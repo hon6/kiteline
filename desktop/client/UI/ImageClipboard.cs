@@ -1,0 +1,119 @@
+using System.Runtime.InteropServices;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Media.Imaging;
+
+namespace Kiteline.UI;
+
+/// 把一张图放进剪贴板（看大图的「拷贝」，同 Mac 版写 NSPasteboard）。
+/// Windows：写 CF_DIB（画图、微信、Office、浏览器都认），另带一份 PNG 格式保留透明；Avalonia 只会写自定义格式，系统格式自己写。
+/// Linux：交给 Avalonia 写 image/png（X11 / XWayland 的剪贴板目标就是 MIME 类型）
+public static class ImageClipboard
+{
+    public static async Task<bool> Copy(TopLevel? top, byte[] data)
+    {
+        if (top is null) return false;
+        try
+        {
+            using var bitmap = new Bitmap(new MemoryStream(data));
+            if (OperatingSystem.IsWindows())
+                return top.TryGetPlatformHandle()?.Handle is IntPtr hwnd && hwnd != IntPtr.Zero && Win32(hwnd, bitmap, Png(bitmap, data));
+            if (top.Clipboard is not { } clipboard) return false;
+            var item = new DataObject();
+            item.Set("image/png", Png(bitmap, data));
+            await clipboard.SetDataObjectAsync(item);
+            return true;
+        }
+        catch (Exception) { return false; }
+    }
+
+    /// PNG 原样用，JPEG 转成 PNG
+    static byte[] Png(Bitmap bitmap, byte[] data)
+    {
+        if (data.Length > 3 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47) return data;
+        using var stream = new MemoryStream();
+        bitmap.Save(stream);
+        return stream.ToArray();
+    }
+
+    // MARK: Windows
+
+    const uint CF_DIB = 8, GMEM_MOVEABLE = 0x0002;
+
+    static bool Win32(IntPtr hwnd, Bitmap bitmap, byte[] png)
+    {
+        var dib = Dib(bitmap);
+        // 打开剪贴板要带窗口：不带的话清空后剪贴板没有主人，SetClipboardData 会失败
+        var opened = false;
+        for (var i = 0; i < 10 && !(opened = OpenClipboard(hwnd)); i++) Thread.Sleep(30);
+        if (!opened) return false;
+        try
+        {
+            EmptyClipboard();
+            var ok = Put(CF_DIB, dib);
+            Put(RegisterClipboardFormatW("PNG"), png);
+            return ok;
+        }
+        finally { CloseClipboard(); }
+    }
+
+    static bool Put(uint format, byte[] bytes)
+    {
+        var memory = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytes.Length);
+        if (memory == IntPtr.Zero) return false;
+        var pointer = GlobalLock(memory);
+        Marshal.Copy(bytes, 0, pointer, bytes.Length);
+        GlobalUnlock(memory);
+        if (SetClipboardData(format, memory) != IntPtr.Zero) return true;
+        GlobalFree(memory);   // 交给剪贴板后归系统管；没交出去的自己放掉
+        return false;
+    }
+
+    /// 32 位、自下而上的 DIB（BITMAPINFOHEADER + 像素）。透明的地方垫白底：多数程序不认 DIB 里的透明度，不垫会变成黑底
+    static byte[] Dib(Bitmap bitmap)
+    {
+        int w = bitmap.PixelSize.Width, h = bitmap.PixelSize.Height, stride = w * 4;
+        var pixels = new byte[stride * h];
+        // 先画到渲染位图上再取像素（BGRA、预乘）：解码出来的格式随图片、平台不同
+        using (var canvas = new RenderTargetBitmap(bitmap.PixelSize))
+        {
+            using (var context = canvas.CreateDrawingContext())
+                context.DrawImage(bitmap, new Rect(0, 0, w, h));
+            var pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+            try { canvas.CopyPixels(new PixelRect(0, 0, w, h), pin.AddrOfPinnedObject(), pixels.Length, stride); }
+            finally { pin.Free(); }
+        }
+        var dib = new byte[40 + pixels.Length];
+        void Int(int offset, int value) => BitConverter.TryWriteBytes(dib.AsSpan(offset, 4), value);
+        Int(0, 40); Int(4, w); Int(8, h);
+        BitConverter.TryWriteBytes(dib.AsSpan(12, 2), (short)1);    // 平面数
+        BitConverter.TryWriteBytes(dib.AsSpan(14, 2), (short)32);   // 每像素位数
+        Int(20, pixels.Length);
+        for (var y = 0; y < h; y++)
+        {
+            var from = y * stride;
+            var to = 40 + (h - 1 - y) * stride;
+            for (var x = 0; x < stride; x += 4)
+            {
+                var a = pixels[from + x + 3];
+                // 预乘过的颜色叠到白底上：c + (255 - a)
+                dib[to + x] = (byte)Math.Min(255, pixels[from + x] + 255 - a);
+                dib[to + x + 1] = (byte)Math.Min(255, pixels[from + x + 1] + 255 - a);
+                dib[to + x + 2] = (byte)Math.Min(255, pixels[from + x + 2] + 255 - a);
+                dib[to + x + 3] = 255;
+            }
+        }
+        return dib;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)] static extern bool OpenClipboard(IntPtr owner);
+    [DllImport("user32.dll")] static extern bool CloseClipboard();
+    [DllImport("user32.dll")] static extern bool EmptyClipboard();
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetClipboardData(uint format, IntPtr memory);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterClipboardFormatW(string name);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr memory);
+    [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr memory);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalFree(IntPtr memory);
+}

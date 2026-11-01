@@ -1,0 +1,20 @@
+# 构建产物 / build output
+.build-cache/
+dist/
+desktop/packaging/build/
+desktop/client/bin/
+desktop/client/obj/
+desktop/client/publish/
+tools/editor/node_modules/
+
+# 远程访问库、离线语音识别库（不随源码发布）/ prebuilt libraries (not distributed with the source)
+desktop/kiteline/lib/
+vendor/sherpa-onnx/lib/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+.DS_Store
+xcuserdata/

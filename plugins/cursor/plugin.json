@@ -1,0 +1,98 @@
+{
+ "id": "cursor",
+ "name": "Cursor",
+ "version": "1.0.0",
+ "summary": "Cursor 编辑器和命令行 agent：查看对话、状态和完整记录，从手机发消息、确认、拒绝和中断",
+ "summaryEn": "Cursor editor and CLI agent: view chats, status and full history, and send, approve, reject or stop from your phone",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "db.read",
+  "proc",
+  "term.tmux",
+  "install.file"
+ ],
+ "detect": {
+  "paths": [
+   "~/.cursor"
+  ],
+  "commands": [
+   "cursor-agent",
+   "cursor"
+  ]
+ },
+ "support": {
+  "mac": {
+   "desktop": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "需在 Cursor 的编辑器窗口中使用（Agents 窗口不支持），装好插件后重启一次 Cursor；对话空闲时从手机发消息需要 Kiteline 3.49.15 / 电脑端 1.0.20 以上"
+   },
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "回复和确认需要 Cursor 命令行在 tmux 中运行"
+   }
+  },
+  "windows": {
+   "desktop": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "需在 Cursor 的编辑器窗口中使用（Agents 窗口不支持），装好插件后重启一次 Cursor；对话空闲时从手机发消息需要 Kiteline 3.49.15 / 电脑端 1.0.20 以上"
+   },
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "Windows 上没有 tmux，只能查看；Cursor 正在工作时发的消息会在这一轮结束后自动发出"
+   }
+  },
+  "linux": {
+   "desktop": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "需在 Cursor 的编辑器窗口中使用（Agents 窗口不支持），装好插件后重启一次 Cursor；对话空闲时从手机发消息需要 Kiteline 3.49.15 / 电脑端 1.0.20 以上"
+   },
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复和确认需要 Cursor 命令行在 tmux 中运行"
+   }
+  }
+ },
+ "mark": [
+  {
+   "d": "M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "Cursor",
+ "notes": "新接入 Cursor：编辑器和命令行 agent 的对话都能在手机上查看（状态、完整记录、改动对比、任务清单），能从手机发消息、允许或拒绝命令、中断任务。编辑器里的对话空闲时，Kiteline 会把 Cursor 中这个项目的编辑器窗口切到前台发送，再切回原来的程序；命令行在 tmux 中运行时可直接回复和确认。Agents 窗口、远程工作区中的对话会说明原因和处理办法。",
+ "notesEn": "Cursor support: view Cursor editor and CLI agent chats on your phone (status, full history, diffs, task lists), and send messages, allow or reject commands and stop tasks from your phone. For idle editor chats, Kiteline brings the Cursor editor window for that project to the front to send and then switches back; when the CLI runs in tmux you can reply and confirm directly. Chats in the Agents window or in remote workspaces explain the reason and what to do."
+}

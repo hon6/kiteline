@@ -1,0 +1,9 @@
+{
+  "uuid": "kiteline@betac.cn",
+  "name": "Kiteline",
+  "description": "Kiteline 配套扩展：从手机发消息时替你切到 VS Code、投完切回原来的窗口；「VS Code 在虚拟屏幕中运行」时把 VS Code 的窗口藏起来；投递时暂时接管键盘，你接着打的字不会落进 VS Code。由 Kiteline 自动安装。",
+  "shell-version": ["45", "46", "47", "48", "49"],
+  "session-modes": ["user", "unlock-dialog"],
+  "url": "https://tars.betac.cn",
+  "version": 2
+}

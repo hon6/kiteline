@@ -1,0 +1,11 @@
+# Kiteline 电脑端（Windows / Linux）依赖
+cryptography>=41      # 本机 HTTPS 证书、推送加密
+zeroconf>=0.130       # 局域网宣告（iPhone 配对页自动发现这台电脑）
+qrcode>=7.4           # 控制台里的配对二维码
+numpy>=1.26           # 语音识别（录音 → 采样）
+sherpa-onnx>=1.13.8   # 语音识别（Fun-ASR-Nano，本机离线）
+sherpa-onnx-core==1.13.8   # sherpa-onnx 各平台 wheel 都依赖它，但 uv 跨平台解析时读不到：显式写上，锁文件里才有它的哈希
+edge-tts>=7.0         # 朗读：微软神经网络语音（和 Mac 版同一套声音；文字发到微软服务器合成）
+tzdata; sys_platform == "win32"   # watcher 的时区换算（Windows 自带的 Python 没有时区库）
+pystray>=0.19         # 系统托盘图标（没有图形界面的 Linux 服务器可以不装）
+pillow>=10            # 托盘图标

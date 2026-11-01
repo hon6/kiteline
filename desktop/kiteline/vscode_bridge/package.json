@@ -1,0 +1,14 @@
+{
+  "name": "kiteline-bridge",
+  "displayName": "Kiteline Bridge",
+  "description": "让 Kiteline 把手机上发来的消息送进 VS Code 里的 Claude Code 会话（Wayland 等无法模拟窗口操作的桌面需要）",
+  "version": "1.0.3",
+  "publisher": "kiteline",
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "extensionKind": ["ui"],
+  "capabilities": { "untrustedWorkspaces": { "supported": true } }
+}

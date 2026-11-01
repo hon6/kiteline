@@ -1,0 +1,58 @@
+{
+ "id": "qwen-code",
+ "name": "Qwen Code",
+ "version": "1.0.2",
+ "summary": "通义千问的命令行编程 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复和确认",
+ "summaryEn": "Qwen's command-line coding agent: view sessions, status and full conversations; reply and confirm when it runs in tmux",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.qwen"
+  ],
+  "commands": [
+   "qwen"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "回复和确认需要 Qwen Code 在 tmux 中运行"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "Windows 上没有 tmux，只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复和确认需要 Qwen Code 在 tmux 中运行"
+   }
+  }
+ },
+ "notes": "只读时说明原因：Qwen Code 不在 tmux 中运行（或在 Windows 上）时，手机输入框里会说清楚为什么只能查看、怎样才能回复。",
+ "notesEn": "When a session is view-only, the phone now explains why (Qwen Code isn't running in tmux, or is on Windows) and how to enable replies."
+}

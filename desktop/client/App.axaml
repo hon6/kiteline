@@ -1,0 +1,60 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kiteline.App"
+             RequestedThemeVariant="Default">
+  <Application.Styles>
+    <FluentTheme />
+    <!-- 代码 IDE 的编辑器（AvaloniaEdit）：查找面板、补全弹窗这些自带的控件样式 -->
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+    <!-- 外观自己画的输入框（对话输入框、提问卡片的「其他」）：去掉系统的外框、底色和聚焦下划线，各种状态都一样 -->
+    <Style Selector="TextBox.plain /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.plain:pointerover /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.plain:focus /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.plain:disabled /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <!-- 侧栏搜索框：胶囊形的浅底，悬停、聚焦不换色、不出下划线（同 Mac 的搜索框） -->
+    <Style Selector="TextBox.search /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="{DynamicResource Fill06}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="14" />
+    </Style>
+    <Style Selector="TextBox.search:pointerover /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="{DynamicResource Fill08}" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.search:focus /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="{DynamicResource Fill08}" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <!-- 下拉框（设置窗口、新任务）：同 Mac 的弹出按钮，浅灰底、无外框，悬停、按下深一档 -->
+    <Style Selector="ComboBox">
+      <Setter Property="Background" Value="{DynamicResource Fill08}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="10,3,6,3" />
+    </Style>
+    <Style Selector="ComboBox:pointerover /template/ Border#Background">
+      <Setter Property="Background" Value="{DynamicResource Fill12}" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ComboBox:pressed /template/ Border#Background">
+      <Setter Property="Background" Value="{DynamicResource Fill15}" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ComboBox:focus-visible /template/ Border#Background">
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+  </Application.Styles>
+</Application>

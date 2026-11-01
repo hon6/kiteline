@@ -1,0 +1,5 @@
+// 只用来让 Swift 认识 sherpa-onnx 的 C 结构体和函数类型；库本身运行时 dlopen（见 Sources/LocalASR.swift），不在编译时链接
+module SherpaOnnxC {
+  header "sherpa-onnx/c-api/c-api.h"
+  export *
+}

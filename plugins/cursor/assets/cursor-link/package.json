@@ -1,0 +1,12 @@
+{
+  "name": "kiteline-cursor-link",
+  "displayName": "Kiteline for Cursor",
+  "description": "Lets Kiteline send messages to, approve, reject or stop Cursor agent chats from your phone.",
+  "version": "1.1.0",
+  "publisher": "kiteline",
+  "license": "UNLICENSED",
+  "engines": {"vscode": "^1.74.0"},
+  "extensionKind": ["ui"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js"
+}

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh-Hans</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>zh-Hans</string>
+        <string>en</string>
+    </array>
+    <key>CFBundleName</key>
+    <string>Kiteline</string>
+    <key>CFBundleDisplayName</key>
+    <string>Kiteline</string>
+    <key>CFBundleExecutable</key>
+    <string>TARS</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mrhong.tars</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>3.49.15</string>
+    <key>CFBundleVersion</key>
+    <string>23</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- 菜单栏小程序：不占 Dock、不显示主窗口 -->
+    <key>LSUIElement</key>
+    <true/>
+    <!-- 主窗口里的对话页是本机 http://127.0.0.1 上的网页 -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+    <key>NSAccentColorName</key>
+    <string>AccentColor</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Kiteline — 随时随地掌控你的编程 Agent</string>
+    <!-- 需要在通知里说明用途 -->
+    <key>NSUserNotificationUsageDescription</key>
+    <string>Kiteline 需要在 Agent 请求确认或完成任务时提醒你。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Kiteline 需要使用麦克风，将你口述的内容（如待办、对 Agent 提问的回答、新任务说明）转写为文字。</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Kiteline 需要将你在手机上「按住说话」录制的语音转写为文字，再发送给 Agent。</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Kiteline 需要控制 VS Code，以激活窗口并将回复粘贴到输入框。</string>
+    <!-- macOS 15 起：在局域网里宣告自己（手机自动找到这台 Mac）、连局域网里的 Remote-SSH 主机都要本地网络权限 -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Kiteline 需要访问本地网络，以便同一 Wi-Fi 下的手机发现并连接此 Mac，以及连接局域网中的 Remote-SSH 主机。</string>
+</dict>
+</plist>

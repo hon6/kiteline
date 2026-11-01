@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Kiteline Editor</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1F1F1F; -webkit-text-size-adjust: 100%; }
+  @media (prefers-color-scheme: light) { html, body { background: #FFFFFF; } }
+  body { -webkit-tap-highlight-color: transparent; }
+  #editor, #diff { position: absolute; inset: 0; }
+  #diff { display: none; overflow: auto; }
+  #editor .cm-editor, #diff > .cm-editor { height: 100%; }
+  .cm-editor.cm-focused { outline: none; }
+  #diff .cm-mergeView { height: 100%; }
+  #diff .cm-mergeView .cm-editor { height: auto; }
+  #diff .cm-mergeViewEditors { min-height: 100%; }
+</style>
+</head>
+<body>
+<div id="editor"></div>
+<div id="diff"></div>
+<script>/*KL_SCRIPT*/</script>
+</body>
+</html>

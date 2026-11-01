@@ -1,0 +1,887 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 由 tools/i18n.py build 从 i18n/en.json 生成，别手改 -->
+<plist version="1.0">
+<dict>
+<key> · %lld 个改动</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string> · %lld change</string>
+<key>other</key><string> · %lld changes</string>
+</dict>
+</dict>
+<key> · %lld 个新文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string> · %lld new file</string>
+<key>other</key><string> · %lld new files</string>
+</dict>
+</dict>
+<key>%lld 个</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld window</string>
+<key>other</key><string>%lld windows</string>
+</dict>
+</dict>
+<key>%lld 个任务进行中</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld task in progress</string>
+<key>other</key><string>%lld tasks in progress</string>
+</dict>
+</dict>
+<key>%lld 个会话</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session</string>
+<key>other</key><string>%lld sessions</string>
+</dict>
+</dict>
+<key>%lld 个会话在此分支上</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session on this branch</string>
+<key>other</key><string>%lld sessions on this branch</string>
+</dict>
+</dict>
+<key>%lld 个会话运行中</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session running</string>
+<key>other</key><string>%lld sessions running</string>
+</dict>
+</dict>
+<key>%lld 个会话，均处于空闲</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session, idle</string>
+<key>other</key><string>%lld sessions, all idle</string>
+</dict>
+</dict>
+<key>%lld 个后台任务</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld background task</string>
+<key>other</key><string>%lld background tasks</string>
+</dict>
+</dict>
+<key>%lld 个工作中</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session working</string>
+<key>other</key><string>%lld sessions working</string>
+</dict>
+</dict>
+<key>%lld 个改动</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld change</string>
+<key>other</key><string>%lld changes</string>
+</dict>
+</dict>
+<key>%lld 个文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld file</string>
+<key>other</key><string>%lld files</string>
+</dict>
+</dict>
+<key>%lld 个文件改动</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld file changed</string>
+<key>other</key><string>%lld files changed</string>
+</dict>
+</dict>
+<key>%lld 个文件改动 · </key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld file change · </string>
+<key>other</key><string>%lld file changes · </string>
+</dict>
+</dict>
+<key>%lld 个文件有改动</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld file changed</string>
+<key>other</key><string>%lld files changed</string>
+</dict>
+</dict>
+<key>%lld 个新文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld new file</string>
+<key>other</key><string>%lld new files</string>
+</dict>
+</dict>
+<key>%lld 个模型</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld model</string>
+<key>other</key><string>%lld models</string>
+</dict>
+</dict>
+<key>%lld 个项目</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld project</string>
+<key>other</key><string>%lld projects</string>
+</dict>
+</dict>
+<key>%lld 分钟</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld minute</string>
+<key>other</key><string>%lld minutes</string>
+</dict>
+</dict>
+<key>%lld 台手机</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld phone</string>
+<key>other</key><string>%lld phones</string>
+</dict>
+</dict>
+<key>%lld 台设备</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld device</string>
+<key>other</key><string>%lld devices</string>
+</dict>
+</dict>
+<key>%lld 处改动</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld change</string>
+<key>other</key><string>%lld changes</string>
+</dict>
+</dict>
+<key>%lld 天</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld day</string>
+<key>other</key><string>%lld days</string>
+</dict>
+</dict>
+<key>%lld 小时</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld hour</string>
+<key>other</key><string>%lld hours</string>
+</dict>
+</dict>
+<key>%lld 张图</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld image</string>
+<key>other</key><string>%lld images</string>
+</dict>
+</dict>
+<key>%lld 张图片</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld image</string>
+<key>other</key><string>%lld images</string>
+</dict>
+</dict>
+<key>%lld 张截图</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld screenshot</string>
+<key>other</key><string>%lld screenshots</string>
+</dict>
+</dict>
+<key>%lld 条</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld phrase</string>
+<key>other</key><string>%lld phrases</string>
+</dict>
+</dict>
+<key>%lld 条停滞提醒</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld stall alert</string>
+<key>other</key><string>%lld stall alerts</string>
+</dict>
+</dict>
+<key>%lld 条出错提醒</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld error alert</string>
+<key>other</key><string>%lld error alerts</string>
+</dict>
+</dict>
+<key>%lld 条回复</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld reply</string>
+<key>other</key><string>%lld replies</string>
+</dict>
+</dict>
+<key>%lld 条定时任务</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld scheduled task</string>
+<key>other</key><string>%lld scheduled tasks</string>
+</dict>
+</dict>
+<key>%lld 条指令</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld prompt</string>
+<key>other</key><string>%lld prompts</string>
+</dict>
+</dict>
+<key>%lld 条消息</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld message</string>
+<key>other</key><string>%lld messages</string>
+</dict>
+</dict>
+<key>%lld 条结论</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld result</string>
+<key>other</key><string>%lld results</string>
+</dict>
+</dict>
+<key>%lld 核</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld core</string>
+<key>other</key><string>%lld cores</string>
+</dict>
+</dict>
+<key>%lld 次回复</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld reply</string>
+<key>other</key><string>%lld replies</string>
+</dict>
+</dict>
+<key>%lld 次失败</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld failure</string>
+<key>other</key><string>%lld failures</string>
+</dict>
+</dict>
+<key>%lld 次请求</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld request</string>
+<key>other</key><string>%lld requests</string>
+</dict>
+</dict>
+<key>%lld 轮</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld turn</string>
+<key>other</key><string>%lld turns</string>
+</dict>
+</dict>
+<key>%lld 轮对话</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld turn</string>
+<key>other</key><string>%lld turns</string>
+</dict>
+</dict>
+<key>…共 %lld 行</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>…%lld line in total</string>
+<key>other</key><string>…%lld lines in total</string>
+</dict>
+</dict>
+<key>丢弃全部 %lld 个文件的更改？已修改的文件会恢复原样，新文件会移到废纸篓。</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Discard changes to %lld file? Modified files will be restored and new files moved to the Trash.</string>
+<key>other</key><string>Discard changes to all %lld files? Modified files will be restored and new files moved to the Trash.</string>
+</dict>
+</dict>
+<key>今天 %lld 条</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld today</string>
+<key>other</key><string>%lld today</string>
+</dict>
+</dict>
+<key>修改 %lld 个文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld file changed</string>
+<key>other</key><string>%lld files changed</string>
+</dict>
+</dict>
+<key>免费试用 %lld 天</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld Day Free Trial</string>
+<key>other</key><string>%lld Days Free Trial</string>
+</dict>
+</dict>
+<key>分布在 %lld 个分支上</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string> on %lld branch</string>
+<key>other</key><string> across %lld branches</string>
+</dict>
+</dict>
+<key>删除 %lld 项？会移到电脑的废纸篓，可以从那里恢复。</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Delete %lld item? It will be moved to the computer's Trash, where you can restore it.</string>
+<key>other</key><string>Delete %lld items? They will be moved to the computer's Trash, where you can restore them.</string>
+</dict>
+</dict>
+<key>加入 %lld 项</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Add %lld Item</string>
+<key>other</key><string>Add %lld Items</string>
+</dict>
+</dict>
+<key>协作图：今天 %lld 条会话之间的消息</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Collaboration map: %lld message between sessions today</string>
+<key>other</key><string>Collaboration map: %lld messages between sessions today</string>
+</dict>
+</dict>
+<key>历史群 %lld 个</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld past group</string>
+<key>other</key><string>%lld past groups</string>
+</dict>
+</dict>
+<key>另有 %lld 个文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld more file</string>
+<key>other</key><string>%lld more files</string>
+</dict>
+</dict>
+<key>另有 %lld 个未跟踪的文件未列出</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld more untracked file not listed</string>
+<key>other</key><string>%lld more untracked files not listed</string>
+</dict>
+</dict>
+<key>另有 %lld 项</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld more item</string>
+<key>other</key><string>%lld more items</string>
+</dict>
+</dict>
+<key>听写：点击开始录音，说完再次点击转写为文字（最长 %lld 秒）</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Dictation: tap to start recording, then tap again when you finish to transcribe to text (up to %lld second).</string>
+<key>other</key><string>Dictation: tap to start recording, then tap again when you finish to transcribe to text (up to %lld seconds).</string>
+</dict>
+</dict>
+<key>展开前 %lld 步</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Show %lld Earlier Step</string>
+<key>other</key><string>Show %lld Earlier Steps</string>
+</dict>
+</dict>
+<key>已上传 %lld 个文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Uploaded %lld file</string>
+<key>other</key><string>Uploaded %lld files</string>
+</dict>
+</dict>
+<key>已加入待办 · %lld 项</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Added to To-Dos · %lld Item</string>
+<key>other</key><string>Added to To-Dos · %lld Items</string>
+</dict>
+</dict>
+<key>建群（%lld 个会话）</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Create Group (%lld Session)</string>
+<key>other</key><string>Create Group (%lld Sessions)</string>
+</dict>
+</dict>
+<key>待办，%lld 项未完成</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>To-Dos, %lld Unfinished Item</string>
+<key>other</key><string>To-Dos, %lld Unfinished Items</string>
+</dict>
+</dict>
+<key>待办，新增 %lld 项</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>To-Dos, %lld New Item</string>
+<key>other</key><string>To-Dos, %lld New Items</string>
+</dict>
+</dict>
+<key>找到 %lld 个会话</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Found %lld session</string>
+<key>other</key><string>Found %lld sessions</string>
+</dict>
+</dict>
+<key>早安 · %lld 个会话待确认</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Good morning · %lld session awaiting approval</string>
+<key>other</key><string>Good morning · %lld sessions awaiting approval</string>
+</dict>
+</dict>
+<key>最多 %lld 张</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Up to %lld Image</string>
+<key>other</key><string>Up to %lld Images</string>
+</dict>
+</dict>
+<key>最多 %lld 张。单张时显示在文字左侧，多张时以九宫格排列于文字下方；轻点图片可放大查看。</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Up to %lld image. With one image, it appears to the left of the text; with several, they are arranged in a grid below the text. Tap an image to enlarge it.</string>
+<key>other</key><string>Up to %lld images. With one image, it appears to the left of the text; with several, they are arranged in a grid below the text. Tap an image to enlarge it.</string>
+</dict>
+</dict>
+<key>最近 %lld 天</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Last %lld Day</string>
+<key>other</key><string>Last %lld Days</string>
+</dict>
+</dict>
+<key>有 %lld 项事项需要你处理</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld item needs your attention</string>
+<key>other</key><string>%lld items need your attention</string>
+</dict>
+</dict>
+<key>本次对话中修改了 %lld 次</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Modified %lld time in this conversation</string>
+<key>other</key><string>Modified %lld times in this conversation</string>
+</dict>
+</dict>
+<key>来自 %lld 个回复 · 加入待办？</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>From %lld Reply · Add to To-Dos?</string>
+<key>other</key><string>From %lld Replies · Add to To-Dos?</string>
+</dict>
+</dict>
+<key>此目录中有 %lld 个会话</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>There is %lld session in this folder</string>
+<key>other</key><string>There are %lld sessions in this folder</string>
+</dict>
+</dict>
+<key>此目录中有 %lld 个会话正在运行</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session is running in this folder</string>
+<key>other</key><string>%lld sessions are running in this folder</string>
+</dict>
+</dict>
+<key>测试 %lld 次</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld test run</string>
+<key>other</key><string>%lld test runs</string>
+</dict>
+</dict>
+<key>添加 %lld 个会话</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Add %lld Session</string>
+<key>other</key><string>Add %lld Sessions</string>
+</dict>
+</dict>
+<key>点击开始录音，说完再次点击转写为文字（最长 %lld 秒）</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Tap to start recording, then tap again when you finish to transcribe to text (up to %lld second).</string>
+<key>other</key><string>Tap to start recording, then tap again when you finish to transcribe to text (up to %lld seconds).</string>
+</dict>
+</dict>
+<key>留空时使用「快捷短语」（%lld 条）。手表屏幕较小，可单独设置简短回复：最多 8 条，每条不超过 40 字。也可在手表上直接语音回复。</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Leave blank to use Quick Replies (%lld item). The watch screen is small, so you can set separate short replies: up to 8, each up to 40 characters. You can also reply by voice on the watch.</string>
+<key>other</key><string>Leave blank to use Quick Replies (%lld items). The watch screen is small, so you can set separate short replies: up to 8, each up to 40 characters. You can also reply by voice on the watch.</string>
+</dict>
+</dict>
+<key>移动到这里（%lld 项）</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Move Here (%lld item)</string>
+<key>other</key><string>Move Here (%lld items)</string>
+</dict>
+</dict>
+<key>粘贴（%lld 项）</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Paste (%lld item)</string>
+<key>other</key><string>Paste (%lld items)</string>
+</dict>
+</dict>
+<key>调用的工具（%lld）</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Tool Called (%lld)</string>
+<key>other</key><string>Tools Called (%lld)</string>
+</dict>
+</dict>
+<key>还有 %lld 个文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld more file</string>
+<key>other</key><string>%lld more files</string>
+</dict>
+</dict>
+<key>：还有 %lld 个冲突</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>: %lld conflict left</string>
+<key>other</key><string>: %lld conflicts left</string>
+</dict>
+</dict>
+</dict>
+</plist>

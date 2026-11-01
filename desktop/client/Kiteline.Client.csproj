@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiteline 电脑端（Windows / Linux）的主窗口：和 Mac App 同样的界面，连本机的 Kiteline 后台（desktop/kiteline）。
+       Avalonia 一套代码出 Windows、Linux 两个版本 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>KitelineApp</AssemblyName>
+    <RootNamespace>Kiteline</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 程序图标（资源管理器、任务栏）：和 Mac 版同一只纸鸢，由 Mac 构建生成的 icon_1024.png 裁掉留白做成 -->
+    <ApplicationIcon>Assets\kiteline.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <!-- 终端引擎 XtermSharp（Terminal/XtermSharp）里有 unsafe 代码 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <!-- 自测：离屏把界面画成图片（render 参数），同 Mac 版 -->
+    <PackageReference Include="Avalonia.Headless" Version="11.3.22" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- 世界模式：Windows 上用系统的 WebView2（Win11 自带运行时）把网页嵌进主窗口；Linux 上不用（开浏览器窗口） -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <!-- 代码 IDE 的编辑器：AvaloniaEdit + VS Code 的 TextMate 语法和配色（Dark+ / Light+），同 Mac / iPhone 的 CodeMirror 编辑器 -->
+    <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.3.0" />
+    <PackageReference Include="AvaloniaEdit.TextMate" Version="11.3.0" />
+    <PackageReference Include="TextMateSharp.Grammars" Version="1.0.70" />
+    <!-- 会话里的终端：终端引擎 XtermSharp（源码在 Terminal/XtermSharp）用的 Rune / ustring -->
+    <PackageReference Include="NStack.Core" Version="1.1.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets/**" />
+  </ItemGroup>
+</Project>

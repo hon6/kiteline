@@ -1,0 +1,6 @@
+/* Mac 系统权限弹框的英文说明（中文写在 Resources/Info.plist；改中文时这里一起改） */
+"NSUserNotificationUsageDescription" = "Kiteline notifies you when an agent needs your approval or finishes a task.";
+"NSMicrophoneUsageDescription" = "Kiteline uses the microphone to transcribe what you dictate, such as to-dos, answers to your agent’s questions and new task descriptions.";
+"NSSpeechRecognitionUsageDescription" = "Kiteline transcribes the voice messages you record on your phone with Hold to Talk before sending them to your agent.";
+"NSAppleEventsUsageDescription" = "Kiteline controls VS Code to bring the right window to the front and paste your reply into its input box.";
+"NSLocalNetworkUsageDescription" = "Kiteline uses the local network so phones on the same Wi-Fi can find and connect to this Mac, and to reach Remote-SSH hosts on your network.";

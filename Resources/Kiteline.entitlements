@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 官网下载版（release.sh）签名时用：公证要求打开「加固运行时」，加固后要用的能力得在这里申报 -->
+<plist version="1.0">
+<dict>
+    <!-- 给 VS Code 发 Apple 事件（激活窗口、粘贴回复）；用途说明在 Info.plist 的 NSAppleEventsUsageDescription -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    <!-- 听写（记待办、回答提问时口述转文字）要录音；用途说明在 Info.plist 的 NSMicrophoneUsageDescription -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

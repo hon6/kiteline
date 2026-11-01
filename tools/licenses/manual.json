@@ -1,0 +1,129 @@
+[
+ {
+  "name": "sherpa-onnx",
+  "version": "1.13.8",
+  "license": "Apache-2.0",
+  "url": "https://github.com/k2-fsa/sherpa-onnx",
+  "files": [
+   "sherpa-onnx.txt"
+  ],
+  "products": [
+   "mac"
+  ]
+ },
+ {
+  "name": "ONNX Runtime",
+  "version": "",
+  "license": "MIT",
+  "url": "https://github.com/microsoft/onnxruntime",
+  "files": [
+   "onnxruntime.txt"
+  ],
+  "products": [
+   "mac",
+   "desktop"
+  ]
+ },
+ {
+  "name": "Fun-ASR-Nano",
+  "version": "2512",
+  "license": "Apache-2.0",
+  "url": "https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512",
+  "files": [
+   "apache-2.0.txt"
+  ],
+  "products": [
+   "mac",
+   "desktop"
+  ],
+  "note": "语音识别模型，首次使用时下载"
+ },
+ {
+  "name": "LobeHub Icons",
+  "version": "1.98.0",
+  "license": "MIT",
+  "url": "https://github.com/lobehub/lobe-icons",
+  "files": [
+   "lobe-icons.txt"
+  ],
+  "products": [
+   "mac",
+   "ios",
+   "desktop"
+  ],
+  "note": "各编程 agent 的标志"
+ },
+ {
+  "name": "Fluent UI System Icons",
+  "version": "",
+  "license": "MIT",
+  "url": "https://github.com/microsoft/fluentui-system-icons",
+  "files": [
+   "fluentui-system-icons.txt"
+  ],
+  "products": [
+   "desktop"
+  ]
+ },
+ {
+  "name": "Python",
+  "version": "",
+  "license": "PSF-2.0",
+  "url": "https://www.python.org",
+  "files": [
+   "python.txt"
+  ],
+  "products": [
+   "desktop"
+  ]
+ },
+ {
+  "name": "three.js",
+  "version": "0.170.0",
+  "license": "MIT",
+  "url": "https://github.com/mrdoob/three.js",
+  "files": [
+   "three.js.txt"
+  ],
+  "products": [
+   "mac"
+  ]
+ },
+ {
+  "name": "Fusion Pixel Font",
+  "version": "2026.10.25",
+  "license": "OFL-1.1",
+  "url": "https://github.com/TakWolf/fusion-pixel-font",
+  "files": [
+   "fusion-pixel-font.txt"
+  ],
+  "products": [
+   "mac"
+  ]
+ },
+ {
+  "files": [
+   "swiftterm.txt"
+  ],
+  "license": "MIT",
+  "name": "SwiftTerm",
+  "products": [
+   "mac",
+   "ios"
+  ],
+  "url": "https://github.com/migueldeicaza/SwiftTerm",
+  "version": "1.20.0"
+ },
+ {
+  "files": [
+   "xtermsharp.txt"
+  ],
+  "license": "MIT",
+  "name": "XtermSharp",
+  "products": [
+   "desktop"
+  ],
+  "url": "https://github.com/migueldeicaza/XtermSharp",
+  "version": "1bed529"
+ }
+]
