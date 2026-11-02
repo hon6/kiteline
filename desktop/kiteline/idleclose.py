@@ -6,10 +6,11 @@
   - 各端对话页打开时报 POST /api/viewed；对话页开着、App 在前台时每 10 分钟再报一次
   - 旧版 iPhone 不报 /api/viewed，但打开对话页时必取一次 GET /api/voices?key=，也算
   - 从对话页发消息、按住说话、恢复会话
+  - 各端启动时随 /api/viewed 带上本机记的「最后看过」（seen），补上升级前的历史（11-02 反馈：超时的会话没有关闭）
 
-起算时间：Kiteline 第一次见到这个会话（含升级到这一版时已经开着的）；关掉 / 结束了 10 分钟以上又出现的重新起算。
-正在跑的不关，等这一轮停下；要切 VS Code / 终端的，等电脑 10 分钟没人动键盘鼠标再关，一次一个。
-记录存配置目录 viewed.json：会话 key → 最后打开时间（毫秒）
+起算时间：有打开记录按最后一次打开；一次都没有的，从 Kiteline 第一次见到它算（first）；关掉 / 结束了 10 分钟以上
+又出现的重新起算。正在跑的不关，等这一轮停下；要切 VS Code / 终端的，等电脑 10 分钟没人动键盘鼠标再关，一次一个。
+记录存配置目录 viewed.json：{viewed: 会话 key → 最后打开时间（毫秒）, first: 第一次见到的时间}
 """
 
 import json
@@ -43,11 +44,21 @@ class IdleClose:
         self.path = os.path.join(config.config_dir(), "viewed.json")
         self._lock = threading.Lock()
         self._save_lock = threading.Lock()
+        self._viewed, self._first = {}, {}   # 打开过的时间 / 第一次见到的时间（一次打开记录都没有时才拿它起算）
         try:
             with open(self.path, encoding="utf-8") as f:
-                self._viewed = {str(k): float(v) for k, v in json.load(f).items()}
+                saved = json.load(f)
+            if "viewed" in saved and "first" in saved:
+                self._viewed = {str(k): float(v) for k, v in saved["viewed"].items()}
+                self._first = {str(k): float(v) for k, v in saved["first"].items()}
+            elif saved:
+                # 1.0.20 存的是一张表：装上那一刻一起记下的（2 分钟内）是「第一次见到」，之后的才是真打开过
+                old = {str(k): float(v) for k, v in saved.items()}
+                earliest = min(old.values())
+                for key, value in old.items():
+                    (self._first if value - earliest < 120000 else self._viewed)[key] = value
         except (OSError, ValueError, AttributeError, TypeError):
-            self._viewed = {}
+            self._viewed, self._first = {}, {}
         self._live = set()
         self._gone_at = {}
         self._failed_at = {}
@@ -64,6 +75,26 @@ class IdleClose:
             for key in keys:
                 self._viewed[key] = stamp
         self._save()
+
+    def merge(self, history, now=None):
+        """各端报来的本机历史（key → 最后看过，毫秒）：只补认识的会话，只往后挪"""
+        if not isinstance(history, dict):
+            return
+        ms = (now or time.time()) * 1000
+        oldest = ms - 30 * 86400 * 1000
+        changed = False
+        with self._lock:
+            for key, value in list(history.items())[:1000]:
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    continue
+                if key not in self._live and key not in self._viewed and key not in self._first:
+                    continue
+                value = min(float(value), ms)
+                if value > oldest and value > self._viewed.get(key, 0):
+                    self._viewed[key] = value
+                    changed = True
+        if changed:
+            self._save()
 
     def lost(self, records, now=None):
         """来源还连着、会话却不见了（关掉、结束了）：记下时间，再出现时看要不要重新起算"""
@@ -83,17 +114,25 @@ class IdleClose:
                 return
             for key in current - self._live:
                 gone = self._gone_at.pop(key, None)
-                if key not in self._viewed or (gone is not None and now - gone >= REGONE):
+                if gone is not None and now - gone >= REGONE:
                     self._viewed[key] = max(self._viewed.get(key, 0), now * 1000)
+                    changed = True
+                elif key not in self._viewed and key not in self._first:
+                    self._first[key] = now * 1000
                     changed = True
             self._live = current
         if changed:
             self._save()
 
+    def opened_keys(self):
+        """有打开记录的会话（自测用：其余的只记了第一次见到）"""
+        with self._lock:
+            return list(self._viewed)
+
     def idle(self, key, now=None):
         """多久没打开了（秒）；没记录的返回 None"""
         with self._lock:
-            last = self._viewed.get(key)
+            last = self._viewed.get(key, self._first.get(key))
         return None if last is None else (now or time.time()) - last / 1000
 
     def tick(self, now=None, force=False):
@@ -163,8 +202,9 @@ class IdleClose:
         cutoff = (now - 30 * 86400) * 1000
         with self._lock:
             kept = {k: v for k, v in self._viewed.items() if k in self._live or v >= cutoff}
-            pruned = len(kept) != len(self._viewed)
-            self._viewed = kept
+            kept_first = {k: v for k, v in self._first.items() if k in self._live or v >= cutoff}
+            pruned = len(kept) != len(self._viewed) or len(kept_first) != len(self._first)
+            self._viewed, self._first = kept, kept_first
             self._failed_at = {k: v for k, v in self._failed_at.items() if k in self._live}
             self._gone_at = {k: v for k, v in self._gone_at.items() if now - v < 86400}
         if pruned:
@@ -173,7 +213,7 @@ class IdleClose:
     def _save(self):
         with self._save_lock:
             with self._lock:
-                data = dict(self._viewed)
+                data = {"viewed": dict(self._viewed), "first": dict(self._first)}
             tmp = self.path + ".tmp"
             try:
                 with open(tmp, "w", encoding="utf-8") as f:

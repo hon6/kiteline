@@ -168,7 +168,7 @@ class Console:
 
     def plugins(self, request):
         """设置 → 插件（plugins.py）：GET /api/desktop/plugins 列表和状态；POST …/check 现在查；…/install {id} 安装或更新；
-        …/enable {id, enabled} 开关；…/remove {id} 恢复内置版本；…/update-install {id} 先更新 Kiteline 再装；
+        …/enable {id, enabled} 开关；…/option {id, option, enabled} 插件的单项开关；…/remove {id} 恢复内置版本；…/update-install {id} 先更新 Kiteline 再装；
         …/report {key 或 id} 出错报告（mailto 链接和正文）；…/mute {key} 这个错不再询问；…/dismiss {key} 先不报告"""
         store = self.app.plugins
         action = request.path[len("/api/desktop/plugins"):]
@@ -182,6 +182,8 @@ class Console:
             payload = store.install(plugin_id)
         elif request.method == "POST" and action == "/enable" and plugin_id:
             payload = store.set_enabled(plugin_id, bool(body.get("enabled")))
+        elif request.method == "POST" and action == "/option" and plugin_id and body.get("option"):
+            payload = store.set_option(plugin_id, str(body["option"]), bool(body.get("enabled")))
         elif request.method == "POST" and action == "/remove" and plugin_id:
             payload = store.remove(plugin_id)
         elif request.method == "POST" and action == "/update-install" and plugin_id:
@@ -257,7 +259,8 @@ class Console:
     def update(self, request):
         """检查更新（客户端右上角的绿色箭头、控制台、托盘都用这几个）：
         GET /api/desktop/update 状态；POST …/check 现在查；…/start 下载并安装；…/cancel 取消下载；
-        …/restart {client: {pid, exe, args}} 重启换上新版本；…/later 这一版不再在托盘提醒"""
+        …/restart {client: {pid, exe, args}} 重启换上新版本；…/skip {key, on} 勾 / 取消「此版本不再提示」；
+        …/prompted {key} 弹过了（24 小时内不再自动弹；…/later 同它，旧控制台页用）。key 是 state 里的 key（电脑端）或 phones.key（手机端）"""
         updater = self.app.updater
         action = request.path[len("/api/desktop/update"):]
         if request.method == "GET" and action == "":
@@ -274,9 +277,11 @@ class Console:
             body = request.json or {}
             updater.client = {"pid": int(body.get("pid") or 0), "exe": str(body.get("exe") or ""), "args": [str(a) for a in body.get("args") or []]}
             payload = updater.state()
-        elif request.method == "POST" and action == "/later":
-            updater.dismissed = updater.state()["version"]
-            payload = {"ok": True}
+        elif request.method == "POST" and action == "/skip":
+            body = request.json or {}
+            payload = updater.set_skipped(str(body.get("key") or ""), bool(body.get("on")))
+        elif request.method == "POST" and action in ("/prompted", "/later"):
+            payload = updater.mark_shown(str((request.json or {}).get("key") or updater.state()["key"]))
         else:
             return Response.error("接口不存在", 404)
         return Response.json(i18n.localize(payload) if i18n.ui_english() else payload)
@@ -577,7 +582,8 @@ def run_tray(app, console, stop_event):
         icon.update_menu()
         u = app.updater
         key = "%s/%s" % (u.phase, (u.release or {}).get("version"))
-        if u.phase in ("available", "ready") and key not in notified and (u.release or {}).get("version") != u.dismissed:
+        version = (u.release or {}).get("version") or ""
+        if u.phase in ("available", "ready") and key not in notified and not (u.phase == "available" and u.is_skipped(u.key(version))):
             notified.add(key)
             try:
                 icon.notify(i18n.tr("Kiteline %@ 可用").replace("%@", u.release["version"]) if u.phase == "available"

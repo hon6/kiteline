@@ -7,6 +7,8 @@ struct FitSheet<Content: View, Bottom: View>: View {
     var background: Color = Theme.pageBackground
     /// 面板里有自己的主按钮（比如「加入 3 项」）：关面板的按钮叫「取消」、放左上角，免得右上角的「完成」被当成确认
     var cancel = false
+    /// 右上角关面板的按钮换个说法（比如新版本面板的「以后再说」）；只在 iPhone / iPad 上用
+    var doneTitle: String?
     let content: Content
     let bottom: Bottom
     @PanelDismiss private var dismiss
@@ -14,11 +16,12 @@ struct FitSheet<Content: View, Bottom: View>: View {
     @State private var contentHeight: CGFloat = 280
     @State private var bottomHeight: CGFloat = 0
 
-    init(title: String, background: Color = Theme.pageBackground, cancel: Bool = false,
+    init(title: String, background: Color = Theme.pageBackground, cancel: Bool = false, doneTitle: String? = nil,
          @ViewBuilder content: () -> Content, @ViewBuilder bottom: () -> Bottom) {
         self.title = title
         self.background = background
         self.cancel = cancel
+        self.doneTitle = doneTitle
         self.content = content()
         self.bottom = bottom()
     }
@@ -66,6 +69,9 @@ struct FitSheet<Content: View, Bottom: View>: View {
                     if cancel {
                         Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                         Spacer()
+                    } else if let doneTitle {
+                        Spacer()
+                        Button(doneTitle) { dismiss() }.fontWeight(.semibold).keyboardShortcut(.cancelAction)
                     } else {
                         Spacer()
                         Button("完成") { dismiss() }.fontWeight(.semibold).keyboardShortcut(.cancelAction)
@@ -91,8 +97,8 @@ struct FitSheet<Content: View, Bottom: View>: View {
 }
 
 extension FitSheet where Bottom == EmptyView {
-    init(title: String, background: Color = Theme.pageBackground, cancel: Bool = false, @ViewBuilder content: () -> Content) {
-        self.init(title: title, background: background, cancel: cancel, content: content, bottom: { EmptyView() })
+    init(title: String, background: Color = Theme.pageBackground, cancel: Bool = false, doneTitle: String? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title: title, background: background, cancel: cancel, doneTitle: doneTitle, content: content, bottom: { EmptyView() })
     }
 }
 

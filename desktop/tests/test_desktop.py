@@ -676,7 +676,128 @@ check("设置里关掉就不关", _ic_tick(_ic, _t0 + 30 * 3600, force=True) == 
 _ica.cfg.mobile["autoCloseIdle"] = True
 _ic2 = idleclose.IdleClose(_ica)
 check("打开记录存盘、重启后还在（不会重启一次就从头算）", _ic2.idle("local#b", _t0 + 3600 + 5) == 5)
+# 1.0.20 存的是一张表；各端启动时报来本机历史（最后看过），补上升级前的
+with open(_ic.path, "w", encoding="utf-8") as _f:
+    _json.dump({"local#a": _t0 * 1000, "local#b": (_t0 + 30) * 1000, "local#c": (_t0 + 5 * 3600) * 1000}, _f)
+_ic3 = idleclose.IdleClose(_ica)
+check("旧版存的一张表：装上那一刻一起记下的算第一次见到，之后的算打开过", _ic3.opened_keys() == ["local#c"], str(_ic3.opened_keys()))
+_ic3.merge({"local#a": (_t0 - 30 * 3600) * 1000, "local#c": (_t0 - 30 * 3600) * 1000, "local#zz": _t0 * 1000, "local#b": "x"}, _t0 + 6 * 3600)
+check("报来的历史：只记了第一次见到的按历史算（升级前 30 小时前看过的不用再等 24 小时）", _ic3.idle("local#a", _t0) == 30 * 3600)
+check("报来的历史不把打开过的往回挪", _ic3.idle("local#c", _t0 + 6 * 3600) == 3600)
+check("不认识的会话、坏数据不收", "local#zz" not in _ic3.opened_keys() and _ic3.idle("local#b", _t0 + 30) == 0)
+check("新格式存盘、重启后还在", idleclose.IdleClose(_ica).idle("local#a", _t0) == 30 * 3600)
 _delivery.close, idleclose.user_idle = _ic_saved
+
+print("== 新版本提醒：自动弹窗（到期才弹、不再提示）、落后各版本说明、手机端版本、手机看电脑的更新")
+import http.server as _uh_http  # noqa: E402
+import json as _uh_json  # noqa: E402
+import threading as _uh_threading  # noqa: E402
+import time as _uh_time  # noqa: E402
+from kiteline import config as _uh_config, updater as _uh  # noqa: E402
+
+_uh_files = {}
+
+
+class _UhHandler(_uh_http.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        body = _uh_files.get(self.path.split("?")[0])
+        self.send_response(200 if body is not None else 404)
+        self.end_headers()
+        if body is not None:
+            self.wfile.write(_uh_json.dumps(body, ensure_ascii=False).encode("utf-8"))
+
+    def log_message(self, *args):
+        pass
+
+
+_uh_server = _uh_http.ThreadingHTTPServer(("127.0.0.1", 0), _UhHandler)
+_uh_threading.Thread(target=_uh_server.serve_forever, daemon=True).start()
+_uh_base = "http://127.0.0.1:%d" % _uh_server.server_port
+_uh_plat = "windows" if _uh_config.IS_WINDOWS else "linux"
+
+
+def _uh_publish(version):
+    _uh_files["/download/latest.json"] = {"platforms": {_uh_plat: {
+        "version": version, "url": _uh_base + "/download/k.zip", "size": 10, "sha256": "", "notes": "新功能\n· 最新一版", "notesEn": "New\n· Latest",
+        "versions": [version, "1.0.21", "1.0.20", "1.0.19", "1.0.18"]}}}
+
+
+_uh_publish("1.0.21")
+_uh_files["/download/notes-desktop.json"] = {"releases": [
+    {"version": "1.0.21", "date": "2026-11-02", "notes": "· 二十一", "notesEn": "· twenty-one"},
+    {"version": "1.0.20", "date": "2026-11-01", "notes": "· 二十", "notesEn": "· twenty"},
+    {"version": "1.0.19", "date": "2026-10-31", "notes": "· 十九（这台已经装了）", "notesEn": ""}]}
+_uh_files["/lookup"] = {"resultCount": 1, "results": [{"version": "1.7", "releaseNotes": "· 手机新版", "minimumOsVersion": "18.0"}]}
+os.environ["KITELINE_UPDATE_URL"] = _uh_base + "/download/latest.json"
+os.environ["KITELINE_STORE_LOOKUP"] = _uh_base + "/lookup"
+_uh_now = _uh_time.time() * 1000
+
+
+class _UhDevices:
+    all = [{"name": "旧 iPhone", "client": "ios/1.5 (iPhone13,2; iOS 18.7.8)", "lastSeen": _uh_now},
+           {"name": "新 iPad", "client": "ios/1.7 (iPad8,1; iOS 26.5)", "lastSeen": _uh_now},
+           {"name": "开发版", "client": "ios/1.8 (iPhone17,1; iOS 26.0)", "lastSeen": _uh_now},
+           {"name": "系统太旧", "client": "ios/1.5 (iPhone9,1; iOS 17.6)", "lastSeen": _uh_now},
+           {"name": "一个月没用", "client": "ios/1.5 (iPhone13,2; iOS 18.7.8)", "lastSeen": _uh_now - 40 * 86_400_000},
+           {"name": "Mac 上的", "client": "mac/1.5 (Mac15,1; macOS 26.0)", "lastSeen": _uh_now},
+           {"name": "旧版 App", "lastSeen": _uh_now}]
+
+
+class _UhApp:
+    version = "1.0.19"
+    cfg = _uh_config.Config()
+    devices = _UhDevices()
+    on_update_change = None
+
+    def request_exit(self):
+        pass
+
+
+_uh_app = _UhApp()
+_uh_u = _uh.Updater(_uh_app)
+
+
+def _uh_settle():
+    for _ in range(50):
+        if _uh_u.history and _uh_u.phones is not None:
+            return
+        _uh_time.sleep(0.1)
+
+
+_uh_u.check()
+_uh_settle()
+_st = _uh_u.state()
+check("发现新版本、该弹窗", _st["phase"] == "available" and _st["version"] == "1.0.21" and _st["prompt"] and not _st["skipped"], str(_st))
+check("落后 2 个版本（latest.json 的 versions 里比这台新的）", _st["behind"] == 2, str(_st["behind"]))
+check("各版本说明：只列比这台新的、新的在前", [r["version"] for r in _st["releases"]] == ["1.0.21", "1.0.20"], str(_st["releases"]))
+_ph = _st.get("phones") or {}
+check("手机端：只列最近用过、系统装得上、比 App Store 旧的 iPhone / iPad",
+      [d["name"] for d in _ph.get("devices", [])] == ["旧 iPhone"] and _ph.get("version") == "1.7" and _ph.get("prompt"), str(_ph))
+_uh_u.mark_shown(_st["key"])
+check("弹过以后 24 小时内不再自动弹", not _uh_u.state()["prompt"])
+_uh_app.cfg.update(lambda d: d["mobile"]["updateSnoozed"].update({_st["key"]: _uh_time.time() - 1}))
+check("过了 24 小时再弹", _uh_u.state()["prompt"])
+_uh_u.set_skipped(_st["key"], True)
+check("勾了「此版本不再提示」就不弹、记得勾过", not _uh_u.state()["prompt"] and _uh_u.state()["skipped"])
+check("「不再提示」存进配置、重启后还在", _st["key"] in (_uh_config.Config().mobile.get("updateSkipped") or []))
+_uh_u.set_skipped(_st["key"], False)
+check("取消勾选又会弹", _uh_u.state()["prompt"])
+_uh_u.set_skipped(_st["key"], True)
+_uh_publish("1.0.22")
+_uh_u.check()
+_st2 = _uh_u.state()
+check("又出了新版本：照样弹（不再提示只管那一个版本）", _st2["version"] == "1.0.22" and _st2["prompt"] and not _st2["skipped"], str(_st2))
+_hp = _uh_u.host_payload()
+check("手机看电脑的更新：两种语言的说明都给、不带客户端自己用的字段",
+      _hp["notes"] == "新功能\n· 最新一版" and _hp["notesEn"] == "New\n· Latest" and "phones" not in _hp and "prompt" not in _hp and _hp["current"] == "1.0.19", str(_hp))
+_rs = _uh_u.remote("start")
+check("开发版：手机上点更新说明原因、不装", _rs["ok"] is False and "官网" in _rs["error"] and _uh_u.phase == "available", str(_rs))
+check("手机上点了不认识的操作", _uh_u.remote("rm -rf")["ok"] is False)
+_uh_app.devices.all = [d for d in _UhDevices.all if d["name"] != "旧 iPhone"]
+_uh_u._evaluate_phones()
+check("手机升级了：手机端提醒收起", "phones" not in _uh_u.state())
+_uh_server.shutdown()
+del os.environ["KITELINE_UPDATE_URL"], os.environ["KITELINE_STORE_LOOKUP"]
 
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

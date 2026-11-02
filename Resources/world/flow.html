@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Kiteline Flow</title>
+<link rel="stylesheet" href="flow.css">
+</head>
+<body>
+<header class="fl-hud">
+  <div class="fl-hud-l" id="flow-hud-l"></div>
+  <button class="fl-door" id="flow-door" hidden><span id="flow-door-l">离开</span></button>
+</header>
+<main class="fl-stage">
+  <canvas id="flow-scene"></canvas>
+  <div class="fl-title" id="flow-title"></div>
+  <div class="fl-callout" id="flow-callout" hidden></div>
+  <div class="fl-tools">
+    <button id="flow-auto" class="on"><i></i><span id="flow-auto-l">自动运镜</span></button>
+    <button id="flow-home"><span id="flow-home-l">全景</span></button>
+  </div>
+</main>
+<section class="fl-dash">
+  <div class="fl-pn"><div class="fl-ph"><b id="fd-thought-t">思考流</b><span>THOUGHT STREAM</span><em id="fd-thought-n"></em></div><canvas id="fd-thought"></canvas></div>
+  <div class="fl-pn"><div class="fl-ph"><b id="fd-lanes-t">工具通道</b><span>TOOL LANES</span><em id="fd-lanes-n"></em></div><canvas id="fd-lanes"></canvas></div>
+  <div class="fl-pn"><div class="fl-ph"><b id="fd-core-t">模型核心</b><span>CORE</span><em></em></div><canvas id="fd-core"></canvas></div>
+  <div class="fl-pn"><div class="fl-ph"><b id="fd-matrix-t">检查矩阵</b><span>CHECK MATRIX</span><em id="fd-matrix-n"></em></div><canvas id="fd-matrix"></canvas></div>
+</section>
+<script type="module" src="js/flow.js"></script>
+</body>
+</html>

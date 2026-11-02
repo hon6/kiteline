@@ -73,7 +73,7 @@ struct GroupRow: View {
                     Image(systemName: "person.2.fill").font(.app(size: compact ? 10 : 12)).foregroundStyle(.secondary)
                     Text(group.name).font(.app(size: compact ? 13 : 17)).lineLimit(1)
                     Text("(\(group.members.count))").font(.app(size: compact ? 11.5 : 14)).foregroundStyle(.secondary).fixedSize()
-                    if group.marked { MarkStar { model.markGroup(group.id, false) } }
+                    if group.marked { MarkStar() }
                     Spacer(minLength: 4)
                     Text(Format.listTime(group.updatedAt)).font(.app(size: compact ? 10.5 : 12)).foregroundStyle(.tertiary).fixedSize()
                 }
@@ -1167,7 +1167,7 @@ struct GroupMenuItems: View {
 }
 
 extension View {
-    /// 群那一行的左右滑和长按菜单，交互同会话行：右滑标记（主题色）；左滑解散（红）、免打扰（橙）
+    /// 群那一行的左右滑和长按菜单，交互同会话行：右滑标记（主题色）/ 取消标记（红，要点）；左滑解散（红）、免打扰（橙）
     func groupRowActions(_ group: GroupInfo, split: ((Bool) -> Void)? = nil, disband: @escaping () -> Void) -> some View {
         modifier(GroupRowActions(group: group, split: split, disband: disband))
     }
@@ -1188,11 +1188,11 @@ private struct GroupRowActions: ViewModifier {
                 Button { model.muteGroup(group.id, !group.muted) } label: { Text(group.muted ? "取消免打扰" : "免打扰") }
                     .tint(Color(hex: 0xF2A33A))
             }
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            .swipeActions(edge: .leading, allowsFullSwipe: !group.marked) {
                 Button { model.markGroup(group.id, !group.marked) } label: {
                     Label(group.marked ? "取消标记" : "标记", systemImage: group.marked ? "star.slash.fill" : "star.fill")
                 }
-                .tint(Theme.claude)
+                .tint(group.marked ? Theme.removed : Theme.claude)
             }
             .contextMenu {
                 if let split {

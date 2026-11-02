@@ -91,6 +91,9 @@ public static class PluginsPage
             version is null ? null : Ui.Text(plugin.Str("source") == "external" ? version : L("%@（内置）", version), 11, color: "Text3").Trim()));
         lines.Children.Add(Ui.Text(AgentLine(plugin, name), 11.5, color: "Text2", lines: 2).Wrap());
         if (version is not null && Abilities(plugin) is { Length: > 0 } abilities) lines.Children.Add(Ui.Text(abilities, 11, color: "Text3", lines: 2).Wrap());
+        // 额度、余额能不能显示、为什么没有（每个插件一句）
+        if (plugin.Str("limitsNote") is { Length: > 0 } limits)
+            lines.Children.Add(Ui.Text(L("额度：%@", Lang.IsEnglish && plugin.Str("limitsNoteEn") is { Length: > 0 } en ? en : L(limits)), 11, color: "Text3", lines: 0).Wrap());
         var (status, warn) = Status(plugin);
         if (status is not null) lines.Children.Add(Ui.Text(status, 11.5, color: warn ? "Red" : "Text2", lines: 3).Wrap());
         // 接入方式（默认不接的插件）、各平台兼容情况：点开才显示，免得列表太长
@@ -163,8 +166,31 @@ public static class PluginsPage
             table.Opacity = dim;
             row.Children.Add(table.Margin(40, 6, 0, 0));
         }
+        // 单项开关（默认关、要读那家凭证的那几项，如 Cursor 的「显示本月用量」）：插件开着才给
+        if (version is not null && enabled)
+            foreach (var option in plugin.Arr("options").Items())
+                row.Children.Add(OptionLine(id, option, reload).Margin(40, 6, 0, 0));
         row.Margin = new Thickness(8, 10);
         return row;
+    }
+
+    /// 一项单项开关：名字和一句说明，右边小开关；打开前弹出完整说明（读哪份凭证、查什么）确认（同 Mac 版 PluginOptionLine）
+    static Control OptionLine(string pluginId, JsonNode option, Action reload)
+    {
+        string Text(string key) => option.Str(key) is { Length: > 0 } zh ? (Lang.IsEnglish && option.Str(key + "En") is { Length: > 0 } en ? en : L(zh)) : "";
+        var optionId = option.Str("id") ?? "";
+        var on = option.Truthy("on");
+        var lines = new StackPanel { Spacing = 2 };
+        lines.Children.Add(Ui.Text(Text("name"), 12, FontWeight.Medium).Trim());
+        if (Text("note") is { Length: > 0 } note) lines.Children.Add(Ui.Text(note, 11, color: "Text2", lines: 0).Wrap());
+        var toggle = new MacSwitch(on, async value =>
+        {
+            if (value && Text("optIn") is { Length: > 0 } detail && !await Dialogs.Confirm(detail, L("开启"), title: L("开启「%@」？", Text("name")))) { reload(); return; }
+            Post("/api/desktop/plugins/option", new JsonObject { ["id"] = pluginId, ["option"] = optionId, ["enabled"] = value }, reload);
+        });
+        toggle.VerticalAlignment = VerticalAlignment.Top;
+        return new Border { Padding = new Thickness(10, 8), CornerRadius = new CornerRadius(8), Child = Ui.HTop(10, lines.Grow(), toggle) }
+            .Res(Border.BackgroundProperty, "Fill03");
     }
 
     static readonly (string Key, string Title)[] Forms = [("cli", "命令行"), ("vscode", "VS Code 扩展"), ("desktop", "桌面版")];

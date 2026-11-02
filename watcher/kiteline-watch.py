@@ -101,7 +101,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.30.0"
+WATCHER_VERSION = "2.31.0"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -3706,8 +3706,9 @@ def claude_limits_pending(sessions, root=None):
     return bool(live) and all((s.get("startedAt") or 0) < installed for s in live)
 
 
-def read_limits(sessions=None):
-    """这台电脑上各家 agent 的额度（电脑端 limits 请求）；sessions：正在跑的会话（看要不要提示新开会话）"""
+def read_limits(sessions=None, plugins=None):
+    """这台电脑上各家 agent 的额度（电脑端 limits 请求）；sessions：正在跑的会话（看要不要提示新开会话）；
+    plugins：AgentPlugins，问各插件的 limits()（DeepSeek Harness 的余额、外部插件的）"""
     now = _now_ms()
     agents = []
     for reader in (claude_limits, codex_limits):
@@ -3720,6 +3721,8 @@ def read_limits(sessions=None):
             agents.append(item)
         elif reader is claude_limits and claude_limits_pending(sessions):
             agents.append({"agent": "claude-code", "at": 0, "windows": [], "pending": True})
+    if plugins is not None:
+        agents.extend(plugins.limits())
     return {"agents": agents, "now": now}
 
 
@@ -9834,6 +9837,8 @@ DSH_HOME = os.environ.get("DSH_HOME") or os.path.join(HOME, ".dsh")
 # （直接跑是 …/dsh/lib/bin.js，经 PATH 里的命令跑是「node …/bin/dsh」）；只是候选，最后靠探测认
 DSH_PROCESS = re.compile(r"@deepseek-ai[\\/](?:dsh-desktop-host|dsh)[\\/]lib[\\/]|(?:^|\s)(?:\S*[\\/])?dsh(?:\.js)?(?=\s|$)")
 DSH_FOLLOW_WINDOW = {"maxMessages": 40, "turnWindow": {"minMessages": 8, "minTurns": 1}}
+# DeepSeek 账号余额（account/getBalance 要经 DSH 问 DeepSeek 平台）：读到了 10 分钟内不再问，没读到 3 分钟后再试
+DSH_BALANCE_TTL, DSH_BALANCE_RETRY = 600, 180
 # DSH 的工具名 → (Claude 的工具名, 字段改名)
 DSH_TOOLS = {
     "bash": ("Bash", {"timeoutMs": "timeout"}),
@@ -10162,6 +10167,8 @@ class DshHost:
         self.alive = True
         self.rejected = False    # cookie 不被认（这个 DSH 用的不是 $DSH_HOME 那份数据）
         self.connected = False
+        self.balance_read = (0.0, None)   # (上次问余额的时间, 读数)
+        self.balance_error = None
         threading.Thread(target=self.run, name="dsh-%d" % port, daemon=True).start()
 
     # --- 连接 ---
@@ -10188,6 +10195,47 @@ class DshHost:
             error = result.get("error") or {}
             raise RuntimeError("DeepSeek Harness：%s" % (error.get("message") or error.get("code") or "调用失败"))
         return result.get("value")
+
+    def balance(self):
+        """DeepSeek 账号的余额：{"at", "balances": [{currency, amount, kind}]}——DSH 设置页上那份（account/getBalance），
+        DSH 自己拿登录态去问 DeepSeek 平台，我们不经手凭证。用 API Key、没登录 DeepSeek 账号的返回 None"""
+        asked, reading = self.balance_read
+        if time.time() - asked < (DSH_BALANCE_TTL if reading else DSH_BALANCE_RETRY):
+            return reading
+        local = time.localtime()
+        # client：发起请求的界面（DSH 据此给平台带版本、语言、时区头）；我们报自己的版本
+        client = {"version": "kiteline-" + WATCHER_VERSION, "locale": "zh-CN", "timezoneOffsetSeconds": int(local.tm_gmtoff or 0)}
+        failed = False
+        try:
+            value = self.call("account/getBalance", {"client": client}, timeout=10)
+        except Exception as exc:
+            # 老版本 DSH 没有这个方法、平台一时连不上：同一个错只记一次
+            if str(exc) != self.balance_error:
+                self.balance_error = str(exc)
+                log("DeepSeek Harness 读余额出错：%s" % exc)
+            value, failed = None, True
+        failed = failed or (isinstance(value, dict) and value.get("status") == "failed")
+        fresh = None
+        if isinstance(value, dict) and value.get("status") == "ready":
+            balances = []
+            for kind, rows in (("main", value.get("value")), ("bonus", value.get("bonusWallets"))):
+                for row in rows if isinstance(rows, list) else []:
+                    if isinstance(row, dict) and row.get("currency") and row.get("balance") is not None:
+                        # 赠送余额是 0 的不列（大多数人没有）
+                        try:
+                            empty = kind == "bonus" and float(row["balance"]) == 0
+                        except (TypeError, ValueError):
+                            empty = False
+                        if empty:
+                            continue
+                        balances.append({"currency": str(row["currency"]), "amount": str(row["balance"]), "kind": kind})
+            if balances:
+                fresh = {"at": _now_ms(), "balances": balances}
+        # 这次没读到（平台一时出错）：上次的读数一天内照样给，卡片上写着是多久前的；退出了 DeepSeek 账号（回 null）的就不给了
+        if fresh is None and failed and reading and _now_ms() - reading["at"] < 86400000:
+            fresh = reading
+        self.balance_read = (time.time(), fresh)
+        return fresh
 
     def open(self, endpoint, args, handler):
         stream = str(uuid.uuid4())
@@ -10975,7 +11023,7 @@ class PromaLink:
 # ---------------------------------------------------------------------------
 
 # 中台能力登记表：能力名 → 从第几版中台起有。只加不改；补一项能力就加一行，HOST_API 跟着加一
-HOST_API = 2
+HOST_API = 3
 HOST_CAPS = {
     "locate": 1,         # agent 装在哪、什么版本
     "fs.read": 1,        # 读文件、列目录
@@ -10997,6 +11045,10 @@ HOST_CAPS = {
     # 哪一步不成就停下、不按键，告诉用户停在哪。只在电脑端发消息时带了 ui（它会执行）时才回，插件看 self.host_ui；
     # 老电脑端不带，插件照旧（Cursor 编辑器空闲时从手机发消息靠它，11-01）
     "ui.keys": 2,
+    # 插件的单项开关（清单的 options / 类属性 options）：插件里某一项要读那家 agent 存在本机的凭证才做得到（Cursor 查月用量），
+    # 插件照常接、这一项默认关，用户在设置 → 插件里看过说明自己打开（电脑端经 CCPULSE_PLUGIN_OPTIONS_ON 带「插件 id.开关 id」）。
+    # 插件用 self.option_on(开关 id) 判断；老中台没有这一项时 option_on 不存在，插件按关着处理（11-02）
+    "plugin.options": 3,
 }
 
 VSCODE_EXTENSION_ROOTS = [os.path.join(HOME, folder, "extensions")
@@ -11090,6 +11142,17 @@ class AgentPlugin:
     opt_in_en = None
     # 这次发消息的电脑端能执行哪些界面动作（请求里的 ui，如 ["keys"]）；老电脑端是空的。send 可以据此回动作单（见 HOST_CAPS 的 ui.keys）
     host_ui = ()
+    # 单项开关（HOST_CAPS 的 plugin.options）：[{"id", "name", "note", "optIn"}，各带 …En 英文]——name 开关名、note 一句话说明、
+    # optIn 打开前给用户看的完整说明（读哪份凭证、查什么、只在本机用）。都默认关
+    options = ()
+    # 额度、余额这家能不能显示、从哪来、为什么没有（设置 → 插件里那家下面的一行「额度：…」，规范 4.5）。每个插件都要写；
+    # 英文：内置的走 i18n/en.json，外部插件写清单的 limitsNoteEn
+    limits_note = None
+    limits_note_en = None
+
+    def option_on(self, key):
+        """用户在设置里打开了这一项没有"""
+        return "%s.%s" % (self.id, key) in PLUGIN_OPTIONS_ON
 
     def standardize(self, snap):
         """补上客户端认的标准字段（docs/agent-plugins.md 第五节）：caps、待确认卡片的按钮、只读的说明"""
@@ -11173,6 +11236,14 @@ class AgentPlugin:
         """电脑端执行插件回的动作单（send 回的 ui）到 {"do": "plugin", "step"} 时调：做这一步，→ 给用户看的一句话；做不了抛错"""
         raise RuntimeError("%s 不支持这一步：%s" % (self.name, step))
 
+    def limits(self):
+        """这家 agent 在这台电脑上的额度 / 余额（手机「今日用量」卡片，电脑端几分钟问一次，要快、要缓存）：
+        {"at": 读数时间（毫秒）, "windows": [{kind, percent, resetsAt}], "balances": [{currency, amount, kind}], "plan"}；没有返回 None。
+        窗口 kind：five_hour 5 小时 / day 今日 / seven_day 本周 / month 本月（按账单周期），别的写 window_<分钟数>；
+        余额 kind：main 充值的 / bonus 赠送的。优先用这家 agent 自己记下、自己给的读数；要读它存在本机的凭证才查得到的，
+        得写进 opt_in 的说明、用户打开才查（Claude 的凭证一律不碰）"""
+        return None
+
     def closable(self, snap):
         """这个会话能不能关（决定 caps 里给不给 close）：默认实现了 close() 就都能"""
         return type(self).close is not AgentPlugin.close
@@ -11183,6 +11254,7 @@ class CodexPlugin(AgentPlugin):
 
     id, name = "codex", "Codex"
     needs = ("locate", "net.connect", "net.ws", "proc.pipe", "fs.tail", "db.read")
+    limits_note = "「今日用量」中显示 5 小时与本周额度（免费版为 30 天额度），取自 Codex 自己的记录，回复一次后更新"
     normalize = staticmethod(normalize_codex_line)
     # 10-23 真机矩阵 + 10-24 真实 Codex + 假模型的端到端（tools/codex-probe/e2e_watcher.py）
     support = {
@@ -11264,6 +11336,7 @@ class OpenCodePlugin(AgentPlugin):
 
     id, name = "opencode", "OpenCode"
     needs = ("locate", "install.file", "net.http", "net.sse", "proc")
+    limits_note = "OpenCode 未提供额度查询接口（OpenCode Go 订阅的用量只能在 OpenCode 网页控制台查看），「今日用量」中不显示"
     # 终端界面；Kiteline 自动往 OpenCode 里装一个桥接插件。Mac 10-23 实测；Windows / Linux 10-24 用 OpenCode 1.19.4 + 假模型实测 25/25
     support = {
         "mac": {"cli": support_form(verified=True)},
@@ -11323,6 +11396,7 @@ class DshPlugin(AgentPlugin):
 
     id, name = "deepseek-harness", "DeepSeek Harness"
     needs = ("proc", "secret.read", "net.http", "net.ws")
+    limits_note = "DeepSeek 按量付费，没有周期额度：「今日用量」中显示 DeepSeek 账号余额（需在 DeepSeek Harness 中登录 DeepSeek 账号，使用 API Key 的不显示）"
     # 桌面版和命令行（dsh --profile web）是同一套网页服务；审批只有「允许这一次」。实测见 ccpulse-c1 10-24 的记录
     support = {
         "mac": {"desktop": support_form(verified=True), "cli": support_form()},
@@ -11366,6 +11440,15 @@ class DshPlugin(AgentPlugin):
     def close(self, sid):
         return self.link.owner(sid).close(sid)
 
+    def limits(self):
+        """DeepSeek 按量付费，没有 5 小时 / 每周额度，给账号余额（连着的 DSH 里第一个登录了 DeepSeek 账号的）"""
+        for host in list(self.link.hosts.values()):
+            if host.connected:
+                reading = host.balance()
+                if reading:
+                    return dict(reading, windows=[])
+        return None
+
     def pending_options(self, snap):
         options = super().pending_options(snap)
         return options and [option for option in options if option["key"] != "2"]   # 审批只有「允许这一次」
@@ -11376,6 +11459,7 @@ class PromaPlugin(AgentPlugin):
 
     id, name = "proma", "Proma"
     needs = ("fs.read", "fs.tail", "proc")
+    limits_note = "Proma 没有对外接口，额度和余额请在 Proma 所接的模型服务中查看，「今日用量」中不显示"
     normalize = staticmethod(normalize_proma_line)
     # 只有桌面版，没有任何对外接口：各平台都只读。Linux 真机实测；Mac / Windows 只验证过进程判断，桌面版没真跑
     support = {
@@ -11421,6 +11505,8 @@ PLUGINS_DIR = os.environ.get("CCPULSE_PLUGINS_DIR") or os.path.join(DATA_DIR, "p
 PLUGINS_OFF = set(filter(None, (os.environ.get("CCPULSE_PLUGINS_OFF") or "").split(",")))
 # 默认不接（opt_in）、用户在设置里自己打开了的插件（同上）
 PLUGINS_ON = set(filter(None, (os.environ.get("CCPULSE_PLUGINS_ON") or "").split(",")))
+# 用户打开了的插件单项开关：「插件 id.开关 id」（见 HOST_CAPS 的 plugin.options）
+PLUGIN_OPTIONS_ON = set(filter(None, (os.environ.get("CCPULSE_PLUGIN_OPTIONS_ON") or "").split(",")))
 PLUGIN_FAIL_LIMIT = 5   # 外部插件连续这么多轮出错就停用
 
 
@@ -11462,6 +11548,10 @@ def load_external_plugins(root=None):
                 plugin.min_app = manifest["minApp"]
             if manifest.get("optIn"):
                 plugin.opt_in, plugin.opt_in_en = str(manifest["optIn"]), manifest.get("optInEn") or plugin.opt_in_en
+            if manifest.get("limitsNote"):
+                plugin.limits_note, plugin.limits_note_en = str(manifest["limitsNote"]), manifest.get("limitsNoteEn") or None
+            if isinstance(manifest.get("options"), list):
+                plugin.options = tuple(o for o in manifest["options"] if isinstance(o, dict) and o.get("id") and o.get("name"))
             plugin.source = "external"
             plugin.folder = folder
             plugins.append(plugin)
@@ -11556,6 +11646,21 @@ class AgentPlugins:
                 self.failed(plugin, "pump", exc)
         return out
 
+    def limits(self):
+        """各插件报的额度 / 余额（read_limits 用）：没有窗口也没有余额的不算；读不到只记日志，不算插件出错"""
+        out = []
+        for plugin in list(self.all):
+            if type(plugin).limits is AgentPlugin.limits:
+                continue
+            try:
+                item = plugin.limits()
+            except Exception as exc:
+                log("插件 %s 读额度出错：%r" % (plugin.id, exc))
+                continue
+            if isinstance(item, dict) and (item.get("windows") or item.get("balances")):
+                out.append(dict(item, agent=plugin.id, windows=list(item.get("windows") or [])))
+        return out
+
     def failed(self, plugin, where, exc):
         """插件自己出错（不是「会话已关」这类正常的操作失败）：记日志；同一个错报一次给电脑端（弹窗问用户要不要报告）；
         外部插件连续出错太多就停用、换回内置的"""
@@ -11614,6 +11719,12 @@ class AgentPlugins:
                 row["optIn"] = plugin.opt_in
                 if plugin.opt_in_en:
                     row["optInEn"] = plugin.opt_in_en
+            if plugin.options:
+                row["options"] = [dict(option, on=plugin.option_on(option["id"])) for option in plugin.options]
+            if plugin.limits_note:
+                row["limitsNote"] = plugin.limits_note
+                if plugin.limits_note_en:
+                    row["limitsNoteEn"] = plugin.limits_note_en
             row.update(self.status.get(plugin.id) or {})
             out.append(row)
         return out + list(self.broken)
@@ -12135,7 +12246,7 @@ class Watcher:
         if cmd == "machine_info":
             return machine_info()
         if cmd == "limits":
-            return read_limits(list(self.sessions.values()))
+            return read_limits(list(self.sessions.values()), self.plugins)
         if agent != "claude-code":
             # 子 agent 图、后台任务、测试记录都是从 Claude 的对话记录里认的，别家没有
             if cmd == "agents":

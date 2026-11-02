@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: 订阅额度（/api/limits）
 
-/// 各台电脑上各家 agent 的订阅额度（5 小时 / 每周）。Claude Code 的读数是电脑端装的小插件在每次回复后记下的，
-/// Codex 的来自它自己的记录；按电脑分组（顺序同电脑端设置里的来源）
+/// 各台电脑上各家 agent 的订阅额度（5 小时 / 每周 / 本月）或余额。Claude Code 的读数是电脑端装的小插件在每次回复后记下的，
+/// Codex 的来自它自己的记录，DeepSeek Harness 给的是 DeepSeek 账号余额；按电脑分组（顺序同电脑端设置里的来源）
 struct LimitsPayload: Decodable {
     var devices: [LimitDevice]
 
@@ -35,6 +35,8 @@ struct LimitAgent: Decodable, Identifiable, Hashable {
     var at: Double
     var plan: String?
     var windows: [LimitWindow]
+    /// 按量付费的 agent（DeepSeek Harness）给的账号余额，没有窗口
+    var balances: [LimitBalance]
     /// 还没有读数：这台电脑上开着的会话都是额度插件装上之前启动的，新开一个会话回复后才有
     var pending: Bool
     var id: String { agent }
@@ -45,17 +47,40 @@ struct LimitAgent: Decodable, Identifiable, Hashable {
         at = c.num("at")
         plan = c.text("plan")
         windows = c.list("windows")
+        balances = c.list("balances")
         pending = c.truthy("pending")
     }
 
-    /// 卡片上的两格：第一格 5 小时、第二格每周；没有这两种窗口的（Codex 免费版 30 天一个窗口、网关的花费上限）按顺序补上
+    /// 卡片上的格子，两格一行，按周期从短到长：5 小时、今日、本周、本月——这家有哪几种就排哪几种（Claude、Codex 是
+    /// 「5 小时 · 本周」一行，只有本月的占一格）。一种都没有的（Codex 免费版 30 天一个窗口、网关的花费上限）按顺序取两格
     var slots: [LimitWindow?] {
-        var first = windows.first { $0.kind == "five_hour" }
-        var second = windows.first { $0.kind == "seven_day" }
-        var rest = windows.filter { $0.kind != "five_hour" && $0.kind != "seven_day" }.makeIterator()
-        if first == nil { first = rest.next() }
-        if second == nil { second = rest.next() }
-        return [first, second]
+        let order = ["five_hour", "day", "seven_day", "month"]
+        var picked = order.compactMap { kind in windows.first { $0.kind == kind } }
+        if picked.isEmpty { picked = Array(windows.prefix(2)) }
+        var out: [LimitWindow?] = picked
+        if out.count % 2 == 1 { out.append(nil) }
+        return out
+    }
+}
+
+/// 一笔余额：main 充值的、bonus 赠送的
+struct LimitBalance: Decodable, Hashable {
+    var currency: String
+    var amount: String
+    var kind: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.fields()
+        currency = c.text("currency") ?? "CNY"
+        amount = c.text("amount") ?? "0"
+        kind = c.text("kind") ?? "main"
+    }
+
+    /// 「¥18.52」：保留两位小数
+    var text: String {
+        let symbol = currency == "USD" ? "$" : currency == "CNY" ? "¥" : currency + " "
+        guard let value = Double(amount) else { return symbol + amount }
+        return symbol + String(format: "%.2f", value)
     }
 }
 
@@ -87,7 +112,9 @@ struct LimitWindow: Decodable, Identifiable, Hashable {
     var label: String {
         switch kind {
         case "five_hour": return L("5 小时")
+        case "day": return L("今日")
         case "seven_day": return L("本周")
+        case "month": return L("本月")
         case "spend_limit": return L("额度")
         default:
             let minutes = minutes ?? Int(kind.split(separator: "_").last ?? "") ?? 0
@@ -152,6 +179,31 @@ struct LimitBar: View {
     }
 }
 
+/// 余额一行：「余额 ¥18.52」，有赠送的后面跟「赠送 ¥5.00」（DeepSeek 按量付费，没有周期额度）
+struct BalanceLine: View {
+    let balances: [LimitBalance]
+    var compact = false
+
+    var body: some View {
+        // 只有赠送余额的就把它当余额显示
+        let paid = balances.filter { $0.kind != "bonus" }
+        let main = paid.isEmpty ? balances : paid
+        let bonus = paid.isEmpty ? [] : balances.filter { $0.kind == "bonus" }
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("余额").font(.app(size: compact ? 10.5 : 11.5)).foregroundStyle(.secondary)
+            Text(main.map(\.text).joined(separator: " · "))
+                .font(.app(size: compact ? 13 : 14, weight: .semibold).monospacedDigit()).lineLimit(1)
+            if !bonus.isEmpty {
+                Text(L("赠送 %@", bonus.map(\.text).joined(separator: " · ")))
+                    .font(.app(size: compact ? 10.5 : 11.5).monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .minimumScaleFactor(0.8)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// 额度面板：每台电脑每家 agent 一块——上面一行左边电脑名、右边 agent，下面「5 小时」「本周」两条各占一半并排（10-31）。
 /// 手机首页卡片、用量页、Mac 侧栏共用
 struct LimitsBoard: View {
@@ -199,13 +251,19 @@ struct LimitsBoard: View {
                     .font(.app(size: compact ? 10.5 : 11.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                HStack(alignment: .top, spacing: compact ? 10 : 14) {
-                    ForEach(Array(agent.slots.enumerated()), id: \.offset) { _, window in
-                        Group {
-                            if let window { LimitBar(window: window, compact: compact) } else { Color.clear.frame(height: 1) }
+                let slots = agent.slots
+                VStack(alignment: .leading, spacing: compact ? 8 : 10) {
+                    ForEach(Array(stride(from: 0, to: slots.count, by: 2)), id: \.self) { row in
+                        HStack(alignment: .top, spacing: compact ? 10 : 14) {
+                            ForEach(row..<row + 2, id: \.self) { index in
+                                Group {
+                                    if let window = slots[index] { LimitBar(window: window, compact: compact) } else { Color.clear.frame(height: 1) }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
                         }
-                        .frame(maxWidth: .infinity)
                     }
+                    if !agent.balances.isEmpty { BalanceLine(balances: agent.balances, compact: compact) }
                 }
             }
         }

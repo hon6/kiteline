@@ -180,7 +180,7 @@ struct AppNotice: Decodable, Equatable, Identifiable {
     }
 }
 
-/// 升级提示：latest 比这台的版本新 → 首页提示一次、设置里一直标着；minimum 比这台的版本新 → 整屏挡住，只能去更新
+/// 升级提示：latest 比这台的版本新 → 当作有新版本（和 App Store 上查到的取新的，见 AppUpdates）；minimum 比这台的版本新 → 整屏挡住，只能去更新
 struct UpdateInfo: Decodable, Equatable {
     var latest: VersionNumber?
     var minimum: VersionNumber?
@@ -214,7 +214,7 @@ final class RemoteConfig {
         .appendingPathComponent("remote-config.json")
 
     private(set) var config = AppConfig()
-    /// 这台手机上关掉的公告（id）、跳过的升级提示（update:版本号）
+    /// 这台手机上关掉的公告（id）、插件要求更新的提示（plugin-app:版本号）
     private(set) var dismissed: Set<String>
     /// 这个 App 的版本（Info.plist 的 CFBundleShortVersionString）
     let version: VersionNumber
@@ -261,18 +261,6 @@ final class RemoteConfig {
         config.notices.filter { $0.isLive(now, version: version) && !dismissed.contains($0.id) }
     }
 
-    /// 比这台新的版本（首页提示关掉了也照样有：设置里一直标着）
-    var newerVersion: VersionNumber? {
-        guard let latest = config.update?.latest, version < latest else { return nil }
-        return latest
-    }
-
-    /// 首页的「有新版本」提示：这个版本的提示没被关掉，也还没到必须更新（那时整屏挡住）
-    var updatePrompt: VersionNumber? {
-        guard let latest = newerVersion, !updateRequired, !dismissed.contains(Self.updateID(latest)) else { return nil }
-        return latest
-    }
-
     /// 这个版本已经低于最低支持的版本
     var updateRequired: Bool {
         guard let minimum = config.update?.minimum else { return false }
@@ -280,8 +268,6 @@ final class RemoteConfig {
     }
 
     var updateNotes: String? { config.update?.notes?.text }
-
-    static func updateID(_ version: VersionNumber) -> String { "update:\(version)" }
 
     func dismiss(_ id: String) {
         dismissed.insert(id)
@@ -343,10 +329,11 @@ final class RemoteConfig {
             }
             checked = .now
             apply(fresh)
-            // 关掉过的公告只记还在配置里的，免得越攒越多
-            let live = Set(fresh.notices.map(\.id)).union(fresh.update?.latest.map { [Self.updateID($0)] } ?? [])
-            if !dismissed.isSubset(of: live) {
-                dismissed.formIntersection(live)
+            // 关掉过的公告只记还在配置里的，免得越攒越多；插件要求更新的提示（plugin-app:版本）不归配置管，留着
+            let live = Set(fresh.notices.map(\.id))
+            let kept = dismissed.filter { live.contains($0) || $0.hasPrefix("plugin-app:") }
+            if kept != dismissed {
+                dismissed = kept
                 defaults.set(dismissed.sorted(), forKey: Self.dismissedKey)
             }
         default:

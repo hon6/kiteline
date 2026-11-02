@@ -1,0 +1,78 @@
+/* 数据流大屏：深色、细线、等宽数字；上面遥测条、中间 three.js 场景、底下四块仪表。insets 由宿主给（标题栏、浮动侧栏、刘海、横条） */
+:root {
+  --inset-top: 0px; --inset-left: 0px; --inset-right: 0px; --inset-bottom: 0px;
+  --bg: #06070b; --fg: #e6e8ef; --fg2: #9aa1b2; --fg3: #5d6476; --line: rgba(160,175,210,.14);
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, "PingFang SC", "Microsoft YaHei UI", "Helvetica Neue", "Noto Sans CJK SC", sans-serif;
+  --hudH: 30px; --dashH: 248px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 12px/1.4 var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; -webkit-user-select: none; user-select: none; }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+
+.fl-hud { position: fixed; z-index: 5; top: var(--inset-top); left: var(--inset-left); right: var(--inset-right); height: var(--hudH); display: flex; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); background: rgba(6,7,11,.86); font: 10.5px var(--mono); letter-spacing: .04em; color: var(--fg3); white-space: nowrap; }
+.fl-hud-l { display: flex; gap: 14px; overflow: hidden; min-width: 0; }
+.fl-hud-l .brand { color: var(--fg2); letter-spacing: .14em; }
+.fl-hud-l b { color: var(--fg); font-weight: 600; }
+.fl-hud-l i { font-style: normal; color: var(--fg3); margin-right: 5px; font-family: var(--sans); letter-spacing: 0; }
+.fl-hud-l span { color: var(--fg); }
+.fl-door { margin-left: auto; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px; font: 11px var(--sans); color: var(--fg2); }
+
+.fl-stage { position: fixed; top: calc(var(--inset-top) + var(--hudH)); left: var(--inset-left); right: var(--inset-right); bottom: calc(var(--inset-bottom) + var(--dashH)); overflow: hidden; }
+.fl-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.fl-title { position: absolute; z-index: 2; left: 14px; top: 12px; display: flex; gap: 10px; align-items: flex-start; padding: 4px 12px 5px 10px; border-left: 2px solid #f2cf5b; border-radius: 0 6px 6px 0; background: rgba(6,7,11,.62); pointer-events: none; max-width: calc(100% - 28px); }
+.fl-title b { font: 700 22px/1 var(--mono); }
+.fl-title span { display: block; font: 700 16px/1.15 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-title small { display: block; margin-top: 3px; font: 10.5px var(--mono); color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-callout { position: absolute; left: 0; top: 0; z-index: 3; display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border: 1px solid var(--c, #fff); border-radius: 3px; background: rgba(8,9,14,.88); font: 11px var(--mono); color: var(--fg); box-shadow: 0 0 18px -4px var(--c, #fff); will-change: transform; max-width: 300px; min-width: 180px; }
+.fl-callout b { font: 600 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-callout span { color: var(--fg2); }
+.fl-callout ul { list-style: none; margin: 3px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.fl-callout li { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: baseline; font: 10.5px/1.35 var(--mono); white-space: nowrap; min-width: 0; }
+.fl-callout li i { font: 600 10px var(--sans); font-style: normal; }
+.fl-callout li span { color: var(--fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fl-callout li em { font: 10px var(--sans); font-style: normal; color: var(--fg3); max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+.fl-callout button { margin-top: 4px; align-self: flex-start; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--c, #fff); color: var(--fg); font: 11px var(--sans); }
+.fl-tools { position: absolute; right: 12px; bottom: 10px; z-index: 3; display: flex; gap: 6px; }
+.fl-tools button { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: rgba(8,9,14,.8); font: 11px var(--sans); color: var(--fg2); }
+.fl-tools button i { width: 6px; height: 6px; border-radius: 50%; background: var(--fg3); }
+.fl-tools button.on { color: var(--fg); }
+.fl-tools button.on i { background: #8be37c; box-shadow: 0 0 6px #8be37c; }
+
+.fl-dash { position: fixed; left: var(--inset-left); right: var(--inset-right); bottom: var(--inset-bottom); height: var(--dashH); display: grid; grid-template-columns: 1.05fr 1fr 1.05fr 1fr; gap: 6px; padding: 6px; border-top: 1px solid var(--line); background: #07080d; }
+.fl-pn { position: relative; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 3px; background: rgba(12,14,20,.92); overflow: hidden; }
+.fl-ph { display: flex; align-items: baseline; gap: 7px; padding: 6px 9px 2px; font: 10px var(--mono); color: var(--fg3); letter-spacing: .06em; white-space: nowrap; }
+.fl-ph b { font: 700 11.5px var(--sans); color: var(--fg); letter-spacing: 0; }
+.fl-ph em { margin-left: auto; font-style: normal; color: var(--fg2); }
+.fl-pn canvas { flex: 1; min-height: 0; width: 100%; display: block; }
+
+/* 手机：遥测条只留前几项；底下四块左右滑 */
+@media (max-width: 700px) {
+  :root { --dashH: 232px; }
+  .fl-hud-l .opt { display: none; }
+  .fl-title b { font-size: 18px; }
+  .fl-title span { font-size: 14px; }
+  .fl-dash { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  .fl-dash::-webkit-scrollbar { display: none; }
+  .fl-pn { flex: 0 0 88%; scroll-snap-align: center; }
+}
+
+/* 横着的手机（11-02）：左右分屏——左边整块画布，右边四块仪表两行两列 */
+@media (orientation: landscape) and (max-height: 540px) {
+  :root { --dashW: 46vw; --hudH: 28px; }
+  .fl-stage { right: calc(var(--inset-right) + var(--dashW)); bottom: var(--inset-bottom); }
+  .fl-dash { top: calc(var(--inset-top) + var(--hudH)); left: auto; width: var(--dashW); height: auto;
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; overflow: hidden;
+    border-top: 0; border-left: 1px solid var(--line); padding: 5px; gap: 5px; }
+  .fl-pn { flex: none; min-height: 0; }
+  .fl-ph { padding: 4px 7px 1px; font-size: 9px; }
+  .fl-ph b { font-size: 10.5px; }
+  .fl-ph span { display: none; }
+  .fl-hud-l .opt { display: none; }
+  .fl-title b { font-size: 16px; }
+  .fl-title span { font-size: 13px; }
+  .fl-title small { font-size: 9.5px; }
+  .fl-tools { bottom: 8px; right: 8px; }
+}
+

@@ -10,7 +10,8 @@
   "db.read",
   "proc",
   "term.tmux",
-  "install.file"
+  "install.file",
+  "secret.read"
  ],
  "detect": {
   "paths": [
@@ -86,6 +87,19 @@
    }
   }
  },
+ "options": [
+  {
+   "id": "usage",
+   "name": "显示本月用量",
+   "nameEn": "Show monthly usage",
+   "note": "在「今日用量」中显示 Cursor 本月已用的额度和重置日期",
+   "noteEn": "Show how much of this month's Cursor usage you've used, and when it resets, under Today's usage",
+   "optIn": "Cursor 不在本机记录用量，也没有提供第三方查询接口。打开后，Kiteline 将读取 Cursor 保存在本机的登录凭证（编辑器数据目录中 state.vscdb 的 cursorAuth/accessToken 一项，只装了命令行时读其 auth.json），每 10 分钟向 Cursor 服务器查询一次本月用量和套餐，与 Cursor 设置页显示的一致。凭证仅在本机使用，不会上传，也不会发送到手机。此查询方式并非 Cursor 官方提供，Cursor 更新后可能失效。",
+   "optInEn": "Cursor doesn't record usage on your computer and offers no third-party usage API. When turned on, Kiteline reads the sign-in token Cursor stores on this computer (cursorAuth/accessToken in the editor's state.vscdb, or the CLI's auth.json if only the CLI is installed) and asks Cursor's servers for this month's usage and plan every 10 minutes, the same figures shown in Cursor's settings. The token is used only on this computer; it is never uploaded or sent to your phone. This isn't an official Cursor interface and may stop working after a Cursor update."
+  }
+ ],
+ "limitsNote": "打开下方「显示本月用量」后，在「今日用量」中显示 Cursor 本月用量（按账单月）",
+ "limitsNoteEn": "Turn on “Show monthly usage” below to see Cursor's usage for the current billing month under Today's usage",
  "mark": [
   {
    "d": "M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z",

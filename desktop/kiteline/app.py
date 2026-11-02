@@ -34,7 +34,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.20"
+VERSION = "1.0.21"
 
 
 class App:
@@ -535,7 +535,8 @@ class App:
         payload["agents"] = self.plugins.agent_cards()   # 插件给的 agent 名称和标志：手机内置表里没有的 agent 靠它画
         payload["alerts"] = self.alerts.payload()        # 要人处理的状况（见 alerts.py）
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
-        payload["features"] = ["files", "groups", "groupMedia"]   # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件（手机按它决定给不给入口）
+        # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate"]
         return payload
 
     def profile_payload(self):

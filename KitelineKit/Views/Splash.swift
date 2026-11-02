@@ -291,7 +291,11 @@ struct SplashOverlay: View {
     @State private var showingItem = false
     @State private var deadline: Date?
     @State private var leaving = false
-    @State private var gone = false
+    @State private var gone = false {
+        didSet { if gone { Self.finished = true } }
+    }
+    /// 启动页已经飞走：新版本面板（AppUpdates）等它走了再弹，别盖在启动页上
+    @MainActor static var finished = false
 
     /// 品牌页在第一帧之后再停多久（静态启动屏已经显示了一会儿，这里不用长）
     private static let brandHold = 0.4

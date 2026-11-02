@@ -36,11 +36,25 @@ public sealed partial class MainModel : ObservableObject
     /// 世界模式里收起了左边的会话列表（世界占满整个窗口）
     [ObservableProperty] bool sidebarCollapsed;
 
+    /// 世界那块放哪一页（同 Mac 版 KitelineModel.worldPage）：world = 像素园区，flow = 数据流大屏；两页共用一个网页面板
+    [ObservableProperty] string worldPage = Prefs.String("worldPage") == "flow" ? "flow" : "world";
+
     public void SetWorld(bool on)
     {
-        if (on && !Views.World.Embedded) { Views.World.OpenWindow(); return; }
+        if (on && !Views.World.Embedded) { Views.World.OpenWindow(WorldPage); return; }
         WorldMode = on;
     }
+
+    /// 地球 / 数据流两个入口：没开就打开这一页；开着别的那页就切过来；开着的正是这页就离开（Linux 上开浏览器窗口）
+    public void ToggleWorld(string page)
+    {
+        if (!Views.World.Embedded) { Views.World.OpenWindow(page); return; }
+        if (WorldMode && WorldPage == page) { WorldMode = false; return; }
+        if (WorldPage != page) { WorldDetail = null; WorldPage = page; }
+        WorldMode = true;
+    }
+
+    partial void OnWorldPageChanged(string value) => Prefs.Set("worldPage", value);
 
     partial void OnWorldModeChanged(bool value)
     {

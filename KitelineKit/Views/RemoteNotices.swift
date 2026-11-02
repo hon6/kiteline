@@ -28,17 +28,20 @@ struct RemoteNoticeStrip: View {
 
     var body: some View {
         let notices = remote.notices()
-        let update = remote.updatePrompt
-        // 服务器已经在提示新版本时不重复说
-        let plugin = update == nil ? PluginAppRequirement.check(model.sessions.map(\.agent))
+        // 这台手机、连着的电脑有新版本（见 AppUpdates）：点开是更新面板，✕ = 这个版本不再提示。必须更新时整屏挡着，不在这里说
+        let updates = AppUpdates.shared
+        let offers = remote.updateRequired ? [] : [updates.appOffer, updates.hostOffer].compactMap { $0 }.filter { !updates.isSkipped($0) }
+        // 已经在提示 App 的新版本时不重复说
+        let plugin = !offers.contains(where: \.isApp) ? PluginAppRequirement.check(model.sessions.map(\.agent))
             .flatMap { remote.dismissed.contains(PluginAppRequirement.dismissID($0.version)) ? nil : $0 } : nil
-        if update != nil || plugin != nil || !notices.isEmpty {
+        if !offers.isEmpty || plugin != nil || !notices.isEmpty {
             VStack(spacing: 8) {
-                if let update {
-                    NoticeCard(symbol: "arrow.down.circle", title: L("Kiteline %@ 已发布", update.description),
-                               detail: remote.updateNotes ?? L("轻点前往 App Store 更新"),
-                               open: { Task { await remote.openStore(openURL) } },
-                               close: { withAnimation(.snappy) { remote.dismiss(RemoteConfig.updateID(update)) } })
+                ForEach(offers) { offer in
+                    NoticeCard(symbol: "arrow.down.circle",
+                               title: offer.isApp ? L("Kiteline %@ 已发布", offer.version) : L("电脑端 Kiteline %@ 已发布", offer.version),
+                               detail: offer.isApp ? L("轻点查看更新内容并前往 App Store 更新") : L("电脑上是 %@，轻点查看更新内容", offer.current),
+                               open: { updates.present([offer]) },
+                               close: { withAnimation(.snappy) { updates.setSkipped([offer], true) } })
                 }
                 if let plugin {
                     NoticeCard(symbol: "arrow.down.circle", title: L("需要更新 Kiteline"),

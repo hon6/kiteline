@@ -225,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         file.addItem(withTitle: L("新任务…"), action: #selector(menuNewTask), keyEquivalent: "n")
         file.addItem(withTitle: L("历史会话"), action: #selector(menuHistory), keyEquivalent: "y")
         file.addItem(withTitle: L("世界模式"), action: #selector(menuWorld), keyEquivalent: "E")   // ⇧⌘E：进出世界
+        file.addItem(withTitle: L("数据流大屏"), action: #selector(menuFlow), keyEquivalent: "D")   // ⇧⌘D：进出数据流大屏
         file.addItem(.separator())
         // 会话的标签页（同浏览器）：⌘T 新标签、⌘W 关标签（没有标签可关时关窗口）
         file.addItem(withTitle: L("新标签页"), action: #selector(menuNewTab), keyEquivalent: "t").tag = TabNeed.conversation.rawValue
@@ -338,7 +339,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuNewTask() { MainWindowController.shared.show(); KitelineModel.shared.newTask(in: current?.live) }
     @objc private func menuWorld() {
         MainWindowController.shared.show()
-        KitelineModel.shared.setWorld(!KitelineModel.shared.worldMode)
+        KitelineModel.shared.toggleWorld(page: "world")
+    }
+    @objc private func menuFlow() {
+        MainWindowController.shared.show()
+        KitelineModel.shared.toggleWorld(page: "flow")
     }
     @objc private func menuHistory() { MainWindowController.shared.show(select: KitelineModel.historyID) }
     @objc private func menuSearch() { perform(.search) }

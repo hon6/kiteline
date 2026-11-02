@@ -35,6 +35,8 @@ final class PluginStore: ObservableObject {
         var held: [String] = []
         /// 做过的一次性迁移
         var flags: [String] = []
+        /// 用户打开了的插件单项开关「插件 id.开关 id」（默认都关，如 cursor.usage 查 Cursor 月用量）
+        var options: [String] = []
 
         init() {}
 
@@ -48,6 +50,7 @@ final class PluginStore: ObservableObject {
             bad = try c.decodeIfPresent([String].self, forKey: .bad) ?? []
             held = try c.decodeIfPresent([String].self, forKey: .held) ?? []
             flags = try c.decodeIfPresent([String].self, forKey: .flags) ?? []
+            options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
         }
     }
 
@@ -71,6 +74,11 @@ final class PluginStore: ObservableObject {
         /// 不是那家 agent 开放的接入方式：默认不接，打开前给用户看的说明（optInEn 是插件给的英文）
         let optIn: String?
         let optInEn: String?
+        /// 单项开关：[{id, name, note, optIn}（各带 En）]，插件里要读那家凭证的那几项，默认关
+        let options: [[String: Any]]
+        /// 额度、余额能不能显示、为什么没有（每个插件一句）
+        let limitsNote: String?
+        let limitsNoteEn: String?
         let action: String?          // install / update / needsApp
         let target: [String: Any]?
         let pending: Bool
@@ -144,6 +152,7 @@ final class PluginStore: ObservableObject {
         var env: [String: String] = [:]
         if !prefs.off.isEmpty { env["CCPULSE_PLUGINS_OFF"] = prefs.off.sorted().joined(separator: ",") }
         if !prefs.on.isEmpty { env["CCPULSE_PLUGINS_ON"] = prefs.on.sorted().joined(separator: ",") }
+        if !prefs.options.isEmpty { env["CCPULSE_PLUGIN_OPTIONS_ON"] = prefs.options.sorted().joined(separator: ",") }
         return env
     }
 
@@ -403,7 +412,10 @@ final class PluginStore: ObservableObject {
                        forms: order.compactMap { key in forms[key].map { (key, $0 as? String ?? "") } },
                        detected: found, detectedOn: detectedOn,
                        enabled: !prefs.off.contains(id) && (optIn == nil || prefs.on.contains(id)),
-                       optIn: optIn, optInEn: row["optInEn"] as? String ?? entry["optInEn"] as? String, action: action, target: target,
+                       optIn: optIn, optInEn: row["optInEn"] as? String ?? entry["optInEn"] as? String,
+                       options: row["options"] as? [[String: Any]] ?? entry["options"] as? [[String: Any]] ?? [],
+                       limitsNote: row["limitsNote"] as? String ?? entry["limitsNote"] as? String,
+                       limitsNoteEn: row["limitsNoteEn"] as? String ?? entry["limitsNoteEn"] as? String, action: action, target: target,
                        pending: prefs.pending.contains(id), canRemove: installed.contains(id),
                        autoInstall: (current != nil || found || prefs.pending.contains(id)) && !prefs.held.contains(id),
                        held: prefs.held.contains(id), kind: entry["kind"] as? String ?? "agent")
@@ -538,6 +550,19 @@ final class PluginStore: ObservableObject {
         if !prefs.held.contains(id) { prefs.held.append(id); savePrefs() }
         try? FileManager.default.removeItem(at: Self.pluginsDir.appendingPathComponent(id))
         try? FileManager.default.removeItem(at: Self.pluginsDir.appendingPathComponent(".previous").appendingPathComponent(id))
+        reconnect()
+    }
+
+    func optionOn(_ id: String, _ option: String) -> Bool { prefs.options.contains("\(id).\(option)") }
+
+    /// 插件的单项开关（打开前设置页已给用户看过说明）：随 watcher 的环境变量带过去，重连生效
+    func setOption(_ id: String, _ option: String, _ on: Bool) {
+        let key = "\(id).\(option)"
+        prefs.options.removeAll { $0 == key }
+        if on { prefs.options.append(key) }
+        savePrefs()
+        Log.write("插件 \(id) 的「\(option)」已\(on ? "打开" : "关闭")")
+        objectWillChange.send()
         reconnect()
     }
 
@@ -854,6 +879,12 @@ private struct PluginRowView: View {
                     .padding(.leading, 40)
             }
             if expanded, !row.support.isEmpty { SupportGrid(support: row.support).padding(.leading, 40).opacity(dimmed ? 0.55 : 1) }
+            // 单项开关（默认关、要读那家凭证的那几项）：插件开着才给
+            if row.version != nil, row.enabled {
+                ForEach(Array(row.options.enumerated()), id: \.offset) { _, option in
+                    PluginOptionLine(row: row, option: option).padding(.leading, 40)
+                }
+            }
         }
         .padding(.horizontal, 8).padding(.vertical, 10)
     }
@@ -875,6 +906,9 @@ private struct PluginRowView: View {
                 Text(agentLine).font(.app(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if row.version != nil, !abilities.isEmpty {
                     Text(abilities).font(.app(size: 11)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                }
+                if let note = limitsText {
+                    Text(L("额度：%@", note)).font(.app(size: 11)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                 }
                 if let status {
                     Text(status.0).font(.app(size: 11.5))
@@ -935,6 +969,12 @@ private struct PluginRowView: View {
         .buttonStyle(.plain)
     }
 
+    /// 额度、余额的说明：英文界面用插件给的英文，没给就查表
+    private var limitsText: String? {
+        guard let text = row.limitsNote, !text.isEmpty else { return nil }
+        return Lang.shared.isEnglish ? (row.limitsNoteEn ?? ServerLang.ui(text)) : text
+    }
+
     /// 默认不接的插件的接入说明：英文界面用插件给的英文，没给就查表
     private var optInText: String? {
         guard let text = row.optIn else { return nil }
@@ -984,6 +1024,50 @@ private struct PluginRowView: View {
             return (L("新版本 %@ 需要 Kiteline %@ 或更新版本", row.target?["version"] as? String ?? "", minimum), false)
         default: return nil
         }
+    }
+}
+
+/// 插件的单项开关（如 Cursor 的「显示本月用量」）：名字和一句说明，右边小开关；要读那家凭证，打开前弹出完整说明确认
+private struct PluginOptionLine: View {
+    let row: PluginStore.Row
+    let option: [String: Any]
+    @ObservedObject private var store = PluginStore.shared
+
+    var body: some View {
+        let id = option["id"] as? String ?? ""
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: text("name")).font(.app(size: 12, weight: .medium))
+                if !text("note").isEmpty {
+                    Text(verbatim: text("note")).font(.app(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(get: { store.optionOn(row.id, id) }, set: { on in
+                // 打开前先说明（读哪份凭证、查什么、只在本机用）；取消了让开关弹回去
+                if on, !text("optIn").isEmpty, !confirm() { store.objectWillChange.send(); return }
+                store.setOption(row.id, id, on)
+            }))
+                .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+    }
+
+    /// 英文界面用插件给的英文，没给就查表
+    private func text(_ key: String) -> String {
+        let zh = option[key] as? String ?? ""
+        return Lang.shared.isEnglish ? (option[key + "En"] as? String ?? ServerLang.ui(zh)) : zh
+    }
+
+    private func confirm() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = L("开启「%@」？", text("name"))
+        alert.informativeText = text("optIn")
+        alert.addButton(withTitle: L("开启"))
+        alert.addButton(withTitle: L("取消"))
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 

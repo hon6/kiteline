@@ -57,6 +57,7 @@ Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harn
 | **待办** | Agent 需要*你*亲自处理的事项从对话中自动识别并持续跟踪，直到完成。 |
 | **会话群** | 不同电脑、不同项目的会话经 Kiteline 互相协作。 |
 | **世界模式** | 像素风办公室，每个会话是工位上的一个小人，整个团队一眼看全。 |
+| **数据流大屏** | 所有会话一块屏：每个会话读了什么、做了什么、产出去了哪。每次工具调用是一根线，调用发生时一串光点沿线流过。 |
 
 ## 支持的 Agent
 
@@ -118,6 +119,7 @@ flowchart LR
 - **签名插件**：内置之外的 Agent 通过 Ed25519 签名的插件索引下发。插件清单声明能力（查看、回复、确认、回答、中断……）与所需权限，各端按 Agent 实际支持的能力渲染界面。
 - **本机语音识别**：按住说话由 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 与 Fun-ASR-Nano 模型在本机完成，音频不离开你自己的设备。
 - **世界模式**：[three.js](https://threejs.org) 场景各端共用一份，由同一条状态流驱动。
+- **数据流大屏**：同样是 three.js，和世界模式共用宿主协议。卡片是贴 Canvas 纹理的薄板；每种线是一个环形写入的 `LineSegments`，线的数量有上限。底层的线用普通叠加，几百根叠起来也只是一层淡灰；只有亮起的线（最多 320 根）和光点（一个着色器驱动的 `Points`，最多 1500 颗）用加法混合。自动运镜正对平面，平移、放大到最忙的卡片，列出刚经过它的几次调用。
 
 ## 技术栈
 
@@ -129,7 +131,7 @@ flowchart LR
 | Windows、Linux 电脑端 | Python 3.10+、cryptography、zeroconf、sherpa-onnx | 约 1.7 万行 |
 | Windows、Linux 窗口 | C#、.NET 10、[Avalonia](https://avaloniaui.net) | 约 3.4 万行 |
 | 代码编辑器 | [CodeMirror 6](https://codemirror.net) | |
-| 世界模式 | [three.js](https://threejs.org) | |
+| 世界模式、数据流大屏 | [three.js](https://threejs.org) | |
 | 远程访问（*不在本仓库*） | Rust、iroh（QUIC） | |
 
 ## 截图
@@ -163,6 +165,8 @@ flowchart LR
 ![Mac 端：两个会话并排，一个计划等批准，两个会话在互发消息](docs/images/mac-main.jpg)
 
 ![Mac 端的世界模式](docs/images/mac-world.jpg)
+
+![数据流大屏：所有会话一块屏，每次工具调用一根线，调用发生时光点沿线流过](docs/images/flow-board.jpg)
 
 <table>
 <tr>

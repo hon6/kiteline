@@ -399,8 +399,9 @@ final class AppState {
             "agents": PluginStore.shared.agentCards,
             "faces": AgentFaces.shared.payload,
             // 这版电脑端能做的（手机按它决定给不给入口）：files = 收手机发来的文件（PDF、Excel……）、按路径取回文件
-            // groups = 会话群（拉群、群里发言、历史群恢复）；groupMedia = 群里能发图、文件
-            "features": ["files", "groups", "groupMedia"],
+            // groups = 会话群（拉群、群里发言、历史群恢复）；groupMedia = 群里能发图、文件；
+            // hostUpdate = 手机上能看这台电脑的新版本、让它下载安装和重启（/api/host-update）
+            "features": ["files", "groups", "groupMedia", "hostUpdate"],
         ]
     }
 

@@ -10,6 +10,11 @@ for f in glob.glob(os.path.join(ROOT, "Resources/world/js/*.js")):
         continue
     for m in re.finditer(r"\bt\('((?:[^'\\]|\\.)*)'", open(f, encoding="utf-8").read()):
         keys.add(m.group(1).replace("\\n", "\n"))
+# 数据流大屏：卡片名、工具通道、阶段标题这些是表里的字面量、按变量查 t()，整份收进来（只收带汉字的）
+for name in ("flow.js", "flowdash.js", "flowdata.js"):
+    src = open(os.path.join(ROOT, "Resources/world/js", name), encoding="utf-8").read()
+    src = re.sub(r"^\s*//.*$", "", src, flags=re.M)
+    keys.update(m.group(1) for m in re.finditer(r"'((?:[^'\\\n])*[\u4e00-\u9fff](?:[^'\\\n])*)'", src))
 walls = open(os.path.join(ROOT, "Resources/world/js/walls.js"), encoding="utf-8").read()
 for arr in ("BANNERS", "POSTERS"):
     block = walls[walls.index("const " + arr):walls.index("];", walls.index("const " + arr))]

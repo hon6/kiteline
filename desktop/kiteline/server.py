@@ -1495,6 +1495,16 @@ def r_changelog(s, request, *_):
     return Response.json({"ok": bool(text), "text": text, "version": s.app.version, "error": "" if text else "此版本未包含更新记录"})
 
 
+def r_host_update(s, request, *_):
+    """手机上看这台电脑的 Kiteline 有没有新版本、下载安装到哪了（同 Mac 版；见 updater.host_payload）"""
+    return Response.json(s.app.updater.host_payload())
+
+
+def r_host_update_post(s, request, *_):
+    """手机上点的：{action: check / start / cancel / restart}——让电脑下载安装新版本、装好后重启换上"""
+    return Response.json(s.app.updater.remote(str((request.json or {}).get("action") or "")))
+
+
 def r_schedules(s, request, *_):
     return Response.json({"ok": True, "schedules": s.app.schedules.payloads()})
 
@@ -1536,9 +1546,12 @@ def r_resume(s, request, *_):
 
 
 def r_viewed(s, request, *_):
-    """打开了这些会话的详情（对话页打开时、开着且在前台时每 10 分钟）：{keys:[…]}，见 idleclose.py"""
-    keys = (request.json or {}).get("keys")
+    """打开了这些会话的详情（对话页打开时、开着且在前台时每 10 分钟）：{keys:[…]}；
+    启动时再带上本机记的最后看过 seen:{key: 毫秒}，补升级前的历史。见 idleclose.py"""
+    body = request.json or {}
+    keys = body.get("keys")
     s.app.idle_close.touch(keys if isinstance(keys, list) else [])
+    s.app.idle_close.merge(body.get("seen"))
     return Response.json({"ok": True})
 
 
@@ -1625,7 +1638,7 @@ def r_idleclose_tick(s, request, *_):
     if not delivery.DRY_RUN:
         return Response.error("接口不存在", 404)
     s.app.idle_close.tick(_sim_now(request), force=True)
-    return Response.json({"ok": True})
+    return Response.json({"ok": True, "opened": s.app.idle_close.opened_keys()})
 
 
 def r_reminders_tick(s, request, *_):
@@ -1668,6 +1681,7 @@ ROUTES = {
     ("POST", "/api/presence"): r_presence, ("GET", "/api/push/key"): r_push_key, ("POST", "/api/push/subscribe"): r_push_subscribe,
     ("POST", "/api/push/unsubscribe"): r_push_unsubscribe, ("POST", "/api/push/test"): r_push_test,
     ("GET", "/api/readiness"): r_readiness, ("POST", "/api/readiness/fix"): r_readiness_fix, ("GET", "/api/changelog"): r_changelog, ("GET", "/api/schedules"): r_schedules,
+    ("GET", "/api/host-update"): r_host_update, ("POST", "/api/host-update"): r_host_update_post,
     ("POST", "/api/schedules"): r_schedules_add, ("POST", "/api/schedules/update"): r_schedules_update,
     ("POST", "/api/schedules/delete"): r_schedules_delete, ("POST", "/api/schedules/run"): r_schedules_run,
     ("POST", "/api/new-session"): r_new_session, ("POST", "/api/resume"): r_resume, ("POST", "/api/viewed"): r_viewed, ("GET", "/api/tts/voices"): r_tts_voices,

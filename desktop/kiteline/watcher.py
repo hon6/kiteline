@@ -51,6 +51,8 @@ NO_WINDOW = {"creationflags": 0x08000000} if config.IS_WINDOWS else {}
 PLUGINS_OFF = ""
 # 默认不接（optIn）、用户在设置里自己打开了的（同上）
 PLUGINS_ON = ""
+# 用户打开了的插件单项开关「插件 id.开关 id」（同上；如 cursor.usage 查 Cursor 月用量）
+PLUGIN_OPTIONS_ON = ""
 
 
 def watcher_env():
@@ -59,6 +61,8 @@ def watcher_env():
         env["CCPULSE_PLUGINS_OFF"] = PLUGINS_OFF
     if PLUGINS_ON:
         env["CCPULSE_PLUGINS_ON"] = PLUGINS_ON
+    if PLUGIN_OPTIONS_ON:
+        env["CCPULSE_PLUGIN_OPTIONS_ON"] = PLUGIN_OPTIONS_ON
     return env
 
 

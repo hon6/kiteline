@@ -217,6 +217,7 @@ public sealed partial class AppModel : ObservableObject
         _ = Connect(streamCancel.Token);
         viewedTimer ??= new DispatcherTimer(TimeSpan.FromMinutes(10), DispatcherPriority.Background, (_, _) => { if (WindowShown()) ReportViewed(); });
         viewedTimer.Start();
+        ReportViewed(WindowShown() ? null : [], history: true);
     }
 
     public void Stop()
@@ -430,12 +431,21 @@ public sealed partial class AppModel : ObservableObject
 
     /// 告诉后台这几个会话的详情打开过：后台会把 24 小时没在 Kiteline 里打开过详情的会话自动关掉、移进历史（idleclose.py / Mac 的 IdleClose）。
     /// 对话页打开时报一次；开着、窗口在屏幕上（没最小化、没收进托盘）时每 10 分钟再报一次。
-    /// 只报人打开着的对话页：别的会话发来消息、它在后台回复，都不经过这里
-    public void ReportViewed(IEnumerable<string>? keys = null)
+    /// 只报人打开着的对话页：别的会话发来消息、它在后台回复，都不经过这里。
+    /// history：再带上本机记的最后看过（未读红点那份 seen），补上后台升级前的历史（连上时报一次）
+    public void ReportViewed(IEnumerable<string>? keys = null, bool history = false)
     {
         var list = (keys ?? openCounts.Keys).ToList();
-        if (list.Count == 0) return;
-        _ = PostViewed(new JsonObject { ["keys"] = new JsonArray(list.Select(k => (JsonNode?)JsonValue.Create(k)).ToArray()) });
+        if (list.Count == 0 && !history) return;
+        var body = new JsonObject { ["keys"] = new JsonArray(list.Select(k => (JsonNode?)JsonValue.Create(k)).ToArray()) };
+        if (history)
+        {
+            var oldest = Format.NowMs - 30.0 * 86400 * 1000;
+            var map = new JsonObject();
+            foreach (var (key, value) in seen) if (value > oldest) map[key] = value;
+            body["seen"] = map;
+        }
+        _ = PostViewed(body);
     }
 
     async Task PostViewed(JsonObject body)

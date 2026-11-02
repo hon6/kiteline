@@ -296,21 +296,14 @@ public struct ViewMenuLabel: View {
     }
 }
 
-/// 标记了的会话标题后的主题色星星：点它取消标记（同「×」，高优先级点按，不会顺带打开对话）
+/// 标记了的会话标题后的主题色星星：只是标识，点到它同点卡片（取消标记在右滑里，免得点开会话时误触）
 struct MarkStar: View {
-    let action: () -> Void
-
     var body: some View {
         Image(systemName: "star.fill")
             .font(.app(size: 12, weight: .semibold))
             .foregroundStyle(Theme.claude)
             .frame(width: 24, height: 22)
-            .contentShape(Rectangle())
-            .highPriorityGesture(TapGesture().onEnded(action))
-            .accessibilityElement()
-            .accessibilityLabel(L("已标记，轻点取消标记"))
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { action() }
+            .accessibilityLabel(L("已标记"))
             .padding(.horizontal, -5)
             .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
     }

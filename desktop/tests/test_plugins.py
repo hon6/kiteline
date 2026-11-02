@@ -250,6 +250,20 @@ check("普通插件打开不记 on（不在 off 里就是开着）", "codex" not
 store.set_enabled("shyagent", False)
 check("再关掉：从 on 去掉、记进 off", "CCPULSE_PLUGINS_ON" not in watcher.watcher_env()
       and watcher.watcher_env().get("CCPULSE_PLUGINS_OFF") == "shyagent" and not next(r for r in store.rows() if r["id"] == "shyagent")["enabled"])
+store.local["plugins"] = saved_local + [{"id": "metered", "name": "Metered", "version": "1.0.0", "source": "external", "status": "ok",
+                                         "limitsNote": "按月计费", "limitsNoteEn": "Billed monthly",
+                                         "options": [{"id": "usage", "name": "显示本月用量", "optIn": "要读它的登录令牌", "on": True}]}]
+metered = next(r for r in store.rows() if r["id"] == "metered")
+check("单项开关：默认关（以这边的偏好为准，不信 watcher 报的 on），说明和额度说明带给客户端",
+      [(o["id"], o["on"]) for o in metered["options"]] == [("usage", False)] and metered["options"][0]["optIn"] == "要读它的登录令牌"
+      and metered["limitsNote"] == "按月计费" and metered["limitsNoteEn"] == "Billed monthly", str(metered)[:300])
+store.set_option("metered", "usage", True)
+check("打开单项开关：记进偏好、带进 watcher 的 CCPULSE_PLUGIN_OPTIONS_ON，插件本身照常开着",
+      plugins.config.read_json(store.prefs_path, {})["options"] == ["metered.usage"]
+      and watcher.watcher_env().get("CCPULSE_PLUGIN_OPTIONS_ON") == "metered.usage" and store.watcher_env().get("CCPULSE_PLUGIN_OPTIONS_ON") == "metered.usage"
+      and next(r for r in store.rows() if r["id"] == "metered")["options"][0]["on"] and "metered" not in store.prefs["on"])
+store.set_option("metered", "usage", False)
+check("关掉单项开关：环境变量里去掉", "CCPULSE_PLUGIN_OPTIONS_ON" not in watcher.watcher_env() and store.prefs["options"] == [])
 store.local["plugins"] = saved_local
 store.prefs["off"] = [i for i in store.prefs["off"] if i != "shyagent"]
 store._save_prefs()

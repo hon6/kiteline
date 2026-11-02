@@ -526,20 +526,31 @@ final class AppModel {
 
     /// 告诉电脑这几个会话的详情打开过：电脑会把 24 小时没在 Kiteline 里打开过详情的会话自动关掉、移进历史（Mac 端 IdleClose）。
     /// 对话页打开时报一次；开着、App 在前台（Mac：窗口在屏幕上看得见）时每 10 分钟再报一次，一直摆在屏幕上看的不算没打开。
-    /// 只报人打开着的对话页：别的会话发来消息、它在后台回复，都不经过这里
-    func reportViewed(_ keys: [String]? = nil) {
+    /// 只报人打开着的对话页：别的会话发来消息、它在后台回复，都不经过这里。
+    /// history：再带上本机记的最后看过（未读红点那份 seen，打开、看完、标为已读时记），补上电脑升级前的历史
+    func reportViewed(_ keys: [String]? = nil, history: Bool = false) {
         let keys = keys ?? Array(openCounts.keys)
-        guard !keys.isEmpty else { return }
+        guard !keys.isEmpty || history else { return }
+        var body: [String: Any] = ["keys": keys]
+        if history {
+            let oldest = Date().timeIntervalSince1970 * 1000 - 30 * 86400 * 1000
+            body["seen"] = seen.filter { $0.value > oldest }
+        }
         let api = api
-        Task { _ = try? await api.post("/api/viewed", body: ["keys": keys]) }
+        Task { _ = try? await api.post("/api/viewed", body: body) }
     }
 
-    /// 回到前台（start）先报一次开着的，之后每 10 分钟；切到后台（stop）停
+    /// 回到前台（start）先报一次开着的（连同本机历史），之后每 10 分钟；切到后台（stop）停
     private func startViewedReports() {
         viewedTask?.cancel()
         viewedTask = Task { [weak self] in
+            var history = true
             while !Task.isCancelled {
-                if let self, self.windowVisible { self.reportViewed() }
+                if let self {
+                    let visible = self.windowVisible
+                    if visible || history { self.reportViewed(visible ? nil : [], history: history) }
+                }
+                history = false
                 try? await Task.sleep(for: .seconds(600))
             }
         }

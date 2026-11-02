@@ -27,6 +27,7 @@ import os
 import queue
 import shutil
 import socket
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -783,6 +784,7 @@ class FakeDsh(http.server.ThreadingHTTPServer):
         self.sockets = []
         self.client_id = "client-1"
         self.running = False
+        self.balance = None      # account/getBalance 回什么（None = 没登录 DeepSeek 账号；"error" = 老版本没有这个方法）
         threading.Thread(target=self.serve_forever, daemon=True).start()
 
     @property
@@ -849,6 +851,8 @@ class FakeDshHandler(http.server.BaseHTTPRequestHandler):
             value = {"records": records[-request.get("maxMessages", 50):], "hasMore": False}
         elif method in ("session/prompt", "session/cancel", "$events/result"):
             value = {"accepted": True} if method != "$events/result" else None
+        elif method == "account/getBalance" and self.server.balance != "error":
+            value = self.server.balance
         else:
             ok = False
         self.reply(200, {"type": "server-response", "rpcId": body.get("rpcId"),
@@ -1016,6 +1020,35 @@ check("说过话以后（DSH 只更新投影里的 blank，不再推列表行）
       wait(lambda: "session-new" in [s["sessionId"] for s in dlink.snapshots()]), str(host.projections.get("session-new")))
 dsh.push("$events", {"type": "emit", "event": "api-session/removed", "args": ["session-new"]})
 check("会话删了 → 不再列", wait(lambda: dlink.snapshots() == []))
+
+# 余额（account/getBalance）：DeepSeek 按量付费，没有 5 小时 / 每周额度，卡片上给余额
+check("没登录 DeepSeek 账号（用 API Key）→ 不报额度", plugins.limits() == [] and dsh.calls[-1][0] == "account/getBalance", str(dsh.calls[-1:]))
+client = dsh.calls[-1][1]["client"]
+check("问余额带 client（版本、语言、时区秒数）", client["version"].startswith("kiteline-") and client["locale"] == "zh-CN"
+      and isinstance(client["timezoneOffsetSeconds"], int), str(client))
+asked = len(dsh.calls)
+plugins.limits()
+check("没读到：3 分钟内不再问", len(dsh.calls) == asked)
+dsh.balance = {"status": "ready", "value": [{"currency": "CNY", "balance": "18.52"}],
+               "bonusWallets": [{"currency": "CNY", "balance": "5.00"}, {"currency": "USD", "balance": "0.00"}]}
+host.balance_read = (0.0, None)
+got = plugins.limits()
+check("登录了 → 余额（充值的、赠送的；赠送 0 的不列），没有窗口",
+      len(got) == 1 and got[0]["agent"] == "deepseek-harness" and got[0]["windows"] == [] and got[0]["at"] > 0
+      and got[0]["balances"] == [{"currency": "CNY", "amount": "18.52", "kind": "main"}, {"currency": "CNY", "amount": "5.00", "kind": "bonus"}], str(got))
+dsh.balance = {"status": "failed"}
+host.balance_read = (0.0, host.balance_read[1])
+check("平台一时出错 → 照样给上次的读数", plugins.limits() == got)
+dsh.balance = None
+host.balance_read = (0.0, host.balance_read[1])
+check("退出了 DeepSeek 账号 → 不再给", plugins.limits() == [])
+dsh.balance = "error"
+host.balance_read = (0.0, None)
+check("老版本 DSH 没有这个方法 → 不报、不出错", plugins.limits() == [])
+dsh.balance = {"status": "ready", "value": [{"currency": "CNY", "balance": "18.52"}], "bonusWallets": []}
+host.balance_read = (0.0, None)
+limits = W.read_limits([], plugins)["agents"]
+check("read_limits 带上插件报的", [a["agent"] for a in limits][-1:] == ["deepseek-harness"], str(limits))
 
 bad = FakeDsh(secret=os.urandom(32))   # 用的是另一份 DSH_HOME
 bad_key = (os.getpid(), bad.server_address[1])
@@ -1658,6 +1691,79 @@ check("Cursor：关掉插件 → 只删自己的 hook，用户的留着", chooks
 check("Cursor：关掉插件 → 扩展删掉、登记去掉（别人的留着）", not os.path.exists(cext)
       and [e["identifier"]["id"] for e in json.load(open(os.path.join(CHOME, ".cursor", "extensions", "extensions.json")))] == ["someone.else"])
 check("Cursor 插件只在 tmux 里的命令行会话给 close", not cursor.closable({"tmuxPane": None}) and cursor.closable({"tmuxPane": "%1"}))
+
+# 月用量：清单 options 里的「显示本月用量」，默认关；打开后读 Cursor 存在本机的登录令牌问它的服务器（这里换成假服务器）
+usage_calls = []
+
+
+class FakeCursorApi(http.server.BaseHTTPRequestHandler):
+    status = 200
+    percent = 19
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        usage_calls.append((self.path, self.headers.get("Authorization"), self.headers.get("Connect-Protocol-Version")))
+        if self.path.endswith("/GetCurrentPeriodUsage"):
+            body = {"billingCycleStart": "1791432413775", "billingCycleEnd": "1894110813775",
+                    "planUsage": {"totalSpend": 38, "autoPercentUsed": 38, "apiPercentUsed": 0, "totalPercentUsed": FakeCursorApi.percent}}
+        else:
+            body = {"planInfo": {"planName": "Pro", "billingCycleEnd": "1894110813775"}}
+        data = json.dumps(body).encode()
+        self.send_response(FakeCursorApi.status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+capi = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeCursorApi)
+threading.Thread(target=capi.serve_forever, daemon=True).start()
+cglobals = type(cursor).limits.__globals__
+real_backend = cglobals["USAGE_BACKEND"]
+cglobals["USAGE_BACKEND"] = "http://127.0.0.1:%d" % capi.server_address[1]
+cdb_path = os.path.join(os.environ["XDG_CONFIG_HOME"], "Cursor", "User", "globalStorage", "state.vscdb")
+os.makedirs(os.path.dirname(cdb_path), exist_ok=True)
+cdb = sqlite3.connect(cdb_path)
+cdb.execute("create table ItemTable (key text unique on conflict replace, value blob)")
+cdb.execute("insert into ItemTable values ('cursorAuth/accessToken', 'tok-ide')")
+cdb.commit()
+cdb.close()
+crow = next(r for r in W.AgentPlugins([], external=[cursor], off=()).describe() if r["id"] == "cursor")
+check("Cursor：设置页列出「显示本月用量」单项开关（默认关、带打开前的说明）和额度说明",
+      [(o["id"], o["on"]) for o in crow.get("options", [])] == [("usage", False)] and "凭证" in crow["options"][0]["optIn"]
+      and crow["options"][0]["optInEn"] and crow.get("limitsNote") and crow.get("limitsNoteEn"), str(crow.get("options"))[:200])
+check("Cursor：没打开「显示本月用量」→ 不查（不碰令牌、不连服务器）", cursor.limits() is None and usage_calls == [])
+W.PLUGIN_OPTIONS_ON.add("cursor.usage")
+got = W.AgentPlugins([], external=[cursor], off=()).limits()
+check("Cursor：打开后 → 本月用量（按账单月，带重置时间）和套餐名；令牌用编辑器的",
+      got == [{"agent": "cursor", "at": got[0]["at"], "plan": "Pro", "windows": [{"kind": "month", "percent": 19.0, "resetsAt": 1894110813775}]}]
+      and usage_calls[0] == ("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", "Bearer tok-ide", "1"), str(got) + str(usage_calls))
+calls_before = len(usage_calls)
+cursor.limits()
+check("Cursor：10 分钟内不再问", len(usage_calls) == calls_before)
+FakeCursorApi.status = 500
+cursor.usage = (0.0, cursor.usage[1])
+check("Cursor：服务器一时出错 → 照样给上次的读数", cursor.limits() == {k: v for k, v in got[0].items() if k != "agent"})
+FakeCursorApi.status = 401
+cursor.usage = (0.0, cursor.usage[1])
+check("Cursor：令牌过期（401）→ 不给旧读数", cursor.limits() is None)
+FakeCursorApi.status = 200
+os.remove(cdb_path)
+os.makedirs(os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor"), exist_ok=True)
+with open(os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor", "auth.json"), "w") as handle:
+    json.dump({"accessToken": "tok-cli", "refreshToken": "r"}, handle)
+cursor.usage = (0.0, None)
+check("Cursor：只装了命令行 → 用命令行 auth.json 里的令牌", cursor.limits() and usage_calls[-2][1] == "Bearer tok-cli", str(usage_calls[-2:]))
+os.remove(os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor", "auth.json"))
+cursor.usage = (0.0, None)
+check("Cursor：没登录 → 不报", cursor.limits() is None)
+W.PLUGIN_OPTIONS_ON.discard("cursor.usage")
+cglobals["USAGE_BACKEND"] = real_backend
+capi.shutdown()
+capi.server_close()
 
 print("\n== 关闭会话（插件实现了 close 才给 caps close，见 docs/agent-plugins.md 4.4）")
 

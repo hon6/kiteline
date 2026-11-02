@@ -25,14 +25,14 @@ struct WorldView: View {
                 WorldSessionCard(key: key)
             }
         }
-            .navigationTitle(L("世界"))
+            .navigationTitle(model.worldPage == "flow" ? L("数据流") : L("世界"))
             .modifier(WorldTitlebar())
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { model.setWorld(false) } label: {
-                        Label(L("离开世界"), systemImage: "door.left.hand.open")
+                        Label(model.worldPage == "flow" ? L("离开数据流") : L("离开世界"), systemImage: "door.left.hand.open")
                     }
-                    .help(L("离开世界模式，回到会话（⇧⌘E）"))
+                    .help(model.worldPage == "flow" ? L("离开数据流大屏，回到会话（⇧⌘D）") : L("离开世界模式，回到会话（⇧⌘E）"))
                     // 会话列表收起 / 展开：展开时从左边浮出来，盖在世界上（macOS 26 起是液态玻璃）
                     Button {
                         withAnimation(.snappy(duration: 0.32)) { sidebar.toggle() }
@@ -124,7 +124,7 @@ final class WorldContainer: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = WorldHost.canvasColor.cgColor
+        layer?.backgroundColor = (KitelineModel.shared.worldPage == "flow" ? WorldHost.flowColor : WorldHost.canvasColor).cgColor
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -161,10 +161,13 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
     static let shared = WorldHost()
     static let scheme = "kiteline-world"
     static let canvasColor = NSColor(srgbRed: 0x2A / 255, green: 0x2B / 255, blue: 0x2F / 255, alpha: 1)
+    static let flowColor = NSColor(srgbRed: 0x06 / 255, green: 0x07 / 255, blue: 0x0B / 255, alpha: 1)
 
     private var web: WKWebView?
     private var ready = false
     private var shown = false
+    /// 放哪一页：world（index.html，像素园区）/ flow（flow.html，数据流大屏）
+    private var page = KitelineModel.shared.worldPage
     private var insetTop: CGFloat = 0
     private var insetLeft: CGFloat = 0
     private var lastState = ""
@@ -202,14 +205,14 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         config.mediaTypesRequiringUserActionForPlayback = []   // 朗读交谈不用先点一下
         let web = WKWebView(frame: .zero, configuration: config)
         web.setValue(false, forKey: "drawsBackground")
-        web.underPageBackgroundColor = Self.canvasColor
+        web.underPageBackgroundColor = page == "flow" ? Self.flowColor : Self.canvasColor
         // 网页铺到标题栏底下：别让系统按标题栏高度缩掉页面（否则窗口底下空出一条）；网页自己按 insets 让开统计条
         if web.responds(to: NSSelectorFromString("_setAutomaticallyAdjustsContentInsets:")) {
             web.setValue(false, forKey: "automaticallyAdjustsContentInsets")
         }
         if #available(macOS 26, *) { web.obscuredContentInsets = NSEdgeInsets() }
         if #available(macOS 13.3, *) { web.isInspectable = true }
-        web.load(URLRequest(url: URL(string: "\(Self.scheme)://app/index.html")!))
+        web.load(URLRequest(url: Self.url(page)))
         self.web = web
         ready = false
         lastState = ""
@@ -227,6 +230,21 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             .sink { _ in MainActor.assumeIsolated { WorldHost.shared.sendInit(); WorldHost.shared.pushState(force: true) } }
             .store(in: &bag)
         return web
+    }
+
+    private static func url(_ page: String) -> URL {
+        URL(string: "\(scheme)://app/\(page == "flow" ? "flow" : "index").html")!
+    }
+
+    /// 换页（地球 ↔ 数据流）：同一个网页宿主重新加载另一页，数据照旧从这里转
+    func setPage(_ value: String) {
+        guard value != page else { return }
+        page = value
+        guard let web else { return }
+        ready = false
+        lastState = ""
+        web.underPageBackgroundColor = page == "flow" ? Self.flowColor : Self.canvasColor
+        web.load(URLRequest(url: Self.url(page)))
     }
 
     /// 世界显示 / 收起：收起时网页停下来不画；收起 3 分钟还没回来就把网页整个放掉（省内存）
@@ -342,10 +360,16 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         body["type"] = event
         switch event {
         case "entries":
-            // 只留世界用得到的字段、最后十几条，长文字截短（工具的输入输出可能很大）
-            let fields: Set<String> = ["t", "id", "ts", "text", "name", "images", "queued", "brief"]
-            let items = (payload["items"] as? [[String: Any]] ?? []).suffix(16).map { item in
-                item.filter { fields.contains($0.key) }.mapValues { value -> Any in (value as? String).map { String($0.prefix(600)) } ?? value }
+            // 只留网页用得到的字段、最后十几条，长文字截短（工具的输入输出可能很大）。
+            // 数据流页还要工具的输入（读写了哪些文件、跑了什么命令）、报错、结果多长，多留几条
+            let flow = page == "flow"
+            let fields: Set<String> = flow ? ["t", "id", "ts", "text", "name", "queued", "brief", "input", "isError", "toolId", "model", "fullLength"]
+                : ["t", "id", "ts", "text", "name", "images", "queued", "brief"]
+            let items = (payload["items"] as? [[String: Any]] ?? []).suffix(flow ? 40 : 16).map { item in
+                item.filter { fields.contains($0.key) }.mapValues { value -> Any in
+                    if let text = value as? String { return String(text.prefix(flow ? 400 : 600)) }
+                    return flow ? Self.slim(value) : value
+                }
             }
             body["items"] = Array(items)
         case "sys":
@@ -357,6 +381,15 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         default: break
         }
         send(body)
+    }
+
+    /// 工具输入里的长字符串（Write 的整份文件、长命令）截短再给网页
+    private static func slim(_ value: Any, depth: Int = 0) -> Any {
+        if let text = value as? String { return String(text.prefix(400)) }
+        if depth > 3 { return "…" }
+        if let dict = value as? [String: Any] { return dict.mapValues { slim($0, depth: depth + 1) } }
+        if let list = value as? [Any] { return list.prefix(20).map { slim($0, depth: depth + 1) } }
+        return value
     }
 
     // MARK: 网页发来的
@@ -473,10 +506,10 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         task.didFinish()
     }
 
-    /// 图（对话里的图、头像）：转给本机的 Kiteline 服务取，只放行这两个接口
+    /// 图（对话里的图、头像）、会话最近的记录（数据流页打开时补线用）：转给本机的 Kiteline 服务取，只放行这几个接口
     private func proxy(_ task: any WKURLSchemeTask, url: URL) {
         let mobile = AppState.shared.config.mobile
-        guard ["/api/media", "/api/agent-avatar"].contains(url.path),
+        guard ["/api/media", "/api/agent-avatar", "/api/history"].contains(url.path),
               var parts = URLComponents(string: "http://127.0.0.1:\(mobile.port)\(url.path)") else {
             finish(task, status: 404, type: "text/plain", data: Data())
             return

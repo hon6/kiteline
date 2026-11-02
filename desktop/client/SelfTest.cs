@@ -79,16 +79,30 @@ static class SelfTest
                 case "theme": Look.SetTheme(LookTheme.Named(arg)); break;
                 // 改一项界面偏好（只在这次自测的内存里）：pref:todosGrouping=project，等号后面空着 = 删掉
                 case "pref": var pref = arg.Split('=', 2); Prefs.Set(pref[0], pref.Length > 1 && pref[1].Length > 0 ? pref[1] : null); break;
-                // 检查更新的几种状态：update:available / downloading / ready …（假数据）
+                // 检查更新的几种状态：update:available / downloading / ready …（假数据）。available 带 prompt：后台说该弹了，会自动弹出更新弹窗；
+                // 同时带一台旧版本的手机（phones），关掉更新弹窗后下一轮会弹「手机端有新版本」
                 case "update":
                     UpdateState.Shared.Inject(new System.Text.Json.Nodes.JsonObject
                     {
-                        ["phase"] = arg, ["version"] = "1.0.4", ["current"] = "1.0.3", ["size"] = 38500000, ["received"] = 14200000, ["supported"] = true,
-                        ["notes"] = "新功能\n· 检查更新：有新版本时右上角显示绿色箭头，下载后自动安装\n· 客户端支持开机自动启动\n\n问题修复\n· 修复窗口圆角和侧栏玻璃效果",
+                        ["phase"] = arg, ["version"] = "1.0.22", ["current"] = "1.0.19", ["size"] = 38500000, ["received"] = 14200000, ["supported"] = true,
+                        ["notes"] = "新功能\n· 新版本提醒", ["behind"] = 3, ["key"] = "linux:1.0.22", ["prompt"] = arg == "available",
+                        ["releases"] = new System.Text.Json.Nodes.JsonArray(
+                            new System.Text.Json.Nodes.JsonObject { ["version"] = "1.0.22", ["date"] = "2026-11-03", ["notes"] = "新功能\n· 新版本提醒：发现新版本时自动弹出，可勾选此版本不再提示\n· 手机与电脑互相提醒新版本", ["notesEn"] = "New\n· Update reminders\n· Your phone and computer remind each other about updates" },
+                            new System.Text.Json.Nodes.JsonObject { ["version"] = "1.0.21", ["date"] = "2026-11-02", ["notes"] = "新功能\n· 数据流大屏", ["notesEn"] = "New\n· Flow board" },
+                            new System.Text.Json.Nodes.JsonObject { ["version"] = "1.0.20", ["date"] = "2026-11-01", ["notes"] = "问题修复\n· 修正若干问题", ["notesEn"] = "Bug Fixes\n· Fixed several issues" }),
+                        ["phones"] = new System.Text.Json.Nodes.JsonObject
+                        {
+                            ["version"] = "1.7", ["notes"] = "新功能\n· 打开 App 时提示新版本\n\n改进\n· 手机与电脑互相提醒", ["key"] = "ios:1.7", ["prompt"] = true,
+                            ["devices"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["name"] = "hon6 的 iPhone", ["version"] = "1.5" }),
+                        },
                     });
                     break;
                 case "updatedialog": Views.UpdateDialog.Open(); break;
-                case "dialogshot": Pump(0.4); if ((Views.Dialog.Last ?? Views.UpdateDialog.Current) is Window dialog) Shot(dialog, arg); break;
+                case "phonedialog": Views.PhoneUpdateDialog.Open(auto: false); break;
+                case "closeupdate": Views.UpdateDialog.Current?.Close(); break;
+                case "dialogshot": Pump(0.4); if ((Views.Dialog.Last ?? Views.UpdateDialog.Current ?? Views.PhoneUpdateDialog.Current) is Window dialog) Shot(dialog, arg); break;
+                case "updateshot": Pump(0.4); if (Views.UpdateDialog.Current is Window updateDialog) Shot(updateDialog, arg); else Console.Error.WriteLine("更新弹窗没开"); break;
+                case "phoneshot": Pump(0.4); if (Views.PhoneUpdateDialog.Current is Window phoneDialog) Shot(phoneDialog, arg); else Console.Error.WriteLine("手机端弹窗没开"); break;
                 case "newtask": Views.NewTaskSheet.Open(arg.Length > 0 && Model.AppModel.Shared.Sessions.FirstOrDefault(x => x.Title == arg) is { } picked ? (picked.SourceId, picked.Cwd ?? "") : null); break;
                 case "todoedit": Views.TodoEditor.Open(Views.TodoEditor.Target.New()); break;
                 // 对话里的面板：action:files / changes / tests / agents / search / info / mode / model；openfile:<路径>；closedialog

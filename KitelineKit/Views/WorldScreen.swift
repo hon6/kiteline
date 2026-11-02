@@ -8,11 +8,17 @@ import WebKit
 // 数据走手机已经连着的那条通道（局域网、远程访问都一样）：整份状态、对话增量、会话之间的消息、负载、待办转给网页；
 // 图片、头像、朗读的语音由这里代取。点屏幕弹出会话页，点卫星弹设备详情，右上角的门关掉世界
 
-/// 全屏的世界：网页 + 点出来的会话页、设备详情
+/// 全屏的世界：网页 + 点出来的会话页、设备详情。page = world（像素园区）/ flow（数据流大屏，同一个宿主换一页）
 struct WorldScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var bridge = WorldBridge()
+    @State private var bridge: WorldBridge
+    private let page: String
+
+    init(page: String = "world") {
+        self.page = page
+        _bridge = State(initialValue: WorldBridge(page: page))
+    }
     @State private var chatKey: ChatTarget?
     @State private var machine: ChatTarget?
 
@@ -23,7 +29,7 @@ struct WorldScreen: View {
         // 只铺满刘海、横条这些边（网页按 insets 让开）；键盘弹出时整块缩到键盘上方，私聊输入框不被挡
         WorldWebView(bridge: bridge)
             .ignoresSafeArea(.container)
-            .background(Color(red: 0x2A / 255, green: 0x2B / 255, blue: 0x2F / 255))
+            .background(Color(uiColor: WorldBridge.canvas(page)))
             .onAppear {
                 bridge.model = model
                 bridge.onOpen = { chatKey = ChatTarget(id: $0) }
@@ -94,6 +100,8 @@ final class WorldBridge: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
     static let scheme = "kiteline-world"
 
     weak var model: AppModel?
+    /// world → index.html，flow → flow.html
+    let page: String
     var onOpen: (String) -> Void = { _ in }
     var onMachine: (String) -> Void = { _ in }
     var onExit: () -> Void = {}
@@ -106,6 +114,16 @@ final class WorldBridge: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
 
     private static var root: URL { Bundle.main.resourceURL!.appendingPathComponent("World") }
 
+    init(page: String = "world") {
+        self.page = page
+        super.init()
+    }
+
+    static func canvas(_ page: String) -> UIColor {
+        page == "flow" ? UIColor(red: 0x06 / 255, green: 0x07 / 255, blue: 0x0B / 255, alpha: 1)
+            : UIColor(red: 0x2A / 255, green: 0x2B / 255, blue: 0x2F / 255, alpha: 1)
+    }
+
     func makeWebView() -> WKWebView {
         if let web { return web }
         let config = WKWebViewConfiguration()
@@ -115,13 +133,13 @@ final class WorldBridge: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         config.mediaTypesRequiringUserActionForPlayback = []
         let web = WKWebView(frame: .zero, configuration: config)
         web.isOpaque = false
-        web.backgroundColor = UIColor(red: 0x2A / 255, green: 0x2B / 255, blue: 0x2F / 255, alpha: 1)
+        web.backgroundColor = Self.canvas(page)
         web.scrollView.isScrollEnabled = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
         #if DEBUG
         if #available(iOS 16.4, *) { web.isInspectable = true }
         #endif
-        web.load(URLRequest(url: URL(string: "\(Self.scheme)://app/index.html")!))
+        web.load(URLRequest(url: URL(string: "\(Self.scheme)://app/\(page == "flow" ? "flow" : "index").html")!))
         self.web = web
         return web
     }
@@ -275,6 +293,14 @@ final class WorldBridge: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             Task {
                 let data = try? await model?.api.data(url.path, query)
                 finish(task, status: data == nil ? 404 : 200, type: "image/jpeg", data: data ?? Data())
+            }
+            return
+        }
+        // 数据流页打开时补每个会话最近的调用
+        if url.path == "/api/history" {
+            Task {
+                let data = try? await model?.api.data(url.path, query)
+                finish(task, status: data == nil ? 404 : 200, type: "application/json", data: data ?? Data())
             }
             return
         }

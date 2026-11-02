@@ -27,22 +27,25 @@ public static class World
     /// 能把网页嵌进主窗口（Windows 装了 WebView2 运行时）；不能就开浏览器窗口
     public static bool Embedded => embedded ??= OperatingSystem.IsWindows() && WorldWeb.RuntimeVersion() is not null;
 
-    /// 网页地址：后台 /world/，带主令牌（网页自己连后台）、界面语言、主题色
-    public static Uri Url()
+    /// 网页地址：后台 /world/，带主令牌（网页自己连后台）、界面语言、主题色。page = world（像素园区）/ flow（数据流大屏）
+    public static Uri Url(string page = "world")
     {
         var api = AppModel.Shared.Api;
         var accent = Palette.GetColor("Accent");
         var query = $"t={Uri.EscapeDataString(api.Token)}&lang={(IsEnglish ? "en" : "zh")}&brand=%23{accent.R:X2}{accent.G:X2}{accent.B:X2}";
-        return new Uri(api.Base, "world/index.html?" + query);
+        return new Uri(api.Base, $"world/{(page == "flow" ? "flow" : "index")}.html?" + query);
     }
 
     /// 侧栏上的地球、Ctrl+Shift+E：能嵌就进出世界模式，不能嵌就打开浏览器窗口
-    public static void Toggle() => MainModel.Shared.SetWorld(!MainModel.Shared.WorldMode);
+    public static void Toggle() => MainModel.Shared.ToggleWorld("world");
+
+    /// 侧栏上的数据流、Ctrl+Shift+D：同上，换成数据流大屏那一页
+    public static void ToggleFlow() => MainModel.Shared.ToggleWorld("flow");
 
     /// 浏览器窗口里打开：有 Chrome / Chromium / Edge 就开成没有地址栏的应用窗口（像单独一个程序），没有就交给默认浏览器
-    public static void OpenWindow()
+    public static void OpenWindow(string page = "world")
     {
-        var url = Url().ToString();
+        var url = Url(page).ToString();
         foreach (var exe in AppBrowsers())
         {
             try
@@ -52,7 +55,7 @@ public static class World
                 start.ArgumentList.Add("--new-window");
                 start.Environment.Remove("LD_LIBRARY_PATH");   // 别把打包版自己的库路径带给浏览器
                 Process.Start(start);
-                AppModel.Shared.Flash(L("世界已在新窗口中打开"));
+                AppModel.Shared.Flash(page == "flow" ? L("数据流大屏已在新窗口中打开") : L("世界已在新窗口中打开"));
                 return;
             }
             catch { }
@@ -60,7 +63,7 @@ public static class World
         try
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            AppModel.Shared.Flash(L("世界已在浏览器中打开"));
+            AppModel.Shared.Flash(page == "flow" ? L("数据流大屏已在浏览器中打开") : L("世界已在浏览器中打开"));
         }
         catch (Exception e) { AppModel.Shared.Flash(L("无法打开浏览器：%@", e.Message)); }
     }
@@ -127,6 +130,8 @@ public sealed class WorldPanel : Grid
     readonly ColumnDefinition cardColumn = new(new GridLength(0));
     readonly Border cardBox = new() { IsVisible = false, BorderThickness = new Thickness(1, 0, 0, 0) };
     readonly Tap sidebarButton;
+    readonly Tap door;
+    readonly TextBlock title;
     ChatView? card;
 
     WorldPanel()
@@ -137,9 +142,9 @@ public sealed class WorldPanel : Grid
         web.Failed += ShowFailure;
 
         // 顶上一条：同 Mac 工具栏上的「离开世界」「收起会话列表」
-        var door = Bar("door.left.hand.open", L("离开世界"), () => main.SetWorld(false)).Tip(L("离开世界模式，回到会话（Ctrl+Shift+E）"));
+        door = Bar("door.left.hand.open", L("离开"), () => main.SetWorld(false));
         sidebarButton = Bar("sidebar.left", "", () => main.SidebarCollapsed = !main.SidebarCollapsed);
-        var title = Ui.Text(L("世界"), 14, FontWeight.SemiBold);
+        title = Ui.Text("", 14, FontWeight.SemiBold);
         title.VerticalAlignment = VerticalAlignment.Center;
         var drag = new Border { Background = Brushes.Transparent };
         drag.PointerPressed += WindowChrome.DragWindow;
@@ -154,7 +159,7 @@ public sealed class WorldPanel : Grid
         var body = new Grid();
         body.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
         body.ColumnDefinitions.Add(cardColumn);
-        stage.Background = new SolidColorBrush(Avalonia.Media.Color.FromRgb(0x2A, 0x2B, 0x2F));
+        stage.Background = new SolidColorBrush(StageColor(main.WorldPage));
         stage.Children.Add(web);
         body.Children.Add(stage);
         cardBox.Res(Border.BorderBrushProperty, "Separator");
@@ -169,13 +174,27 @@ public sealed class WorldPanel : Grid
             if (e.PropertyName == nameof(MainModel.WorldDetail)) ShowCard(main.WorldDetail);
             if (e.PropertyName == nameof(MainModel.SidebarCollapsed)) UpdateSidebarButton();
             if (e.PropertyName == nameof(MainModel.WorldMode)) web.SetShown(main.WorldMode);
+            if (e.PropertyName == nameof(MainModel.WorldPage)) UpdatePage(true);
         };
+        UpdatePage(false);
         UpdateSidebarButton();
         web.SetShown(main.WorldMode);
     }
 
     /// 发给网页（World.receive）
     public void Post(JsonObject message) => web.Post(message);
+
+    static Avalonia.Media.Color StageColor(string page) => page == "flow" ? Avalonia.Media.Color.FromRgb(0x06, 0x07, 0x0B) : Avalonia.Media.Color.FromRgb(0x2A, 0x2B, 0x2F);
+
+    /// 换页（地球 ↔ 数据流）：标题、门的提示、底色跟着换，网页重新加载那一页
+    void UpdatePage(bool reload)
+    {
+        var flow = main.WorldPage == "flow";
+        title.Text = flow ? L("数据流") : L("世界");
+        door.Tip(flow ? L("离开数据流大屏，回到会话（Ctrl+Shift+D）") : L("离开世界模式，回到会话（Ctrl+Shift+E）"));
+        stage.Background = new SolidColorBrush(StageColor(main.WorldPage));
+        if (reload) web.Navigate(World.Url(main.WorldPage).ToString());
+    }
 
     static Tap Bar(string symbol, string text, Action click)
     {
@@ -246,7 +265,7 @@ public sealed class WorldPanel : Grid
         var box = Ui.Stack(Orientation.Vertical, 12, Align.Center, [
             Ui.Text(L("无法加载世界"), 17, FontWeight.SemiBold, "White"),
             Ui.Text(reason, 13, color: "White", lines: 4).Wrap(),
-            new GlassButton(L("在浏览器中打开"), "arrow.up.forward.app", World.OpenWindow, height: 32),
+            new GlassButton(L("在浏览器中打开"), "arrow.up.forward.app", () => World.OpenWindow(main.WorldPage), height: 32),
         ]);
         box.MaxWidth = 420;
         box.HorizontalAlignment = HorizontalAlignment.Center;
@@ -356,18 +375,16 @@ public sealed class WorldWeb : NativeControlHost
                 queued.Clear();
                 SendActive();
             };
-            // 焦点在网页里时 Ctrl+Shift+E 也能离开世界（键先到 WebView2，不经过 Avalonia）
+            // 焦点在网页里时 Ctrl+Shift+E / D 也能离开世界、数据流（键先到 WebView2，不经过 Avalonia）
             made.AcceleratorKeyPressed += (_, e) =>
             {
-                if (e.KeyEventKind == CoreWebView2KeyEventKind.KeyDown && e.VirtualKey == 'E' && Down(0x11) && Down(0x10))
-                {
-                    e.Handled = true;
-                    Dispatcher.UIThread.Post(World.Toggle);
-                }
+                if (e.KeyEventKind != CoreWebView2KeyEventKind.KeyDown || !Down(0x11) || !Down(0x10)) return;
+                if (e.VirtualKey == 'E') { e.Handled = true; Dispatcher.UIThread.Post(World.Toggle); }
+                else if (e.VirtualKey == 'D') { e.Handled = true; Dispatcher.UIThread.Post(World.ToggleFlow); }
             };
             Resize();
             made.IsVisible = shown;
-            core.Navigate(World.Url().ToString());
+            core.Navigate(World.Url(MainModel.Shared.WorldPage).ToString());
         }
         catch (Exception e)
         {
@@ -385,6 +402,15 @@ public sealed class WorldWeb : NativeControlHost
         var script = "window.World && World.receive(" + message.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + ")";
         if (controller is { } c && loaded) _ = c.CoreWebView2.ExecuteScriptAsync(script);
         else queued.Add(script);
+    }
+
+    /// 换一页（地球 ↔ 数据流）：同一个 WebView2 重新加载；没建好时建好会按当前页面加载
+    public void Navigate(string url)
+    {
+        if (controller is not { } c) return;
+        loaded = false;
+        queued.Clear();
+        c.CoreWebView2.Navigate(url);
     }
 
     /// 进出世界：藏起来时网页停画（WebView2 看不见时页面是 hidden）。

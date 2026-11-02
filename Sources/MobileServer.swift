@@ -698,7 +698,7 @@ final class MobileServer {
             case ("POST", "/api/idleclose/tick") where Delivery.dryRun:
                 // 自测用：模拟时间推进，验证闲置会话自动关闭（不等人离开电脑）
                 IdleClose.shared.tick(now: Date(timeIntervalSince1970: Digest.number(request.jsonBody?["now"]) / 1000), force: true)
-                respond(.json(["ok": true]))
+                respond(.json(["ok": true, "opened": IdleClose.shared.openedKeys]))
             case ("POST", "/api/reminders/tick") where Delivery.dryRun:
                 // 自测用：模拟时间推进，验证等确认提醒
                 WaitingReminder.shared.tick(now: Date(timeIntervalSince1970: Digest.number(request.jsonBody?["now"]) / 1000))
@@ -828,11 +828,21 @@ final class MobileServer {
             case ("GET", "/api/changelog"):
                 let text = ChangelogWindowController.bundledText(english: ServerLang.of(request) == "en")   // 按手机的语言给中文版 / 英文版
                 respond(.json(["ok": !text.isEmpty, "text": text, "version": AppVersion.app, "error": text.isEmpty ? "此版本未包含更新记录" : ""]))
+            case ("GET", "/api/host-update"):
+                // 手机上看这台电脑的 Kiteline 有没有新版本、下载安装到哪了（同 Windows / Linux 版；见 Updater.payload）
+                respond(.json(Updater.shared.payload()))
+            case ("POST", "/api/host-update"):
+                // 手机上点的：{action: check / start / cancel / restart}——让电脑下载安装新版本、装好后重启换上
+                respond(.json(Updater.shared.remote(request.jsonBody?["action"] as? String ?? "")))
             case ("GET", "/api/session-meta"):
                 self.sessionMeta(request, respond: respond)
             case ("POST", "/api/viewed"):
-                // 打开了这些会话的详情（对话页打开时、开着且在前台时每 10 分钟）：{keys:[…]}，见 IdleClose
+                // 打开了这些会话的详情（对话页打开时、开着且在前台时每 10 分钟）：{keys:[…]}；
+                // 启动时再带上本机记的最后看过 seen:{key: 毫秒}，补升级前的历史。见 IdleClose
                 IdleClose.shared.touch((request.jsonBody?["keys"] as? [String]) ?? [])
+                if let seen = request.jsonBody?["seen"] as? [String: Any] {
+                    IdleClose.shared.merge(history: seen.compactMapValues { ($0 as? NSNumber)?.doubleValue })
+                }
                 respond(.json(["ok": true]))
             case ("POST", "/api/resume"):
                 IdleClose.shared.touch([request.query["key"] ?? ""])

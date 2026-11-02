@@ -9,7 +9,10 @@
            新装的扩展要重启一次 Cursor 才生效。
   tmux     命令行 agent 在 tmux 里跑时，回复、确认（y / tab / shift+tab / esc）、中断、关闭都经中台的 term.tmux。
   排队     Cursor 正在工作时手机发的消息放进 queue/<会话 id>.json，这一轮结束时 stop hook 作为 followup_message 交给 Cursor 接着发。
-做不到的：编辑器里的对话空闲时从手机发起新一轮（Cursor 没有给扩展「往已有对话里提交」的命令，要电脑端真按回车，下一步做）。
+  空闲发送 编辑器里的对话空闲时，send 回动作单（中台 ui.keys）：电脑端把项目窗口切到前台 → 扩展填字 → 电脑端按回车 → 还原前台
+           （Cursor 没有给扩展「往已有对话里提交」的命令）。
+  月用量   Cursor 不在本机记用量，只有它的服务器有：用户在设置 → 插件里打开「显示本月用量」（清单 options 的 usage，默认关）后，
+           读 Cursor 存在本机的登录令牌，10 分钟问一次 DashboardService 的 GetCurrentPeriodUsage（Cursor 设置页那个数）。
 状态：编辑器看它自己的 state.vscdb 里 composerHeaders 的 hasBlockingPendingActions（等你确认），命令行看 tmux 界面上的审批菜单。
 """
 import glob
@@ -22,6 +25,8 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +37,8 @@ LIVE_HOURS = 12            # 编辑器里的对话：最近这么久有动静才
 BUSY_STALE = 30 * 60       # 「忙」超过这么久没有任何动静：当成已经停了（Cursor 被强关时收不到 stop）
 KEEP_DAYS = 14             # 事件记录留这么久
 BEAT_FRESH = 15            # 扩展的心跳多久以内算它还在
+USAGE_BACKEND = "https://api2.cursor.sh"
+USAGE_TTL, USAGE_RETRY = 600, 180   # 月用量：读到了 10 分钟内不再问，没读到 3 分钟后再试
 # 命令行 agent 的审批菜单（tmux 界面上）
 APPROVAL_MARKS = ("Run this command?", "Waiting for approval", "Skip & tell the agent")
 CLI_OPTIONS = ({"key": "esc", "label": "拒绝", "labelEn": "Skip", "style": "destructive"},
@@ -141,6 +148,52 @@ def create(kl):
         APP_DATA = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(kl.HOME, ".config"), "Cursor")
     STATE_DB = os.path.join(APP_DATA, "User", "globalStorage", "state.vscdb")
     LOG_ROOT = os.path.join(APP_DATA, "logs")
+    # 命令行的登录令牌（只装了命令行、没有编辑器时用）：Windows %APPDATA%\Cursor、Mac ~/.cursor、其他 $XDG_CONFIG_HOME/cursor
+    if kl.IS_WINDOWS:
+        CLI_AUTH = os.path.join(APP_DATA, "auth.json")
+    elif sys.platform == "darwin":
+        CLI_AUTH = os.path.join(CURSOR, "auth.json")
+    else:
+        CLI_AUTH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(kl.HOME, ".config"), "cursor", "auth.json")
+
+    def read_state(keys):
+        """编辑器 state.vscdb 里的几项（ItemTable，只读打开）→ {键: 值}"""
+        out = {}
+        if os.path.isfile(STATE_DB):
+            try:
+                db = sqlite3.connect("file:%s?mode=ro" % STATE_DB.replace("\\", "/").replace("?", "%3f"), uri=True, timeout=1)
+                try:
+                    marks = ",".join("?" * len(keys))
+                    for key, value in db.execute("select key, value from ItemTable where key in (%s)" % marks, tuple(keys)):
+                        out[key] = value.decode("utf-8", "replace") if isinstance(value, bytes) else value
+                finally:
+                    db.close()
+            except sqlite3.Error:
+                pass
+        return out
+
+    def cursor_login():
+        """Cursor 的登录令牌和服务器地址：先看编辑器的，没有再看命令行的 → (令牌, 地址)；没登录返回 (None, None)"""
+        state = read_state(("cursorAuth/accessToken", "cursorAuth/storedServerBackendUrl"))
+        token = state.get("cursorAuth/accessToken")
+        if not token:
+            try:
+                with open(CLI_AUTH, encoding="utf-8") as handle:
+                    token = (json.load(handle) or {}).get("accessToken")
+            except (OSError, ValueError, AttributeError):
+                token = None
+        backend = state.get("cursorAuth/storedServerBackendUrl") or ""
+        if not backend.startswith("https://"):
+            backend = USAGE_BACKEND
+        return (str(token) if token else None), backend.rstrip("/")
+
+    def dashboard(backend, token, method):
+        """Cursor 服务器的 DashboardService（Connect 协议的 JSON 形式），设置页查用量、套餐用的就是它"""
+        request = urllib.request.Request("%s/aiserver.v1.DashboardService/%s" % (backend, method), data=b"{}", method="POST",
+                                         headers={"Authorization": "Bearer " + token, "Content-Type": "application/json",
+                                                  "Connect-Protocol-Version": "1"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read() or b"{}")
 
     class HostLog:
         """跟 Cursor Agent Host 的日志（每个窗口一份，见上面 LOG_LINE 的说明）：哪个对话在等你确认"""
@@ -398,6 +451,8 @@ def create(kl):
             self.log = HostLog()
             self.running = (0, False)   # (查的时间, Cursor 编辑器在不在运行)
             self.fills = {}             # 会话 id → 等电脑端切好窗口再填的字（send 回动作单、ui_step 填）
+            self.usage = (0.0, None)    # (上次问月用量的时间, 读数)
+            self.usage_error = None
 
         normalize = staticmethod(cursor_normalize)
 
@@ -412,6 +467,48 @@ def create(kl):
 
         def start(self):
             self.ensure()
+
+        def limits(self):
+            """本月用量（「今日用量」卡片）：用户打开了「显示本月用量」才查（老中台没有单项开关，按关着处理）。
+            读 Cursor 存在本机的登录令牌问它的服务器——和 Cursor 设置页显示的同一个数；令牌只在本机用"""
+            option_on = getattr(self, "option_on", None)
+            if option_on is None or not option_on("usage"):
+                return None
+            asked, reading = self.usage
+            if time.time() - asked < (USAGE_TTL if reading else USAGE_RETRY):
+                return reading
+            fresh, failed = None, False
+            token, backend = cursor_login()
+            if token:
+                try:
+                    usage = dashboard(backend, token, "GetCurrentPeriodUsage")
+                    plan = (usage.get("planUsage") or {}) if isinstance(usage, dict) else {}
+                    if plan.get("totalPercentUsed") is not None:
+                        try:
+                            name = (dashboard(backend, token, "GetPlanInfo").get("planInfo") or {}).get("planName")
+                        except (OSError, ValueError, urllib.error.URLError):
+                            name = (reading or {}).get("plan")
+                        end = int(usage.get("billingCycleEnd") or 0) or None
+                        fresh = {"at": int(time.time() * 1000), "plan": name or None,
+                                 "windows": [{"kind": "month", "percent": round(max(0.0, float(plan["totalPercentUsed"])), 1), "resetsAt": end}]}
+                    self.usage_error = None
+                except urllib.error.HTTPError as exc:
+                    # 401 / 403：令牌过期或退出了登录（Cursor 自己会刷新令牌，下次再试）
+                    failed = exc.code not in (401, 403)
+                    self.note_usage_error("HTTP %d" % exc.code)
+                except (OSError, ValueError, urllib.error.URLError) as exc:
+                    failed = True
+                    self.note_usage_error(repr(exc))
+            # 一时连不上：上次的读数一天内照样给（卡片上写着是多久前的）
+            if fresh is None and failed and reading and time.time() * 1000 - reading["at"] < 86400000:
+                fresh = reading
+            self.usage = (time.time(), fresh)
+            return fresh
+
+        def note_usage_error(self, text):
+            if text != self.usage_error:
+                self.usage_error = text
+                kl.log("Cursor 查月用量出错：%s" % text)
 
         def ensure(self):
             """装 hook 和扩展（只在用过 Cursor 的电脑上）；每 10 分钟对一遍，被用户或 Cursor 改掉了就补回来"""

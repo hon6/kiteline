@@ -916,21 +916,33 @@ print("== 闲置会话自动关闭（模拟时间推进）")
 check("设置里默认开着「自动关闭 24 小时未查看的会话」", request("/api/info")[1].get("autoCloseIdle") is True)
 _, st, _ = request("/api/state")
 idle_ones = [x for x in st["sessions"] if "close" in x.get("caps", []) and x.get("canReply") and x["activity"] != "busy"]
-check("有几个能关闭、没在跑的会话可测", len(idle_ones) >= 3, str([x["title"] for x in idle_ones]))
-viewed_one, voiced_one, stale = (idle_ones + [{}, {}, {}])[:3]
+check("有几个能关闭、没在跑的会话可测", len(idle_ones) >= 4, str([x["title"] for x in idle_ones]))
+# 补历史用的那个要挑主机只记了「第一次见到」的（前面的测试发过消息、取过语音的都算打开过）
+opened = set(request("/api/idleclose/tick", "POST", {"now": time.time() * 1000})[1].get("opened", []))
+fresh = [x for x in idle_ones if x["key"] not in opened]
+check("有只记了第一次见到、没打开过的会话可测", fresh, str(sorted(opened))[:200])
+old_one = (fresh + [{}])[0]
+viewed_one, voiced_one, stale = ([x for x in idle_ones if x is not old_one] + [{}, {}, {}])[:3]
 request("/api/mark", "POST", {"key": stale.get("key", ""), "marked": True})
 request("/api/pin", "POST", {"key": stale.get("key", ""), "pinned": True})
 t0 = time.time() * 1000
 time.sleep(2.2)
 request("/api/viewed", "POST", {"keys": [viewed_one.get("key", "")]})   # 对话页打开（新版各端）
 request("/api/voices?key=%s" % q(voiced_one.get("key", "")))            # 对话页打开（旧版手机只取语音）
+# 各端启动时带上的本机历史（最后看过）：old_one 30 小时前看过 → 按历史算；viewed_one 刚打开过，报个更早的不往回挪；不认识的不收
+long_ago = t0 - 30 * 3600_000
+request("/api/viewed", "POST", {"keys": [], "seen": {old_one.get("key", ""): long_ago, viewed_one.get("key", ""): long_ago,
+                                                     "ssh:nowhere#x": long_ago, voiced_one.get("key", ""): "坏数据"}})
 def auto_closed(after):
     tail = log_tail()[after:]
     return {x["title"] for x in st["sessions"] if "自动关闭会话「%s」" % x["title"] in tail}
 mark = len(log_tail())
-request("/api/idleclose/tick", "POST", {"now": t0 + 23 * 3600_000})
-time.sleep(1)
-check("23 小时没打开：不关", not auto_closed(mark), str(auto_closed(mark)))
+opened = set(request("/api/idleclose/tick", "POST", {"now": t0 + 23 * 3600_000})[1].get("opened", []))
+time.sleep(1.5)
+closed = auto_closed(mark)
+check("23 小时没打开：不关", not closed & {stale.get("title"), viewed_one.get("title"), voiced_one.get("title")}, str(closed))
+check("升级前的历史也算（各端报来的最后看过）：30 小时前看过的 23 小时后就过了 24 小时、关掉", old_one.get("title") in closed, str(closed))
+check("报来的历史只收认识的会话", "ssh:nowhere#x" not in opened, str(sorted(opened))[:200])
 mark = len(log_tail())
 request("/api/idleclose/tick", "POST", {"now": t0 + 24 * 3600_000 + 1000})
 time.sleep(1.5)

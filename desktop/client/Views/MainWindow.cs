@@ -30,6 +30,7 @@ public sealed class MainWindow : Window
     Control? sidebarPanel, sidebarLine, sidebarSplitter;
     /// 侧栏顶上的世界入口（进了世界底下一道主题色）
     WorldGlobe? globe;
+    Icon? flowIcon;
     ToastLayer toast = new();
     SidebarGlass glass = new();
     /// Linux 自己画的外框：阴影、圆角裁剪、一圈细边
@@ -72,7 +73,13 @@ public sealed class MainWindow : Window
         // 模糊壁纸要跟着窗口在屏幕上的位置取
         PositionChanged += (_, _) => { if (SidebarGlass.Current == SidebarGlass.Mode.Wallpaper) glass.InvalidateVisual(); };
         // 有新版本时的绿色箭头在侧栏底栏里（SidebarFooter）；装好了弹窗问要不要现在重启
+        // 发现新版本（自己的 / 手机端的）：后台说该弹了就自动弹一次（不抢焦点）。主窗口换语言会重搭：先摘掉再挂，不重复
+        UpdateState.Shared.Ready -= UpdateDialog.Open;
         UpdateState.Shared.Ready += UpdateDialog.Open;
+        UpdateState.Shared.PromptOwn -= UpdateDialog.OpenAuto;
+        UpdateState.Shared.PromptOwn += UpdateDialog.OpenAuto;
+        UpdateState.Shared.PromptPhones -= PhoneUpdateDialog.OpenAuto;
+        UpdateState.Shared.PromptPhones += PhoneUpdateDialog.OpenAuto;
         if (WindowChrome.Custom)
         {
             AddHandler(PointerPressedEvent, ResizePressed, Avalonia.Interactivity.RoutingStrategies.Tunnel);
@@ -215,7 +222,15 @@ public sealed class MainWindow : Window
         world.PointerEntered += (_, _) => globe.Hover(true);
         world.PointerExited += (_, _) => globe.Hover(false);
         world.Tip(main.WorldMode ? L("离开世界模式，回到会话（Ctrl+Shift+E）") : L("世界模式：机房、卫星和像素小人，一眼看全所有会话（Ctrl+Shift+E）"));
-        var bar = Ui.H(8, compose, world).Margin(16 + WindowChrome.CaptionLeftWidth, 8, 16, 0);
+        // 数据流大屏：所有会话读了什么、做了什么、产出去了哪（和世界共用一个网页面板）
+        flowIcon = Ui.Sym("point.3.connected.trianglepath.dotted", 16, "Text");
+        flowIcon.HorizontalAlignment = HorizontalAlignment.Center;
+        flowIcon.VerticalAlignment = VerticalAlignment.Center;
+        var flow = new Tap(flowIcon, World.ToggleFlow, 18) { Width = 36, Height = 36, BorderThickness = new Thickness(0.5) }.Keys("Glass", "Fill12");
+        flow.Res(Border.BorderBrushProperty, "GlassEdge");
+        flow.Tip(L("数据流大屏：所有会话读了什么、做了什么、产出去了哪，连成一块屏（Ctrl+Shift+D）"));
+        UpdateWorldButtons();
+        var bar = Ui.H(8, compose, world, flow).Margin(16 + WindowChrome.CaptionLeftWidth, 8, 16, 0);
         bar.VerticalAlignment = VerticalAlignment.Top;
         bar.HorizontalAlignment = HorizontalAlignment.Left;
         return bar;
@@ -318,6 +333,25 @@ public sealed class MainWindow : Window
     {
         if (e.PropertyName == nameof(MainModel.Selection)) UpdateDetail();
         if (e.PropertyName is nameof(MainModel.WorldMode) or nameof(MainModel.SidebarCollapsed)) UpdateWorld();
+        if (e.PropertyName == nameof(MainModel.WorldPage)) UpdateWorldButtons();
+    }
+
+    /// 地球、数据流两个入口：开着的那一页亮起来
+    void UpdateWorldButtons()
+    {
+        var on = main.WorldMode && World.Embedded;
+        var world = on && main.WorldPage == "world";
+        var flow = on && main.WorldPage == "flow";
+        if (globe is not null)
+        {
+            globe.Active = world;
+            if (globe.Parent is Tap tap) tap.Tip(world ? L("离开世界模式，回到会话（Ctrl+Shift+E）") : L("世界模式：机房、卫星和像素小人，一眼看全所有会话（Ctrl+Shift+E）"));
+        }
+        if (flowIcon is not null)
+        {
+            flowIcon.Res(TextBlock.ForegroundProperty, flow ? "Accent" : "Text");
+            if (flowIcon.Parent is Tap tap) tap.Tip(flow ? L("离开数据流大屏，回到会话（Ctrl+Shift+D）") : L("数据流大屏：所有会话读了什么、做了什么、产出去了哪，连成一块屏（Ctrl+Shift+D）"));
+        }
     }
 
     /// 进出世界、收起会话列表（同 Mac 版 SidebarState）：世界那一层盖住平时的右边；收起时侧栏那一列宽度归零，世界占满窗口
@@ -326,11 +360,7 @@ public sealed class MainWindow : Window
         var on = main.WorldMode && World.Embedded;
         detail.IsVisible = !on;
         if (WorldPanel.Current is { } world) world.IsVisible = on;
-        if (globe is not null)
-        {
-            globe.Active = on;
-            if (globe.Parent is Tap tap) tap.Tip(on ? L("离开世界模式，回到会话（Ctrl+Shift+E）") : L("世界模式：机房、卫星和像素小人，一眼看全所有会话（Ctrl+Shift+E）"));
-        }
+        UpdateWorldButtons();
         var collapsed = on && main.SidebarCollapsed;
         foreach (var c in new[] { sidebarPanel, sidebarLine, sidebarSplitter }) if (c is not null) c.IsVisible = !collapsed;
         KiteOverlay.Shared?.Refresh();
@@ -408,6 +438,7 @@ public sealed class MainWindow : Window
         else if (ctrl && e.Key == Key.N) { main.NewTask(); e.Handled = true; }
         // Ctrl+Shift+E：进出世界（同 Mac 版 ⇧⌘E）；Esc：关掉世界里点开的会话
         else if (ctrl && shift && e.Key == Key.E) { World.Toggle(); e.Handled = true; }
+        else if (ctrl && shift && e.Key == Key.D) { World.ToggleFlow(); e.Handled = true; }
         else if (e.Key == Key.Escape && main.WorldMode && main.WorldDetail is not null) { main.WorldDetail = null; e.Handled = true; }
         else if (ctrl && e.Key == Key.Y) { main.Selection = MainModel.HistoryId; e.Handled = true; }   // 历史会话（同 Mac 版 ⌘Y）
         else if (ctrl && e.Key == Key.OemComma) { SettingsWindow.Open("general"); e.Handled = true; }

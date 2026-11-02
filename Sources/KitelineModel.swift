@@ -168,8 +168,22 @@ final class KitelineModel: ObservableObject {
     }
     /// 世界里点了某人的屏幕：这个会话的对话页悬浮在世界上面（同主窗口右边的分屏会话页）
     @Published var worldDetail: String?
+    /// 世界那块放哪一页：像素园区（world）还是数据流大屏（flow）；两页共用一个网页宿主（WorldHost）。记在偏好里
+    @Published private(set) var worldPage = AppConfig.defaults.string(forKey: "worldPage") == "flow" ? "flow" : "world" {
+        didSet { AppConfig.defaults.set(worldPage, forKey: "worldPage") }
+    }
 
-    func setWorld(_ on: Bool) {
+    /// 地球 / 数据流两个入口：没开就打开这一页；开着别的那页就切过来；开着的正是这页就离开
+    func toggleWorld(page: String) {
+        if worldMode && worldPage == page { setWorld(false) } else { setWorld(true, page: page) }
+    }
+
+    func setWorld(_ on: Bool, page: String? = nil) {
+        if on, let page, page != worldPage {
+            worldPage = page
+            worldDetail = nil
+            MainActor.assumeIsolated { WorldHost.shared.setPage(page) }   // 只在界面上点的时候调（主线程）
+        }
         guard on != worldMode else { return }
         worldMode = on
         if !on {

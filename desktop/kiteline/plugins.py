@@ -172,8 +172,8 @@ class PluginStore:
         self.index_path = config.path("plugins-index.json")
         prefs = config.read_json(self.prefs_path, {})
         # on：默认不接（optIn）、用户自己打开了的；held：用户手动移除过（恢复内置版本）的，不再自动装回来，直到再手动装一次；
-        # flags：做过的一次性迁移
-        self.prefs = {key: list(prefs.get(key) or []) for key in ("off", "on", "pending", "muted", "bad", "held", "flags")}
+        # flags：做过的一次性迁移；options：用户打开了的插件单项开关「插件 id.开关 id」（默认都关）
+        self.prefs = {key: list(prefs.get(key) or []) for key in ("off", "on", "pending", "muted", "bad", "held", "flags", "options")}
         cached = config.read_json(self.index_path, {})
         self.index = cached if isinstance(cached, dict) and cached.get("plugins") else {"plugins": []}
         self.local = {"plugins": [], "hostCaps": None}
@@ -208,6 +208,7 @@ class PluginStore:
         from . import watcher
         watcher.PLUGINS_OFF = ",".join(sorted(self.off_ids()))
         watcher.PLUGINS_ON = ",".join(sorted(self.prefs["on"]))
+        watcher.PLUGIN_OPTIONS_ON = ",".join(sorted(self.prefs["options"]))
 
     def off_ids(self):
         return set(self.prefs["off"])
@@ -218,6 +219,8 @@ class PluginStore:
             env["CCPULSE_PLUGINS_OFF"] = ",".join(sorted(self.off_ids()))
         if self.prefs["on"]:
             env["CCPULSE_PLUGINS_ON"] = ",".join(sorted(self.prefs["on"]))
+        if self.prefs["options"]:
+            env["CCPULSE_PLUGIN_OPTIONS_ON"] = ",".join(sorted(self.prefs["options"]))
         return env
 
     def opt_in(self, plugin_id):
@@ -408,6 +411,12 @@ class PluginStore:
                 "enabled": plugin_id not in self.off_ids() and (not opt_in or plugin_id in self.prefs["on"]),
                 "optIn": opt_in,
                 "optInEn": row.get("optInEn") or entry.get("optInEn") or None,
+                # 单项开关（默认关、要读那家凭证的那几项）：[{id, name, nameEn, note, noteEn, on}]，开没开以这边的偏好为准
+                "options": [dict(option, on="%s.%s" % (plugin_id, option.get("id")) in self.prefs["options"])
+                            for option in (row.get("options") or entry.get("options") or []) if isinstance(option, dict) and option.get("id")],
+                # 额度、余额能不能显示、为什么没有（每个插件一句，规范 4.5）
+                "limitsNote": row.get("limitsNote") or entry.get("limitsNote") or None,
+                "limitsNoteEn": row.get("limitsNoteEn") or entry.get("limitsNoteEn") or None,
                 "action": action,
                 "target": target and {k: target.get(k) for k in ("version", "notes", "notesEn", "minApp", "size")},
                 "pending": plugin_id in self.prefs["pending"],
@@ -570,6 +579,18 @@ class PluginStore:
             cfg.update(lambda data: data.setdefault("mobile", {}).update(installOpenCodePlugin=True))
             watcher.OPENCODE_PLUGIN = True
         log.write("插件 %s 已%s" % (plugin_id, "启用" if enabled else "关闭"))
+        self._reconnect()
+        return {"ok": True}
+
+    def set_option(self, plugin_id, option_id, enabled):
+        """插件的单项开关（设置 → 插件里那家下面的小开关）：打开前客户端已给用户看过说明"""
+        key = "%s.%s" % (plugin_id, option_id)
+        with self.lock:
+            options = set(self.prefs["options"])
+            (options.add if enabled else options.discard)(key)
+            self.prefs["options"] = sorted(options)
+            self._save_prefs()
+        log.write("插件 %s 的「%s」已%s" % (plugin_id, option_id, "打开" if enabled else "关闭"))
         self._reconnect()
         return {"ok": True}
 

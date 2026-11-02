@@ -641,6 +641,17 @@
 <key>other</key><string>Added to To-Dos · %lld Items</string>
 </dict>
 </dict>
+<key>已落后 %lld 个版本</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld version behind</string>
+<key>other</key><string>%lld versions behind</string>
+</dict>
+</dict>
 <key>建群（%lld 个会话）</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>

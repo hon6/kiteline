@@ -134,6 +134,8 @@ enum SelfTest {
             ["sourceId": "local", "name": "本机", "local": true, "agents": [
                 ["agent": "claude-code", "at": now - 180_000, "windows": [window("five_hour", 42, 2.5), window("seven_day", 68, 20)]],
                 ["agent": "codex", "at": now - 1_500_000, "plan": "plus", "windows": [window("five_hour", 18, 3.5), window("seven_day", 35, 90)]],
+                ["agent": "deepseek-harness", "at": now - 300_000, "windows": [Any](), "balances": [
+                    ["currency": "CNY", "amount": "18.5200", "kind": "main"], ["currency": "CNY", "amount": "5", "kind": "bonus"]]],
             ]],
             ["sourceId": "vm", "name": "虚拟机", "local": false, "agents": [
                 ["agent": "claude-code", "at": now - 60_000, "windows": [window("five_hour", 86, 1), window("seven_day", 57, 130)]],
@@ -723,7 +725,8 @@ extension SelfTest {
             Log.write("[capture] 标题栏 + 工具栏 \(Int(window.frame.height - window.contentLayoutRect.maxY)) 点，透明 \(window.titlebarAppearsTransparent)，key \(window.isKeyWindow)，位置 \(window.frame.origin)，工具栏 \(window.toolbar.map { "\($0.items.count) 项" } ?? "无")")
         case "toast": KitelineKit.flash(arg)
         // 世界模式：world:on / off；worldjs:<脚本>（在世界的网页里跑，比如 World.world.view('rooms')）；worldshot:<png>（截网页，含 WebGL）
-        case "world": KitelineModel.shared.setWorld(arg != "off"); delay = 3
+        case "world": KitelineModel.shared.setWorld(arg != "off", page: "world"); delay = 3
+        case "flow": KitelineModel.shared.setWorld(arg != "off", page: "flow"); delay = 4
         case "sidebarcollapse": withAnimation(.snappy(duration: 0.32)) { SidebarState.shared.toggle() }; delay = 1   // 世界模式左上角的收起 / 展开会话列表
         case "worldjs":
             WorldHost.shared.webView.evaluateJavaScript(arg) { result, error in
@@ -811,16 +814,27 @@ extension SelfTest {
             if found == nil { Log.write("[capture] 面板里没有网页视图") }
             delay = 1
         case "update":
-            // 检查更新：update:check / begin / restart / show（测试实例要给 CCPULSE_UPDATE_URL、CCPULSE_UPDATE_ANY=1）
+            // 检查更新：update:check / auto / begin / restart / phones / show（测试实例要给 CCPULSE_UPDATE_URL、CCPULSE_UPDATE_ANY=1）。
+            // auto = 照每小时那次例行检查查（会按「不再提示」、24 小时规则自动弹）；phones = 打开「手机端有新版本」；
+            // status = 只记一行状态；close = 关掉更新窗口（轮到手机的会接着弹）；skip = 勾上新版本的「此版本不再提示」
             switch arg {
             case "check": Updater.shared.check(manual: true)
+            case "auto": Updater.shared.check()
+            case "phones": UpdateWindowController.phones.show()
+            case "status": break
+            case "close": UpdateWindowController.shared.close()
+            case "skip": if let version = Updater.shared.release?.version { Updater.shared.setSkipped(Updater.ownKey(version), true) }
             case "begin": Updater.shared.begin()
             case "restart": Updater.shared.restart()
             default: UpdateWindowController.shared.show()
             }
-            Log.write("[capture] 更新：\(Updater.shared.phase.rawValue) \(Updater.shared.release?.version ?? "-") 已收 \(Updater.shared.received)，箭头\(Updater.shared.visible ? "显示" : "不显示")")
+            Log.write("[capture] 更新：\(Updater.shared.phase.rawValue) \(Updater.shared.release?.version ?? "-") 已收 \(Updater.shared.received)，箭头\(Updater.shared.visible ? "显示" : "不显示")，" +
+                      "更新窗口\(UpdateWindowController.shared.window?.isVisible == true ? "开着" : "没开")，手机窗口\(UpdateWindowController.phones.window?.isVisible == true ? "开着" : "没开")，" +
+                      "落后 \(Updater.shared.release?.behind ?? 0) 版、说明 \(Updater.shared.release?.history.count ?? 0) 版，手机 \(Updater.shared.phones.map { "\($0.version) \($0.devices.map(\.name))" } ?? "-")")
         case "updateshot":
             if let panel = UpdateWindowController.shared.window { write(panel.contentView?.superview ?? panel.contentView, to: arg) }
+        case "phoneshot":
+            if let panel = UpdateWindowController.phones.window { write(panel.contentView?.superview ?? panel.contentView, to: arg) }
         case "open": KitelineKit.show(arg, key: KitelineModel.shared.selection ?? "")
         case "type": KitelineKit.setDraft(key: KitelineModel.shared.selection ?? "", arg)
         case "shot": capture(window, to: arg)

@@ -9,11 +9,18 @@ version、url、size、sha256，notes / notesEn 是这一版的更新说明。
 
 只有正式安装的版本能自动更新：Windows 是打包版（Kiteline.exe），Linux 是 install.sh 装在 ~/.local/share/kiteline 的；
 直接从源码跑的开发版只检查、不安装。
+
+发现新版本时客户端主动弹出更新弹窗（state 里 prompt 为真时弹，弹过报 /prompted）：「以后再说」24 小时后再弹，
+勾了「此版本不再提示」（/skip）这个版本就不再弹，出了更新的版本再弹（同 Mac 版）。顺带看配对过的手机：App Store 上
+有比手机上新的 Kiteline 时，state 的 phones 里列出来，客户端同样弹一次「手机端有新版本」。
+手机也能反过来看这台电脑的更新、让它下载安装和重启（/api/host-update → host_payload() / remote()）。
 """
 
 import hashlib
 import json
+import locale
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +34,9 @@ from . import config, i18n, log
 
 CHECK_EVERY = 3600          # 每小时查一次：发版后各端一小时内就会出绿色箭头（latest.json 才几百字节）
 FIRST_CHECK = 30
+SNOOZE = 24 * 3600          # 弹过（点了「以后再说」）之后多久再自动弹
+STORE_EVERY = 6 * 3600      # App Store 上的 iPhone 版六小时问一次
+IOS_BUNDLE = "com.mrhong.tars.ios"
 
 
 def parse_version(text):
@@ -55,7 +65,11 @@ class Updater:
         self.error = ""
         self.checked_at = 0
         self.staged = None           # 待换上的新版本目录（Windows）/ 解压出的安装包目录（Linux）
-        self.dismissed = ""          # 用户点了「以后再说」的版本：托盘不再提醒（客户端的箭头照样在）
+        self.history = []            # 落后的这几版各自的更新内容（官网 notes-desktop.json，新的在前）
+        self.behind = 0              # 落后几个版本（latest.json 里发过的版本中比这台新的）
+        self.store = None            # App Store 上的 iPhone 版 {version, notes, minimumOS}
+        self.store_checked = 0
+        self.phones = None           # 还是旧版本的手机 {version, notes, devices: [{name, version}]}
         self.client = {}             # 正在运行的客户端（启动时自己报上来）：从托盘、控制台重启时也把它关掉再打开
         self.supported, self.reason = self._supported()
         self.directory = config.path("updates")
@@ -104,15 +118,65 @@ class Updater:
             release = self.release or {}
             english = i18n.ui_english()
             notes = (release.get("notesEn") if english else None) or release.get("notes") or ""
-            return {"ok": True, "supported": self.supported, "reason": self.reason, "current": self.app.version,
-                    "phase": self.phase, "version": release.get("version", ""), "notes": notes,
-                    "size": int(release.get("size") or 0), "received": self.received, "error": self.error,
-                    "checkedAt": int(self.checked_at * 1000), "page": self.app.cfg.relay().rstrip("/") + "/download",
-                    "restartNeeded": self.phase == "ready"}
+            version = release.get("version", "")
+            key = self.key(version) if version else ""
+            payload = {"ok": True, "supported": self.supported, "reason": self.reason, "current": self.app.version,
+                       "phase": self.phase, "version": version, "notes": notes,
+                       "size": int(release.get("size") or 0), "received": self.received, "error": self.error,
+                       "checkedAt": int(self.checked_at * 1000), "page": self.app.cfg.relay().rstrip("/") + "/download",
+                       "restartNeeded": self.phase == "ready", "behind": self.behind,
+                       # 各版本说明（客户端按界面语言挑 notes / notesEn）；没取到就只有新版本这一版
+                       "releases": self.history or ([{"version": version, "date": "", "notes": release.get("notes") or "",
+                                                       "notesEn": release.get("notesEn") or ""}] if version else []),
+                       # 自动弹窗：key 记「不再提示」「弹过了」，prompt = 现在该弹
+                       "key": key, "skipped": bool(key) and self.is_skipped(key),
+                       "prompt": self.phase == "available" and bool(key) and self.due(key)}
+            phones = self.phones
+        if phones:
+            phone_key = "ios:" + phones["version"]
+            payload["phones"] = dict(phones, key=phone_key, skipped=self.is_skipped(phone_key), prompt=self.due(phone_key))
+        return payload
+
+    # MARK: 什么时候弹（「此版本不再提示」、24 小时后再弹）
+
+    def key(self, version):
+        return "%s:%s" % (self.platform, version)
+
+    def _prefs(self):
+        m = self.app.cfg.mobile
+        return list(m.get("updateSkipped") or []), dict(m.get("updateSnoozed") or {})
+
+    def is_skipped(self, key):
+        return key in self._prefs()[0]
+
+    def due(self, key):
+        skipped, snoozed = self._prefs()
+        return key not in skipped and float(snoozed.get(key) or 0) <= time.time()
+
+    def set_skipped(self, key, on):
+        """勾 / 取消「此版本不再提示」：当场记下，直接关窗口也算"""
+        def change(data):
+            skipped = [k for k in data["mobile"].get("updateSkipped") or [] if k != key] + ([key] if on else [])
+            data["mobile"]["updateSkipped"] = skipped[-10:]   # 只留最近的几个：换了版本的旧键不会再用到
+        if key:
+            self.app.cfg.update(change)
+        return {"ok": True}
+
+    def mark_shown(self, key):
+        """弹过了（自动弹的、自己点开的都算）：24 小时内不再自动弹"""
+        now = time.time()
+        def change(data):
+            snoozed = {k: v for k, v in (data["mobile"].get("updateSnoozed") or {}).items() if float(v or 0) > now}
+            snoozed[key] = now + SNOOZE
+            data["mobile"]["updateSnoozed"] = snoozed
+        if key:
+            self.app.cfg.update(change)
+        return {"ok": True}
 
     def _set(self, phase, **fields):
         with self._lock:
-            self.phase = phase
+            if phase is not None:
+                self.phase = phase
             for key, value in fields.items():
                 setattr(self, key, value)
         if self.app.on_update_change:
@@ -150,16 +214,120 @@ class Updater:
             release = (data.get("platforms") or {}).get(self.platform)
             self.checked_at = time.time()
             if release and release.get("url") and newer(release.get("version"), self.app.version):
-                if not self.release or self.release.get("version") != release.get("version"):
-                    log.write("发现新版本 %s（当前 %s）" % (release.get("version"), self.app.version))
-                self._set("available", release=release, error="")
+                version = release.get("version")
+                fresh = not self.release or self.release.get("version") != version
+                if fresh:
+                    log.write("发现新版本 %s（当前 %s）" % (version, self.app.version))
+                behind = len({parse_version(v) for v in release.get("versions") or [] if newer(v, self.app.version) and not newer(v, version)})
+                self._set("available", release=release, error="", behind=behind, **({"history": []} if fresh else {}))
+                if fresh:
+                    threading.Thread(target=self._fetch_history, args=(version,), daemon=True, name="updater-notes").start()
             else:
-                self._set("none", release=None, error="")
+                self._set("none", release=None, error="", history=[], behind=0)
+            threading.Thread(target=self._check_phones, daemon=True, name="updater-phones").start()
         except Exception as exc:  # noqa: BLE001
             log.write("检查更新失败：%s" % exc)
             # 查不到不算错：之前发现过的新版本照旧显示
             self._set("available" if previous == "available" else "error", error="无法连接更新服务器")
         return self.state()
+
+    def _fetch_history(self, version):
+        """落后的这几版各自的更新内容：官网 latest.json 旁边的 notes-desktop.json（relay/download.sh 发布时写，最近十几版）；
+        旧的官网没有这个文件，就只显示新版本这一版的"""
+        url = self.url().rsplit("/", 1)[0] + "/notes-desktop.json"
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "Kiteline/%s (%s)" % (self.app.version, self.platform)})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                items = json.loads(response.read().decode("utf-8")).get("releases") or []
+        except Exception:  # noqa: BLE001
+            return
+        picked = [{"version": str(i.get("version")), "date": str(i.get("date") or ""), "notes": str(i.get("notes") or ""),
+                   "notesEn": str(i.get("notesEn") or "")}
+                  for i in items if isinstance(i, dict) and newer(i.get("version"), self.app.version) and not newer(i.get("version"), version)
+                  and (i.get("notes") or i.get("notesEn"))]
+        picked.sort(key=lambda i: parse_version(i["version"]), reverse=True)
+        with self._lock:
+            if (self.release or {}).get("version") != version:
+                return
+        self._set(None, history=picked[:8])
+
+    # MARK: 手机端的新版本
+
+    def _check_phones(self):
+        """配对过的 iPhone / iPad 有没有比 App Store 上旧的：App Store 六小时问一次，设备每次检查都重新看（手机升级了就收起）"""
+        fake = os.environ.get("KITELINE_STORE_LOOKUP")
+        if fake or time.time() - self.store_checked >= STORE_EVERY:
+            self.store_checked = time.time()
+            region = ((locale.getlocale()[0] or "").split("_") + ["", ""])[1].lower() or "cn"
+            for country in ([region] if region == "cn" else [region, "cn"]) if not fake else [""]:
+                url = fake or "https://itunes.apple.com/lookup?bundleId=%s&country=%s" % (IOS_BUNDLE, country)
+                try:
+                    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Kiteline/%s" % self.app.version}), timeout=20) as response:
+                        results = json.loads(response.read().decode("utf-8")).get("results") or []
+                except Exception:  # noqa: BLE001
+                    self.store_checked = 0 if not fake else self.store_checked
+                    break
+                if results and results[0].get("version"):
+                    first = results[0]
+                    self.store = {"version": str(first["version"]), "notes": str(first.get("releaseNotes") or ""),
+                                  "minimumOS": str(first.get("minimumOsVersion") or "")}
+                    break
+        self._evaluate_phones()
+
+    def _evaluate_phones(self):
+        store = self.store
+        devices = []
+        if store:
+            recent = time.time() * 1000 - 30 * 86_400_000
+            for device in self.app.devices.all:
+                client = device.get("client") or ""
+                # 最近 30 天用过的手机：「ios/1.6 (iPhone13,2; iOS 18.7.8)」→ App 1.6、系统 18.7.8；系统低于新版本要求的装不上，不算
+                if float(device.get("lastSeen") or 0) < recent or not client.startswith("ios/"):
+                    continue
+                app = client[4:].split(" ", 1)[0]
+                system = (re.search(r"iOS ([0-9.]+)", client) or [None, ""])[1]
+                if not app[:1].isdigit() or not newer(store["version"], app):
+                    continue
+                if store["minimumOS"] and system and newer(store["minimumOS"], system):
+                    continue
+                devices.append({"name": device.get("name") or "", "version": app})
+        phones = {"version": store["version"], "notes": store["notes"], "devices": devices} if devices else None
+        if phones != self.phones:
+            self._set(None, phones=phones)
+
+    # MARK: 手机上看这台电脑的更新（/api/host-update）
+
+    def host_payload(self):
+        """同 Mac 版 Updater.payload()：手机一套代码看两种电脑。更新内容两种语言都给，手机按自己的界面语言挑"""
+        payload = self.state()
+        release = self.release or {}
+        payload.update({"notes": release.get("notes") or "", "notesEn": release.get("notesEn") or ""})
+        for key in ("phones", "prompt", "skipped", "key", "checkedAt", "restartNeeded"):
+            payload.pop(key, None)
+        return payload
+
+    def remote(self, action):
+        """手机上点的：check 现在查、start 下载并安装、cancel 取消下载、restart 重启换上新版本"""
+        if action == "check":
+            threading.Thread(target=self.check, daemon=True, name="updater-check").start()
+            time.sleep(0.2)
+        elif action == "start":
+            if not self.supported:
+                return dict(self.host_payload(), ok=False, error="%s，请在电脑上到官网下载新版本" % self.reason)
+            log.write("手机上点了更新电脑端 Kiteline %s" % (self.release or {}).get("version"))
+            result = self.begin()
+            if not result.get("ok"):
+                return dict(self.host_payload(), ok=False, error=result.get("error") or "更新失败")
+        elif action == "cancel":
+            self.cancel()
+        elif action == "restart":
+            log.write("手机上点了重启电脑端 Kiteline 以完成更新")
+            result = self.restart()
+            if not result.get("ok"):
+                return dict(self.host_payload(), ok=False, error=result.get("error") or "重启失败")
+        else:
+            return {"ok": False, "error": "未知操作"}
+        return self.host_payload()
 
     # MARK: 下载、安装
 

@@ -23,7 +23,9 @@ public sealed record LimitWindow(string Kind, double Percent, double? ResetsAt, 
     public string Label => Kind switch
     {
         "five_hour" => L("5 小时"),
+        "day" => L("今日"),
         "seven_day" => L("本周"),
+        "month" => L("本月"),
         "spend_limit" => L("额度"),
         _ => (Minutes ?? 0) switch
         {
@@ -55,23 +57,42 @@ public sealed record LimitWindow(string Kind, double Percent, double? ResetsAt, 
     public string Tint => Percent >= 80 ? "Red" : "Accent";
 }
 
+/// 一笔余额（按量付费的 DeepSeek Harness）：main 充值的、bonus 赠送的
+public sealed record LimitBalance(string Currency, string Amount, string Kind)
+{
+    public static LimitBalance Parse(JsonNode n) => new(n.Str("currency") ?? "CNY", n.Str("amount") ?? "0", n.Str("kind") ?? "main");
+
+    /// 「¥18.52」：保留两位小数
+    public string Text
+    {
+        get
+        {
+            var symbol = Currency switch { "USD" => "$", "CNY" => "¥", _ => Currency + " " };
+            return double.TryParse(Amount, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
+                ? symbol + value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) : symbol + Amount;
+        }
+    }
+}
+
 /// pending：还没有读数，这台电脑上开着的会话都是额度插件装上之前启动的，新开一个会话回复后才有
-public sealed record LimitAgent(string Agent, double At, string? Plan, List<LimitWindow> Windows, bool Pending)
+public sealed record LimitAgent(string Agent, double At, string? Plan, List<LimitWindow> Windows, List<LimitBalance> Balances, bool Pending)
 {
     public static LimitAgent Parse(JsonNode n) =>
         new(n.Str("agent") ?? "claude-code", n.Num("at") ?? 0, n.Str("plan"), n.Arr("windows").Items().Select(LimitWindow.Parse).ToList(),
-            n.Bool("pending") ?? false);
+            n.Arr("balances").Items().Select(LimitBalance.Parse).ToList(), n.Bool("pending") ?? false);
 
-    /// 两格：第一格 5 小时、第二格每周；没有这两种窗口的按顺序补上
+    static readonly string[] Order = ["five_hour", "day", "seven_day", "month"];
+
+    /// 格子，两格一行，按周期从短到长：5 小时、今日、本周、本月——有哪几种排哪几种；一种都没有的按顺序取两格（同 Mac 版）
     public LimitWindow?[] Slots
     {
         get
         {
-            var rest = Windows.Where(w => w.Kind != "five_hour" && w.Kind != "seven_day").GetEnumerator();
-            LimitWindow? Next() => rest.MoveNext() ? rest.Current : null;
-            var first = Windows.FirstOrDefault(w => w.Kind == "five_hour") ?? Next();
-            var second = Windows.FirstOrDefault(w => w.Kind == "seven_day") ?? Next();
-            return [first, second];
+            var picked = Order.Select(kind => Windows.FirstOrDefault(w => w.Kind == kind)).OfType<LimitWindow>().ToList();
+            if (picked.Count == 0) picked = Windows.Take(2).ToList();
+            var slots = picked.Cast<LimitWindow?>().ToList();
+            if (slots.Count % 2 == 1) slots.Add(null);
+            return [.. slots];
         }
     }
 }
@@ -159,8 +180,24 @@ public static class LimitsBoard
             Ui.Text(Kiteline.Model.Agents.Info(agent.Agent).Name + plan, compact ? 12.5 : 13.5, FontWeight.SemiBold).Trim());
         if (agent.Pending)
             return Ui.VFill(8, head, Ui.Text(L("已开着的会话不记额度，新开一个会话回复后显示"), compact ? 10.5 : 11.5, color: "Text2").Wrap());
-        var bars = new EqualRow(compact ? 10 : 14, agent.Slots.Select(w => w is null ? (Control)new Border() : new LimitBar(w, compact)).ToArray());
-        return Ui.VFill(8, head, bars);
+        var body = Ui.VFill(compact ? 8 : 10);
+        var slots = agent.Slots;
+        for (var i = 0; i < slots.Length; i += 2)
+            body.Children.Add(new EqualRow(compact ? 10 : 14, slots.Skip(i).Take(2).Select(w => w is null ? (Control)new Border() : new LimitBar(w, compact)).ToArray()));
+        if (agent.Balances.Count > 0) body.Children.Add(BalanceLine(agent.Balances, compact));
+        return Ui.VFill(8, head, body);
+    }
+
+    /// 「余额 ¥18.52 赠送 ¥5.00」（DeepSeek 按量付费，没有周期额度；同 Mac 版 BalanceLine）
+    static Control BalanceLine(List<LimitBalance> balances, bool compact)
+    {
+        var paid = balances.Where(b => b.Kind != "bonus").ToList();
+        var main = paid.Count == 0 ? balances : paid;
+        List<LimitBalance> bonus = paid.Count == 0 ? [] : balances.Where(b => b.Kind == "bonus").ToList();
+        return Ui.H(6,
+            Ui.Text(L("余额"), compact ? 10.5 : 11.5, color: "Text2"),
+            Ui.Text(string.Join(" · ", main.Select(b => b.Text)), compact ? 13 : 14, FontWeight.SemiBold).Digits().Trim(),
+            bonus.Count == 0 ? null : Ui.Text(L("赠送 %@", string.Join(" · ", bonus.Select(b => b.Text))), compact ? 10.5 : 11.5, color: "Text2").Digits().Trim());
     }
 
     static string Relative(double? ms)

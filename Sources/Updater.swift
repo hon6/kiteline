@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CryptoKit
 import Security
 import SwiftUI
@@ -9,6 +10,10 @@ import KitelineKit
 /// → 静默装好：挂载 DMG、核对签名是同一个开发者、拷到 App 旁边待换 → 提示重启；点「立即重启」时由一个小脚本等 Kiteline 退出、
 /// 换上新版本再打开；点「稍后」就在下次退出时换。
 /// 只有官网下载的版本（Developer ID 签名）会自动安装：本机自己编的开发版签名不同，换过去辅助功能等权限要重新给，只提示去官网下载
+///
+/// 发现新版本时主动弹出更新窗口（不抢前台）：「以后再说」24 小时后再弹，勾了「此版本不再提示」这个版本就不再弹，出了更新的版本再弹。
+/// 顺带看配对过的手机：App Store 上有比手机上新的 Kiteline 时，同样弹一次「手机端有新版本」（PhoneUpdateWindowController）。
+/// 手机也能反过来看这台电脑的更新、让它下载安装和重启（/api/host-update → payload() / remote(_:)）
 final class Updater: ObservableObject {
     static let shared = Updater()
 
@@ -19,15 +24,56 @@ final class Updater: ObservableObject {
         var url: URL
         var size: Int64
         var sha256: String
-        var notes: String
+        var notesZh: String
+        var notesEn: String
+        /// 落后的这几版各自的更新内容（新的在前，官网的 notes-mac.json）；取不到就是空的，只显示这一版的 notes
+        var history: [Note] = []
+        /// 这台落后了几个版本（latest.json 里发过的版本 versions 中比这台新的）
+        var behind = 0
+
+        var notes: String { Lang.shared.isEnglish && !notesEn.isEmpty ? notesEn : notesZh }
     }
+
+    /// 一个版本的更新内容
+    struct Note: Equatable {
+        var version: String
+        var date: String
+        var zh: String
+        var en: String
+
+        var text: String { Lang.shared.isEnglish && !en.isEmpty ? en : zh }
+        var payload: [String: Any] { ["version": version, "date": date, "notes": zh, "notesEn": en] }
+    }
+
+    /// App Store 上比配对过的手机新的 Kiteline：哪个版本、更新内容、哪几台手机还是旧版本
+    struct PhoneOffer: Equatable {
+        var version: String
+        var notes: String
+        /// 设备名 → 手机上的版本
+        var devices: [Device]
+
+        struct Device: Equatable { var name: String; var version: String }
+        var key: String { Updater.phoneKey(version) }
+    }
+
+    /// 什么时候主动弹窗：电脑端自己的新版本 / 手机端的新版本
+    enum Prompt { case own, phones }
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var release: Release?
     @Published private(set) var received: Int64 = 0
     @Published private(set) var error = ""
-    /// 用户点了「以后再说」的版本：不再自动弹（右上角箭头照样在）
-    @Published private(set) var dismissed = AppConfig.defaults.string(forKey: "updateDismissed") ?? ""
+    @Published private(set) var phones: PhoneOffer?
+    /// 勾了「此版本不再提示」的（mac:3.49.16、ios:1.7）：不再自动弹，侧栏的箭头照样在
+    @Published private(set) var skipped = Set(AppConfig.defaults.stringArray(forKey: "updateSkipped") ?? [])
+    /// 上次弹过的时间 + 24 小时（同上的键 → 秒）：这之前不再自动弹
+    private var snoozed = AppConfig.defaults.dictionary(forKey: "updateSnoozed") as? [String: Double] ?? [:]
+    static let snoozeFor: TimeInterval = 24 * 3600
+    /// 该弹窗了（UpdateWindowController 听着）
+    let prompts = PassthroughSubject<Prompt, Never>()
+    /// App Store 上的 iPhone 版：上次查到的和什么时候查的（六小时查一次）
+    private var store: (version: String, notes: String, minimumOS: String)?
+    private var storeChecked = Date.distantPast
 
     let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
     /// 右上角要不要出绿色箭头
@@ -83,19 +129,156 @@ final class Updater: ObservableObject {
                 let mac = (json["platforms"] as? [String: Any])?["mac"] as? [String: Any]
                 if let mac, let version = mac["version"] as? String, let link = mac["url"] as? String, let url = URL(string: link),
                    Self.newer(version, than: self.current) {
-                    let english = Lang.shared.isEnglish
-                    let notes = (english ? mac["notesEn"] as? String : nil) ?? mac["notes"] as? String ?? ""
-                    let found = Release(version: version, url: url, size: Int64(Digest.number(mac["size"])), sha256: mac["sha256"] as? String ?? "", notes: notes)
-                    if self.release?.version != version { Log.write("发现新版本 \(version)（当前 \(self.current)）") }
+                    var found = Release(version: version, url: url, size: Int64(Digest.number(mac["size"])), sha256: mac["sha256"] as? String ?? "",
+                                        notesZh: mac["notes"] as? String ?? "", notesEn: mac["notesEn"] as? String ?? "")
+                    found.behind = Set((mac["versions"] as? [String] ?? []).filter { Self.newer($0, than: self.current) && !Self.newer($0, than: version) }).count
+                    let fresh = self.release?.version != version
+                    if fresh { Log.write("发现新版本 \(version)（当前 \(self.current)）") } else { found.history = self.release?.history ?? [] }
                     self.release = found
                     self.error = ""
                     self.phase = .available
+                    if fresh { self.fetchHistory(version) }
+                    if !manual, self.due(Self.ownKey(version)) {
+                        self.markShown(Self.ownKey(version))
+                        self.prompts.send(.own)
+                    }
                 } else {
                     self.release = nil
                     self.phase = .none
                 }
+                self.checkPhones()
             }
         }.resume()
+    }
+
+    /// 落后的这几版各自的更新内容：官网 latest.json 旁边的 notes-mac.json（relay/download.sh 发布时写，最近十几版）；
+    /// 旧的官网没有这个文件，就只显示新版本这一版的
+    private func fetchHistory(_ version: String) {
+        let url = feed.deletingLastPathComponent().appendingPathComponent("notes-mac.json")
+        URLSession.shared.dataTask(with: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)) { [weak self] data, response, _ in
+            guard (response as? HTTPURLResponse)?.statusCode == 200, let data,
+                  let list = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["releases"] as? [[String: Any]] else { return }
+            DispatchQueue.main.async {
+                guard let self, self.release?.version == version else { return }
+                let notes = list.compactMap { item -> Note? in
+                    guard let v = item["version"] as? String, Self.newer(v, than: self.current), !Self.newer(v, than: version) else { return nil }
+                    let note = Note(version: v, date: item["date"] as? String ?? "", zh: item["notes"] as? String ?? "", en: item["notesEn"] as? String ?? "")
+                    return note.zh.isEmpty && note.en.isEmpty ? nil : note
+                }
+                self.release?.history = Array(notes.sorted { Self.newer($0.version, than: $1.version) }.prefix(8))
+            }
+        }.resume()
+    }
+
+    // MARK: 什么时候弹
+
+    static func ownKey(_ version: String) -> String { "mac:\(version)" }
+    static func phoneKey(_ version: String) -> String { "ios:\(version)" }
+
+    func isSkipped(_ key: String) -> Bool { skipped.contains(key) }
+
+    /// 勾 / 取消「此版本不再提示」：当场记下，直接关窗口也算
+    func setSkipped(_ key: String, _ on: Bool) {
+        if on { skipped.insert(key) } else { skipped.remove(key) }
+        // 只留最近的几个：换了版本的旧键不会再用到
+        if skipped.count > 20 { skipped = Set(skipped.sorted().suffix(10)) }
+        AppConfig.defaults.set(skipped.sorted(), forKey: "updateSkipped")
+    }
+
+    /// 该自动弹：没勾「不再提示」、上次弹过已经过了一天
+    private func due(_ key: String) -> Bool {
+        !skipped.contains(key) && (snoozed[key] ?? 0) <= Date().timeIntervalSince1970
+    }
+
+    /// 弹过了（自动弹的、自己点开的都算）：24 小时内不再自动弹
+    func markShown(_ key: String) {
+        let now = Date().timeIntervalSince1970
+        snoozed[key] = now + Self.snoozeFor
+        snoozed = snoozed.filter { $0.value > now }
+        AppConfig.defaults.set(snoozed, forKey: "updateSnoozed")
+    }
+
+    // MARK: 手机端的新版本
+
+    /// 配对过的 iPhone / iPad 有没有比 App Store 上旧的：App Store 六小时问一次，设备每次检查都重新看（手机升级了提示就收起）
+    private func checkPhones() {
+        let env = ProcessInfo.processInfo.environment
+        if Date().timeIntervalSince(storeChecked) < (env["CCPULSE_STORE_LOOKUP"] == nil ? 6 * 3600 : 0) {
+            evaluatePhones()
+            return
+        }
+        storeChecked = Date()
+        let region = Locale.current.region?.identifier.lowercased() ?? "cn"
+        let link = env["CCPULSE_STORE_LOOKUP"] ?? "https://itunes.apple.com/lookup?bundleId=com.mrhong.tars.ios&country=\(region)"
+        guard let url = URL(string: link) else { return }
+        URLSession.shared.dataTask(with: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)) { [weak self] data, response, _ in
+            let first = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["results"] as? [[String: Any]])?.first
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if (response as? HTTPURLResponse)?.statusCode == 200, let first, let version = first["version"] as? String {
+                    self.store = (version, first["releaseNotes"] as? String ?? "", first["minimumOsVersion"] as? String ?? "")
+                } else if region != "cn", env["CCPULSE_STORE_LOOKUP"] == nil {
+                    self.storeChecked = .distantPast   // 这个地区没上架：下次按中国区查
+                }
+                self.evaluatePhones()
+            }
+        }.resume()
+    }
+
+    private func evaluatePhones() {
+        guard let store else { phones = nil; return }
+        // 最近 30 天用过的手机：「ios/1.6 (iPhone13,2; iOS 18.7.8)」→ App 1.6、系统 18.7.8；系统低于新版本要求的装不上，不算
+        let recent = Date().timeIntervalSince1970 * 1000 - 30 * 86_400_000
+        let devices = DeviceStore.shared.all.compactMap { device -> PhoneOffer.Device? in
+            guard device.lastSeen > recent, let client = device.client, client.hasPrefix("ios/") else { return nil }
+            let app = String(client.dropFirst(4).prefix { $0 != " " })
+            let system = client.range(of: #"iOS [0-9.]+"#, options: .regularExpression).map { String(client[$0].dropFirst(4)) } ?? ""
+            guard app.first?.isNumber == true, Self.newer(store.version, than: app), store.minimumOS.isEmpty || system.isEmpty || !Self.newer(store.minimumOS, than: system) else { return nil }
+            return PhoneOffer.Device(name: device.name, version: app)
+        }
+        let offer = devices.isEmpty ? nil : PhoneOffer(version: store.version, notes: store.notes, devices: devices)
+        if offer != phones { phones = offer }
+        if let offer, due(offer.key) {
+            markShown(offer.key)
+            prompts.send(.phones)
+        }
+    }
+
+    // MARK: 手机上看这台电脑的更新（/api/host-update）
+
+    /// 同 Windows / Linux 版 updater.state()：字段名一样，手机一套代码看两种电脑
+    func payload() -> [String: Any] {
+        var payload: [String: Any] = [
+            "ok": true, "supported": supported, "reason": supported ? "" : "此版本是本机编译的开发版，不会自动安装", "current": current,
+            "phase": phase.rawValue, "version": release?.version ?? "", "notes": release?.notesZh ?? "", "notesEn": release?.notesEn ?? "",
+            "size": release?.size ?? 0, "received": received, "error": error, "page": downloadPage.absoluteString,
+        ]
+        if let release {
+            // 至少有新版本这一版
+            let list = release.history.isEmpty ? [Note(version: release.version, date: "", zh: release.notesZh, en: release.notesEn)] : release.history
+            payload["releases"] = list.map(\.payload)
+        }
+        return payload
+    }
+
+    /// 手机上点的：check 现在查、start 下载并安装、cancel 取消下载、restart 重启换上新版本
+    func remote(_ action: String) -> [String: Any] {
+        switch action {
+        case "check": check(manual: true)
+        case "start":
+            guard supported else { return payload().merging(["ok": false, "error": "此版本是本机编译的开发版，不会自动安装，请在电脑上到官网下载新版本"]) { $1 } }
+            Log.write("手机上点了更新电脑端 Kiteline \(release?.version ?? "")")
+            begin()
+        case "cancel": cancel()
+        case "restart":
+            guard phase == .ready else { return payload().merging(["ok": false, "error": "新版本还没有装好"]) { $1 } }
+            Log.write("手机上点了重启电脑端 Kiteline 以完成更新")
+            // 先回复手机再退出
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.restart() }
+            return payload().merging(["phase": Phase.restarting.rawValue]) { $1 }
+        default: return ["ok": false, "error": "未知操作"]
+        }
+        return payload()
     }
 
     static func newer(_ candidate: String, than current: String) -> Bool {
@@ -110,13 +293,6 @@ final class Updater: ObservableObject {
             if x != y { return x > y }
         }
         return false
-    }
-
-    func later() {
-        if let version = release?.version {
-            dismissed = version
-            AppConfig.defaults.set(version, forKey: "updateDismissed")
-        }
     }
 
     // MARK: 下载、安装
@@ -135,7 +311,8 @@ final class Updater: ObservableObject {
             switch result {
             case .failure(let failure):
                 if (failure as? URLError)?.code == .cancelled { self.phase = .available; self.received = 0; return }
-                self.fail(L("下载失败：%@", failure.localizedDescription))
+                // 服务器回了错误码的已经写好「下载失败：…」，别再套一层
+                self.fail(failure is Failure ? failure.localizedDescription : L("下载失败：%@", failure.localizedDescription))
             case .success(let file):
                 self.phase = .installing
                 DispatchQueue.global(qos: .userInitiated).async {

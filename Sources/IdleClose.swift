@@ -9,10 +9,13 @@ import Foundation
 ///   对话页开着、App 在前台时每 10 分钟再报一次（一直摆在屏幕上看的，不算没打开）
 /// - 旧版 iPhone 不报 /api/viewed，但打开对话页时必取一次 GET /api/voices?key=，也算
 /// - 从对话页发消息、按住说话、恢复会话
+/// - 各端启动时随 /api/viewed 带上本机记的「最后看过」（seen：未读红点用的那份，打开、看完、标为已读时记），
+///   补上升级前的历史：这一版之前打开过的会话不用再从安装时起算 24 小时（11-02 反馈：超时的会话没有关闭）
 ///
-/// 起算时间：Kiteline 第一次见到这个会话（含升级到这一版时已经开着的，不会一装上就关一片）；关掉 / 结束了 10 分钟以上
-/// 又出现的（在 VS Code 里自己恢复的）重新起算。正在跑的不关，等这一轮停下；要切 VS Code / 终端的，等电脑 10 分钟
-/// 没人动键盘鼠标再关（不把人正在用的窗口切走），一次一个。记录存配置目录 viewed.json：会话 key → 最后打开时间（毫秒）
+/// 起算时间：有打开记录按最后一次打开；一次都没有的，从 Kiteline 第一次见到它算（first，只在没有任何打开记录时用）；
+/// 关掉 / 结束了 10 分钟以上又出现的（在 VS Code 里自己恢复的）重新起算。正在跑的不关，等这一轮停下；要切 VS Code /
+/// 终端的，等电脑 10 分钟没人动键盘鼠标再关（不把人正在用的窗口切走），一次一个。
+/// 记录存配置目录 viewed.json：{viewed: 会话 key → 最后打开时间（毫秒）, first: 第一次见到的时间}
 final class IdleClose {
     static let shared = IdleClose()
     static let threshold: TimeInterval = 24 * 3600
@@ -22,7 +25,10 @@ final class IdleClose {
     static let regone: TimeInterval = 600
 
     private var timer: Timer?
+    /// 打开过的时间（Kiteline 里打开、各端报上来的历史、关掉后又恢复）
     private var viewed: [String: Double] = [:]
+    /// 第一次见到的时间：一次打开记录都没有时才拿它起算
+    private var first: [String: Double] = [:]
     /// 还开着的会话 / 从列表里消失的时间（看再出现时要不要重新起算）
     private var live: Set<String> = []
     private var goneAt: [String: Date] = [:]
@@ -32,9 +38,21 @@ final class IdleClose {
     private var saving: DispatchWorkItem?
     private var url: URL { AppConfig.directoryURL.appendingPathComponent("viewed.json") }
 
+    private struct Saved: Codable {
+        var viewed: [String: Double]
+        var first: [String: Double]
+    }
+
     func start() {
-        if let data = try? Data(contentsOf: url), let saved = try? JSONDecoder().decode([String: Double].self, from: data) {
-            viewed = saved
+        if let data = try? Data(contentsOf: url) {
+            if let saved = try? JSONDecoder().decode(Saved.self, from: data) {
+                (viewed, first) = (saved.viewed, saved.first)
+            } else if let old = try? JSONDecoder().decode([String: Double].self, from: data), let earliest = old.values.min() {
+                // 3.49.15 存的是一张表：装上那一刻一起记下的（2 分钟内）是「第一次见到」，之后的才是真打开过
+                for (key, value) in old {
+                    if value - earliest < 120_000 { first[key] = value } else { viewed[key] = value }
+                }
+            }
         }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.tick(now: Date()) }
@@ -49,6 +67,19 @@ final class IdleClose {
         save()
     }
 
+    /// 各端报来的本机历史（key → 最后看过，毫秒）：只补认识的会话，只往后挪（主线程）
+    func merge(history: [String: Double], now: Date = Date()) {
+        let ms = now.timeIntervalSince1970 * 1000, oldest = ms - 30 * 86400 * 1000
+        var changed = false
+        for (key, value) in history.prefix(1000) where live.contains(key) || viewed[key] != nil || first[key] != nil {
+            let value = min(value, ms)
+            guard value > oldest, value > viewed[key] ?? 0 else { continue }
+            viewed[key] = value
+            changed = true
+        }
+        if changed { save() }
+    }
+
     /// 会话列表变了（主线程）：新出现的记下起算时间；关掉 / 结束了一阵子又出现的重新起算
     func storeUpdated(_ records: [SessionRecord], now: Date = Date()) {
         let current = Set(records.map(\.key))
@@ -61,8 +92,11 @@ final class IdleClose {
             }
         }
         for key in current.subtracting(live) {
-            if viewed[key] == nil || goneAt[key].map({ now.timeIntervalSince($0) >= Self.regone }) == true {
+            if goneAt[key].map({ now.timeIntervalSince($0) >= Self.regone }) == true {
                 viewed[key] = max(viewed[key] ?? 0, now.timeIntervalSince1970 * 1000)
+                changed = true
+            } else if viewed[key] == nil, first[key] == nil {
+                first[key] = now.timeIntervalSince1970 * 1000
                 changed = true
             }
             goneAt[key] = nil
@@ -71,9 +105,12 @@ final class IdleClose {
         if changed { save() }
     }
 
+    /// 有打开记录的会话（自测用：其余的只记了第一次见到）
+    var openedKeys: [String] { Array(viewed.keys) }
+
     /// 多久没打开了（秒）；没记录的返回 nil
     func idle(_ key: String, now: Date = Date()) -> TimeInterval? {
-        viewed[key].map { now.timeIntervalSince1970 - $0 / 1000 }
+        (viewed[key] ?? first[key]).map { now.timeIntervalSince1970 - $0 / 1000 }
     }
 
     /// now 可以从外面传（自测时模拟时间）；force = 不等人离开电脑（自测用）
@@ -82,7 +119,7 @@ final class IdleClose {
         prune(now)
         guard AppState.shared.config.mobile.autoCloseIdle, !closing else { return }
         let due = AppState.shared.store.records.filter { isDue($0, now: now) }
-            .sorted { (viewed[$0.key] ?? 0) < (viewed[$1.key] ?? 0) }
+            .sorted { (idle($0.key, now: now) ?? 0) > (idle($1.key, now: now) ?? 0) }
         closeNext(due.map(\.key), now: now, force: force)
     }
 
@@ -125,14 +162,15 @@ final class IdleClose {
     private func prune(_ now: Date) {
         let cutoff = (now.timeIntervalSince1970 - 30 * 86400) * 1000
         let kept = viewed.filter { live.contains($0.key) || $0.value >= cutoff }
-        if kept.count != viewed.count { viewed = kept; save() }
+        let keptFirst = first.filter { live.contains($0.key) || $0.value >= cutoff }
+        if kept.count != viewed.count || keptFirst.count != first.count { (viewed, first) = (kept, keptFirst); save() }
         failedAt = failedAt.filter { live.contains($0.key) }
     }
 
     private func save() {
         saving?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, let data = try? JSONEncoder().encode(self.viewed) else { return }
+            guard let self, let data = try? JSONEncoder().encode(Saved(viewed: self.viewed, first: self.first)) else { return }
             try? data.write(to: self.url, options: .atomic)
         }
         saving = work

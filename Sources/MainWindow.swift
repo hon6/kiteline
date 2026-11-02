@@ -172,10 +172,19 @@ struct SidebarView: View {
             }
             // 世界模式的入口：像素地球（鼠标移上去会转）；再点一下回到会话
             ToolbarItem(placement: .primaryAction) {
-                Button { model.setWorld(!model.worldMode) } label: {
-                    Label { Text("世界") } icon: { WorldGlobeIcon(active: model.worldMode) }
+                let on = model.worldMode && model.worldPage == "world"
+                Button { model.toggleWorld(page: "world") } label: {
+                    Label { Text("世界") } icon: { WorldGlobeIcon(active: on) }
                 }
-                .help(model.worldMode ? L("离开世界模式，回到会话（⇧⌘E）") : L("世界模式：机房、卫星和像素小人，一眼看全所有会话（⇧⌘E）"))
+                .help(on ? L("离开世界模式，回到会话（⇧⌘E）") : L("世界模式：机房、卫星和像素小人，一眼看全所有会话（⇧⌘E）"))
+            }
+            // 数据流大屏：所有会话读了什么、做了什么、产出去了哪，一块屏连成线（和世界共用一个网页宿主）
+            ToolbarItem(placement: .primaryAction) {
+                let on = model.worldMode && model.worldPage == "flow"
+                Button { model.toggleWorld(page: "flow") } label: {
+                    Label { Text("数据流") } icon: { Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(on ? Color.tarsBrand : .secondary) }
+                }
+                .help(on ? L("离开数据流大屏，回到会话（⇧⌘D）") : L("数据流大屏：所有会话读了什么、做了什么、产出去了哪，连成一块屏（⇧⌘D）"))
             }
         }
     }

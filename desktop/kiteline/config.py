@@ -34,6 +34,8 @@ DEFAULT_WATCH = {
 
 DEFAULT_MOBILE = {
     "autostartDefaulted": False,   # 装好后第一次运行时已默认打开过开机自启（autostart.ensure_default）
+    "updateSkipped": [],           # 新版本提示勾了「此版本不再提示」的（windows:1.0.21、ios:1.7，见 updater.py）
+    "updateSnoozed": {},           # 新版本提示上次弹过的时间 + 24 小时（同上的键 → 秒），这之前不再自动弹
     "enabled": True,
     "port": 8765,
     "bindAddress": "0.0.0.0",

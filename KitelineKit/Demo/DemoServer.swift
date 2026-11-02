@@ -366,7 +366,18 @@ final class DemoServer: @unchecked Sendable {
         #endif
     }
 
-    private var todoState: [String: Any] { ["items": todos, "suggestions": [], "handled": todosHandled] }
+    private var todoState: [String: Any] { ["items": todos, "suggestions": demoSuggestions, "handled": todosHandled] }
+
+    /// agent 提醒你做、还没决定加不加的：演示里没有；截图构建 TARS_DEMO_SUGGEST=1 时造一条（看首页「待办」格子两个角标并存）
+    private var demoSuggestions: [[String: Any]] {
+        #if SNAPSHOT
+        if ProcessInfo.processInfo.environment["TARS_DEMO_SUGGEST"] == "1" {
+            return [["key": "local#demo-suggest", "itemId": "demo-suggest", "title": "订单接口限流", "machine": "本机",
+                     "asks": ["在阿里云控制台开通短信签名", "把测试账号的密码发给前端"], "at": Date().timeIntervalSince1970 * 1000]]
+        }
+        #endif
+        return []
+    }
 
     /// 待办的增删改：只改内存里的这份，退出演示就没了。演示里不存截图
     private func todoAction(_ path: String, _ body: [String: Any]) -> Reply {

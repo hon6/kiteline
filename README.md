@@ -57,6 +57,7 @@ Kiteline watches every Claude Code, Codex, OpenCode and DeepSeek Harness session
 | **To-dos** | Anything the agent needs *you* to do is picked up from the conversation and tracked until it's done. |
 | **Group chats** | Sessions on different computers and projects coordinate with each other through Kiteline. |
 | **World mode** | A voxel office where every session is a worker at a desk, so you can see the whole team at a glance. |
+| **Flow Board** | Every session on one screen: what each one reads, what it does and where the output goes. Each tool call is a line, and a trail of light runs along it the moment the call happens. |
 
 ## Supported agents
 
@@ -118,6 +119,7 @@ flowchart LR
 - **Signed plugins.** Agents beyond the built-ins are distributed through an Ed25519-signed index. Each manifest declares capabilities (view, reply, approve, answer, interrupt, …) and the permissions it needs, and every client renders exactly what an agent supports.
 - **On-device speech.** Hold-to-talk transcription runs locally with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and the Fun-ASR-Nano model, so audio never leaves your own devices.
 - **World mode.** A [three.js](https://threejs.org) scene shared by every platform and rendered from the same state stream.
+- **Flow Board.** Also three.js, on the same host protocol. Cards are thin slabs with canvas textures; each line kind is one `LineSegments` buffer written as a ring, so the line count stays bounded. Base lines use normal blending so hundreds of them stay a faint grey, while only the lit lines (up to 320) and the particles (one shader-driven `Points`, up to 1,500) are additive. An automatic camera pans and zooms to the busiest card — straight on, in 2D — and lists the calls that just passed through it.
 
 ## Tech stack
 
@@ -129,7 +131,7 @@ flowchart LR
 | Windows and Linux host | Python 3.10+, cryptography, zeroconf, sherpa-onnx | ~17k lines |
 | Windows and Linux window | C#, .NET 10, [Avalonia](https://avaloniaui.net) | ~34k lines |
 | Code editor | [CodeMirror 6](https://codemirror.net) | |
-| World mode | [three.js](https://threejs.org) | |
+| World mode and Flow Board | [three.js](https://threejs.org) | |
 | Remote access *(not in this repo)* | Rust, iroh (QUIC) | |
 
 ## Screenshots
@@ -163,6 +165,8 @@ flowchart LR
 ![Mac app: sessions side by side, a plan waiting for approval and two sessions messaging each other](docs/images/mac-main.jpg)
 
 ![World mode on the Mac](docs/images/mac-world.jpg)
+
+![Flow Board: every session on one screen, each tool call a line, light running along it as the call happens](docs/images/flow-board.jpg)
 
 <table>
 <tr>

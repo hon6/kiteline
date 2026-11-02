@@ -14,7 +14,7 @@ import UIKit
 ///   list [hide] = 横着的 iPhone 拉出 / 收起浮着的会话列表；settings = 横着的 iPhone 在浮着的列表里打开设置；
 ///   hint topLeft|topRight|portrait = 当作手里的手机转到那个方向（看转屏提示，见 RotationHint）
 ///   （这几样由 MainView 接，见 command）；scroll <第几个滚动区> <点数> = 把那个滚动区往下滚（负数往上）；focus = 点进输入框（弹出键盘）
-///   world = 打开世界模式（会话列表接）；worldjs <脚本> = 在世界网页里执行一段脚本（如 World.openSession(key)）
+///   world / flow = 打开世界模式 / 数据流大屏（会话列表接）；worldjs <脚本> = 在世界网页里执行一段脚本（如 World.openSession(key)）
 ///   inbound <路径> = 当作别的 App「用其他应用打开」发来这个文件（弹发送面板，见 InboundShare）；
 ///   inboundsend session|project <补充说明> = 在发送面板里填好说明、点「发送」（发给选中的会话 / 第一个项目新建会话）；
 ///   openfile / sharefile <会话 key> <路径> = 当作在消息里点了这个文件路径 / 长按「转发文件」（见 FileOpener；InboundShareHost 接）
