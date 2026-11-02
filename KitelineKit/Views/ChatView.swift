@@ -396,6 +396,7 @@ struct ChatView: View {
         .sheetPanel(isPresented: $showMenu) { SessionMenuSheet(key: key, perform: perform) }
         .sheetPanel(isPresented: $showMode) { ModeSheet(key: key) }
         .sheetPanel(isPresented: $showModel) { ModelSheet(key: key) }
+        .sheetPanel(isPresented: goalSheet) { GoalSheet(key: key) }
         .sheetPanel(isPresented: $showAgents) { AgentMapSheet(key: key) }
         .sheetPanel(isPresented: $showInfo) { SessionReader(slot: slot) { session in if let session { SessionInfoView(session: session) } } }
         .sheetPanel(isPresented: $showAgentInfo) { AgentInfoSheet(key: key, agent: slot.agent) }
@@ -459,6 +460,7 @@ struct ChatView: View {
             if Snapshot.sheet == "mode" { try? await Task.sleep(for: .seconds(2)); showMode = true }
             if Snapshot.sheet == "model" { try? await Task.sleep(for: .seconds(2)); showModel = true }
             if Snapshot.sheet == "agents" { try? await Task.sleep(for: .seconds(2)); showAgents = true }
+            if Snapshot.sheet == "goal" { try? await Task.sleep(for: .seconds(2)); model.chat(key).goalSheet = true }
             if let text = Snapshot.send {
                 try? await Task.sleep(for: .seconds(3))
                 model.send(key, text: text, images: [])
@@ -487,9 +489,13 @@ struct ChatView: View {
     }
     #endif
 
-    /// 输入区：任务进展条、确认卡片、输入框；终端开着时输入框换成终端面板（确认卡片照常在上面）
+    /// 输入区：目标条、任务进展条、确认卡片、输入框；终端开着时输入框换成终端面板（确认卡片照常在上面）
     private func deck(session: SessionInfo?, chat: ChatStore) -> some View {
         VStack(spacing: 8) {
+            if model.connected, let goal = session?.goal, GoalStrip.visible(goal) {
+                GoalStrip(key: key, goal: goal)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if model.connected, let stage = session?.liveStage {
                 StageStrip(stage: stage, available: chatHeight)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -504,6 +510,7 @@ struct ChatView: View {
         }
         .animation(.snappy, value: session?.isWaiting)
         .animation(.snappy, value: session?.liveStage == nil)
+        .animation(.snappy, value: session?.goal?.state)
         .environment(\.chatWidth, chatWidth)   // 分屏的窄块里：卡片按钮上下叠、打字时收起语音和停止键
         .environment(\.promptCap, promptCap)
         #if os(macOS)
@@ -568,6 +575,12 @@ struct ChatView: View {
         return max(48, chatHeight * 0.7 - chrome)
     }
 
+    /// 目标面板（输入框下面的「目标」、目标条、会话菜单都改 ChatStore 的 goalSheet）
+    private var goalSheet: Binding<Bool> {
+        let chat = model.chat(key)
+        return Binding(get: { chat.goalSheet }, set: { chat.goalSheet = $0 })
+    }
+
     /// 会话菜单里点的：菜单收起后再做
     private func perform(_ action: SessionAction) {
         switch action {
@@ -579,6 +592,7 @@ struct ChatView: View {
         case .stop: confirmStop = true
         case .mode: showMode = true
         case .model: showModel = true
+        case .goal: model.chat(key).goalSheet = true
         case .compact: confirmCompact = true
         case .newTask: showNewTask = true
         case .info: showInfo = true

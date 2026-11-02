@@ -13,6 +13,8 @@ struct SessionItem: Identifiable, Equatable {
     var line: String
     /// 这一轮任务做到第几步（忙、等确认时才有）：第二行前面挂「2/4 开发中」
     var stage: StageSnapshot?
+    /// 目标（/goal）：在做的、结束不久的，第二行前面挂「◎ 目标 · 第 3 轮」
+    var goal: GoalSnapshot?
     /// 出错停下了（侧栏「出错」筛选、状态排序排在待确认后面，同手机）
     var failed: Bool
     var sourceId: String
@@ -63,6 +65,7 @@ struct SessionItem: Identifiable, Equatable {
         name = s.name
         activity = s.act
         stage = s.liveStage
+        goal = s.listGoal
         switch s.act {
         // 等待原因、出错原因是电脑（watcher）拼的中文：按这台 Mac 的界面语言换；Claude 的回复（message）是内容，不动
         case .waiting: line = s.blockingDescription.map(ServerLang.ui) ?? L("需要确认")

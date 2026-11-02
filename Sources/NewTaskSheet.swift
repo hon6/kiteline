@@ -94,14 +94,14 @@ struct NewTaskSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("新任务").font(.app(size: 18, weight: .bold))
-                Spacer()
+            // 标题「新任务」在面板的标题栏里（同别的弹窗）；这一行是说明和搜索
+            HStack(alignment: .center, spacing: 12) {
+                Text("选择项目并填写任务内容，可附截图。将在该项目的 VS Code 窗口中新建会话（窗口未打开时将先打开）。")
+                    .font(.app(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
                 TextField("搜索项目", text: $query).textFieldStyle(.roundedBorder).frame(width: 200)
             }
-            .panelDragBackground()   // 标题这一行的空白处按住能拖动面板
-            Text("选择项目并填写任务内容，可附截图。将在该项目的 VS Code 窗口中新建会话（窗口未打开时将先打开）。")
-                .font(.app(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .panelDragBackground()   // 这一行的空白处按住能拖动面板
             scopeBars
             List(shown, selection: $selection) { project in
                 row(project).tag(project.id)
@@ -160,6 +160,7 @@ struct NewTaskSheet: View {
         .padding(20)
         // 打开时 600 宽，能拖边改大小
         .frame(minWidth: 520, idealWidth: 600, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .navigationTitle(L("新任务"))   // 放进面板的标题栏
         .onAppear(perform: load)
     }
 

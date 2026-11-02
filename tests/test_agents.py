@@ -1703,10 +1703,16 @@ class FakeCursorApi(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    events = []
+
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         usage_calls.append((self.path, self.headers.get("Authorization"), self.headers.get("Connect-Protocol-Version")))
-        if self.path.endswith("/GetCurrentPeriodUsage"):
+        if self.path.endswith("/GetFilteredUsageEvents"):
+            hit = [e for e in FakeCursorApi.events if int(body["startDate"]) <= int(e["timestamp"]) <= int(body["endDate"])]
+            size, page = int(body["pageSize"]), int(body["page"])
+            body = {"totalUsageEventsCount": len(hit), "usageEventsDisplay": hit[(page - 1) * size:page * size]}
+        elif self.path.endswith("/GetCurrentPeriodUsage"):
             body = {"billingCycleStart": "1791432413775", "billingCycleEnd": "1894110813775",
                     "planUsage": {"totalSpend": 38, "autoPercentUsed": 38, "apiPercentUsed": 0, "totalPercentUsed": FakeCursorApi.percent}}
         else:
@@ -1724,7 +1730,9 @@ threading.Thread(target=capi.serve_forever, daemon=True).start()
 cglobals = type(cursor).limits.__globals__
 real_backend = cglobals["USAGE_BACKEND"]
 cglobals["USAGE_BACKEND"] = "http://127.0.0.1:%d" % capi.server_address[1]
-cdb_path = os.path.join(os.environ["XDG_CONFIG_HOME"], "Cursor", "User", "globalStorage", "state.vscdb")
+cdb_path = os.path.join(APP, "User", "globalStorage", "state.vscdb")
+# 命令行令牌：Mac 在 ~/.cursor，Linux 在 $XDG_CONFIG_HOME/cursor（跟插件一样按系统分）
+cli_auth = os.path.join(CHOME, ".cursor", "auth.json") if sys.platform == "darwin" else os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor", "auth.json")
 os.makedirs(os.path.dirname(cdb_path), exist_ok=True)
 cdb = sqlite3.connect(cdb_path)
 cdb.execute("create table ItemTable (key text unique on conflict replace, value blob)")
@@ -1745,20 +1753,44 @@ calls_before = len(usage_calls)
 cursor.limits()
 check("Cursor：10 分钟内不再问", len(usage_calls) == calls_before)
 FakeCursorApi.status = 500
-cursor.usage = (0.0, cursor.usage[1])
+cursor.month = (0.0, cursor.month[1])
 check("Cursor：服务器一时出错 → 照样给上次的读数", cursor.limits() == {k: v for k, v in got[0].items() if k != "agent"})
 FakeCursorApi.status = 401
-cursor.usage = (0.0, cursor.usage[1])
+cursor.month = (0.0, cursor.month[1])
 check("Cursor：令牌过期（401）→ 不给旧读数", cursor.limits() is None)
 FakeCursorApi.status = 200
+# 每次请求的用量（用量报表）：同一个开关；对话 id 对上 hook 记的项目目录；一页不够翻页；10 分钟内不再问
+now_ev = int(time.time() * 1000)
+os.makedirs(os.path.join(CSTATE, "meta"), exist_ok=True)
+with open(os.path.join(CSTATE, "meta", "ev-1.json"), "w") as handle:
+    json.dump({"roots": ["/proj/cursor-app"]}, handle)
+FakeCursorApi.events = [{"timestamp": str(now_ev - i * 60000), "model": "cursor-grok-4.6-medium", "conversationId": "ev-1" if i % 2 else "ev-x",
+                         "usageEventId": "e%d" % i, "tokenUsage": {"inputTokens": 1000, "outputTokens": 50, "cacheReadTokens": 400, "totalCents": 2.5}}
+                        for i in range(150)]
+W.PLUGIN_OPTIONS_ON.discard("cursor.usage")
+check("Cursor 用量明细：没打开开关 → 不问", cursor.usage(now_ev - 86400000) == [])
+W.PLUGIN_OPTIONS_ON.add("cursor.usage")
+calls_before = len(usage_calls)
+evs = cursor.usage(now_ev - 86400000)
+check("Cursor 用量明细：翻页拿全（150 条）、token 和花费、对话对上项目目录",
+      len(evs) == 150 and len(usage_calls) - calls_before == 2 and evs[1]["cwd"] == "/proj/cursor-app" and evs[0]["cwd"] is None
+      and evs[0]["input"] == 1000 and evs[0]["cacheRead"] == 400 and abs(evs[0]["cost"] - 0.025) < 1e-9 and evs[0]["session"] == "ev-x",
+      str(evs[:2]) + str(len(usage_calls) - calls_before))
+calls_before = len(usage_calls)
+check("Cursor 用量明细：10 分钟内不再问", len(cursor.usage(now_ev - 86400000)) == 150 and len(usage_calls) == calls_before)
+cursor.events_at, cursor.events_tried = 0.0, 0.0
+FakeCursorApi.events.append({"timestamp": str(now_ev - 500), "model": "gpt-6", "conversationId": "ev-1", "usageEventId": "new",
+                             "tokenUsage": {"inputTokens": 7, "outputTokens": 3}})
+evs = cursor.usage(now_ev - 86400000)
+check("Cursor 用量明细：过了 10 分钟只补新的（不重复记）", len(evs) == 151 and [e for e in evs if e["model"] == "gpt-6"][0]["cost"] is None, len(evs))
 os.remove(cdb_path)
-os.makedirs(os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor"), exist_ok=True)
-with open(os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor", "auth.json"), "w") as handle:
+os.makedirs(os.path.dirname(cli_auth), exist_ok=True)
+with open(cli_auth, "w") as handle:
     json.dump({"accessToken": "tok-cli", "refreshToken": "r"}, handle)
-cursor.usage = (0.0, None)
+cursor.month = (0.0, None)
 check("Cursor：只装了命令行 → 用命令行 auth.json 里的令牌", cursor.limits() and usage_calls[-2][1] == "Bearer tok-cli", str(usage_calls[-2:]))
-os.remove(os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor", "auth.json"))
-cursor.usage = (0.0, None)
+os.remove(cli_auth)
+cursor.month = (0.0, None)
 check("Cursor：没登录 → 不报", cursor.limits() is None)
 W.PLUGIN_OPTIONS_ON.discard("cursor.usage")
 cglobals["USAGE_BACKEND"] = real_backend
@@ -1799,6 +1831,161 @@ except RuntimeError as exc:
     refused = str(exc)
 check("没实现 close 的插件：关闭时报不支持", "不支持远程关闭" in refused, refused)
 check("Qwen 插件实现了 close（tmux 里发 /quit）", type(qwen).close is not W.AgentPlugin.close)
+
+print("\n== 别家 agent 的 token 用量（AgentPlugin.usage → 用量报表，见 docs/agent-plugins.md 4.6）")
+u_now = int(time.time() * 1000)
+u_iso = lambda ms: time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ms / 1000)) + ".%03dZ" % (ms % 1000)
+
+# Codex：照 0.162 真实记录的样子；token_count 会重复记（只更新额度时），累计值逐次相减
+UCODEX = os.path.join(ROOT, "codex-usage")
+os.makedirs(os.path.join(UCODEX, "sessions", "2026", "11", "02"))
+os.makedirs(os.path.join(UCODEX, "archived_sessions"))
+tc = lambda ms, total, last: {"timestamp": u_iso(ms), "type": "event_msg", "payload": {"type": "token_count", "info": {
+    "total_token_usage": total, "last_token_usage": last, "model_context_window": 258400}, "rate_limits": {}}}
+tok = lambda i, c, o: {"input_tokens": i, "cached_input_tokens": c, "cache_write_input_tokens": 0, "output_tokens": o, "reasoning_output_tokens": 0, "total_tokens": i + o}
+with open(os.path.join(UCODEX, "sessions", "2026", "11", "02", "rollout-2026-11-02T08-00-00-cx1.jsonl"), "w") as handle:
+    for entry in ({"timestamp": u_iso(u_now - 9000), "type": "session_meta", "payload": {"id": "cx1", "cwd": "/proj/codex-app", "model_provider": "openai"}},
+                  {"timestamp": u_iso(u_now - 8000), "type": "turn_context", "payload": {"model": "gpt-6-luna", "cwd": "/proj/codex-app"}},
+                  tc(u_now - 7000, tok(24250, 19200, 72), tok(24250, 19200, 72)),
+                  tc(u_now - 6000, tok(24250, 19200, 72), tok(24250, 19200, 72)),          # 重复的
+                  {"timestamp": u_iso(u_now - 6500), "type": "event_msg", "payload": {"type": "token_count", "info": None, "rate_limits": {}}},
+                  tc(u_now - 5000, tok(48588, 42496, 173), tok(24338, 23296, 101))):
+        handle.write(json.dumps(entry) + "\n")
+with open(os.path.join(UCODEX, "archived_sessions", "rollout-2026-11-01T08-00-00-cx0.jsonl"), "w") as handle:
+    for entry in ({"timestamp": u_iso(u_now - 4000), "type": "turn_context", "payload": {"model": "gpt-6-mini", "cwd": "/proj/old"}},
+                  tc(u_now - 3000, tok(500, 0, 20), tok(500, 0, 20))):
+        handle.write(json.dumps(entry) + "\n")
+cx = W.codex_token_usage(u_now - 86400000, UCODEX)
+cx_main = [r for r in cx if r["model"] == "gpt-6-luna"]
+check("Codex 用量：累计值相减（重复的不算）、输入拆出缓存、带项目和会话",
+      len(cx_main) == 1 and cx_main[0]["requests"] == 2 and cx_main[0]["input"] == (24250 - 19200) + (24338 - 23296)
+      and cx_main[0]["cacheRead"] == 19200 + 23296 and cx_main[0]["output"] == 173 and cx_main[0]["cwd"] == "/proj/codex-app"
+      and cx_main[0]["session"] == "cx1" and cx_main[0]["cost"] is None, str(cx))
+check("Codex 用量：归档的会话也算", [r["model"] for r in cx if r["cwd"] == "/proj/old"] == ["gpt-6-mini"], str(cx))
+check("Codex 用量：时间段外的不给", W.codex_token_usage(u_now + 7200000, UCODEX) == [])
+
+# Proma：每轮结尾的 result；有 modelUsage 按模型分、带各自花费
+proma_write("usage-p", [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "好"}], "model": "glm-5"}, "_createdAt": u_now - 5000},
+    {"type": "result", "subtype": "success", "_createdAt": u_now - 4000, "num_turns": 3, "total_cost_usd": 0.42,
+     "usage": {"input_tokens": 300, "output_tokens": 50, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 200}},
+    {"type": "result", "subtype": "success", "_createdAt": u_now - 2000, "num_turns": 2, "total_cost_usd": 0.3,
+     "modelUsage": {"glm-5": {"inputTokens": 100, "outputTokens": 10, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "costUSD": 0.2},
+                    "glm-5-air": {"inputTokens": 40, "outputTokens": 4, "costUSD": 0.1}}}])
+pu = W.proma_usage_scan(os.path.join(PROMA, "agent-sessions", "usage-p.jsonl"))
+glm = [r for r in pu if r["model"] == "glm-5"]
+check("Proma 用量：每轮结尾的汇总、花费；modelUsage 按模型分",
+      len(glm) == 1 and glm[0]["input"] == 400 and glm[0]["cacheRead"] == 1000 and glm[0]["cacheWrite"] == 200 and glm[0]["requests"] == 5
+      and abs(glm[0]["cost"] - 0.62) < 1e-9 and [r["cost"] for r in pu if r["model"] == "glm-5-air"] == [0.1], str(pu))
+
+# DSH：投影缓存里只有累计值 → 记账，涨了多少记多少；文件没变不重复记
+UDSH = os.path.join(ROOT, "dsh-usage")
+dsh_cache = os.path.join(UDSH, "storages", "session_projcache", "sessions")
+os.makedirs(dsh_cache)
+ledger = os.path.join(ROOT, "data", "dsh-usage-test.json")
+
+
+def dsh_proj(sid, totals, steps, when, mtime):
+    path = os.path.join(dsh_cache, sid + ".json")
+    rows = {"tokenUsage": {"ver": 2, "seq": 1, "val": {"totals": dict(zip(("uncachedInputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"), totals))}},
+            "sessionStats": {"ver": 1, "seq": 1, "val": {"steps": steps}}, "timeContext": {"ver": 1, "seq": 1, "val": {"lastMessageTime": when}},
+            "modelSelection": {"ver": 1, "seq": 1, "val": {"lastUsed": {"provider": "deepseek-account", "model": "deepseek-flash"}}}}
+    with open(path, "w") as handle:
+        json.dump({"record": {"identity": {"cwd": "/proj/dsh-app", "createdAt": when}, "rows": rows}}, handle)
+    os.utime(path, (mtime, mtime))
+
+
+dsh_proj("session-a", (1000, 200, 5000, 0), 4, u_now - 7200000, 1000)
+first = W.dsh_usage(u_now - 86400000, UDSH, ledger)
+check("DSH 用量：第一次看到 → 整段累计记在最后一条消息的时间", len(first) == 1 and first[0]["input"] == 1000 and first[0]["cacheRead"] == 5000
+      and first[0]["requests"] == 4 and first[0]["ts"] == u_now - 7200000 and first[0]["model"] == "deepseek-flash" and first[0]["cwd"] == "/proj/dsh-app",
+      str(first))
+check("DSH 用量：文件没变 → 不重复记", len(W.dsh_usage(u_now - 86400000, UDSH, ledger)) == 1)
+dsh_proj("session-a", (1500, 260, 9000, 0), 6, u_now - 60000, 2000)
+grown = W.dsh_usage(u_now - 86400000, UDSH, ledger)
+check("DSH 用量：涨了 → 只记涨的那部分", len(grown) == 2 and grown[1]["input"] == 500 and grown[1]["output"] == 60 and grown[1]["cacheRead"] == 4000
+      and grown[1]["requests"] == 2 and grown[1]["ts"] == u_now - 60000, str(grown))
+
+# OpenCode：数据库 part 表 step-finish 那条；输出 = output + reasoning；只补新的、按 part id 不重复
+UOC = os.path.join(ROOT, "oc-usage.db")
+odb = sqlite3.connect(UOC)
+odb.executescript("create table session (id text primary key, directory text);"
+                  "create table message (id text primary key, session_id text, time_created integer, data text);"
+                  "create table part (id text primary key, message_id text, session_id text, time_created integer, data text);")
+odb.execute("insert into session values ('ses1', '/proj/oc-app')")
+odb.execute("insert into message values ('msg1', 'ses1', ?, ?)", (u_now - 9000, json.dumps({"role": "assistant", "modelID": "kimi-k3", "providerID": "moonshot",
+                                                                                           "tokens": {"input": 1, "output": 1}, "cost": 0.05})))
+step = lambda pid, ms, i, o, r, cr, cost: ("insert into part values (?, 'msg1', 'ses1', ?, ?)", (pid, ms, json.dumps(
+    {"type": "step-finish", "sessionID": "ses1", "tokens": {"input": i, "output": o, "reasoning": r, "cache": {"read": cr, "write": 0}}, "cost": cost})))
+odb.execute(*step("p1", u_now - 8000, 800, 60, 20, 3000, 0.02))
+odb.execute(*step("p2", u_now - 7000, 900, 40, 0, 3500, 0.03))
+odb.execute("insert into part values ('p3', 'msg1', 'ses1', ?, ?)", (u_now - 6500, json.dumps({"type": "text", "text": "step-finish 只是一段字"})))
+odb.commit()
+oc = W.opencode_usage(u_now - 86400000, UOC)
+check("OpenCode 用量：每一步一条（不用消息上的）、输出含推理、花费、项目目录",
+      sorted((r["input"], r["output"], r["cacheRead"]) for r in oc) == [(800, 80, 3000), (900, 40, 3500)]
+      and abs(sum(r["cost"] for r in oc) - 0.05) < 1e-9 and {r["cwd"] for r in oc} == {"/proj/oc-app"} and {r["model"] for r in oc} == {"kimi-k3"}, str(oc))
+odb.execute(*step("p4", u_now - 1000, 100, 10, 0, 0, 0))
+odb.commit()
+odb.close()
+oc = W.opencode_usage(u_now - 86400000, UOC)
+check("OpenCode 用量：只补新的、不重复", len(oc) == 3 and [r["input"] for r in oc if r["ts"] == u_now - 1000] == [100], str(oc))
+
+# Qwen Code：每次请求一条助手记录；输入含缓存要拆；/branch 抄过来的（forkedFrom）不算
+with open(os.path.join(QCHATS, "q-usage.jsonl"), "w") as handle:
+    for entry in ({"type": "assistant", "uuid": "qa1", "sessionId": "q-usage", "timestamp": u_iso(u_now - 5000), "cwd": QCWD, "model": "qwen3.6-coder",
+                   "usageMetadata": {"promptTokenCount": 5000, "cachedContentTokenCount": 4000, "candidatesTokenCount": 120, "thoughtsTokenCount": 30, "totalTokenCount": 5150}},
+                  {"type": "assistant", "uuid": "qa2", "sessionId": "q-usage", "timestamp": u_iso(u_now - 4000), "cwd": QCWD, "model": "qwen3.6-coder",
+                   "usageMetadata": {"promptTokenCount": 6000, "candidatesTokenCount": 200, "thoughtsTokenCount": 50, "totalTokenCount": 6200}},
+                  {"type": "assistant", "uuid": "qa0", "sessionId": "q-usage", "timestamp": u_iso(u_now - 3000), "cwd": QCWD, "model": "qwen3.6-coder",
+                   "forkedFrom": {"sessionId": "q-old", "messageUuid": "qa0"}, "usageMetadata": {"promptTokenCount": 99999, "totalTokenCount": 99999}},
+                  {"type": "system", "subtype": "ui_telemetry", "timestamp": u_iso(u_now - 3000), "usageMetadata": {"promptTokenCount": 88888}}):
+        handle.write(json.dumps(entry) + "\n")
+qu = [r for r in qwen.usage(u_now - 86400000) if r["session"] == "q-usage"]
+check("Qwen 用量：输入拆出缓存、输出按 total - prompt（Gemini 思考另算 / OpenAI 含在里面都对）、抄过来的和界面统计不算",
+      len(qu) == 1 and qu[0]["input"] == 1000 + 6000 and qu[0]["cacheRead"] == 4000 and qu[0]["output"] == 150 + 200 and qu[0]["requests"] == 2
+      and qu[0]["cwd"] == QCWD and qu[0]["cost"] is None, str(qu))
+
+
+# 合进用量报表：按天 / 模型 / 项目 / agent；agent 没记花费的模型列进「无费率」
+class UsageDemo(W.AgentPlugin):
+    id, name = "usage-demo", "Usage Demo"
+
+    def usage(self, since_ms):
+        return [{"ts": u_now - 1000, "model": "demo-pro", "cwd": "/proj/demo", "session": "d1", "input": 100, "output": 10, "cacheRead": 0,
+                 "cacheWrite": 0, "requests": 1, "cost": 0.5},
+                {"ts": u_now - 2000, "model": "demo-free", "cwd": "/proj/demo", "session": "d2", "input": 30, "output": 3, "requests": 1, "cost": None},
+                {"ts": u_now - 5 * 86400000, "model": "demo-pro", "input": 999, "requests": 1, "cost": 9}]
+
+
+class BrokenUsage(W.AgentPlugin):
+    id, name = "broken-usage", "Broken"
+
+    def usage(self, since_ms):
+        raise RuntimeError("坏了")
+
+
+report = W.usage_report(u_now - 86400000, None, 0, W.AgentPlugins([UsageDemo(), BrokenUsage()], external=[], off=()))
+demo = [a for a in report["agents"] if a["agent"] == "usage-demo"]
+check("用量报表：插件报的并进总数，按 agent 分（时间段外的不算）",
+      demo and demo[0]["input"] == 130 and demo[0]["requests"] == 2 and abs(demo[0]["cost"] - 0.5) < 1e-9 and demo[0]["name"] == "Usage Demo"
+      and report["totals"]["input"] >= 130, str(report["agents"]))
+check("用量报表：按模型、按项目里有它；没记花费的模型列进「无费率」、会话数算上",
+      {"demo-pro", "demo-free"} <= {m["model"] for m in report["models"]} and "/proj/demo" in [p["cwd"] for p in report["projects"]]
+      and "demo-free" in report["unpriced"] and "demo-pro" not in report["unpriced"] and report["sessions"] >= 2, str(report)[:400])
+check("用量报表：一个插件读用量出错不影响别的", any(a["agent"] == "usage-demo" for a in report["agents"]))
+
+
+class TokensOnly(W.AgentPlugin):
+    id, name = "tokens-only", "Tokens Only"
+
+    def usage(self, since_ms):
+        return [{"ts": u_now - 1000, "model": "free-model", "input": 5, "output": 1, "requests": 1, "cost": None}]
+
+
+report = W.usage_report(u_now - 86400000, None, 0, W.AgentPlugins([UsageDemo(), TokensOnly()], external=[], off=()))
+flags = {a["agent"]: a.get("unpriced") for a in report["agents"]}
+check("用量报表：一条花费都没记的 agent 标「无费率」（界面写「仅 token」），记了的不标", flags.get("tokens-only") is True and flags.get("usage-demo") is False, str(flags))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 if os.path.exists("/tmp/kl-agents-%d.sock" % os.getpid()):

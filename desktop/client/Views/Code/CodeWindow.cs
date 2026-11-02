@@ -149,7 +149,7 @@ public sealed partial class CodeWindow
         root.Children.Add(Ui.Rule("Separator", 0.5).Self(Align.Stretch));
         DockPanel.SetDock(root.Children[^1], Dock.Top);
         root.Children.Add(grid);
-        window = Dialog.Make(root, 1240, L("代码"));
+        window = Dialog.Make(root, 1240, L("代码"), titleBar: false);   // 自己画了标题栏和窗口按钮
         window.SizeToContent = SizeToContent.Manual;
         window.Height = 820;
         window.MinWidth = 820;
@@ -573,17 +573,18 @@ public sealed partial class CodeWindow
         box.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Ok(); e.Handled = true; } else if (e.Key == Key.Escape) { w?.Close(); e.Handled = true; } };
         var ok = PromptCard.CardButton(confirm.Length > 0 ? confirm : L("确定"), true, Ok);
         var cancel = PromptCard.CardButton(L("取消"), false, () => { done.TrySetResult(null); w?.Close(); });
-        var stack = new StackPanel { Spacing = 12, Children = { Ui.Text(title, 14, FontWeight.SemiBold) } };
+        var stack = new StackPanel { Spacing = 12 };   // 标题在统一的标题栏里
         if (message is not null) stack.Children.Add(Ui.Text(message, 12, color: "Text2", lines: 0).Wrap());
         stack.Children.Add(box);
         stack.Children.Add(new ButtonPair(cancel, ok));
         w = new Window
         {
             Width = 420, SizeToContent = SizeToContent.Height, CanResize = true, MinWidth = 320, ShowInTaskbar = false, Title = title,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = stack.Pad(20), FontFamily = Look.Family,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, FontFamily = Look.Family,
         };
+        w.Content = Dialog.WithTitleBar(w, stack.Pad(20, 4, 20, 20));
         w.Res(Window.BackgroundProperty, "Sheet");
-        Dialog.Chromeless(w);
+        Dialog.Chromeless(w, titleBar: true);
         w.Opened += (_, _) => { box.Focus(); box.SelectAll(); };
         w.Closed += (_, _) => done.TrySetResult(null);
         Dialog.Show(w, modal: true);

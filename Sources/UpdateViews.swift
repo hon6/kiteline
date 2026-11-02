@@ -63,11 +63,10 @@ final class UpdateWindowController: NSWindowController, NSWindowDelegate {
         let hosting = NSHostingController(rootView: root.tarsLook())
         hosting.sizingOptions = [.preferredContentSize]
         let panel = NSPanel(contentViewController: hosting)
-        panel.styleMask = [.titled, .closable, .fullSizeContentView]
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
+        // 同别的弹窗（11-02 反馈：要有标题栏、全屏、关闭）：标题栏写明是什么，红黄绿钮都能用，绿钮铺满屏幕
+        panel.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         panel.isMovableByWindowBackground = true
-        panel.title = "Kiteline"
+        panel.title = phones ? L("手机端更新") : L("Kiteline 更新")
         panel.isReleasedWhenClosed = false
         // 自动弹出时 Kiteline 多半不在前台：别一切到别的 App 就藏起来
         panel.hidesOnDeactivate = false
@@ -118,6 +117,11 @@ final class UpdateWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func close(_ sender: Any? = nil) { window?.close() }
+
+    /// 绿钮：铺满所在屏幕（菜单栏、程序坞以外），再按一次回到原来的大小
+    func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame newFrame: NSRect) -> NSRect {
+        (window.screen ?? NSScreen.main)?.visibleFrame ?? newFrame
+    }
 
     func windowWillClose(_ notification: Notification) {
         guard !isPhones, phonesWaiting else { return }

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import KitelineKit
 import UserNotifications
 
 protocol SessionStoreDelegate: AnyObject {
@@ -15,6 +16,8 @@ protocol SessionStoreDelegate: AnyObject {
 ///  1. 某会话处于 waiting → 「需要你确认」提醒（同一等待原因只提醒一次）
 ///  2. 会话从 busy 变成 idle 且带结论文本 → 「出结论了」提醒（同一 messageUuid 只提醒一次）
 ///  3. App 启动时已经存在的等待/结论不补发提醒，避免一开机就被历史消息轰炸
+///  4. 别的会话来信引起的那一轮（turnFrom = peer）答完不提醒：那是会话之间的往来，回给发信的会话就行；出错停下照样提醒
+///  5. 设了目标（/goal）的会话：每一轮停下不提醒（Codex 一轮接一轮自己续做），目标达成、做不到、停下来时提醒一次
 final class SessionStore {
     weak var delegate: SessionStoreDelegate?
 
@@ -184,6 +187,12 @@ final class SessionStore {
             return .appeared
         }
 
+        if new.snapshot.act != .waiting, let goal = GoalSnapshot.ended(old: old.snapshot.goal, new: new.snapshot.goal) {
+            // 这一条替掉同时到的「已完成」：结论记成提醒过了
+            if new.snapshot.act == .idle { notifiedConclusions[key] = new.snapshot.messageUuid ?? new.snapshot.message }
+            return .goalEnded(goal)
+        }
+
         if new.snapshot.act == .waiting {
             let reason = needsKey(new)
             if notifiedNeeds[key] != reason {
@@ -206,6 +215,9 @@ final class SessionStore {
             let fingerprint = new.snapshot.messageUuid ?? message
             if notifiedConclusions[key] != fingerprint {
                 notifiedConclusions[key] = fingerprint
+                if new.snapshot.fromPeer, new.snapshot.error == nil { return nil }
+                // 目标还在做：这一轮停下不算完（达成了下一刻就到、停下了过几秒就认出来），等目标的提醒
+                if new.snapshot.goal?.state == "active" { return nil }
                 return .concluded(message: message)
             }
             return nil
@@ -223,6 +235,8 @@ final class SessionStore {
                now.timeIntervalSince(last) < config.attentionCooldownSeconds { return false }
             lastAttentionAt[record.key] = now
             return true
+        case .goalEnded:
+            return config.notifyOnConclusion
         case .concluded:
             guard config.notifyOnConclusion else { return false }
             if let last = lastConclusionAt[record.key],
@@ -344,6 +358,10 @@ final class NotificationCenterBridge: NSObject, UNUserNotificationCenterDelegate
             content.title = snapshot.error == nil ? "已完成 · \(snapshot.name)" : "出错已停止 · \(snapshot.name)"
             content.subtitle = record.sourceName
             content.body = snapshot.error?.display ?? message
+        case .goalEnded(let goal):
+            content.title = "\(L(GoalText.head(goal.state))) · \(snapshot.displayTitle)"
+            content.subtitle = record.sourceName
+            content.body = goal.pushBody(english: Lang.shared.isEnglish)
         default:
             return
         }

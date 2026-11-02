@@ -481,9 +481,13 @@ public static class EventRow
         if (item.ResetAt is double reset)
             text = reset > Format.NowMs ? L("%@，%@ 恢复", text, Format.ResetTime(reset)) : L("%@（%@ 已恢复）", text, Format.ResetTime(reset));
         var color = item.Level == "error" ? "Removed" : "Text2";
+        // 目标的那几行（设定、每轮检查、达成……）：前面带个小图标，达成的写上用了几轮、多久
+        if (item.Goal is not null && GoalText.Stats(item.GoalTurns, item.GoalMs is double ms ? (int)(ms / 1000) : null, item.GoalTokens) is { Length: > 0 } stats)
+            text += " · " + stats;
         var label = Ui.Text(text, 11.5, color: color, lines: 0).Wrap();
         label.TextAlignment = TextAlignment.Center;
         Control content = item.Detail is null ? label : Ui.H(4, label.Shrink(), Ui.Sym("chevron.right", 9, color));
+        if (item.Goal is string kind) content = Ui.H(4, Ui.Sym(GoalText.EventSymbol(kind), 11, color), content.Shrink());
         var box = Ui.Box(content, new Thickness(12, 6), "Fill06", 8);
         box.HorizontalAlignment = HorizontalAlignment.Center;
         box.Margin = new Thickness(40, 10);

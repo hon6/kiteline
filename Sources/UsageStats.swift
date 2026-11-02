@@ -40,25 +40,55 @@ enum UsageStats {
         guard let url = endpoint, AppState.shared.config.mobile.usageStats, !sending else { return }
         sending = true
         let wantUsage = force || lastUsage.map { Date().timeIntervalSince($0) > usageEvery } ?? true
-        collectUsage(wantUsage) { usage in
-            var body = snapshot()
-            let fingerprint = try? JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
-            if usage == nil, !force, fingerprint == lastFingerprint, let last = lastSent, Date().timeIntervalSince(last) < heartbeat {
-                sending = false
-                return
+        // 本机装了哪些 Agent：一小时问一次（后台据此看出「装了 Kiteline 却没有任何 Agent」的电脑）
+        let wantAgents = force || lastAgentCheck.map { Date().timeIntervalSince($0) > 3600 } ?? true
+        AgentCheck.run(skip: !wantAgents) { found in
+            if let found {
+                installedAgents = found.filter(\.installed).map(\.id)
+                lastAgentCheck = Date()
             }
-            if let usage {
-                body["days"] = usage.days
-                body["models"] = usage.models
-            }
-            post(url, body) { ok in
-                sending = false
-                guard ok else { return }
-                lastSent = Date()
-                lastFingerprint = fingerprint
-                if usage != nil { lastUsage = Date() }
+            collectUsage(wantUsage) { usage in
+                var body = snapshot()
+                let fingerprint = try? JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+                if usage == nil, !force, fingerprint == lastFingerprint, let last = lastSent, Date().timeIntervalSince(last) < heartbeat {
+                    sending = false
+                    return
+                }
+                if let usage {
+                    body["days"] = usage.days
+                    body["models"] = usage.models
+                }
+                post(url, body) { ok in
+                    sending = false
+                    guard ok else { return }
+                    lastSent = Date()
+                    lastFingerprint = fingerprint
+                    if usage != nil { lastUsage = Date() }
+                }
             }
         }
+    }
+
+    /// 本机检测到的 Agent（id）：nil = 还没检测过（报 null）
+    static var installedAgents: [String]?
+    private static var lastAgentCheck: Date?
+
+    /// 用户主动提交的反馈（第一次打开的引导里「你使用的 Agent 不在列表中？」）：和使用统计同一个本机编号，
+    /// 发到 /stats/feedback。是用户自己点的「提交」，不看「帮助改进 Kiteline」开关；测试实例没指地址时不发
+    static func feedback(_ fields: [String: Any], completion: @escaping (Bool) -> Void) {
+        guard let url = endpoint?.deletingLastPathComponent().appendingPathComponent("feedback") else {
+            DispatchQueue.main.async { completion(false) }
+            return
+        }
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        var body: [String: Any] = [
+            "v": 1, "install": identity.install, "key": identity.key,
+            "name": Profile.displayName(AppState.shared.config.mobile), "platform": "macos",
+            "os": "macOS \(os.majorVersion).\(os.minorVersion)", "app": AppVersion.app,
+            "lang": Locale.preferredLanguages.first ?? "",
+        ]
+        body.merge(fields) { _, new in new }
+        post(url, body, completion: completion)
     }
 
     // MARK: 本机编号
@@ -128,6 +158,8 @@ enum UsageStats {
                 "watch": devices.contains { $0.watch?.installed == true },
             ],
             "hosts": sources.filter { $0.config.enabled }.map { ["kind": $0.config.kind == .ssh ? "ssh" : "local", "live": $0.state.isLive] },
+            // 本机装了哪些 Agent；还没检测过时是 null（后台显示「未知」，和「一个都没有」分开）
+            "agents": installedAgents.map { $0 as Any } ?? NSNull(),
             "devices": devices.map { device(for: $0, pushed: pushed.contains($0.id)) },
             "sessions": state.store.records.map(session(for:)),
         ]

@@ -454,7 +454,7 @@ public sealed class GroupChatPage : Panel
                 ? new MessageImages(key, message.Images.Select(m => new ChatImage(m.Ref, null, m.Name)).ToList(), path: GroupMedia.Path).HAlign(HorizontalAlignment.Right) : null;
             var files = message.Files.Count > 0
                 ? new Bubble(true, true, FileOpen.GroupChips(group.Id, message.Files), string.Join("\n", message.Files.Select(f => f.Name))).MaxW(560) : null;
-            var bubble = message.Text.Length > 0 ? new Bubble(true, true, Ui.Text(message.Text, 13, color: "BubbleText", lines: 0).Wrap(), message.Text).MaxW(560) : null;
+            var bubble = message.Text.Length > 0 ? new Bubble(true, true, new RichText(message.Text, ChatType.Size, color: Bubble.TextColor(true)), message.Text).MaxW(560) : null;
             return Ui.Stack(Orientation.Vertical, 4, Align.End, [Ui.Text(Format.ListTime(message.Ts), 10.5, color: "Text3"), images, files, bubble,
                 delivery.Length > 0 ? Ui.Text(delivery, 10.5, color: failed ? "Red" : "Text2", lines: 0).Wrap() : null]).HAlign(HorizontalAlignment.Right);
         }
@@ -654,7 +654,7 @@ public static class GroupRename
         var stack = new StackPanel
         {
             Spacing = 12,
-            Children = { Ui.Text(L("修改群名"), 15, FontWeight.SemiBold), box, Ui.Text(L("改过之后，agent 不会再自动起名。"), 11.5, color: "Text2"), new ButtonPair(cancel, ok) },
+            Children = { box, Ui.Text(L("改过之后，agent 不会再自动起名。"), 11.5, color: "Text2"), new ButtonPair(cancel, ok) },   // 「修改群名」在标题栏里
         };
         window = Dialog.Make(stack.Pad(20), 400, L("修改群名"));
         window.Opened += (_, _) => { box.Focus(); box.SelectAll(); };

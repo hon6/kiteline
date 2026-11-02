@@ -71,6 +71,36 @@ os.environ.pop("KITELINE_SKILL_TEST")
 os.environ["KITELINE_CONFIG_DIR"] = os.environ.get("KITELINE_CONFIG_DIR") or "/tmp/kl-isolated"
 check("隔离的测试实例不带技能开关（不动真的技能目录）", agent_skill.local_env("/x/ccpulse-watch.py") == {})
 agent_skill.ENABLED = agent_skill.TEST_ENABLED = agent_skill.TODO_ENABLED = True
+# 技能命令里的路径：没空格不加引号（带引号的程序路径 PowerShell 不执行），有空格才加
+check("技能命令：路径没空格不加引号（PowerShell、cmd、Git Bash 都能跑）",
+      agent_skill._quote("C:\\Users\\kite\\.ccpulse\\ccpulse-watch.py") == "C:/Users/kite/.ccpulse/ccpulse-watch.py")
+check("技能命令：路径有空格还是加引号", agent_skill._quote("/home/a b/ccpulse-watch.py") == '"/home/a b/ccpulse-watch.py"')
+
+print("== 用量：各台电脑按 agent 合起来（旧版 watcher 没有这一项，当它只统计 Claude Code）")
+import threading as _ag_threading  # noqa: E402
+from kiteline import aggregate as _ag  # noqa: E402
+
+
+class _AgSource:
+    def __init__(self, sid, name, reply):
+        self.id, self.name, self.live, self.reply, self.kind = sid, name, True, reply, "local"
+
+    def request(self, request, timeout=None):
+        return self.reply
+
+
+_ag_row = lambda **kw: dict({"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "requests": 0, "cost": 0.0, "estimated": 0.0}, **kw)
+_ag_new = {"days": [], "models": [], "projects": [], "unpriced": ["deepseek-flash"],
+           "totals": _ag_row(input=130, output=13, requests=3, cost=1.0),
+           "agents": [_ag_row(agent="claude", name="Claude Code", input=100, output=10, requests=2, cost=1.0),
+                      _ag_row(agent="deepseek-harness", name="DeepSeek Harness", input=30, output=3, requests=1, unpriced=True)]}
+_ag_old = {"days": [], "models": [], "projects": [], "unpriced": [], "totals": _ag_row(input=50, output=5, requests=1, cost=0.5)}
+_ag_store = type("Store", (), {"lock": _ag_threading.Lock(), "sources": {"a": _AgSource("a", "Mac", _ag_new), "b": _AgSource("b", "旧电脑", _ag_old)}})()
+_ag_report = _ag.usage(_ag_store, 1, fresh=True)
+_ag_by = {a["agent"]: a for a in _ag_report.get("agents") or []}
+check("用量按 agent：两台合起来、旧版 watcher 算进 Claude Code", _ag_by.get("claude", {}).get("input") == 150
+      and _ag_by.get("claude", {}).get("requests") == 3 and not _ag_by["claude"].get("unpriced"), str(_ag_report.get("agents")))
+check("用量按 agent：没记花费的 agent 带「仅 token」标记", _ag_by.get("deepseek-harness", {}).get("unpriced") is True, str(_ag_by))
 
 print("== 语音分段")
 import numpy as np  # noqa: E402
@@ -677,6 +707,7 @@ _ica.cfg.mobile["autoCloseIdle"] = True
 _ic2 = idleclose.IdleClose(_ica)
 check("打开记录存盘、重启后还在（不会重启一次就从头算）", _ic2.idle("local#b", _t0 + 3600 + 5) == 5)
 # 1.0.20 存的是一张表；各端启动时报来本机历史（最后看过），补上升级前的
+import json as _json  # noqa: E402  （上面的只在 Linux 分支里导入）
 with open(_ic.path, "w", encoding="utf-8") as _f:
     _json.dump({"local#a": _t0 * 1000, "local#b": (_t0 + 30) * 1000, "local#c": (_t0 + 5 * 3600) * 1000}, _f)
 _ic3 = idleclose.IdleClose(_ica)
@@ -798,6 +829,59 @@ _uh_u._evaluate_phones()
 check("手机升级了：手机端提醒收起", "phones" not in _uh_u.state())
 _uh_server.shutdown()
 del os.environ["KITELINE_UPDATE_URL"], os.environ["KITELINE_STORE_LOOKUP"]
+
+print("== 别的会话来信引起的那一轮答完不提醒（store）")
+from kiteline.store import Store as _Store  # noqa: E402
+
+_sn_calls = []
+_sn = _Store({}, lambda: None, lambda record, kind, text: _sn_calls.append((kind, text)))
+_sn_src = type("Src", (), {"id": "local", "name": "本机", "kind": "local", "config": {}})()
+
+
+def _sn_apply(activity, uuid, message, **extra):
+    _sn.apply_snapshots(_sn_src, [dict({"sessionId": "s1", "name": "s1", "activity": activity, "message": message, "messageUuid": uuid}, **extra)])
+
+
+_sn_apply("idle", "m0", "旧结论")
+_sn_apply("busy", "m0", "旧结论", turnFrom="user")
+_sn_apply("idle", "m1", "首页改好了", turnFrom="user")
+check("你发起的一轮答完：照常提醒", _sn_calls == [("conclusion", "首页改好了")], str(_sn_calls))
+del _sn_calls[:]
+_sn_apply("busy", "m1", "首页改好了", turnFrom="peer")
+_sn_apply("idle", "m2", "已回复 ccpulse-67：可以拍快照了", turnFrom="peer")
+check("别的会话来信那一轮答完：不提醒", _sn_calls == [], str(_sn_calls))
+_sn._last_conclusion.clear()   # 过了冷却（同一会话 20 秒内只提醒一次）
+_sn_apply("idle", "m3", "Claude 用量已达上限", turnFrom="peer", error={"kind": "limit", "text": "Claude 用量已达上限"})
+check("来信那一轮出错停下：照样提醒", [k for k, _ in _sn_calls] == ["conclusion"], str(_sn_calls))
+del _sn_calls[:]
+_sn._last_conclusion.clear()   # 过了冷却
+_sn_apply("idle", "m4", "又改好一处")
+check("老 watcher 不带 turnFrom：照常提醒", _sn_calls == [("conclusion", "又改好一处")], str(_sn_calls))
+
+print("== 目标（/goal）：每一轮停下不提醒，达成、做不到、停下时提醒一次（store）")
+from kiteline.store import caps_payload as _caps, goal_push_body as _goal_body  # noqa: E402
+
+_goal = {"text": "测试全部通过", "state": "active", "checks": 1, "since": 1793610000000}
+del _sn_calls[:]
+_sn._last_conclusion.clear()
+_sn_apply("busy", "m4", "又改好一处", goal=_goal)
+_sn_apply("idle", "m5", "这一轮做完了", goal=_goal)
+check("目标还在做：这一轮停下不提醒（Codex 一轮接一轮续做）", _sn_calls == [], str(_sn_calls))
+_sn_apply("idle", "m5", "这一轮做完了", goal=dict(_goal, state="met", checks=3, turns=3, durationMs=720000, reason="全部通过"))
+check("目标达成：提醒一次（kind goal，带着目标）", [(k, t.get("state")) for k, t in _sn_calls] == [("goal", "met")], str(_sn_calls))
+_sn_apply("idle", "m5", "这一轮做完了", goal=dict(_goal, state="met", checks=3, turns=3, durationMs=720000, reason="全部通过"))
+check("状态没变：不再提醒", len(_sn_calls) == 1, str(_sn_calls))
+del _sn_calls[:]
+_sn_apply("busy", "m5", "x", goal=dict(_goal, text="迁移数据"))
+_sn_apply("idle", "m6", "停在第 2 步", goal=dict(_goal, text="迁移数据", state="paused", note="目标检查超时"))
+check("目标停下：提醒（结论那条不再另推）", [k for k, _ in _sn_calls] == ["goal"], str(_sn_calls))
+met = dict(_goal, state="met", checks=3, turns=3, durationMs=720000)
+check("推送正文：目标 + 用了几轮、多久；英文那份按表换", _goal_body(met, False) == "目标：测试全部通过\n用了 3 轮 · 12 分钟"
+      and _goal_body(met, True).startswith("Goal: 测试全部通过") and "3 turns" in _goal_body(met, True), _goal_body(met, True))
+check("停下的正文写原因；没有原因提示发消息继续", _goal_body(dict(_goal, state="paused", note="目标检查超时"), False).endswith("目标检查超时")
+      and _goal_body(dict(_goal, state="paused"), False).endswith("发送消息即可继续"))
+check("Claude Code 2.1.139 起才给「目标」，别家看插件给的", "goal" in _caps({"version": "2.1.314"}) and "goal" not in _caps({"version": "2.1.120"})
+      and "goal" not in _caps({"agent": "opencode"}) and _caps({"agent": "codex", "caps": ["goal", "goal-pause"]}) == ["goal", "goal-pause"])
 
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

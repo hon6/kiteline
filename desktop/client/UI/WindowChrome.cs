@@ -23,8 +23,8 @@ public static class WindowChrome
     public const double ShadowMargin = 18;
     public const double Radius = 14;
 
-    /// 是否自己画外框（Linux）
-    public static bool Custom => OperatingSystem.IsLinux() && !Program.Headless;
+    /// 是否自己画外框（Linux）。离屏截图（--render）默认不画；KITELINE_RENDER_CHROME=1 照 Linux 桌面的样子画（自测看弹窗标题栏、窗口按钮）
+    public static bool Custom => OperatingSystem.IsLinux() && (!Program.Headless || Environment.GetEnvironmentVariable("KITELINE_RENDER_CHROME") == "1");
 
     /// 打开前按所在屏幕的可用范围收小（矮屏幕上 780 高的窗口标题栏会跑到屏幕外、拖不动），再放到正中
     public static void FitToScreen(Window window, double margin = 40)

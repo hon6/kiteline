@@ -1,7 +1,7 @@
 {
  "id": "qwen-code",
  "name": "Qwen Code",
- "version": "1.0.3",
+ "version": "1.0.4",
  "summary": "通义千问的命令行编程 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复和确认",
  "summaryEn": "Qwen's command-line coding agent: view sessions, status and full conversations; reply and confirm when it runs in tmux",
  "needs": [
@@ -55,6 +55,6 @@
  },
  "limitsNote": "Qwen Code 的免费额度已于 2026 年 4 月停止；阿里云百炼 Coding Plan 的用量只能在阿里云控制台查看，没有查询接口，「今日用量」中不显示",
  "limitsNoteEn": "Qwen Code's free quota ended in April 2026, and Alibaba Cloud Model Studio Coding Plan usage can only be viewed in the Alibaba Cloud console (no usage API), so it isn't shown under Today's usage",
- "notes": "设置 → 插件中说明 Qwen Code 的额度情况：免费额度已停止，Coding Plan 用量需在阿里云控制台查看。",
- "notesEn": "Settings → Plugins now explains Qwen Code usage limits: the free quota has ended, and Coding Plan usage is viewed in the Alibaba Cloud console."
+ "notes": "用量统计（「今日用量」和用量页的 token，按模型、项目、Agent 分）计入 Qwen Code；Qwen Code 不记录花费，只统计 token。",
+ "notesEn": "Usage stats (tokens in Today’s Usage and on the Usage page, by model, project and agent) now include Qwen Code. Qwen Code doesn't record spend, so only tokens are counted."
 }

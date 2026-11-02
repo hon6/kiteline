@@ -766,6 +766,10 @@ struct SessionRow: View {
                         }
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    // 设了目标的：目标到哪了（鼠标停上去看目标原文）
+                    if let goal = item.goal {
+                        GoalBadge(state: goal.state, round: goal.round, size: 10.5).hoverTip(goal.text)
+                    }
                     // 正在做的会话：这一轮做到第几步（主题色小标识，几个会话各到哪一步一眼看清）
                     if let stage = item.stage {
                         StageBadge(step: stage.step, total: stage.total, label: stage.label, part: stage.part, dots: stage.dots, size: 10.5)
@@ -1121,6 +1125,10 @@ struct WelcomeView: View {
                 }
                 Button { SettingsWindowController.shared.show(tab: .phone) } label: {
                     Label("在手机上使用", systemImage: "iphone.gen3")
+                }
+                .tarsButton()
+                Button { OnboardingWindowController.shared.show() } label: {
+                    Label("新手引导", systemImage: "list.number")
                 }
                 .tarsButton()
             }

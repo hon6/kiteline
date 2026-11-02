@@ -19,7 +19,7 @@ Why are some agents view-only? See the [plugin development guide](docs/plugin-de
 | **DeepSeek Harness** <br><sub>built-in plugin, opt-in</sub> | Desktop app | Full ✓ | Full ✓ | — <sup>3</sup> |
 |  | CLI | Full | Full | Full ✓ |
 | **Proma** <br><sub>built-in plugin</sub> | Desktop app | View only <sup>4</sup> | View only <sup>4</sup> | View only ✓ <sup>4</sup> |
-| **Cursor** <br><sub>[plugin](plugins/cursor), coming soon</sub> | Editor | View · Reply · Approve · Interrupt <sup>5</sup> | View · Reply · Approve · Interrupt <sup>5</sup> | View · Reply · Approve · Interrupt ✓ <sup>5</sup> |
+| **Cursor** <br><sub>[plugin](plugins/cursor)</sub> | Editor | View · Reply · Approve · Interrupt <sup>5</sup> | View · Reply · Approve · Interrupt ✓ <sup>5</sup> | View · Reply · Approve · Interrupt ✓ <sup>5</sup> |
 |  | CLI | View · Reply · Approve · Interrupt <sup>6</sup> | View only <sup>7</sup> | View · Reply · Approve · Interrupt ✓ <sup>6</sup> |
 | **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>8</sup> | View only <sup>9</sup> | View · Reply · Approve · Interrupt ✓ <sup>8</sup> |
 

@@ -108,11 +108,12 @@ public static class ImageViewer
             // 多张时工具栏多一组翻页按钮：最窄 560 才放得下（工具栏不会折叠，窄了「完成」会被挤出窗口）
             Title = images.Count > 1 || name is null ? L("图片") : name, Width = 900, Height = 700, MinWidth = images.Count > 1 ? 560 : 480, MinHeight = 320,
             CanResize = true, ShowInTaskbar = false, FontFamily = Look.Family,
-            Content = new Panel { Children = { panel, new ToastLayer(24) } },
         };
+        // 顶上统一的标题栏（标题、最大化、关闭，同别的弹窗），下面是看图的工具栏
+        window.Content = new Panel { Children = { Dialog.WithTitleBar(window, panel), new ToastLayer(24) } };
         window.Res(Window.BackgroundProperty, "Sheet");
-        // 没有系统标题栏，按住工具栏空白处拖动、四周拖边改大小（同别的弹窗）；图上按住是拖着看图
-        Dialog.Chromeless(window);
+        // 按住标题栏、工具栏空白处拖动、四周拖边改大小（同别的弹窗）；图上按住是拖着看图
+        Dialog.Chromeless(window, titleBar: true);
         LastWindow = window;
         window.Closed += (_, _) => { if (LastWindow == window) LastWindow = null; };
         window.AddHandler(InputElement.KeyDownEvent, (_, e) =>

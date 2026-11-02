@@ -65,7 +65,8 @@ public sealed class UsagePage : Panel
     public static string Money(double value) =>
         value >= 1000 ? $"${(value / 1000).ToString("0.0", CultureInfo.InvariantCulture)}k" : value >= 100 ? $"${value:0}" : $"${value.ToString("0.00", CultureInfo.InvariantCulture)}";
 
-    sealed record Row(string Name, string Detail, double Cost, double Estimated, double Requests, double Output, double CacheRead);
+    // Unpriced：没有花费数据（agent 不记花费的模型、这家 agent），显示「仅 token」，不显示 $0
+    sealed record Row(string Name, string Detail, double Cost, double Estimated, double Requests, double Output, double CacheRead, bool Unpriced = false);
 
     static List<Row> Rows(string field) => payload.Arr(field).Items().Select(item =>
     {
@@ -79,7 +80,10 @@ public sealed class UsagePage : Panel
                 break;
             default: name = item.Str("name") ?? ""; detail = L("%@ 次请求", (int)(item.Num("requests") ?? 0)); break;
         }
-        return new Row(name, detail, item.Num("cost") ?? 0, item.Num("estimated") ?? 0, item.Num("requests") ?? 0, item.Num("output") ?? 0, item.Num("cacheRead") ?? 0);
+        var cost = item.Num("cost") ?? 0;
+        var unpriced = field == "agents" ? item.Bool("unpriced") == true
+            : field == "models" && cost == 0 && payload.Strings("unpriced").Contains(name);
+        return new Row(name, detail, cost, item.Num("estimated") ?? 0, item.Num("requests") ?? 0, item.Num("output") ?? 0, item.Num("cacheRead") ?? 0, unpriced);
     }).ToList();
 
     void Show()
@@ -101,7 +105,7 @@ public sealed class UsagePage : Panel
                 Ui.Text(detail, 11, color: "Text3").Trim()), 12, 14);
             tiles.Add(card);
         }
-        Tile("dollarsign.circle", Money(cost), L("花费"), estimated > 0 ? L("含估算 %@", Money(estimated)) : L("Claude Code 记录"));
+        Tile("dollarsign.circle", Money(cost), L("花费"), estimated > 0 ? L("含估算 %@", Money(estimated)) : L("取自 agent 记录"));
         Tile("arrow.up.arrow.down.circle", ((int)N("requests")).ToString(), L("次请求"), L("%@ 个模型", Rows("models").Count));
         Tile("text.word.spacing", UsageFormat.Compact(N("output")), L("输出 token"), L("输入 %@", UsageFormat.Compact(input)));
         Tile("internaldrive", UsageFormat.Compact(N("cacheRead")), L("读缓存"), L("写缓存 %@", UsageFormat.Compact(N("cacheWrite"))));
@@ -118,10 +122,13 @@ public sealed class UsagePage : Panel
             var chart = new Panel { Height = 200, Children = { new CostChart(dayRows, days) { Margin = new Thickness(0, 0, 0, 18) }, Ui.H(12, Legend(L("记录"), 1), Legend(L("估算"), 0.4)).VAlign(VerticalAlignment.Bottom) } };
             body.Children.Add(Card.Make(Ui.VFill(8, Ui.Text(L("每天花费"), 12, FontWeight.SemiBold, "Text2"), chart)));
         }
+        if (Rows("agents").Count > 1) Table(L("按 Agent"), Rows("agents"), cost);
         Table(L("按模型"), Rows("models"), cost);
         Table(L("按项目"), Rows("projects").Take(12).ToList(), cost);
         if (Rows("sources").Count > 1) Table(L("按机器"), Rows("sources"), cost);
-        body.Children.Add(Ui.Text(L("花费数据取自 Claude Code 记录的 cost-state（会话结束或恢复时写入）；进行中的会话按同一机器、同一模型的平均费率估算（图中浅色部分）。"), 11, color: "Text3", lines: 0).Wrap());
+        body.Children.Add(Ui.Text(L("花费取自各 agent 自己的记录：Claude Code 的 cost-state（会话结束或恢复时写入；进行中的会话按同一机器、同一模型的平均费率估算，图中浅色部分），以及 OpenCode、Proma、Cursor 记下的花费。Codex、DeepSeek Harness、Qwen Code 不记录花费，只统计 token。"), 11, color: "Text3", lines: 0).Wrap());
+        if (payload.Strings("unpriced") is { Count: > 0 } unpriced)
+            body.Children.Add(Ui.Text(L("无费率数据的模型仅统计 token：%@", string.Join("、", unpriced)), 11, color: "Text3", lines: 0).Wrap());
         foreach (var e in payload.Strings("errors"))
             body.Children.Add(Ui.H(6, Ui.Sym("exclamationmark.triangle", 11.5, "Text2"), Ui.Text(e, 11.5, color: "Text2", lines: 2).Wrap().Shrink()));
     }
@@ -143,7 +150,9 @@ public sealed class UsagePage : Panel
             var fill = new Border { CornerRadius = new CornerRadius(2) }.Res(Border.BackgroundProperty, "Accent");
             meter.Children.Add(track);
             meter.Children.Add(fill);
-            var line = Ui.H(12, Ui.VFill(3, Ui.Text(row.Name, 13, FontWeight.SemiBold).Trim(), detail, meter).Grow(), Ui.Text(Money(row.Cost), 13, FontWeight.SemiBold).Digits());
+            meter.Opacity = row.Unpriced ? 0 : 1;
+            var amount = row.Unpriced ? Ui.Text(L("仅 token"), 12, color: "Text2") : Ui.Text(Money(row.Cost), 13, FontWeight.SemiBold).Digits();
+            var line = Ui.H(12, Ui.VFill(3, Ui.Text(row.Name, 13, FontWeight.SemiBold).Trim(), detail, meter).Grow(), amount);
             list.Children.Add(line.Pad(0, 8));
             if (i < rows.Count - 1) list.Children.Add(Ui.Rule("Separator", 0.5));
         }

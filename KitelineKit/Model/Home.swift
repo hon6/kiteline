@@ -151,13 +151,15 @@ struct UsagePayload: Decodable {
     var models: [UsageItem]
     var projects: [UsageItem]
     var sources: [UsageItem]
+    /// 按 agent（Claude Code、Codex……）；旧电脑端没有
+    var agents: [UsageItem]
     var unpriced: [String]
     var errors: [String]
 
     init(from decoder: Decoder) throws {
         let c = try decoder.fields()
         totals = c.one("totals") ?? UsageItem()
-        days = c.list("days"); models = c.list("models"); projects = c.list("projects"); sources = c.list("sources")
+        days = c.list("days"); models = c.list("models"); projects = c.list("projects"); sources = c.list("sources"); agents = c.list("agents")
         unpriced = c.list("unpriced"); errors = c.list("errors")
     }
 }
@@ -170,6 +172,8 @@ struct UsageItem: Decodable, Hashable {
     /// 按项目统计时：「来源\n目录」，和项目列表对上
     var key = ""
     var cost = 0.0, estimated = 0.0, requests = 0.0, input = 0.0, output = 0.0, cacheRead = 0.0, cacheWrite = 0.0
+    /// 没有花费数据（agent 不记花费的模型、这家 agent）：显示「仅 token」，不显示 $0
+    var unpriced = false
     /// token 总数：输入、输出、读写缓存都算
     var tokens: Double { input + output + cacheRead + cacheWrite }
 
@@ -179,6 +183,7 @@ struct UsageItem: Decodable, Hashable {
         cost = c.num("cost"); estimated = c.num("estimated"); requests = c.num("requests"); input = c.num("input")
         output = c.num("output"); cacheRead = c.num("cacheRead"); cacheWrite = c.num("cacheWrite")
         day = c.text("day") ?? ""
+        unpriced = c.one("unpriced") ?? false
         let cwd = c.text("cwd")
         name = c.text("model") ?? c.text("name") ?? cwd.map { ($0 as NSString).lastPathComponent } ?? L("（未知）")
         sub = c.text("sourceName") ?? ""

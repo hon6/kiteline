@@ -263,7 +263,7 @@ class MobileServer:
         if wants:
             pushed = bool(app.push.device_ids(in_app)) or any(not s.get("deviceId") for s in app.push.subscriptions)
             delivery_state = "sent" if pushed or use_bark else ("none" if not in_app else "app")
-        elif key and key in app.cfg.mobile["mutedSessions"] and kind in ("conclusion", "image", "error", "stuck", "todo", "keyinfo"):
+        elif key and key in app.cfg.mobile["mutedSessions"] and kind in ("conclusion", "image", "error", "stuck", "todo", "keyinfo", "goal"):
             delivery_state = "muted"
         entry = app.inbox.add(kind, title, body, key, route, delivery_state, english) if kind != "test" else None
         payload = {"kind": kind, "title": title, "body": body, "inbox": entry["id"] if entry else "",
@@ -281,12 +281,20 @@ class MobileServer:
         heads = {"attention": "需要确认", "conclusion": "已完成", "image": "发来图片", "todo": "新待办", "keyinfo": "关键信息",
                  "error": "出错已停止", "stuck": "可能停滞"}
         if use_bark:
-            bark_title = "%s · %s" % (title, heads.get(kind, "新消息")) if route is None else title
-            threading.Thread(target=bark.send, args=(bark_title, body, kind, mobile), daemon=True).start()
+            # 目标的标题里已经带着「目标已达成」（notify_goal）
+            bark_title = "%s · %s" % (title, heads.get(kind, "新消息")) if route is None and kind != "goal" else title
+            bark_body = body
+            if kind == "goal" and english and i18n.ui_english():
+                bark_title, bark_body = english
+            threading.Thread(target=bark.send, args=(bark_title, bark_body, kind, mobile), daemon=True).start()
         if not app.push.subscriptions:
             return
         head = heads.get(kind, "新消息")
-        if route is None:
+        if route is None and kind == "goal":
+            # 标题里已经带着「目标已达成」，中英两份源头拼好（notify_goal）
+            data = {"title": title, "body": body[:240], "key": key or "", "kind": kind}
+            english = dict(data, title=english[0], body=english[1][:240]) if english else dict(data)
+        elif route is None:
             data = {"title": "%s · %s" % (title, head), "body": body[:240], "key": key or "", "kind": kind}
             english = dict(data, title="%s · %s" % (title, i18n.translate(head)), body=i18n.translate(body)[:240])
         else:
@@ -300,6 +308,11 @@ class MobileServer:
         targets = en_devices - set(in_app)
         if targets:
             app.push.send(english, urgency=urgency, only=targets)
+
+    def notify_goal(self, title, head, body, body_en, key):
+        """目标（/goal）达成、做不到、停下：标题「会话 · 目标已达成」，正文是目标和结果；中英两份在源头拼好（正文里夹着目标原文）（同 Mac 版 notifyGoal）"""
+        shown, shown_en = "%s · %s" % (title, head), "%s · %s" % (title, i18n.translate(head))
+        self.notify("goal", shown, body, key, english=(shown_en, body_en))
 
     def notify_alert(self, kind, title, head, body, alert, body_en=None):
         """要人处理的状况（见 alerts.py）：VS Code 弹着对话框、到某台机器的连接断了 / 又连上了。带 alert 的锁屏通知长按有「尝试重连」。
@@ -1369,6 +1382,18 @@ def r_agent_info(s, request, *_):
     return Response.json(faces.agent_info(s.app, s.app.faces, request.query.get("key", ""), request.query.get("agent")))
 
 
+def r_feedback(s, request, *_):
+    """新手引导第一步：用户填的「我使用的 Agent 不在列表中」，连同本机检测到的 Agent 发到统计后台"""
+    body = request.json or {}
+    agents = str(body.get("agents") or "").strip()[:200]
+    if not agents:
+        return Response.error("请填写 Agent 名称", 400)
+    detected = [str(a) for a in body.get("detected") or [] if isinstance(a, str)][:30]
+    ok = s.app.stats.feedback({"kind": "agent", "agents": agents, "note": str(body.get("note") or "").strip()[:1000], "detected": detected})
+    log.write("已提交 Agent 反馈：%s" % agents if ok else "Agent 反馈提交失败")
+    return Response.json({"ok": ok} if ok else {"ok": False, "error": "提交失败，请检查网络后重试"})
+
+
 def r_machine(s, request, *_):
     detail = faces.machine(s.app, request.query.get("source", ""))
     if detail is None:
@@ -1676,7 +1701,7 @@ ROUTES = {
     ("POST", "/api/quick-replies"): r_quick_replies, ("GET", "/api/profile"): r_profile, ("POST", "/api/profile"): r_profile_set,
     ("GET", "/api/avatar"): r_avatar, ("GET", "/api/watch"): r_watch, ("POST", "/api/watch"): r_watch_set,
     ("POST", "/api/agent-face"): r_agent_face, ("GET", "/api/agent-avatar"): r_agent_avatar,
-    ("GET", "/api/agent-info"): r_agent_info, ("GET", "/api/machine"): r_machine,
+    ("GET", "/api/agent-info"): r_agent_info, ("GET", "/api/machine"): r_machine, ("POST", "/api/feedback"): r_feedback,
     ("POST", "/api/watch/status"): r_watch_status, ("POST", "/api/p2p/join"): r_p2p_join, ("POST", "/api/clientlog"): r_clientlog,
     ("POST", "/api/presence"): r_presence, ("GET", "/api/push/key"): r_push_key, ("POST", "/api/push/subscribe"): r_push_subscribe,
     ("POST", "/api/push/unsubscribe"): r_push_unsubscribe, ("POST", "/api/push/test"): r_push_test,

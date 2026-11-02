@@ -98,6 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !startInBackground && reopen {
             MainWindowController.shared.show()
         }
+        // 第一次打开（还没配过手机）：四步新手引导，压在主窗口上面
+        OnboardingWindowController.showOnFirstLaunch()
         if drillNotificationsOnLaunch {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { SelfTest.runNotificationDrill() }
         }
@@ -207,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         app.addItem(withTitle: L("关于 Kiteline"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(withTitle: L("检查更新…"), action: #selector(menuCheckUpdate), keyEquivalent: "")
         app.addItem(withTitle: L("更新记录…"), action: #selector(menuChangelog), keyEquivalent: "")
+        app.addItem(withTitle: L("新手引导…"), action: #selector(menuOnboarding), keyEquivalent: "")
         app.addItem(.separator())
         app.addItem(withTitle: L("设置…"), action: #selector(menuSettings), keyEquivalent: ",")
         app.addItem(.separator())
@@ -379,6 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuPhone() { SettingsWindowController.shared.show(tab: .phone) }
     @objc private func menuSettings() { SettingsWindowController.shared.show(tab: .general) }
     @objc private func menuChangelog() { ChangelogWindowController.shared.show() }
+    @objc private func menuOnboarding() { OnboardingWindowController.shared.show() }
     @objc private func menuReconnect() { state.reconnect() }
     @objc private func menuVirtualScreen() { VirtualScreen.shared.toggle() }
     @objc private func menuTestNotification() { NotificationCenterBridge.shared.deliverTest(config: state.config) }

@@ -41,6 +41,8 @@ final class ChatStore {
     var attachments: [ComposeAttachment] = []
     /// Mac 输入区上面的常用语展开着（每个会话各记各的：分屏时只展开点的那一块）
     var quickRepliesShown = false
+    /// 目标面板开着（输入框下面的「目标」、目标条、会话菜单都能打开，对话页统一弹）
+    var goalSheet = false
     private(set) var revision = 0
 
     init(key: String) { self.key = key }
@@ -48,12 +50,16 @@ final class ChatStore {
     func add(_ new: [ChatItem]) {
         guard !new.isEmpty else { return }
         var users: [ChatItem] = []
+        var goalNoted = false
         for item in new {
             if item.t == "result", let toolId = item.toolId { results[toolId] = item }
             if item.t == "user" { users.append(item) }
+            if item.t == "event", item.goal != nil { goalNoted = true }
             items[item.id] = item
         }
         if !users.isEmpty, !pending.isEmpty { settle(users) }
+        // 发的 /goal：对话里出了「已设定目标」这类提示就算到了（Codex 的目标不当成一句话回显）
+        if goalNoted { pending.removeAll { !$0.isFailed && $0.text.hasPrefix("/goal") } }
         revision += 1
     }
 

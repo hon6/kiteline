@@ -75,12 +75,14 @@ enum SessionTransition {
     case appeared
     case needsAttention(reason: String)
     case concluded(message: String)
+    /// 目标（/goal）达成、做不到、停下、出错中止
+    case goalEnded(GoalSnapshot)
     case wentBusy
     case disappeared
 
     var shouldNotify: Bool {
         switch self {
-        case .needsAttention, .concluded: return true
+        case .needsAttention, .concluded, .goalEnded: return true
         default: return false
         }
     }

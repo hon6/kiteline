@@ -223,6 +223,10 @@ public static class Palette
         ("CodeKeyword", 0xBE185D, 1, 0xF472B6, 1),
         ("Blue", 0x007AFF, 1, 0x0A84FF, 1),
         ("OrangeFill13", 0xFF9F0A, 0.13, 0xFF9F0A, 0.13),
+        // 目标的小标识：停下了橙、达成绿、做不到红（淡底 + 细边，同选中态）
+        ("OrangeEdge40", 0xFF9F0A, 0.40, 0xFF9F0A, 0.40),
+        ("AddedEdge40", 0x219A4D, 0.40, 0x219A4D, 0.40),
+        ("RemovedEdge40", 0xD94040, 0.40, 0xD94040, 0.40),
         ("GreenFill13", 0x34C759, 0.13, 0x30D158, 0.13),
         ("GreenHover", 0x2FB350, 1, 0x2BBE4F, 1),
         // 待办的打勾、「加入」按钮（同 Mac 版 Theme.wechatGreen）

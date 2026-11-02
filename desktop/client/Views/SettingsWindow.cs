@@ -643,8 +643,8 @@ public sealed class SettingsWindow : Window
 
     static string Spaced(string code) => code.Length == 6 ? $"{code[..3]} {code[3..]}" : code.Length == 0 ? "------" : code;
 
-    /// 二维码（QRCoder 算模块，自己画方块：白底黑块，不糊）
-    sealed class QrView : Control
+    /// 二维码（QRCoder 算模块，自己画方块：白底黑块，不糊）；新手引导第三步也用
+    internal sealed class QrView : Control
     {
         bool[,]? modules;
         string text = "";
@@ -916,6 +916,13 @@ public sealed class SettingsWindow : Window
         var reply = await Api.Get("/api/readiness");
         var page = Form.Page();
         page.Children.Add(Ui.Text(L("以下各项完成后即可使用全部功能。"), 12, color: "Text2").Margin(0, 12, 0, 6));
+        foreach (var card in ReadinessCards(reply)) page.Children.Add(card);
+        return page;
+    });
+
+    /// 就绪检查的一项一张卡片（设置 → 权限、新手引导第二步共用）：没就绪的带原因、修法和「一键安装」这类按钮
+    internal static IEnumerable<Control> ReadinessCards(JsonNode? reply)
+    {
         foreach (var item in reply.Arr("items").Items())
         {
             var level = item.Str("level") ?? "ok";
@@ -927,10 +934,9 @@ public sealed class SettingsWindow : Window
             if (level != "ok" && item.Obj("action") is JsonNode a && a.Str("id") is string actionId)
                 action = Form.Button(a.Str("label") ?? L("一键安装"), () => Post("/api/readiness/fix", new JsonObject { ["action"] = actionId }, r => AppModel.Shared.Flash(r.Str("message") ?? "")));
             var icon = Ui.Sym(level == "ok" ? "checkmark.circle" : "exclamationmark.triangle", 16, color);
-            page.Children.Add(Card.Make(Ui.HTop(12, icon.Margin(0, 1, 0, 0), body.Grow(), action), 12, 12).Margin(0, 8, 0, 0));
+            yield return Card.Make(Ui.HTop(12, icon.Margin(0, 1, 0, 0), body.Grow(), action), 12, 12).Margin(0, 8, 0, 0);
         }
-        return page;
-    });
+    }
 
     // MARK: 操作记录
 
@@ -974,6 +980,7 @@ public sealed class SettingsWindow : Window
         var links = Ui.H(18,
             // 在客户端里看（时间轴，同 Mac 版「更新记录」）
             Link(L("更新记录"), ChangelogWindow.Open),
+            Link(L("新手引导"), () => OnboardingWindow.Open()),
             Link(L("检查更新"), () => { _ = UpdateState.Shared.Check(); UpdateDialog.Open(); }),
             Link(L("打开数据目录"), () => OpenPath(dataDir)),
             Link(L("打开配置文件"), () => OpenPath(System.IO.Path.Combine(dataDir, "config.json"))),
@@ -996,7 +1003,7 @@ public sealed class SettingsWindow : Window
         return stack.HAlign(HorizontalAlignment.Center).Margin(0, 70, 0, 40);
     });
 
-    static void OpenPath(string target)
+    internal static void OpenPath(string target)
     {
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
         catch (Exception e) { AppModel.Shared.Flash(e.Message); }

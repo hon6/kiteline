@@ -58,6 +58,10 @@ public sealed record SessionInfo
     public string? Worktree { get; init; }
     /// 这一轮任务做到第几步（「2/4 开发中」，见 StageInfo）：后台只在忙、等确认时给，老版本后台没有
     public StageInfo? Stage { get; init; }
+    /// 目标（/goal，见 GoalInfo）：agent 围着它跨多轮一直做；没设目标、老版本后台没有
+    public GoalInfo? Goal { get; init; }
+    /// 列表里显示的目标：还在做的一直显示；结束了的（达成、做不到）一小时内还显示
+    public GoalInfo? ListGoal => Goal is { } g && (g.Running || g.At is double at && Format.NowMs - at < 3_600_000) ? g : null;
 
     public bool IsWaiting => Activity == "waiting";
     /// 正在做（忙、等确认）才显示阶段
@@ -115,7 +119,37 @@ public sealed record SessionInfo
             Branch = n.Str("branch") is { Length: > 0 } branch ? branch : null,
             Worktree = n.Str("worktree") is { Length: > 0 } tree ? tree : null,
             Stage = StageInfo.Parse(n.Get("stage")),
+            Goal = GoalInfo.Parse(n.Get("goal")),
         };
+    }
+}
+
+/// 目标（/goal；Claude Code 2.1.139 起、Codex 0.128 起，同 iOS 版 GoalViews.swift 的 GoalInfo）：agent 围着一个目标跨多轮一直做，
+/// 每轮结束检查一次，确认达成才停。State：active 进行中 / paused 停下了（发消息继续）/ blocked 受阻 / limited 额度或预算用完 /
+/// met 已达成 / failed 无法达成 / error 出错中止。Reason 是最近一次检查的说法（还差什么），Note 是停下的原因
+public sealed record GoalInfo(string Text, string State, int? Checks, string? Reason, string? Note, double? Since, double? At,
+    int? Turns, double? DurationMs, int? Tokens, int? Budget)
+{
+    public bool Running => State is "active" or "paused" or "blocked" or "limited";
+    /// 正在第几轮（检查过 n 次没达成 = 在做第 n+1 轮）；没有检查次数的（Codex）不说
+    public int? Round => Checks is int c ? (Running ? c + 1 : Math.Max(1, c)) : null;
+    /// 同一个目标的标识（收起结束提示时记它）
+    public string Id => $"{(long)(Since ?? 0)}|{(Text.Length > 60 ? Text[..60] : Text)}";
+
+    /// 一共做了多久（秒）：结束了的用记下的；还在做的从设定算到现在
+    public int? Seconds(double now)
+    {
+        if (DurationMs is double ms && ms > 0 && (!Running || Since is null)) return (int)(ms / 1000);
+        if (Since is not double since) return DurationMs is double d ? (int)(d / 1000) : null;
+        var end = Running ? now : At ?? since;
+        return (int)Math.Max(0, (end - since) / 1000);
+    }
+
+    public static GoalInfo? Parse(JsonNode? n)
+    {
+        if (n is not JsonObject || n.Str("text") is not { Length: > 0 } text) return null;
+        return new GoalInfo(text, n.Str("state") ?? "active", n.Int("checks"), n.Str("reason") is { Length: > 0 } r ? r : null,
+            n.Str("note") is { Length: > 0 } note ? note : null, n.Num("since"), n.Num("at"), n.Int("turns"), n.Num("durationMs"), n.Int("tokens"), n.Int("budget"));
     }
 }
 
@@ -361,6 +395,10 @@ public sealed class ChatItem : IEquatable<ChatItem>
     /// agent 发到会话群的（group_say）：哪个群、只发给了谁（成员 key）
     public string? Group;
     public List<string>? To;
+    /// 目标的那几行提示（event）：set / check / met / failed / paused / cleared / error；达成、做不到的带用了几轮、多久、多少 token
+    public string? Goal;
+    public int? GoalTurns, GoalTokens;
+    public double? GoalMs;
     /// 原样的 JSON：比较两条是不是同一份内容（同 Swift 的 Hashable）
     public string Raw = "";
 
@@ -394,6 +432,10 @@ public sealed class ChatItem : IEquatable<ChatItem>
             Fields = n.Arr("fields") is JsonArray fields ? fields.Items().Select(f => new KeyField(f.Str("name"), f.Str("value"), f.Truthy("secret"))).ToList() : null,
             Group = n.Str("group"),
             To = n.Get("to") is JsonArray ? n.Strings("to") : null,
+            Goal = n.Str("goal"),
+            GoalTurns = n.Get("goalStats").Int("turns"),
+            GoalTokens = n.Get("goalStats").Int("tokens"),
+            GoalMs = n.Get("goalStats").Num("durationMs"),
             Raw = n.ToJsonString(),
         };
     }

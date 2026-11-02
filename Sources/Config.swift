@@ -162,8 +162,8 @@ struct MobileConfig: Codable, Equatable {
     /// 这类提醒现在要不要推到锁屏（应用内横幅不受影响）
     func shouldPush(kind: String, key: String?) -> Bool {
         if kind == "attention" || kind == "budget" || kind == "test" { return true }
-        if let key = key, mutedSessions.contains(key), ["conclusion", "image", "error", "stuck", "todo", "keyinfo"].contains(kind) { return false }
-        if inQuietHours(), ["conclusion", "image", "schedule", "error", "stuck", "editor", "link", "todo", "keyinfo", "group"].contains(kind) { return false }
+        if let key = key, mutedSessions.contains(key), ["conclusion", "image", "error", "stuck", "todo", "keyinfo", "goal"].contains(kind) { return false }
+        if inQuietHours(), ["conclusion", "image", "schedule", "error", "stuck", "editor", "link", "todo", "keyinfo", "group", "goal"].contains(kind) { return false }
         return true
     }
     /// Bark 备用推送：Bark App 里的地址（https://api.day.app/<key>）；空 = 不用

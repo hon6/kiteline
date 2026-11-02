@@ -669,14 +669,7 @@ struct PhonePane: View {
 
     private var link: String? {
         guard selected < addresses.count else { return nil }
-        // fp：本机根证书指纹，Kiteline iOS App 扫码时用它确认连的是这台 Mac（网页版忽略这个参数）
-        let fingerprint = LocalTLS.caFingerprint.map { "&fp=\($0)" } ?? ""
-        // id、r：开着远程访问时带上本机点对点公钥和中继，手机和 Mac 局域网不通时 App 经中继配对（网页版忽略）
-        var remote = ""
-        if let info = P2P.shared.joinInfo, let id = info["id"] as? String, let relay = info["relay"] as? String {
-            remote = "&id=\(id)&r=\(relay.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")"
-        }
-        return "\(addresses[selected].base)/?t=\(token)\(fingerprint)\(remote)"
+        return PhoneAccess.pairingLink(base: addresses[selected].base, token: token)
     }
 
     var body: some View {
@@ -806,10 +799,7 @@ struct PhonePane: View {
         token = AppState.shared.mobile.newLinkToken()
         addresses = PhoneAccess.addresses(port: mobile.port, publicURL: mobile.publicURL,
                                           httpsPort: mobile.httpsEnabled ? mobile.effectiveHTTPSPort : nil)
-        // 默认选哪个地址扫码：自定义 > Tailscale > 局域网
-        selected = addresses.firstIndex { $0.label.hasPrefix("自定义") }
-            ?? addresses.firstIndex { $0.label == "Tailscale" }
-            ?? addresses.firstIndex { $0.label == "局域网" } ?? 0
+        selected = PhoneAccess.preferred(addresses)
         pushCount = AppState.shared.mobile.push.subscriptions.count
         newCode()
     }
@@ -833,6 +823,25 @@ struct PhonePane: View {
 
 /// 手机能连到本机的地址与二维码
 enum PhoneAccess {
+    /// 扫码配对的链接：base 是手机连本机的地址，token 是一次性配对令牌（AppState.shared.mobile.newLinkToken()）
+    static func pairingLink(base: String, token: String) -> String {
+        // fp：本机根证书指纹，Kiteline iOS App 扫码时用它确认连的是这台 Mac（网页版忽略这个参数）
+        let fingerprint = LocalTLS.caFingerprint.map { "&fp=\($0)" } ?? ""
+        // id、r：开着远程访问时带上本机点对点公钥和中继，手机和 Mac 局域网不通时 App 经中继配对（网页版忽略）
+        var remote = ""
+        if let info = P2P.shared.joinInfo, let id = info["id"] as? String, let relay = info["relay"] as? String {
+            remote = "&id=\(id)&r=\(relay.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")"
+        }
+        return "\(base)/?t=\(token)\(fingerprint)\(remote)"
+    }
+
+    /// 默认选哪个地址扫码：自定义 > Tailscale > 局域网
+    static func preferred(_ addresses: [(label: String, base: String)]) -> Int {
+        addresses.firstIndex { $0.label.hasPrefix(L("自定义")) }
+            ?? addresses.firstIndex { $0.label == "Tailscale" }
+            ?? addresses.firstIndex { $0.label == L("局域网") } ?? 0
+    }
+
     static func addresses(port: Int, publicURL: String, httpsPort: Int?) -> [(label: String, base: String)] {
         var result: [(String, String)] = []
         let trimmed = publicURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
@@ -1018,6 +1027,20 @@ struct SourceRow: View {
 // MARK: - 权限
 
 struct PermissionsPane: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PermissionsList()
+            Text("自行构建的 App 每次重新构建后，macOS 可能要求重新授予以上权限。")
+                .font(.app(size: 11)).foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+        .padding(22)
+        .frame(width: SettingsWindowController.width, height: 480, alignment: .top)
+    }
+}
+
+/// 各项权限的卡片（设置 → 权限、第一次打开的引导第二步共用）：每 2 秒刷新一次，去系统设置里打开了回来马上能看到
+struct PermissionsList: View {
     @State private var accessibility = AXIsProcessTrusted()
     @State private var speech = Transcriber.status
     @State private var notifications = "unknown"
@@ -1051,12 +1074,7 @@ struct PermissionsPane: View {
                        action: notifications == "authorized" ? nil : (L("打开系统设置"), {
                            open("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
                        }))
-            Text("自行构建的 App 每次重新构建后，macOS 可能要求重新授予以上权限。")
-                .font(.app(size: 11)).foregroundStyle(.tertiary)
-            Spacer(minLength: 0)
         }
-        .padding(22)
-        .frame(width: SettingsWindowController.width, height: 480, alignment: .top)
         .onAppear {
             refresh()
             LocalNetwork.check { localNetwork = $0 }   // 开着设置页时去系统设置里打开了，回来马上能看到

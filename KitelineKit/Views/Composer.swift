@@ -687,6 +687,8 @@ struct SessionChips: View {
                 .buttonStyle(PressableStyle())
                 .allowsHitTesting(session.can("compact"))
             }
+            // 目标（/goal）：没设时点开写一个，设了的显示进行中 / 暂停（会话支持才有）
+            if session.can("goal"), session.canReply { GoalChip(key: key, session: session) }
             TodoChip(todos: chat.todos, action: onTodos)
             if session.subagents > 0, session.can("subagents") {
                 ToolChip(symbol: "point.3.connected.trianglepath.dotted", text: L("子 agent %@", "\(session.subagents)"), action: onAgents)

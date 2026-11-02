@@ -21,8 +21,9 @@ public sealed class NavSheet
 {
     readonly Window window;
     readonly ContentControl body = new();
-    readonly TextBlock title = Ui.Text("", 13, FontWeight.SemiBold).Trim();
     readonly Tap back;
+    /// 返回键那一行（标题在弹窗统一的标题栏里，见 Dialog.TitleBar）：进到下一层才有
+    readonly Control header;
     readonly List<(string Title, Func<NavSheet, Control> Build)> stack = [];
 
     public static NavSheet Open(string title, Func<NavSheet, Control> root, double width = 640, double height = 705)
@@ -37,7 +38,7 @@ public sealed class NavSheet
     {
         back = new Tap(Ui.Sym("chevron.left", 13, "Accent").Pad(6, 3), Pop, 6).Keys("Transparent", "Fill08");
         back.Tip(L("返回"));
-        var header = Ui.H(4, back, title.Shrink()).Pad(14, 12, 14, 8);
+        header = Ui.H(4, back).Pad(10, 0, 14, 6);
         var done = Form.Button(L("完成"), Close);
         var footer = Ui.H(8, new Spacer(), done).Pad(16, 10, 16, 12);
         var rule = Ui.Rule("Separator", 0.5);
@@ -79,9 +80,8 @@ public sealed class NavSheet
     void Show()
     {
         var (text, build) = stack[^1];
-        title.Text = text;
-        window.Title = text;
-        back.IsVisible = stack.Count > 1;
+        window.Title = text;   // 统一标题栏跟着窗口标题变
+        back.IsVisible = header.IsVisible = stack.Count > 1;
         body.Content = build(this);
     }
 

@@ -605,7 +605,52 @@ try:
     check("忙时收到的消息也认出来，正文从标签里取", items and items[0].get("peer", {}).get("body") == "正文在这" and items[0]["peer"].get("msgId") == "m2", str(items))
     check("普通的排队消息照旧是用户说的话", W.normalize_line(0, {"type": "attachment", "timestamp": now_ts(-1), "attachment": {
         "type": "queued_command", "prompt": "顺便看看日志"}})[0].get("t") == "user")
+    snap = wait_for(lambda e: e["event"] == "snapshots" and any(x["sessionId"] == SID2 and x.get("turnFrom") == "peer" for x in e["sessions"]))
+    check("快照标出这一轮是别的会话来信引起的（答完不提醒用户）", snap is not None)
     peer_proc.kill()
+
+    # 这一轮是谁发起的：别的会话来信（peer）答完不提醒用户
+    def turn_from(rows, path=None):
+        path = path or tempfile.mkstemp(dir=root, suffix=".jsonl")[1]
+        with open(path, "w") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        return W.scan_transcript(path)["turnFrom"]
+
+    def said(text, meta=False):
+        return {"type": "user", "isMeta": meta, "message": {"role": "user", "content": text}}
+
+    def reply(text="好的"):
+        return {"type": "assistant", "uuid": "u-" + text, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+    def tool(i):
+        return [{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t%d" % i, "name": "Bash", "input": {"command": "ls"}}]}},
+                {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t%d" % i, "content": "ok"}]}}]
+
+    peer_in = dict(said("<cross-session-message from=\"uds:/x.sock\">拍好了</cross-session-message>", meta=True),
+                   origin={"kind": "peer", "from": "uds:/x.sock", "name": "甲", "msg_id": "m3"})
+
+    def queued(prompt, origin=None):
+        attachment = {"type": "queued_command", "prompt": prompt}
+        if origin:
+            attachment["origin"] = origin
+        return {"type": "attachment", "attachment": attachment}
+    check("你发起的一轮：user", turn_from([said("改一下首页"), reply()]) == "user")
+    check("空闲时收到别的会话来信、由它开始的一轮：peer", turn_from([said("改一下首页"), reply(), peer_in, reply("已回复甲")]) == "peer")
+    check("来信那一轮里你又插了一句：改回 user（你在等回复）",
+          turn_from([peer_in] + tool(1) + [queued("顺便看看日志")] + [reply("日志正常")]) == "user")
+    check("你那一轮里排队进来的来信不改发起方", turn_from([said("跑测试")] + tool(2) + [queued("<cross-session-message>x</cross-session-message>", peer_in["origin"]), reply("测试通过")]) == "user")
+    check("技能展开、系统提示这类 isMeta 不算新一轮", turn_from([peer_in, said("Base directory for this skill: /x", meta=True), reply()]) == "peer")
+    check("群里只有别的会话发言：peer", turn_from([said("【群「发版」· ccpulse-67（Mac · ccpulse）】\n快照拍好了\n（回复群里：kl group say \"内容\"；不需要回复就不用回）"), reply()]) == "peer")
+    check("首次进群的说明 + 别的会话发言：peer", turn_from([said("【Kiteline 会话群「发版」】用户把这个会话和下面几个会话拉进了一个群……\n· 你：ccpulse-c2\n\n【群「发版」· ccpulse-67】\n拍好了"), reply()]) == "peer")
+    check("群里有你说的话：user", turn_from([said("【群「发版」· ccpulse-67】\n拍好了\n【群「发版」· 用户】\n今晚发"), reply()]) == "user")
+    long_path = os.path.join(root, "turn-long.jsonl")
+    rows = [said("改一下首页"), reply(), peer_in]
+    turn_from(rows, long_path)
+    for i in range(300):
+        rows += tool(100 + i)
+    check("来信那一轮很长、开头滚出尾部：照样记得是 peer", turn_from(rows + [reply("都改好了")], long_path) == "peer")
+    check("老记录没有发起方的线索：None（照旧提醒）", turn_from(tool(9) + [reply()]) is None)
 
     print("== 压缩上下文")
     check("压缩边界行不单独出条目", W.normalize_line(0, {"type": "system", "subtype": "compact_boundary", "timestamp": now_ts(-3)}) == [])
@@ -1133,6 +1178,153 @@ try:
     check("有插件装上之后开的会话（还没读数多半没用订阅）、没有会话、别家 agent 的会话：都不提示",
           not W.claude_limits_pending([old, new], claude_dir) and not W.claude_limits_pending([], claude_dir)
           and not W.claude_limits_pending([dict(old, agent="codex")], claude_dir))
+
+    print("== 目标（/goal：Claude Code 2.1.139 起、Codex 0.128 起）")
+    # 字段照 Claude Code 2.1.314 真实写进记录的样子（tools/agent-probe/fakellm.py 的 [goal:N] 实测过）
+    def goal_att(ts, **fields):
+        return {"type": "attachment", "timestamp": ts, "attachment": dict(type="goal_status", **fields)}
+    goal_lines = [
+        goal_att("2026-11-02T09:00:00Z", met=False, sentinel=True, condition="测试全部通过"),
+        {"type": "system", "subtype": "local_command", "timestamp": "2026-11-02T09:00:00Z",
+         "content": "<local-command-stdout>Goal set: 测试全部通过</local-command-stdout>"},
+        goal_att("2026-11-02T09:05:00Z", met=False, condition="测试全部通过", reason="还有 2 个用例失败"),
+        {"type": "system", "subtype": "informational", "level": "notice", "timestamp": "2026-11-02T09:06:00Z",
+         "content": "Goal paused · the goal check timed out · send a message to continue"},
+    ]
+    meter = W.ClaudeGoal()
+    for line in goal_lines:
+        meter.feed(line)
+    view = meter.view()
+    check("Claude：设定后每次检查记一次、留着检查的说法（还差什么），停下的提示记成原因",
+          view["text"] == "测试全部通过" and view["state"] == "active" and view["checks"] == 1
+          and view["reason"] == "还有 2 个用例失败" and view["note"] == "目标检查超时", str(view))
+    book = W.GoalBook()
+    W._GOALS["g1"] = meter
+    snaps = [{"sessionId": "g1", "activity": "idle"}]
+    book.annotate(snaps)
+    check("目标还在、会话闲下来又有停下的提示：paused", snaps[0]["goal"]["state"] == "paused", str(snaps[0].get("goal")))
+    meter.feed({"type": "user", "timestamp": "2026-11-02T09:07:00Z", "message": {"role": "user", "content": "继续"}})
+    snaps = [{"sessionId": "g1", "activity": "busy"}]
+    book.annotate(snaps)
+    check("你发了话、又忙起来：回到进行中，停下的原因清掉", snaps[0]["goal"]["state"] == "active" and "note" not in snaps[0]["goal"])
+    snaps = [{"sessionId": "g1", "activity": "idle"}]
+    book.annotate(snaps)
+    check("刚闲下来（每轮检查目标时会短暂空闲；没有停下的提示）：还算进行中，不来回跳", snaps[0]["goal"]["state"] == "active")
+    book.idle_since["g1"] -= W.GOAL_IDLE_PAUSE_MS + 1000
+    book.annotate(snaps)
+    check("闲满 2 分钟（没有明确信号的兜底）：paused", snaps[0]["goal"]["state"] == "paused")
+    meter.feed({"type": "user", "timestamp": "2026-11-02T09:08:00Z", "message": {"role": "user", "content": "继续"}})
+    meter.feed({"type": "user", "timestamp": "2026-11-02T09:09:00Z", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "x"}, {"type": "text", "text": "[Request interrupted by user for tool use]"}]}})
+    book.idle_since.pop("g1", None)
+    snaps = [{"sessionId": "g1", "activity": "idle"}]
+    book.annotate(snaps)
+    check("你按了中断：马上算停下（原因「这一轮被中断」），不用等 2 分钟", snaps[0]["goal"]["state"] == "paused"
+          and snaps[0]["goal"]["note"] == "这一轮被中断", str(snaps[0].get("goal")))
+    meter.feed(goal_att(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), met=True, condition="测试全部通过", reason="全部通过",
+                        iterations=3, durationMs=600000, tokens=45000))
+    snaps = [{"sessionId": "g1", "activity": "idle"}]
+    book.annotate(snaps)
+    goal = snaps[0]["goal"]
+    check("达成：met，带用了几轮、多久、多少 token", goal["state"] == "met" and goal["turns"] == 3 and goal["durationMs"] == 600000
+          and goal["tokens"] == 45000 and goal["checks"] == 2, str(goal))
+    meter.goal["at"] -= W.GOAL_KEEP_MS + 1000
+    snaps = [{"sessionId": "g1", "activity": "idle"}]
+    book.annotate(snaps)
+    check("结束了的目标挂 6 小时就不再给", "goal" not in snaps[0])
+    failed = W.ClaudeGoal()
+    for line in (goal_att("2026-11-02T10:00:00Z", met=False, sentinel=True, condition="x"),
+                 goal_att("2026-11-02T10:01:00Z", met=False, failed=True, condition="x", reason="没有这个集群", iterations=1)):
+        failed.feed(line)
+    check("做不到：failed，说法是为什么", failed.view()["state"] == "failed" and failed.view()["reason"] == "没有这个集群")
+    errored = W.ClaudeGoal()
+    for line in (goal_att("2026-11-02T10:00:00Z", met=False, sentinel=True, condition="x"),
+                 goal_att("2026-11-02T10:02:00Z", met=True, sentinel=True, condition="x"),
+                 {"type": "system", "timestamp": "2026-11-02T10:02:00Z",
+                  "content": "Goal cleared after an unrecoverable error (credit balance too low): \"x\". Run /goal again to continue."}):
+        errored.feed(line)
+    check("出了救不回来的错被清掉：error，原因换成中文", errored.view()["state"] == "error" and errored.view()["reason"] == "余额不足", str(errored.view()))
+    cleared = W.ClaudeGoal()
+    for line in (goal_att("2026-11-02T10:00:00Z", met=False, sentinel=True, condition="x"),
+                 goal_att("2026-11-02T10:02:00Z", met=True, sentinel=True, condition="x")):
+        cleared.feed(line)
+    W._GOALS["g2"] = cleared
+    snaps = [{"sessionId": "g2", "activity": "idle"}]
+    book.annotate(snaps)
+    check("你自己 /goal clear 的：快照里不再带目标", cleared.view()["state"] == "cleared" and "goal" not in snaps[0])
+    W._GOALS.pop("g1", None)
+    W._GOALS.pop("g2", None)
+    # 自己跟着读文件：第一次检查和设定落在同一秒也不会拿着上一个目标判断（11-02 真机：假模型 1 秒跑完，推了一条「已完成」）
+    goal_file = os.path.join(root, "goal-poll.jsonl")
+    with open(goal_file, "w") as fh:
+        fh.write(json.dumps(goal_att("2026-11-02T11:00:00Z", met=True, condition="旧目标", reason="ok", iterations=1)) + "\n")
+    polled = W.ClaudeGoal()
+    polled.scan(goal_file)
+    with open(goal_file, "a") as fh:
+        fh.write(json.dumps(goal_att("2026-11-02T11:01:00Z", met=False, sentinel=True, condition="新目标")) + "\n")
+        fh.write('{"type": "attachment", "attachm')   # 还没写完的一行
+    W._GOALS["g3"] = polled
+    snaps = [{"sessionId": "g3", "activity": "idle", "transcriptPath": goal_file}]
+    book.annotate(snaps)
+    check("快照时先读文件新写完的行：新设的目标马上认出，没写完的那行不读", snaps[0]["goal"]["text"] == "新目标"
+          and snaps[0]["goal"]["state"] == "active" and polled.offset < os.path.getsize(goal_file), str(snaps[0].get("goal")))
+    W._GOALS.pop("g3", None)
+    items = [it for offset, line in enumerate(goal_lines) for it in W.normalize_line(offset, line)]
+    check("对话里：/goal 的回显 → 「已设定目标」（轻点看目标）、每次检查一行、停下一行，不再露 <local-command-stdout>", [
+        (it["text"], it.get("goal"), it.get("detail")) for it in items] == [
+        ("已设定目标", "set", "测试全部通过"), ("目标尚未达成，继续工作", "check", "还有 2 个用例失败"), ("目标已暂停：目标检查超时", "paused", None)], str(items))
+    model = W.normalize_line(0, {"type": "system", "subtype": "local_command", "content": "<local-command-stdout>Set model to Opus</local-command-stdout>"})
+    check("别的斜杠命令回显也去掉外面那层标签", model and model[0]["text"] == "Set model to Opus", str(model))
+    met = W.normalize_line(5, goal_att("2026-11-02T09:09:00Z", met=True, condition="x", reason="ok", iterations=3, durationMs=1000, tokens=9))
+    check("达成那一行带 goalStats（新客户端显示用了几轮、多久）", met[0]["text"] == "目标已达成" and met[0]["goalStats"] == {"turns": 3, "durationMs": 1000, "tokens": 9})
+    check("暂停提示的几种原因都换成中文", W.goal_notice("Goal still active · the API was unavailable or the connection dropped · retrying in 5 min (2/3) · send a message to retry now")
+          == ("paused", "接口不可用或连接中断，5 分钟后自动重试")
+          and W.goal_notice("Goal paused after 3 automatic retries · the API returned an unexpected response · send a message to continue")
+          == ("paused", "自动重试 3 次未成功：接口返回异常"))
+    check("Claude Code 版本够不够用 /goal：2.1.139 起", W.goal_supported("2.1.139") and W.goal_supported("2.1.314")
+          and not W.goal_supported("2.1.138") and not W.goal_supported(None) and not W.goal_supported("2.0.90"))
+    check("/goal 命令：设定 / 清除（clear、stop……）/ 暂停 / 继续 / 只看", W.goal_command("/goal 把测试跑通") == ("set", "把测试跑通")
+          and W.goal_command("/goal clear") == ("clear", "") and W.goal_command("/goal Stop") == ("clear", "")
+          and W.goal_command("/goal pause") == ("pause", "") and W.goal_command("/goal") == ("show", "")
+          and W.goal_command("/goals 不是") is None and W.goal_command("帮我看看 /goal") is None)
+    # Codex：目标在 goals_N.sqlite 的 thread_goals 表（0.163 实测的表结构），对话记录里是 <codex_internal_context source="…">
+    codex_home = tempfile.mkdtemp(prefix="kl-codex-goal-")
+    db = W.sqlite3.connect(os.path.join(codex_home, "goals_1.sqlite"))
+    db.execute("create table thread_goals (thread_id text primary key, goal_id text, objective text, status text, token_budget integer, "
+               "tokens_used integer, time_used_seconds integer, created_at_ms integer, updated_at_ms integer)")
+    db.executemany("insert into thread_goals values (?,?,?,?,?,?,?,?,?)", [
+        ("t1", "g", "把测试跑通", "active", None, 9020, 18, 1793611372000, 1793611391000),
+        ("t2", "g", "迁移数据", "budget_limited", 50000, 50100, 600, 1793611372000, 1793611391000),
+        ("t3", "g", "写文档", "complete", None, 220, 1, 1793611372000, 1793611391000)])
+    db.commit()
+    db.close()
+    saved_home = W.CODEX_HOME
+    W.CODEX_HOME = codex_home
+    try:
+        goals = W.codex_goals()
+    finally:
+        W.CODEX_HOME = saved_home
+    check("Codex：从目标库读出每个会话的目标，状态换成同一套（预算用完 → limited 带原因，complete → met）",
+          goals["t1"] == {"text": "把测试跑通", "state": "active", "since": 1793611372000, "at": 1793611391000, "tokens": 9020, "durationMs": 18000}
+          and goals["t2"]["state"] == "limited" and goals["t2"]["budget"] == 50000 and goals["t2"]["note"] == "token 预算已用完"
+          and goals["t3"]["state"] == "met", str(goals))
+    W.CODEX_HOME = os.path.join(codex_home, "none")
+    try:
+        check("没装带目标的 Codex：None（不给设定目标的按钮）", W.codex_goals() is None)
+    finally:
+        W.CODEX_HOME = saved_home
+    shutil.rmtree(codex_home, ignore_errors=True)
+
+    def codex_user(text):
+        return {"timestamp": "2026-11-02T09:22:52Z", "type": "response_item", "payload": {
+            "type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}}
+    got = [W.normalize_codex_line(i, codex_user(t)) for i, t in enumerate((
+        '<codex_internal_context source="user_goal">\nUser set the goal: "把测试跑通"\nUser set goal status: "active".\n</codex_internal_context>',
+        '<codex_internal_context source="goal">\nContinue working toward the active thread goal.\n</codex_internal_context>',
+        '<codex_internal_context source="user_goal">\nUser set goal status: "paused".\n</codex_internal_context>',
+        '<codex_internal_context source="world">\n别的内部上下文\n</codex_internal_context>'))]
+    check("Codex 记录：设定 / 每轮续做 / 暂停显示成一行提示，别的内部上下文不当成你说的话", [[(it["t"], it["text"]) for it in row] for row in got] == [
+        [("event", "已设定目标")], [("event", "继续推进目标")], [("event", "已暂停目标")], []] and got[0][0]["detail"] == "把测试跑通", str(got))
 
     print("== 本机性能")
     stats = wait_for(lambda e: e["event"] == "sys", timeout=12)

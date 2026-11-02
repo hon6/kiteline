@@ -222,9 +222,9 @@ class Config:
         if kind in ("attention", "budget", "test"):
             return True
         m = self.mobile
-        if key and key in m.get("mutedSessions", []) and kind in ("conclusion", "image", "error", "stuck", "todo", "keyinfo"):
+        if key and key in m.get("mutedSessions", []) and kind in ("conclusion", "image", "error", "stuck", "todo", "keyinfo", "goal"):
             return False
-        if self.in_quiet_hours() and kind in ("conclusion", "image", "schedule", "error", "stuck", "editor", "link", "todo", "keyinfo", "group"):
+        if self.in_quiet_hours() and kind in ("conclusion", "image", "schedule", "error", "stuck", "editor", "link", "todo", "keyinfo", "group", "goal"):
             return False
         return True
 

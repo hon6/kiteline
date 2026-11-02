@@ -349,6 +349,7 @@ final class AppState {
             if let value = snap.worktree, !value.isEmpty { item["worktree"] = value }
             if let value = snap.activityText { item["activityText"] = value }
             if let stage = snap.liveStage { item["stage"] = stage.payload }   // 任务做到第几步（忙、等确认时才有）
+            if let goal = snap.goal, goal.valid { item["goal"] = goal.payload }   // 目标（/goal）：在做的、结束不久的
             if let value = snap.message { item["preview"] = value }
             if let effort = snap.effort {
                 if let level = effort.effort { item["effort"] = level }
@@ -461,8 +462,13 @@ extension AppState: SessionStoreDelegate {
 
     func sessionStore(_ store: SessionStore, wantsNotificationFor record: SessionRecord, transition: SessionTransition) {
         Log.write("提醒 \(record.sourceName)/\(record.snapshot.name)：\(transition)")
-        // 静音的会话：Mac 上也不弹结论通知（需要确认的照弹）
-        if case .concluded = transition, config.mobile.mutedSessions.contains(record.key) {} else {
+        // 静音的会话：Mac 上也不弹结论、目标的通知（需要确认的照弹）
+        let quiet: Bool
+        switch transition {
+        case .concluded, .goalEnded: quiet = config.mobile.mutedSessions.contains(record.key)
+        default: quiet = false
+        }
+        if !quiet {
             NotificationCenterBridge.shared.deliver(record: record, transition: transition, config: config)
         }
         switch transition {
@@ -475,6 +481,9 @@ extension AppState: SessionStoreDelegate {
             } else {
                 mobile.notify(kind: "conclusion", title: record.snapshot.displayTitle, body: message, key: record.key)
             }
+        case .goalEnded(let goal):
+            mobile.notifyGoal(title: record.snapshot.displayTitle, head: GoalText.head(goal.state),
+                              body: goal.pushBody(english: false), bodyEn: goal.pushBody(english: true), key: record.key)
         default:
             return
         }
@@ -557,6 +566,8 @@ extension AppState: SourceConnectionDelegate {
         for item in items {
             switch item["t"] as? String {
             case "agent_image":
+                // 回别的会话来信的那一轮里发的图：是会话之间的往来，对话里照常显示，不推送
+                guard record?.snapshot.fromPeer != true else { continue }
                 let caption = item["text"] as? String ?? ""
                 mobile.notify(kind: "image", title: title, body: caption.isEmpty ? "\(speaker) 发来一张图片" : caption, key: key)
             case "agent_todo":

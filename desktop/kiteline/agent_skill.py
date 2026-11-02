@@ -34,7 +34,18 @@ def skill_ids():
 
 
 def _quote(path):
-    return '"%s"' % path.replace("\\", "/")
+    """命令里的路径：没有空格就不加引号。Windows 上 Codex、Cursor 在 PowerShell 里跑技能命令，带引号的程序路径在 PowerShell 里
+    只是个字符串（要前面加 & 才执行，Git Bash 又不认 &），不带引号 PowerShell、cmd、Git Bash 都认；有空格先换成 8.3 短路径"""
+    if " " in path and config.IS_WINDOWS:
+        try:
+            import ctypes
+            buffer = ctypes.create_unicode_buffer(1024)
+            if ctypes.windll.kernel32.GetShortPathNameW(path, buffer, len(buffer)):
+                path = buffer.value
+        except (AttributeError, OSError):
+            pass
+    path = path.replace("\\", "/")
+    return '"%s"' % path if " " in path else path
 
 
 def local_command(watcher_path):

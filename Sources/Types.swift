@@ -56,6 +56,8 @@ struct SessionSnapshot: Codable, Equatable {
     var activityText: String?
     var message: String?
     var messageUuid: String?
+    /// 最近一轮是谁发起的：user（你）/ peer（别的会话来信：SendMessage、群里别的会话发言）；老 watcher 不带
+    var turnFrom: String?
     var pendingTool: String?
     var pendingId: String?
     var startedAt: Double?
@@ -93,8 +95,21 @@ struct SessionSnapshot: Codable, Equatable {
     var pendingOptions: [PendingOption]?
     /// 这一轮任务做到第几步（watcher 给；老 watcher 没有）
     var stage: StageSnapshot?
+    /// 目标（/goal）：agent 围着它跨多轮一直做、每轮结束检查一次（watcher 给；没设目标、老 watcher 没有）
+    var goal: GoalSnapshot?
 
     var act: Activity { Activity(raw: activity) }
+
+    /// 这一轮是别的会话来信引起的：答完、发图都不提醒你（会话之间的往来）
+    var fromPeer: Bool { turnFrom == "peer" }
+
+    /// 列表里显示的目标：在做的一直显示；结束了的（达成、做不到）一小时内还显示
+    var listGoal: GoalSnapshot? {
+        guard let goal, goal.valid else { return nil }
+        if goal.running { return goal }
+        guard let at = goal.at, Date().timeIntervalSince1970 * 1000 - at < 3_600_000 else { return nil }
+        return goal
+    }
 
     /// 正在做（忙、等确认）且像样的阶段才显示
     var liveStage: StageSnapshot? {
@@ -104,8 +119,11 @@ struct SessionSnapshot: Codable, Equatable {
 
     /// 给手机的 caps：没带的 Claude Code 会话是现在 Claude Code 的全套，别家没带就是什么都没有。
     /// close（关闭会话，3.49.7 起）只由电脑端给：手机连老电脑端时的兜底全套里没有它
+    /// goal（设定目标，发 /goal）：Claude Code 2.1.139 起有，按会话报来的版本给；别家由插件给（Codex 终端里的会话）
     var capsPayload: [String] {
-        caps ?? (agentID == "claude-code" ? ["mode", "model", "compact", "subagents", "tests", "close"] : [])
+        var out = caps ?? (agentID == "claude-code" ? ["mode", "model", "compact", "subagents", "tests", "close"] : [])
+        if agentID == "claude-code", GoalSnapshot.claudeSupports(version), !out.contains("goal") { out.append("goal") }
+        return out
     }
 
     /// 列表里显示的名字：优先用标题
@@ -227,6 +245,100 @@ struct StageSnapshot: Codable, Equatable {
             out["parts"] = parts.map { ["name": $0.name, "step": $0.step, "done": $0.done] as [String: Any] }
         }
         return out
+    }
+}
+
+/// 目标（/goal；Claude Code 2.1.139 起、Codex 0.128 起）：agent 围着一个目标跨多轮一直做，每轮结束检查，确认达成才停。
+/// 字段见 ccpulse-watch.py 的 GoalBook。state：active 进行中 / paused 停下了 / blocked 受阻 / limited 额度或预算用完 /
+/// met 已达成 / failed 无法达成 / error 出错中止。字段缺了、类型不对都不抛错（同 StageSnapshot）
+struct GoalSnapshot: Codable, Equatable {
+    var text = ""
+    var state = "active"
+    /// 检查了几次（Claude Code 每轮结束检查一次）
+    var checks: Int?
+    /// 最近一次检查的说法（还差什么 / 为什么做不到）
+    var reason: String?
+    /// 停下的原因（接口出错、检查超时、额度用完……）
+    var note: String?
+    var since: Double?
+    var at: Double?
+    var turns: Int?
+    var durationMs: Double?
+    var tokens: Int?
+    /// token 预算（Codex 设了才有）
+    var budget: Int?
+
+    private enum CodingKeys: String, CodingKey { case text, state, checks, reason, note, since, at, turns, durationMs, tokens, budget }
+
+    init(from decoder: Decoder) throws {
+        guard let c = try? decoder.container(keyedBy: CodingKeys.self) else { return }
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        state = (try? c.decode(String.self, forKey: .state)) ?? "active"
+        checks = try? c.decode(Int.self, forKey: .checks)
+        reason = (try? c.decode(String.self, forKey: .reason)).flatMap { $0.isEmpty ? nil : $0 }
+        note = (try? c.decode(String.self, forKey: .note)).flatMap { $0.isEmpty ? nil : $0 }
+        since = try? c.decode(Double.self, forKey: .since)
+        at = try? c.decode(Double.self, forKey: .at)
+        turns = try? c.decode(Int.self, forKey: .turns)
+        durationMs = try? c.decode(Double.self, forKey: .durationMs)
+        tokens = try? c.decode(Int.self, forKey: .tokens)
+        budget = try? c.decode(Int.self, forKey: .budget)
+    }
+
+    var valid: Bool { !text.isEmpty }
+    /// 还在进行（含停下了、等你发话的）；结束了的是 met / failed / error
+    var running: Bool { GoalText.running(state) }
+    /// 正在第几轮（检查过 n 次没达成 = 在做第 n+1 轮）；没有检查次数的（Codex）不说
+    var round: Int? { checks.map { running ? $0 + 1 : max(1, $0) } }
+
+    /// Claude Code 的版本号（2.1.314）够不够用 /goal
+    static func claudeSupports(_ version: String?) -> Bool {
+        guard let version else { return false }
+        let parts = version.split(separator: ".").prefix(3).map { Int($0) ?? 0 }
+        return parts.count == 3 && !parts.lexicographicallyPrecedes([2, 1, 139])
+    }
+
+    var payload: [String: Any] {
+        var out: [String: Any] = ["text": text, "state": state]
+        if let checks { out["checks"] = checks }
+        if let reason { out["reason"] = reason }
+        if let note { out["note"] = note }
+        if let since { out["since"] = Int64(since) }
+        if let at { out["at"] = Int64(at) }
+        if let turns { out["turns"] = turns }
+        if let durationMs { out["durationMs"] = Int64(durationMs) }
+        if let tokens { out["tokens"] = tokens }
+        if let budget { out["budget"] = budget }
+        return out
+    }
+
+    /// 推送正文：目标是什么 + 结果（用了几轮、多久 / 为什么做不到 / 为什么停下）。english：给英文设备的那份
+    func pushBody(english: Bool) -> String {
+        let p = Phrase(english: english)
+        let goal = text.count > 80 ? String(text.prefix(80)) + "…" : text
+        var detail: String?
+        switch state {
+        case "met":
+            var parts: [String] = []
+            if let rounds = turns ?? checks, rounds > 0 { parts.append(p("%lld 轮", rounds)) }
+            if let ms = durationMs, ms >= 60_000 {
+                let minutes = Int(ms / 60_000)
+                parts.append(minutes >= 120 ? p("%lld 小时", minutes / 60) : p("%lld 分钟", minutes))
+            }
+            detail = parts.isEmpty ? nil : p("用了 %@", parts.joined(separator: " · "))
+        case "paused":
+            detail = note.map { english ? ServerLang.translate($0) : $0 } ?? p("发送消息即可继续")
+        default:
+            detail = (note.map { english ? ServerLang.translate($0) : $0 }) ?? reason
+        }
+        return [p("目标：%@", goal), detail].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    /// 目标从「在做」变成另一个状态：达成、做不到、停下、出错时提醒（你自己清除的不提醒，快照里就没了）
+    static func ended(old: GoalSnapshot?, new: GoalSnapshot?) -> GoalSnapshot? {
+        guard let new, new.valid, new.state != "active" else { return nil }
+        guard let old, old.text == new.text else { return nil }   // 刚看到的（App 刚启动）、换了目标的不算
+        return old.state != new.state ? new : nil
     }
 }
 

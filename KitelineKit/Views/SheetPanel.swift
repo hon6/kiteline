@@ -136,8 +136,8 @@ extension View {
         background { Color.clear.contentShape(Rectangle()).panelDragArea() }
     }
 
-    /// Mac 面板当成正经窗口（代码 IDE 这类大工作区）：左上角有红黄绿按钮（关闭、缩放；最小化是灰的——挂在主窗口上的小窗收不进程序坞），
-    /// 双击标题栏缩放，Esc 不关（编辑器里 Esc 是收起查找、补全）。挂在面板最外层；iPhone 不管
+    /// Mac 面板当成正经窗口（代码 IDE 这类大工作区）：Esc 不关（编辑器里 Esc 是收起查找、补全）。红黄绿按钮、双击标题栏缩放
+    /// 所有面板都有（11-02 起）。挂在面板最外层；iPhone 不管
     public func panelWindowStyle() -> some View {
         #if os(macOS)
         modifier(PanelWindowStyle())
@@ -357,7 +357,9 @@ private struct PanelBridge: NSViewRepresentable {
     }
 }
 
-/// 面板小窗：标题栏透明、平时不要红黄绿三个钮（「完成」/ Esc 关；当成正经窗口的才有）；能成为 key（能打字），不当主窗口
+/// 面板小窗：同正经窗口一样有标题栏和红黄绿三个钮（11-02 反馈：弹窗要统一，有标题栏、全屏、关闭），绿钮铺满所在屏幕，
+/// 最小化钮是灰的（挂在主窗口上的小窗收不进程序坞）；
+/// 平时 Esc 也能关（当成正经窗口的不关）；能成为 key（能打字），不当主窗口
 final class KitePanel: NSPanel {
     var onCancel: (() -> Void)?
     /// Esc 关面板（当成正经窗口的不关）
@@ -374,16 +376,19 @@ final class KitePanel: NSPanel {
         unconstrained ? frameRect : super.constrainFrameRect(frameRect, to: screen)
     }
 
-    // 标题栏透明时，工具栏那一带的点击会落到底下的内容上：macOS 26 贴着顶边的列表、滚动视图会伸到工具栏底下，
+    // 工具栏那一带的点击会落到底下的内容上：macOS 26 贴着顶边的列表、滚动视图会伸到工具栏底下，
     // 背景色也会铺上去，按下去是 SwiftUI 的视图，窗口拖不动（10-31 反馈代码 IDE 的标题栏拖不动）。
-    // 有工具栏的面板：那一带按在内容上一律当成按在标题栏上——拖动窗口。工具栏按钮、红黄绿钮不在内容里，照常。
-    // 当成正经窗口的：标题栏上按钮以外的地方双击缩放（面板上系统自己不缩放）
+    // 标题栏那一带按在内容上一律当成按在标题栏上——拖动窗口。工具栏按钮、红黄绿钮不在内容里，照常。
+    // 按钮以外的地方双击照系统设置缩放 / 最小化（面板上系统自己不做）
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown, toolbar != nil, event.locationInWindow.y > contentLayoutRect.maxY,
+        if event.type == .leftMouseDown, event.locationInWindow.y > contentLayoutRect.maxY,
            let content = contentView, let frame = content.superview, let hit = frame.hitTest(event.locationInWindow) {
             let onContent = hit === content || hit.isDescendant(of: content)
-            if event.clickCount == 2, standardWindowButton(.zoomButton)?.isHidden == false, onContent || !Self.isControl(hit) {
-                if !["None", "Minimize"].contains(UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "") { zoom(nil) }
+            if event.clickCount == 2, onContent || !Self.isControl(hit) {
+                switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "" {
+                case "None", "Minimize": break   // 挂在主窗口上的小窗收不进程序坞（最小化钮是灰的）
+                default: zoom(nil)
+                }
                 return
             }
             if onContent {
@@ -409,7 +414,7 @@ final class KitePanel: NSPanel {
     }
 }
 
-/// 面板有没有工具栏（导航标题、返回）：没有的让内容顶到最上面（透明标题栏底下），有的给工具栏让出位置
+/// 面板有没有工具栏（导航标题、返回）：量大小时用；内容一律从标题栏下面开始
 private final class PanelState: ObservableObject {
     @Published var toolbar = false
 }
@@ -437,7 +442,6 @@ private struct PanelRoot: View {
         styled
             .environment(\.closePanel, close)
             .environment(\.panelAnchor, nil)   // 面板里再弹的面板对着这个面板居中
-            .ignoresSafeArea(.container, edges: state.toolbar ? [] : .top)
     }
 
     // 没指定样式的按钮不跟发起处（对话页是无边框的）：同系统 sheet，用系统默认的带边框按钮
@@ -510,9 +514,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         hosting.sceneBridgingOptions = [.toolbars, .title]   // 面板里的导航标题、返回按钮放进小窗的工具栏
         panel.contentViewController = hosting
         panel.title = ""
-        panel.titlebarAppearsTransparent = true
+        // 标题栏有底：内容往上滚时从标题栏底下过，不和标题叠在一起（11-02 截图：目标面板的标题压在第一行上）
+        panel.titlebarAppearsTransparent = false
         panel.toolbarStyle = .unified
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { panel.standardWindowButton(kind)?.isHidden = true }
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = false
@@ -607,10 +611,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         dismiss()
     }
 
-    /// 当成正经窗口（panelWindowStyle）：露出红黄绿钮，Esc 不关
+    /// 当成正经窗口（panelWindowStyle）：Esc 不关（红黄绿钮所有面板都有）
     private func setWindowStyle(_ on: Bool) {
         guard !closed else { return }
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { panel.standardWindowButton(kind)?.isHidden = !on }
         panel.escCloses = !on
     }
 
@@ -666,6 +669,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     func windowShouldZoom(_ window: NSWindow, toFrame newFrame: NSRect) -> Bool {
         userSized = true
         return true
+    }
+
+    /// 绿钮、双击标题栏：铺满所在屏幕（菜单栏、程序坞以外的地方），再按一次回到原来的大小和位置
+    func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame newFrame: NSRect) -> NSRect {
+        (window.screen ?? panel.parent?.screen ?? NSScreen.main)?.visibleFrame ?? newFrame
     }
 
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {

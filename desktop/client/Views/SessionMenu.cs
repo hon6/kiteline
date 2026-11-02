@@ -7,7 +7,7 @@ using static Kiteline.Lang;
 namespace Kiteline.Views;
 
 /// 会话的操作：对话页收到后去做（打开面板、确认后中断……），同 Mac 版 KitelineKit.Action
-public enum SessionAction { Files, Changes, Tests, Agents, Search, Stop, Mode, Model, Compact, Info, NewTask, Bottom, Terminal }
+public enum SessionAction { Files, Changes, Tests, Agents, Search, Stop, Mode, Model, Goal, Compact, Info, NewTask, Bottom, Terminal }
 
 /// 左边栏、标签栏按钮、菜单要对话页做的事，交给开着这个会话的对话页（同 Mac 版 KitelineKit.perform）
 public static class ChatActions
@@ -48,6 +48,9 @@ public static class SessionMenu
             var tune = Tune(item);
             if (item.Can("model"))
                 yield return Ui.Item(tune.Length == 0 ? L("模型和思考等级…") : L("模型和思考等级（%@）…", tune), () => ChatActions.Perform(key, SessionAction.Model));
+            // 目标（/goal）：围着一个目标跨多轮一直做，确认达成才停（Claude Code 2.1.139 起、Codex 终端里的会话）
+            if (item.Can("goal"))
+                yield return Ui.Item(item.Goal is { } goal ? L("目标（%@）…", GoalText.Label(goal.State)) : L("设定目标…"), () => ChatActions.Perform(key, SessionAction.Goal));
             if (item.Can("compact"))
                 yield return Ui.Item(L("压缩上下文（/compact）") + (item.Usage?.Percent is int p ? L(" · 已用 %@%", p) : "") + "…", () => ChatActions.Perform(key, SessionAction.Compact));
         }

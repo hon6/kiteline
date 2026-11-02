@@ -606,7 +606,7 @@ final class Groups {
                 lines.append("· \(other.key == member.key ? "你：" : "")\(Self.label(other))")
             }
             lines.append("发群消息（成员会收到，用户在群里也看得到）：\(command) group say \"内容\"；只发给某一个加 --to 名字；看成员和最近的群消息：\(command) group info。")
-            lines.append("需要对方知道或配合的事（进度、结果、请求、回答对方的问题）再发，不用客套回复；用户在群里说的话也用 group say 回复。")
+            lines.append("需要对方知道或配合的事（进度、结果、请求、回答对方的问题）再发，不用客套回复；用户在群里说的话也用 group say 回复；群里的往来只在群里回，不用另外向用户汇报。")
             if group.autoName {
                 lines.append("这个群还没有正式名字：你第一次发群消息时加上 --name \"群名\"（概括这次协作的事，12 个字以内）。")
             }

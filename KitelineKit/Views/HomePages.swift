@@ -260,7 +260,7 @@ struct UsageView: View {
             PageNote(text: L("%@：定时任务已暂停，新建任务和手机发送消息需先确认。", "\(budget.capped)"), color: Theme.removed)
         }
         StatGrid(cards: [
-            StatCard(value: Money.cost(t.cost), label: L("花费"), sub: t.estimated > 0 ? L("含估算 %@", "\(Money.cost(t.estimated))") : L("Claude Code 记录")),
+            StatCard(value: Money.cost(t.cost), label: L("花费"), sub: t.estimated > 0 ? L("含估算 %@", "\(Money.cost(t.estimated))") : L("取自 agent 记录")),
             StatCard(value: "\(Int(t.requests.rounded()))", label: L("次请求", plural: "%lld 次请求", count: Int(t.requests.rounded())), sub: L("%lld 个模型", count: r.models.count)),
             StatCard(value: Money.compact(t.output), label: L("输出 token"), sub: L("输入 %@", "\(Money.compact(t.input + t.cacheRead + t.cacheWrite))")),
         ], columns: 3)
@@ -283,7 +283,10 @@ struct UsageView: View {
             .padding(14)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        breakdown(L("按模型"), r.models, total: t.cost) { L("%@ 次 · 输出 %@ · 读缓存 %@", "\(Int($0.requests.rounded()))", "\(Money.compact($0.output))", "\(Money.compact($0.cacheRead))") }
+        if r.agents.count > 1 {
+            breakdown(L("按 Agent"), r.agents, total: t.cost) { L("%@ 次请求", "\(Int($0.requests.rounded()))") }
+        }
+        breakdown(L("按模型"), r.models.map { var m = $0; m.unpriced = m.cost == 0 && r.unpriced.contains(m.name); return m }, total: t.cost) { L("%@ 次 · 输出 %@ · 读缓存 %@", "\(Int($0.requests.rounded()))", "\(Money.compact($0.output))", "\(Money.compact($0.cacheRead))") }
         breakdown(L("按项目"), Array(r.projects.prefix(10)), total: t.cost) { L("%@ · %@ 次 · 输出 %@", "\($0.sub)", "\(Int($0.requests.rounded()))", "\(Money.compact($0.output))") }
         if r.sources.count > 1 {
             breakdown(L("按机器"), r.sources, total: t.cost) { L("%@ 次请求", "\(Int($0.requests.rounded()))") }
@@ -299,7 +302,7 @@ struct UsageView: View {
         }
         .buttonStyle(.steady(.plain))
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        PageNote(text: L("花费数据取自 Claude Code 记录的 cost-state（会话结束或恢复时写入）；进行中的会话按同一机器、同一模型的平均费率估算（图中浅色部分）。"))
+        PageNote(text: L("花费取自各 agent 自己的记录：Claude Code 的 cost-state（会话结束或恢复时写入；进行中的会话按同一机器、同一模型的平均费率估算，图中浅色部分），以及 OpenCode、Proma、Cursor 记下的花费。Codex、DeepSeek Harness、Qwen Code 不记录花费，只统计 token。"))
         if !r.unpriced.isEmpty { PageNote(text: L("无费率数据的模型仅统计 token：%@", "\(r.unpriced.joined(separator: "、"))")) }
         ForEach(r.errors, id: \.self) { PageNote(text: $0) }
     }
@@ -322,8 +325,13 @@ struct UsageView: View {
                                     }
                             }
                             .frame(height: 4)
+                            .opacity(item.unpriced ? 0 : 1)
                         }
-                        Text(Money.cost(item.cost)).font(.ui(.subheadline).monospacedDigit())
+                        if item.unpriced {
+                            Text("仅 token").font(.ui(.caption)).foregroundStyle(.secondary)
+                        } else {
+                            Text(Money.cost(item.cost)).font(.ui(.subheadline).monospacedDigit())
+                        }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 11)
                 }

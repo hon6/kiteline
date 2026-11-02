@@ -67,7 +67,8 @@ struct InboxEntry: Decodable, Identifiable, Hashable {
          "todo": ("checklist", L("新待办")), "keyinfo": ("key.fill", L("关键信息")),
          "error": ("exclamationmark.triangle.fill", L("出错已停止")), "stuck": ("hourglass", L("可能停滞")), "digest": ("sun.max.fill", L("日报")),
          "schedule": ("alarm.fill", L("定时任务")), "budget": ("dollarsign.circle.fill", L("花费提醒")),
-         "editor": ("exclamationmark.bubble.fill", L("VS Code 提示")), "link": ("network.slash", L("连接状态"))][kind] ?? ("bell.fill", L("提醒"))
+         "editor": ("exclamationmark.bubble.fill", L("VS Code 提示")), "link": ("network.slash", L("连接状态")),
+         "goal": ("scope", L("目标"))][kind] ?? ("bell.fill", L("提醒"))
     }
 
     var heldReason: String? {

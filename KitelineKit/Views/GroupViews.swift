@@ -174,6 +174,9 @@ struct GroupChatView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(.horizontal, 14).padding(.vertical, 12)
+                    // 正文字号、行高同会话的对话页（见 ChatType）：不套的话气泡里落回系统默认字，和会话里看着不一样
+                    .font(ChatType.body)
+                    .lineSpacing(ChatType.lineSpacing)
                 }
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
@@ -469,14 +472,12 @@ struct GroupMessageRow: View {
                     }
                     Text(Format.listTime(message.ts)).font(.ui(.caption2)).foregroundStyle(.tertiary).fixedSize()
                 }
-                MarkdownView(message.text, fill: false)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Theme.botBubble, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .contextMenu {
-                        Button { Clipboard.copy(message.text) } label: { Label(L("复制"), systemImage: "doc.on.doc") }
-                        Button { open(.chat(message.from)) } label: { Label(L("打开这个会话"), systemImage: "bubble.left") }
-                    }
+                // 同会话里 agent 的气泡（内边距、圆角、菜单都一样）
+                Bubble(mine: false, text: message.text, actions: [
+                    MenuAction(title: L("打开这个会话"), symbol: "bubble.left") { open(.chat(message.from)) },
+                ]) {
+                    MarkdownView(message.text, fill: false)
+                }
                 if !delivery.isEmpty {
                     Text(delivery).font(.ui(.caption2)).foregroundStyle(failed ? Theme.removed : Color.secondary)
                 }
@@ -539,18 +540,14 @@ struct GroupBubbleMine: View {
                     ForEach(files, id: \.ref) { file in
                         FileChip(name: file.name, size: file.size, mine: true)
                             .foregroundStyle(Theme.meText)
-                            .padding(.horizontal, 12).padding(.vertical, 9)
-                            .background(Theme.meBubble, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(.horizontal, ChatType.padH).padding(.vertical, ChatType.padV)
+                            .background(Theme.meBubble, in: RoundedRectangle(cornerRadius: ChatType.radius, style: .continuous))
                             .onTapGesture { guard TouchTravel.isTap else { return }; FileOpener.shared.openGroupFile(model, group: group, file: file) }
                             .accessibilityAddTraits(.isButton)
                     }
                 }
                 if !text.isEmpty {
-                Text(text).font(.ui(.body)).foregroundStyle(Theme.meText)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Theme.meBubble, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .contextMenu { Button { Clipboard.copy(text) } label: { Label(L("复制"), systemImage: "doc.on.doc") } }
+                    Bubble(mine: true, text: text) { Text(text).fixedSize(horizontal: false, vertical: true) }
                 }
                 if !footnote.isEmpty {
                     Text(footnote).font(.ui(.caption2)).foregroundStyle(failed ? Theme.removed : Color.secondary).multilineTextAlignment(.trailing)

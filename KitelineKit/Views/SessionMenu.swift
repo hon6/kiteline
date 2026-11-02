@@ -47,6 +47,11 @@ struct SessionMenuSheet: View {
                                 MenuRow(symbol: "cpu", title: L("模型和思考等级"),
                                         value: ModelLabel.text(model, key), chevron: true) { run(.model) }
                             }
+                            // 目标（/goal）：围着一个目标跨多轮一直做，确认达成才停（Claude Code 2.1.139 起、Codex 终端里的会话）
+                            if session.can("goal") {
+                                MenuRow(symbol: "scope", title: L("目标"),
+                                        value: session.goal.map { GoalText.label($0.state) } ?? L("未设定"), chevron: true) { run(.goal) }
+                            }
                             if session.can("compact") {
                                 MenuRow(symbol: "arrow.down.right.and.arrow.up.left", title: L("压缩上下文"), chevron: true,
                                         trailing: session.usage?.percent.map { AnyView(ContextBar(percent: $0)) }) { run(.compact) }
@@ -90,6 +95,9 @@ struct SessionMenuSheet: View {
             .padding(16)
         }
         .background(Theme.pageBackground)
+        #if os(macOS)
+        .navigationTitle(L("会话菜单"))   // Mac 面板的标题栏（同别的弹窗）
+        #endif
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
@@ -111,7 +119,7 @@ enum CloseSessionText {
 }
 
 /// menu、speak：横着的 iPhone 没有导航栏，分屏标题条上的「⋯」「朗读」经 externalAction 交给对话页
-enum SessionAction { case search, files, changes, tests, agents, stop, mode, model, compact, newTask, info, agentInfo, bottom, close, menu, speak, terminal, group }
+enum SessionAction { case search, files, changes, tests, agents, stop, mode, model, goal, compact, newTask, info, agentInfo, bottom, close, menu, speak, terminal, group }
 
 struct MenuTile: View {
     let symbol: String

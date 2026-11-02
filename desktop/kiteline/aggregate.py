@@ -226,7 +226,7 @@ def usage(store, days, fresh=False):
         return hit[1]
     since = config.start_of_day_ms() - (days - 1) * 86_400_000
     tz = int(-time.altzone / 60) if time.localtime().tm_isdst else int(-time.timezone / 60)
-    by_day, by_model, by_project, by_source, unpriced = {}, {}, {}, [], set()
+    by_day, by_model, by_project, by_agent, by_source, unpriced = {}, {}, {}, {}, [], set()
     totals = _blank()
     errors = _offline_errors(store)
     complete = not errors
@@ -246,6 +246,12 @@ def usage(store, days, fresh=False):
             by_project[key] = _add(by_project.get(key) or _blank({"cwd": cwd, "name": os.path.basename(cwd.rstrip("/\\")),
                                                                   "sourceName": source.name, "sourceId": source.id}), project)
         source_totals = r.get("totals") or {}
+        # 按 agent：旧版 watcher 没有这一项，它只统计 Claude Code
+        for agent in r.get("agents") if isinstance(r.get("agents"), list) else [dict(source_totals, agent="claude", name="Claude Code")]:
+            key = agent.get("agent") or "unknown"
+            merged = _add(by_agent.get(key) or _blank({"agent": key, "name": agent.get("name") or key, "unpriced": True}), agent)
+            merged["unpriced"] = merged["unpriced"] and bool(agent.get("unpriced"))   # 哪台电脑上记了花费就不算「仅 token」
+            by_agent[key] = merged
         totals = _add(totals, source_totals)
         by_source.append(_add(_blank({"name": source.name}), source_totals))
         unpriced.update(r.get("unpriced") or [])
@@ -259,6 +265,7 @@ def usage(store, days, fresh=False):
         return (-number(item.get("cost")), -number(item.get("output")))
     payload = {"ok": True, "days": day_list, "range": days, "since": since,
                "models": sorted(by_model.values(), key=rank), "projects": sorted(by_project.values(), key=rank)[:20],
+               "agents": sorted((a for a in by_agent.values() if number(a.get("requests")) or number(a.get("output"))), key=rank),
                "sources": sorted(by_source, key=rank), "totals": totals, "unpriced": sorted(unpriced), "errors": errors,
                "generatedAt": int(time.time() * 1000)}
     if complete and not errors:

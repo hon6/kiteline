@@ -34,7 +34,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.21"
+VERSION = "1.0.22"
 
 
 class App:
@@ -405,7 +405,9 @@ class App:
         for item in items:
             kind = item.get("t")
             if kind == "agent_image":
-                self.server.notify("image", title, item.get("text") or "%s 发来一张图片" % self._speaker(record), key)
+                # 回别的会话来信的那一轮里发的图：对话里照常显示，不推送
+                if not (record and record.snap.get("turnFrom") == "peer"):
+                    self.server.notify("image", title, item.get("text") or "%s 发来一张图片" % self._speaker(record), key)
             elif kind == "agent_todo" and item.get("id") and item.get("text"):
                 ts = aggregate.number(item.get("ts")) or None
                 if item.get("forUser"):
@@ -474,6 +476,9 @@ class App:
             if tool and tool not in text:
                 body = "%s\n工具：%s" % (text, tool)
             self.server.notify("attention", title, body, record.key)
+        elif kind == "goal":
+            from .store import GOAL_HEADS, goal_push_body
+            self.server.notify_goal(title, GOAL_HEADS.get(text.get("state"), "目标"), goal_push_body(text, False), goal_push_body(text, True), record.key)
         else:
             error = record.snap.get("error")
             if error:

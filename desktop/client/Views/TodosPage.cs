@@ -420,22 +420,62 @@ public static class TodoContent
 }
 
 /// 弹出的小窗（同 Mac 的面板）：面板底色（比里面的输入框、列表亮一档，同 Mac）、打开时宽度固定、高度随内容，Esc 关掉。
-/// 按住空白处能拖走，拖边角能改大小；在会话里弹的对着那一块会话正中打开（见 Place）
+/// 顶上统一的标题栏（标题、最大化、关闭，见 TitleBar）；按住空白处能拖走，拖边角能改大小；在会话里弹的对着那一块会话正中打开（见 Place）
 public static class Dialog
 {
-    public static Window Make(Control content, double width, string title = "Kiteline")
+    /// titleBar：false = 内容自己画了标题栏和窗口按钮（代码窗口）
+    public static Window Make(Control content, double width, string title = "Kiteline", bool titleBar = true)
     {
         var window = new Window
         {
             Title = title, Width = width, SizeToContent = SizeToContent.Height, CanResize = true, ShowInTaskbar = false,
             MinWidth = Math.Min(width, 360), MinHeight = 120,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, FontFamily = Look.Family,
-            // 浮动提示（「未能识别」之类）在弹窗里也显示
-            Content = new Panel { Children = { content, new ToastLayer(24) } },
         };
+        // 浮动提示（「未能识别」之类）在弹窗里也显示
+        window.Content = new Panel { Children = { titleBar ? WithTitleBar(window, content) : content, new ToastLayer(24) } };
         window.Res(Window.BackgroundProperty, "Sheet");
-        Chromeless(window);
+        Chromeless(window, titleBar);
         return window;
+    }
+
+    /// 标题栏的高度（Windows 上系统的最大化、关闭按钮画在这一条里）
+    public const double TitleHeight = 40;
+
+    /// 弹窗统一的标题栏（11-02 反馈：软件内的弹窗要统一，有标题栏、全屏、关闭）：左边标题（跟着窗口标题变），
+    /// 右边最大化（铺满屏幕，再点还原）、关闭。Windows 用系统画的按钮（Chromeless 给它留出这一条），Linux 用自己画的（按 GNOME 设置放左边或右边）。
+    /// 按住拖动窗口，双击最大化 / 还原。挂在主窗口上的弹窗收不进任务栏，不要最小化
+    public static Control TitleBar(Window window)
+    {
+        window.CanMinimize = false;
+        var title = Ui.Text(window.Title, 13, FontWeight.SemiBold).Trim();
+        title.IsHitTestVisible = false;   // 按在标题上也算按在标题栏上（拖动、双击）
+        window.PropertyChanged += (_, e) => { if (e.Property == Window.TitleProperty) title.Text = window.Title; };
+        var row = Ui.H(8, title.Shrink(), new Spacer());
+        var left = 16.0;
+        if (WindowChrome.Custom)
+        {
+            var buttons = new CaptionButtons(window, WindowChrome.Buttons.Where(b => b != "minimize"));
+            if (WindowChrome.ButtonsLeft) { row.Children.Insert(0, buttons); left = 0; } else row.Children.Add(buttons);
+        }
+        var bar = new Border
+        {
+            Child = row, Height = TitleHeight, Background = Brushes.Transparent,
+            Padding = new Thickness(left, 0, OperatingSystem.IsWindows() ? WindowChrome.CaptionWidth : 0, 0),
+        };
+        bar.PointerPressed += (sender, e) => { WindowChrome.DragWindow(sender, e); if (ReferenceEquals(e.Source, sender)) e.Handled = true; };
+        return bar;
+    }
+
+    /// 内容上面加统一的标题栏
+    public static Control WithTitleBar(Window window, Control content)
+    {
+        var bar = TitleBar(window);
+        var dock = new DockPanel();
+        DockPanel.SetDock(bar, Dock.Top);
+        dock.Children.Add(bar);
+        dock.Children.Add(content);
+        return dock;
     }
 
     /// 在会话里弹的窗对着它居中：最近一次在哪一块会话里按下（主窗口别处按下就清掉，弹窗对着整个窗口居中）
@@ -499,13 +539,15 @@ public static class Dialog
     /// 不要系统标题栏（同 Mac 的面板：没有标题、最小化 / 最大化；弹窗内容里自己有标题），按住空白处拖动。
     /// Windows：系统照样给圆角和阴影；客户区铺满整个窗口后系统的拖边没了，四周往里 5 点自己接（同主窗口）。
     /// Linux：同主窗口自己画圆角、阴影和一圈细边（GNOME 的标题栏会把「新任务」再写一遍）
-    public static void Chromeless(Window window)
+    /// titleBar：内容顶上有统一的标题栏（TitleBar）——Windows 上让系统在那一条里画最大化、关闭按钮（同代码窗口）
+    public static void Chromeless(Window window, bool titleBar = false)
     {
         if (OperatingSystem.IsWindows())
         {
             window.ExtendClientAreaToDecorationsHint = true;
-            window.ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome;
-            window.ExtendClientAreaTitleBarHeightHint = -1;
+            window.ExtendClientAreaChromeHints = titleBar ? Avalonia.Platform.ExtendClientAreaChromeHints.PreferSystemChrome
+                                                           : Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome;
+            window.ExtendClientAreaTitleBarHeightHint = titleBar ? TitleHeight : -1;
             ResizeGrips(window, 5);
         }
         else if (WindowChrome.Custom) LinuxFrame(window);
@@ -926,8 +968,6 @@ public static class AddTodosDialog
             if (await TodoState.Shared.Add(chosen, request.Key, request.ItemId, request.Title, request.Ts)) window?.Close();
         }, 12) { Height = 46 }.Keys("WechatGreen", "GreenHover", "GreenPressed");
         var stack = new StackPanel { Spacing = 12 };
-        stack.Children.Add(Ui.H(8, Ui.Text(L("加入待办"), 16, FontWeight.SemiBold), new Spacer(),
-            new Tap(Ui.Text(L("取消"), 13, color: "Text2").Pad(6, 3), () => window?.Close(), 6).Keys("Transparent", "Fill05")));
         if (request.Title is { Length: > 0 } title)
             stack.Children.Add(Ui.Text(L("出自「%@」，加入后点击即可跳转到原消息", title), 12, color: "Text2", lines: 2).Wrap());
         stack.Children.Add(Card.Make(rows, 0, 12).Res(Border.BackgroundProperty, "Surface"));

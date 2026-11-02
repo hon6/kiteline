@@ -125,6 +125,7 @@ struct MiniSessionRow: View {
                     Text(item.title).font(.app(size: 12.5, weight: .semibold)).lineLimit(1)
                 }
                 HStack(spacing: 4) {
+                    if let goal = item.goal { GoalBadge(state: goal.state, round: goal.round, size: 10) }
                     if let stage = item.stage { StageBadge(step: stage.step, total: stage.total, label: stage.label, part: stage.part, dots: stage.dots, size: 10) }
                     Text(item.line.isEmpty ? item.folder : item.line)
                         .font(.app(size: 11))

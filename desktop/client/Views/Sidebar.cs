@@ -459,6 +459,8 @@ public sealed class SessionRowView : Tap
         Control lineView = Ui.Text(line.Length == 0 ? " " : line, 11.5, color: lineColor, lines: 2);
         // 正在做的会话：这一轮做到第几步（主题色小标识，几个会话各到哪一步一眼看清）
         if (s.LiveStage is StageInfo stage) lineView = Ui.HTop(5, StageBadge.Make(stage, 10.5).Margin(0, 1, 0, 0), lineView.Shrink());
+        // 设了目标的：目标到哪了（鼠标停上去看目标原文）
+        if (s.ListGoal is GoalInfo goal) lineView = Ui.HTop(5, GoalBadge.Make(goal, 10.5).Margin(0, 1, 0, 0), lineView.Shrink());
         var text = Ui.VFill(2, title, lineView, meta);
         meta.ClipToBounds = true;
         Avatar = new SessionAvatar(s.Title, s.Activity, 34, SessionFace.Make(s.Key, 34, 0.28)).Margin(0, 1, 0, 0);

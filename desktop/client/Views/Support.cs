@@ -50,14 +50,13 @@ public static class Sheets
         window.Res(Window.BackgroundProperty, "Sheet");
         var done = new GlassButton(L("完成"), null, window.Close, prominent: true, height: 30);
         var footer = Ui.H(8, new Spacer(), buttons is null ? null : Ui.Stack(Orientation.Horizontal, 8, Align.Center, buttons), done).Pad(16, 12);
-        var header = Ui.Text(title, 15, FontWeight.SemiBold).Pad(20, 16, 20, 8);
         var dock = new DockPanel();
-        DockPanel.SetDock(header, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
-        dock.Children.Add(header);
         dock.Children.Add(footer);
         dock.Children.Add(scroll ? new ScrollViewer { Content = content.Pad(20, 4, 20, 8) } : content);
-        window.Content = dock;
+        // 标题在统一的标题栏里（同别的弹窗：标题、最大化、关闭）
+        window.Content = Dialog.WithTitleBar(window, dock);
+        Dialog.Chromeless(window, titleBar: true);
         window.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Escape) window.Close(); };
         Dialog.ShowPlaced(window, owner);
         return window;

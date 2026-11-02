@@ -112,7 +112,7 @@ public sealed class UpdateDialog : Window
 
     UpdateDialog()
     {
-        Title = "Kiteline";
+        Title = L("Kiteline 更新");
         Width = 420;
         SizeToContent = SizeToContent.Height;
         CanResize = true;
@@ -122,7 +122,7 @@ public sealed class UpdateDialog : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         FontFamily = Look.Family;
         this.Res(BackgroundProperty, "Sheet");
-        Dialog.Chromeless(this);
+        Dialog.Chromeless(this, titleBar: true);
         detail.TextAlignment = TextAlignment.Center;
         notes = ReleaseNotesBox(notesPanel);
         bar.Res(ProgressBar.ForegroundProperty, "Green").Res(ProgressBar.BackgroundProperty, "Fill10");
@@ -133,7 +133,7 @@ public sealed class UpdateDialog : Window
             Spacing = 12,
             Children = { new KiteIcon(64).HAlign(HorizontalAlignment.Center), title, detail, notes, skip, bar, buttons },
         };
-        Content = stack.Pad(22, 20, 22, 20);
+        Content = Dialog.WithTitleBar(this, stack.Pad(22, 4, 22, 20));   // 统一的标题栏（标题、最大化、关闭）
         KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Escape) Close(); };
         var state = UpdateState.Shared;
         void Changed(object? s, PropertyChangedEventArgs e) => Draw();
@@ -285,7 +285,7 @@ public sealed class PhoneUpdateDialog : Window
 
     PhoneUpdateDialog(UpdateState.PhoneOffer offer)
     {
-        Title = "Kiteline";
+        Title = L("手机端更新");
         Width = 420;
         SizeToContent = SizeToContent.Height;
         CanResize = true;
@@ -294,7 +294,7 @@ public sealed class PhoneUpdateDialog : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         FontFamily = Look.Family;
         this.Res(BackgroundProperty, "Sheet");
-        Dialog.Chromeless(this);
+        Dialog.Chromeless(this, titleBar: true);
         var devices = new StackPanel { Spacing = 3, HorizontalAlignment = HorizontalAlignment.Center };
         foreach (var device in offer.Devices)
             devices.Children.Add(Ui.Text(L("「%@」当前版本 %@", device.Name, device.Version), 12.5, color: "Text2").HAlign(HorizontalAlignment.Center));
@@ -306,7 +306,7 @@ public sealed class PhoneUpdateDialog : Window
         notes.IsVisible = panel.Children.Count > 0;
         var skip = new CheckBox { Content = Ui.Text(L("此版本不再提示"), 12), IsChecked = offer.Skipped };
         skip.IsCheckedChanged += (_, _) => _ = UpdateState.Shared.Skip(offer.Key, skip.IsChecked == true);
-        Content = new StackPanel
+        Content = Dialog.WithTitleBar(this, new StackPanel
         {
             Spacing = 12,
             Children =
@@ -315,7 +315,7 @@ public sealed class PhoneUpdateDialog : Window
                 Ui.Text(L("手机端 Kiteline %@ 已发布", offer.Version), 15, FontWeight.Bold).HAlign(HorizontalAlignment.Center),
                 devices, hint, notes, skip, PromptCard.CardButton(L("好"), true, Close),
             },
-        }.Pad(22, 20, 22, 20);
+        }.Pad(22, 4, 22, 20));
         KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Escape) Close(); };
     }
 }

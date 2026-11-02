@@ -92,6 +92,8 @@ public sealed class MainWindow : Window
             WindowChrome.RoundCorners(this);
             UpdateGlass();
             UpdateFrame();
+            // 第一次打开（还没配过手机）：四步新手引导，压在主窗口上面
+            OnboardingWindow.ShowOnFirstLaunch();
         };
         PropertyChanged += (_, e) => { if (e.Property == ActualTransparencyLevelProperty) UpdateGlass(); };
 
@@ -474,7 +476,8 @@ public sealed class WelcomeView : Panel
         var first = model.Sessions.FirstOrDefault(s => s.IsWaiting) ?? model.Sessions.FirstOrDefault(s => s.IsBusy) ?? model.Sessions.FirstOrDefault();
         var buttons = Ui.H(12,
             first is null ? null : new GlassButton(L("打开「%@」", first.Title), "bubble.left.and.text.bubble.right", () => main.Selection = first.Key, prominent: true, height: 32),
-            new GlassButton(L("在手机上使用"), "iphone.gen3", () => SettingsWindow.Open("phone"), height: 32));
+            new GlassButton(L("在手机上使用"), "iphone.gen3", () => SettingsWindow.Open("phone"), height: 32),
+            new GlassButton(L("新手引导"), "list.bullet", () => OnboardingWindow.Open(), height: 32));
         var stack = Ui.Stack(Orientation.Vertical, 18, Align.Center, [
             icon,
             Ui.Stack(Orientation.Vertical, 6, Align.Center, [Ui.Text("Kiteline", 30, FontWeight.Bold), Ui.Text(MainModel.Summary(model.Sessions), 15, color: "Text2")]),

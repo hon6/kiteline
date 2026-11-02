@@ -883,6 +883,37 @@ check("又出错时推「出错停下了」（不是「有结论了」），写�
 check("Mac 日志里是出错提醒", "周报生成" in log_tail())
 request("/api/quiet", "POST", {"start": "23:00", "end": "08:00"})
 
+print("== 别的会话来信引起的那一轮：答完不提醒")
+
+
+def lim_append(*rows):
+    with open(lim_path, "a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(dict(row, cwd="/Users/demo/projects/weekly", timestamp=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())),
+                                    ensure_ascii=False) + "\n")
+
+
+def lim_inbox(text, wait):
+    end = time.time() + wait
+    while time.time() < end:
+        time.sleep(0.5)
+        got = next((e for e in request("/api/inbox?limit=30")[1].get("entries", []) if text in (e.get("body") or "")), None)
+        if got:
+            return got
+    return None
+
+
+time.sleep(21)   # 上面刚推过「出错停下」：等过同一会话的结论冷却，免得下面「不提醒」是被冷却挡掉的
+lim_append({"type": "user", "isMeta": True, "origin": {"kind": "peer", "from": "uds:/tmp/x.sock", "name": "发版会话", "msg_id": "it-peer-1",
+                                                       "body": "快照拍好了"},
+            "message": {"role": "user", "content": "<cross-session-message from=\"uds:/tmp/x.sock\">快照拍好了</cross-session-message>"}},
+           {"type": "assistant", "uuid": "it-peer-reply", "message": {"role": "assistant", "content": [{"type": "text", "text": "已回复发版会话：周报这边不用改"}]}})
+check("来信那一轮答完：不进提醒、不推送", lim_inbox("已回复发版会话", 5) is None)
+lim_append({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "周报再加一页图表"}]}},
+           {"type": "assistant", "uuid": "it-user-reply", "message": {"role": "assistant", "content": [{"type": "text", "text": "图表页加好了"}]}})
+got = lim_inbox("图表页加好了", 10)
+check("你发起的下一轮答完：照常提醒", got and got["kind"] == "conclusion", str(got))
+
 print("== 可能卡住了（模拟时间推进）")
 _, st, _ = request("/api/state")
 busy_now = next(x for x in st["sessions"] if x["key"] == busy["key"])

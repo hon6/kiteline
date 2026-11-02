@@ -59,6 +59,13 @@ enum Format {
         return "\(m / 60)h \(m % 60)m"
     }
 
+    /// token 数：「820」「45.2k」「1.3M」（同 Claude Code）
+    static func tokens(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        if n < 1_000_000 { return String(format: "%.1fk", Double(n) / 1000).replacingOccurrences(of: ".0k", with: "k") }
+        return String(format: "%.1fM", Double(n) / 1_000_000).replacingOccurrences(of: ".0M", with: "M")
+    }
+
     /// 用量恢复时间：今天的只写时分，别的天带日期
     static func resetTime(_ ms: Double) -> String {
         let d = date(ms)

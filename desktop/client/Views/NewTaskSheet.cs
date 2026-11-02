@@ -74,8 +74,9 @@ public sealed class NewTaskSheet
         search = new TextBox { Watermark = L("搜索项目"), Width = 200, FontSize = Look.Pt(13), Padding = new Thickness(10, 5) };
         search.Classes.Add("search");
         search.TextChanged += (_, _) => DrawRows();
-        var header = Ui.H(8, Ui.Text(L("新任务"), 18, FontWeight.Bold), new Spacer(), search);
+        // 「新任务」在弹窗的标题栏里（同别的弹窗）；这一行是说明和搜索
         var intro = Ui.Text(L("选择项目并填写任务内容，可附截图。将在该项目的 VS Code 窗口中新建会话（窗口未打开时将先打开）。"), 12, color: "Text2", lines: 0).Wrap();
+        var header = Ui.H(12, intro.Shrink(), search);
 
         var listBox = new Border
         {
@@ -124,7 +125,7 @@ public sealed class NewTaskSheet
             .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
         var footer = Ui.H(10, warning, status.Shrink(), new Spacer(), cancel, startButton);
 
-        var stack = new StackPanel { Spacing = 12, Children = { header, intro, scopes, listBox, field, options, footer } };
+        var stack = new StackPanel { Spacing = 12, Children = { header, scopes, listBox, field, options, footer } };
         window = Dialog.Make(stack.Pad(20), 600, L("新任务"));
         window.KeyDown += (_, e) => { if (e.Key == Key.Escape) window.Close(); };
         window.Closed += (_, _) => { shown = null; MainModel.Shared.NewTaskPreset = null; };

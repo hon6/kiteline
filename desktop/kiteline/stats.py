@@ -94,6 +94,18 @@ def millis(value):
     return int(value * 1000 if value < 1e12 else value)
 
 
+def detect_agents(app):
+    """本机装了哪些 Agent（同设备详情 /api/machine：Claude Code 在 machine_info 里、别家在插件列表里）；本机来源没连上时 None"""
+    from . import faces
+    try:
+        detail = faces.machine(app, "local")
+    except Exception as exc:  # noqa: BLE001
+        log.write("检测本机 Agent 出错：%s" % exc)
+        return None
+    agents = (detail or {}).get("agents")
+    return agents if agents else None
+
+
 class UsageStats:
     def __init__(self, app):
         self.app = app
@@ -103,6 +115,9 @@ class UsageStats:
         self._last_usage = 0.0
         self._last_fingerprint = None
         self._identity = None
+        # 本机检测到的 Agent（id）：None = 还没检测过（报 null）；一小时问一次本机 watcher
+        self.installed_agents = None
+        self._last_agent_check = 0.0
 
     def start(self):
         if not endpoint():
@@ -153,6 +168,11 @@ class UsageStats:
             return
         now = time.time()
         usage = self._usage() if force or now - self._last_usage > USAGE_EVERY else None
+        if force or now - self._last_agent_check > 3600:
+            found = detect_agents(self.app)
+            if found is not None:
+                self.installed_agents = [a["id"] for a in found if a.get("installed")]
+                self._last_agent_check = now
         body = self.snapshot()
         fingerprint = json.dumps(body, sort_keys=True)
         if usage is None and not force and fingerprint == self._last_fingerprint and now - self._last_sent < HEARTBEAT:
@@ -189,6 +209,7 @@ class UsageStats:
                 "watch": any((d.get("watch") or {}).get("installed") for d in devices),
             },
             "hosts": [{"kind": "ssh" if s.kind == "ssh" else "local", "live": bool(s.live)} for s in sources],
+            "agents": self.installed_agents,
             "devices": [self._device(d, d.get("id") in pushed) for d in devices],
             "sessions": [self._session(r) for r in records],
         }
@@ -263,6 +284,19 @@ class UsageStats:
             out["cost"] = aggregate.number(item.get("cost"))
             return out
         return [pick(d, "day") for d in report.get("days") or []], [pick(m, "model") for m in (report.get("models") or [])[:30]]
+
+    def feedback(self, fields):
+        """用户主动提交的反馈（新手引导里「你使用的 Agent 不在列表中？」）：和使用统计同一个本机编号，发到 /stats/feedback。
+        是用户自己点的「提交」，不看「发送使用统计」开关；测试实例没指地址时不发"""
+        url = endpoint()
+        if not url:
+            return False
+        identity = self.identity
+        body = {"v": 1, "install": identity["install"], "key": identity["key"],
+                "name": self.app.cfg.mobile.get("myName") or self.app.user_name(), "platform": config.PLATFORM,
+                "os": os_name(), "app": self.app.version, "lang": ui_locale()}
+        body.update(fields)
+        return self._post(url.rsplit("/", 1)[0] + "/feedback", body)
 
     def _post(self, url, body):
         data = gzip.compress(json.dumps(body, ensure_ascii=False).encode())

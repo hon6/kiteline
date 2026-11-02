@@ -27,8 +27,9 @@ public sealed class ChatView : Grid
     readonly StackPanel deck = new() { Spacing = 8 };
     readonly Composer composer;
     readonly Border newPill;
-    /// 输入框上方的任务进展条（见 StageStrip）
+    /// 输入框上方的任务进展条（见 StageStrip）、它上面的目标条（见 GoalStrip）
     readonly StageStrip stageStrip = new();
+    readonly GoalStrip goalStrip = new();
     readonly Dictionary<string, (ChatRow Row, Control View)> views = new();
     readonly List<Control> order = [];
     Control? promptCard;
@@ -76,6 +77,7 @@ public sealed class ChatView : Grid
             OnMode = () => Perform(SessionAction.Mode), OnModel = () => Perform(SessionAction.Model),
             OnTodos = () => Sheets.Show(L("任务清单"), TodoCard.Make(chat.Todos), 420, 480), OnAgents = () => Perform(SessionAction.Agents),
         };
+        deck.Children.Add(goalStrip);
         deck.Children.Add(stageStrip);
         deck.Children.Add(composer);
         var deckBox = new Border { Child = deck, Padding = new Thickness(0, 8, 0, 0) };
@@ -240,6 +242,7 @@ public sealed class ChatView : Grid
     {
         var session = Session;
         composer.Update(session);
+        goalStrip.Update(Key, model.Connected ? session?.Goal : null);
         stageStrip.Update(model.Connected ? session?.LiveStage : null, Bounds.Height);
         var signature = session is null ? null : PromptCard.Current(Key, chat) + "|" + session.IsWaiting + session.CanReply + chat.AnsweredPrompt + session.Activity;
         if (signature == promptSignature && promptCard is not null == (session?.IsWaiting ?? false)) { UpdateWorking(session); return; }
@@ -337,6 +340,7 @@ public sealed class ChatView : Grid
             case SessionAction.Terminal: chat.TerminalOpen = !chat.TerminalOpen; break;
             case SessionAction.Mode: ChatSheets.Mode(Key); break;
             case SessionAction.Model: ChatSheets.Model(Key); break;
+            case SessionAction.Goal: GoalSheet.Open(Key); break;
             case SessionAction.NewTask:
                 if (model.Session(Key) is { } s) MainModel.Shared.NewTask(s);
                 break;
@@ -427,19 +431,20 @@ public static class Dialogs
     public static Task<bool> Confirm(string message, string confirm, bool destructive = false, string? title = null)
     {
         var done = new TaskCompletionSource<bool>();
-        Control text = Ui.Text(message, title is null ? 13 : 12, color: title is null ? "Text" : "Text2", lines: 0).Wrap();
-        if (title is not null) text = Ui.VFill(6, Ui.Text(title, 14, FontWeight.SemiBold, lines: 0).Wrap(), text);
+        // 标题（有的话）在统一的标题栏里（同别的弹窗）
+        Control text = Ui.Text(message, 13, lines: 0).Wrap();
         Window? window = null;
         var ok = PromptCard.CardButton(confirm, !destructive, () => { done.TrySetResult(true); window?.Close(); }, destructive ? "Removed" : null);
         var cancel = PromptCard.CardButton(L("取消"), false, () => { done.TrySetResult(false); window?.Close(); });
         var stack = new StackPanel { Spacing = 16, Children = { text, new ButtonPair(cancel, ok) } };
         window = new Window
         {
-            Width = 420, SizeToContent = SizeToContent.Height, CanResize = true, MinWidth = 320, MinHeight = 120, ShowInTaskbar = false, Title = "Kiteline",
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = stack.Pad(20), FontFamily = Look.Family,
+            Width = 420, SizeToContent = SizeToContent.Height, CanResize = true, MinWidth = 320, MinHeight = 120, ShowInTaskbar = false, Title = title ?? "",
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, FontFamily = Look.Family,
         };
+        window.Content = Dialog.WithTitleBar(window, stack.Pad(20, 4, 20, 20));
         window.Res(Window.BackgroundProperty, "Sheet");
-        Dialog.Chromeless(window);
+        Dialog.Chromeless(window, titleBar: true);
         window.Closed += (_, _) => done.TrySetResult(false);
         // 对着发起它的那一块会话正中（同别的弹窗）；按住空白处能拖走、拖边能改大小；记成最近的弹窗（自测能截）
         Dialog.Show(window, modal: true);

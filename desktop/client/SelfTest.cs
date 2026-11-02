@@ -171,6 +171,16 @@ static class SelfTest
                 case "settingsshot": Pump(0.4); if (Views.SettingsWindow.Current is Window settings) Shot(settings, arg); break;
                 // 更新记录窗口：changelog 打开，changelogshot:<png> 截它
                 case "changelog": Views.ChangelogWindow.Open(); break;
+                // 新手引导：onboarding:<第几步，0～3>[:none]（none = 假装一个 Agent 都没检测到），onboardingshot:<png> 截它
+                case "onboarding":
+                    var ob = arg.Split(':');
+                    Views.OnboardingWindow.PretendNone = ob.Length > 1 && ob[1] == "none";
+                    Views.OnboardingWindow.Current?.Close();   // 每次重开：重新检测 Agent（none 才生效）
+                    Pump(0.3);
+                    Views.OnboardingWindow.Open(int.Parse(ob[0]));
+                    Pump(4);
+                    break;
+                case "onboardingshot": Pump(0.4); if (Views.OnboardingWindow.Current is Window onboarding) Shot(onboarding, arg); break;
                 // 放一只纸鸢：peerfly:发信标题>收信标题（按会话标题找 key；收信写不存在的标题 = 对方不在列表里，看「发给」小胶囊）
                 case "peerfly":
                     var ends = arg.Split('>');

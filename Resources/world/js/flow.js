@@ -1,6 +1,6 @@
 // 数据流大屏：所有会话一块屏。左边是它们读进来的东西，中间一列是每个会话，右边是做的事和产出去了哪；
 // 每次工具调用画一串线穿过各列（一次一根，越忙越密），发生时一道亮光带着星芒沿线走一趟。
-// 卡片是立在平面上的薄板，镜头会自己运镜：飞到正在忙的那张卡跟前、压低斜着看、旁边标出它连着多少根线，再拉回全景。
+// 卡片铺在一张带格子的画布上，镜头会自己 2D 运镜：平移、推近到正在忙的那张卡、旁边列出它最近的调用，再拉回全景。
 // 和世界共用一套宿主（Mac / iPhone 的 WKWebView、Windows 的 WebView2、Linux 浏览器直连），消息协议同 docs/world.md 第 9 节，
 // 另外会去 api/history 补每个会话最近的调用，一打开就是满的。
 
@@ -789,11 +789,7 @@ class Flow {
 
   // MARK: 背景：暗红的大星形、竖总线
   decor() {
-    const g = new THREE.Group(), pts = [], cx = 520, cy = 400, r = 430;
-    for (let i = 0; i <= 5; i++) { const a = -Math.PI / 2 + (i % 5) * 4 * Math.PI / 5; pts.push(W(cx + r * Math.cos(a), cy + r * Math.sin(a), -2)); }
-    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x5a1724 })));
-    const circle = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2; circle.push(W(cx + r * .81 * Math.cos(a), cy + r * .81 * Math.sin(a), -2)); }
-    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(circle), new THREE.LineBasicMaterial({ color: 0x3a1018 })));
+    const g = new THREE.Group();
     // 总线：一列小点 + 一根虚线 + 刻度
     const dots = [], ticks = document.createElement('canvas'), s = 3;
     ticks.width = 40 * s; ticks.height = DH * s;
@@ -807,15 +803,48 @@ class Flow {
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(40, DH), new THREE.MeshBasicMaterial({ map: tt, transparent: true, depthWrite: false }));
     plane.position.copy(W(BUS_X + 20, DH / 2, .5));
     g.add(plane);
-    // 底下一块淡淡的光晕，画面不至于死黑
-    const vg = document.createElement('canvas'); vg.width = vg.height = 256;
-    const vgc = vg.getContext('2d'), gr = vgc.createRadialGradient(128, 128, 10, 128, 128, 128);
-    gr.addColorStop(0, 'rgba(30,34,58,.9)'); gr.addColorStop(1, 'rgba(6,7,11,0)'); vgc.fillStyle = gr; vgc.fillRect(0, 0, 256, 256);
-    const vt = new THREE.CanvasTexture(vg); vt.colorSpace = THREE.SRGBColorSpace;
-    const bg = new THREE.Mesh(new THREE.PlaneGeometry(DW * 1.6, DH * 1.8), new THREE.MeshBasicMaterial({ map: vt, transparent: true, depthWrite: false }));
-    bg.position.set(-80, 0, -6);
-    g.add(bg);
     this.scene.add(g);
+    this.grid = this.makeGrid();
+  }
+
+  /// 背景是一张带格子的画布（11-02）：20 一小格、100 一大格，对齐设计坐标；
+  /// 着色器按屏幕像素画线，怎么缩放线都是 1 像素细，拉远了小格慢慢隐去只留大格。平面跟着镜头走，拖到哪都铺满
+  makeGrid() {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uBg: { value: new THREE.Color('#06070b') }, uMinor: { value: new THREE.Color('#11141c') }, uMajor: { value: new THREE.Color('#1a1e2a') },
+        uOrigin: { value: new THREE.Vector2(-DW / 2, DH / 2) }, uCell: { value: 20 }, uPx: { value: this.pixelRatio },
+      },
+      vertexShader: `varying vec2 vP;
+        void main() { vec4 w = modelMatrix * vec4(position, 1.0); vP = w.xy; gl_Position = projectionMatrix * viewMatrix * w; }`,
+      fragmentShader: `uniform vec3 uBg; uniform vec3 uMinor; uniform vec3 uMajor; uniform vec2 uOrigin; uniform float uCell; uniform float uPx;
+        varying vec2 vP;
+        float line(vec2 p, float cell) {
+          vec2 c = p / cell, d = fwidth(c);
+          vec2 g = abs(fract(c - 0.5) - 0.5) / d / uPx;
+          return 1.0 - min(min(g.x, g.y), 1.0);
+        }
+        void main() {
+          vec2 p = vP - uOrigin;
+          float px = uCell / max(fwidth(p.x), 1e-4) / uPx;
+          vec3 c = mix(uBg, uMinor, line(p, uCell) * smoothstep(5.0, 14.0, px));
+          c = mix(c, uMajor, line(p, uCell * 5.0));
+          gl_FragColor = vec4(c, 1.0);
+          #include <colorspace_fragment>
+        }`,
+      depthWrite: false,
+    });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    m.position.z = -8; m.renderOrder = -1; m.frustumCulled = false;
+    this.scene.add(m);
+    return m;
+  }
+  /// 画布平面挪到镜头正下方、按看到的范围放大（每帧）
+  fitGrid() {
+    const h = 2 * Math.tan(this.camera.fov * Math.PI / 360) * (this.camera.position.z + 8) * 1.3;
+    this.grid.position.x = this.camera.position.x; this.grid.position.y = this.camera.position.y;
+    this.grid.scale.set(h * Math.max(1, this.camera.aspect), h, 1);
+    this.grid.material.uniforms.uPx.value = this.pixelRatio;
   }
 
   makeGlow() {
@@ -892,6 +921,7 @@ class Flow {
     this.ambient(now);
     this.tickGlints(now);
     this.tickLit(now);
+    this.fitGrid();
     this.renderer.render(this.scene, this.camera);
     this.placeCallout();
     this.dash.draw(now);

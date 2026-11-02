@@ -684,7 +684,13 @@ struct EventRow: View {
 
     var body: some View {
         HStack(spacing: 4) {
+            // 目标的那几行（设定、每轮检查、达成……）前面带个小图标，达成的写上用了几轮、多久
+            if let goal = item.goal { Image(systemName: GoalText.eventSymbol(goal)).imageScale(.small) }
             Text(text)
+            if let stats = item.goalStats {
+                let summary = GoalText.stats(turns: stats.turns, seconds: stats.durationMs.map { Int($0 / 1000) }, tokens: stats.tokens)
+                if !summary.isEmpty { Text("· " + summary).monospacedDigit() }
+            }
             if item.detail != nil { Image(systemName: "chevron.right").imageScale(.small) }
         }
             .font(.ui(.caption))

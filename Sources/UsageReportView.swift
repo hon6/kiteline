@@ -15,6 +15,8 @@ final class UsageReportModel: ObservableObject {
         var requests: Double
         var output: Double
         var cacheRead: Double
+        /// 没有花费数据（agent 不记花费的模型、这家 agent）：显示「仅 token」，不显示 $0
+        var unpriced = false
     }
 
     struct Day: Identifiable {
@@ -75,9 +77,12 @@ final class UsageReportModel: ObservableObject {
                 name = item["name"] as? String ?? ""
                 detail = L("%@ 次请求", "\(Int(Digest.number(item["requests"])))")
             }
-            return Row(id: "\(field)\(index)", name: name, detail: detail, cost: Digest.number(item["cost"]),
+            let cost = Digest.number(item["cost"])
+            let unpriced = field == "agents" ? (item["unpriced"] as? Bool ?? false)
+                : field == "models" && cost == 0 && ((payload?["unpriced"] as? [String]) ?? []).contains(name)
+            return Row(id: "\(field)\(index)", name: name, detail: detail, cost: cost,
                        estimated: Digest.number(item["estimated"]), requests: Digest.number(item["requests"]),
-                       output: Digest.number(item["output"]), cacheRead: Digest.number(item["cacheRead"]))
+                       output: Digest.number(item["output"]), cacheRead: Digest.number(item["cacheRead"]), unpriced: unpriced)
         }
     }
 
@@ -105,11 +110,15 @@ struct UsageReportView: View {
                 if model.payload != nil {
                     summary
                     if model.days > 1 { chart }
+                    if model.rows("agents").count > 1 { table(L("按 Agent"), model.rows("agents")) }
                     table(L("按模型"), model.rows("models"))
                     table(L("按项目"), Array(model.rows("projects").prefix(12)))
                     if model.rows("sources").count > 1 { table(L("按机器"), model.rows("sources")) }
-                    Text("花费数据取自 Claude Code 记录的 cost-state（会话结束或恢复时写入）；进行中的会话按同一机器、同一模型的平均费率估算（图中浅色部分）。")
+                    Text("花费取自各 agent 自己的记录：Claude Code 的 cost-state（会话结束或恢复时写入；进行中的会话按同一机器、同一模型的平均费率估算，图中浅色部分），以及 OpenCode、Proma、Cursor 记下的花费。Codex、DeepSeek Harness、Qwen Code 不记录花费，只统计 token。")
                         .font(.app(size: 11)).foregroundStyle(.tertiary)
+                    if let unpriced = model.payload?["unpriced"] as? [String], !unpriced.isEmpty {
+                        Text(L("无费率数据的模型仅统计 token：%@", unpriced.joined(separator: "、"))).font(.app(size: 11)).foregroundStyle(.tertiary)
+                    }
                     ForEach((model.payload?["errors"] as? [String]) ?? [], id: \.self) { error in
                         Label(ServerLang.ui(error), systemImage: "exclamationmark.triangle").font(.app(size: 11.5)).foregroundStyle(.secondary)
                     }
@@ -145,7 +154,7 @@ struct UsageReportView: View {
         let cost = Digest.number(t["cost"]), estimated = Digest.number(t["estimated"])
         let input = Digest.number(t["input"]) + Digest.number(t["cacheRead"]) + Digest.number(t["cacheWrite"])
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
-            tile("dollarsign.circle", UsageReportModel.money(cost), L("花费"), estimated > 0 ? L("含估算 %@", "\(UsageReportModel.money(estimated))") : L("Claude Code 记录"))
+            tile("dollarsign.circle", UsageReportModel.money(cost), L("花费"), estimated > 0 ? L("含估算 %@", "\(UsageReportModel.money(estimated))") : L("取自 agent 记录"))
             tile("arrow.up.arrow.down.circle", "\(Int(Digest.number(t["requests"])))", L("次请求"), L("%@ 个模型", "\(model.rows("models").count)"))
             tile("text.word.spacing", UsageInfo.compact(Int(Digest.number(t["output"]))), L("输出 token"), L("输入 %@", "\(UsageInfo.compact(Int(input)))"))
             tile("internaldrive", UsageInfo.compact(Int(Digest.number(t["cacheRead"]))), L("读缓存"), L("写缓存 %@", "\(UsageInfo.compact(Int(Digest.number(t["cacheWrite"]))))"))
@@ -206,9 +215,14 @@ struct UsageReportView: View {
                                         }
                                 }
                                 .frame(height: 4)
+                                .opacity(row.unpriced ? 0 : 1)
                             }
                             Spacer(minLength: 12)
-                            Text(UsageReportModel.money(row.cost)).font(.app(size: 13, weight: .semibold)).monospacedDigit()
+                            if row.unpriced {
+                                Text("仅 token").font(.app(size: 12)).foregroundStyle(.secondary)
+                            } else {
+                                Text(UsageReportModel.money(row.cost)).font(.app(size: 13, weight: .semibold)).monospacedDigit()
+                            }
                         }
                         .padding(.vertical, 8)
                         if row.id != rows.last?.id { Divider() }

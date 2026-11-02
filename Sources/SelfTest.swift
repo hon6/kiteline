@@ -573,6 +573,23 @@ extension SelfTest {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { MainActor.assumeIsolated { write(settings.contentView?.superview ?? settings.contentView, to: bits[1]) } }
                 delay = 2.6
             }
+        case "onboarding":
+            // 新手引导：onboarding:<第几步，0～3>:<截图路径>[:none[:<提交的 Agent 名>]]
+            // （none = 假装一个 Agent 都没检测到；带名字就填进「你使用的 Agent 不在列表中？」并提交，截提交后的样子）
+            let bits = arg.split(separator: ":").map(String.init)
+            if let raw = Int(bits[0]), let step = OnboardingModel.Step(rawValue: raw), bits.count > 1,
+               let window = OnboardingWindowController.shared.showForCapture(step: step) {
+                let model = OnboardingWindowController.shared.model
+                OnboardingModel.pretendNone = bits.count > 2 && bits[2] == "none"
+                model.detect()
+                if bits.count > 3 {
+                    model.wanted = bits[3]
+                    model.note = "自测提交\n第二行"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { model.submit() }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { write(window.contentView?.superview ?? window.contentView, to: bits[1]) } }
+                delay = 3.6
+            }
         case "select": KitelineModel.shared.selection = arg
         case "group":
             // 会话群：group = 第一个群开进当前块的标签；group:split = 开在右侧分屏；group:drawer = 点标签栏上的成员按钮；group:list = 全部群；group:pick = 拉群面板（先勾上列表里前两个会话）；group:new = 点「建群」（什么都没勾）

@@ -369,6 +369,18 @@ public static class SessionChips
         }
         if (s.Usage?.Percent is int percent)
             yield return Pill(Ui.H(4, new ContextRing(percent), Ui.Text($"{percent}%", 11.5, color: "Text2").Digits()), s.Can("compact") ? onCompact : null);
+        // 目标（/goal）：没设时点开写一个，设了的显示进行中 / 暂停（会话支持才有）
+        if (s.Can("goal") && s.CanReply)
+        {
+            var goal = s.Goal is { Running: true } g ? g : null;
+            var (fg, fill, _) = goal is null ? ("Text", "Field", "") : GoalText.Tint(goal.State);
+            var icon = Ui.Sym(GoalText.Symbol(goal?.State ?? "active"), 11, fg);
+            icon.FontWeight = FontWeight.SemiBold;
+            var label = Ui.H(4, icon, Ui.Text(goal is null ? L("目标") : GoalText.Label(goal.State), 11.5, color: fg));
+            var chip = (Tap)Pill(goal is null ? label.Opacity(0.75) : label, () => GoalSheet.Open(key));
+            if (goal is not null) chip.Keys(fill, fill);
+            yield return chip.Tip(L("设定目标：%@ 围绕目标持续工作，确认达成才停", s.Speaker));
+        }
         var todos = chat.Todos;
         var done = todos.Count(t => t.Str("status") == "completed");
         if (todos.Count > 0 && done < todos.Count) yield return Chip("checklist", L("任务 %@/%@", done, todos.Count), onTodos);

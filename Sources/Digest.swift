@@ -293,6 +293,7 @@ enum UsageReport {
         var byDay: [String: [String: Any]] = [:]
         var byModel: [String: [String: Any]] = [:]
         var byProject: [String: [String: Any]] = [:]
+        var byAgent: [String: [String: Any]] = [:]
         var bySource: [[String: Any]] = []
         var totals = blank()
         var unpriced = Set<String>()
@@ -320,6 +321,17 @@ enum UsageReport {
                         byProject[key] = add(byProject[key] ?? blank(["cwd": cwd, "name": (cwd as NSString).lastPathComponent, "sourceName": name, "sourceId": connection.id]), project)
                     }
                     let sourceTotals = r["totals"] as? [String: Any] ?? [:]
+                    // 按 agent：旧版 watcher 没有这一项，它只统计 Claude Code
+                    var claudeOnly = sourceTotals
+                    claudeOnly["agent"] = "claude"
+                    claudeOnly["name"] = "Claude Code"
+                    for agent in r["agents"] as? [[String: Any]] ?? [claudeOnly] {
+                        let key = agent["agent"] as? String ?? "unknown"
+                        var merged = add(byAgent[key] ?? blank(["agent": key, "name": agent["name"] as? String ?? key, "unpriced": true]), agent)
+                        // 哪台电脑上记了花费就不算「仅 token」
+                        merged["unpriced"] = (merged["unpriced"] as? Bool ?? true) && (agent["unpriced"] as? Bool ?? false)
+                        byAgent[key] = merged
+                    }
                     totals = add(totals, sourceTotals)
                     if days == 1 { lastToday[connection.id] = (DailyReport.dayStamp(Date()), Digest.number(sourceTotals["cost"])) }
                     bySource.append(add(blank(["name": name]), sourceTotals))
@@ -348,6 +360,7 @@ enum UsageReport {
                 "ok": true, "days": dayList, "range": days, "since": since,
                 "models": byModel.values.sorted(by: rank),
                 "projects": Array(byProject.values.sorted(by: rank).prefix(20)),
+                "agents": byAgent.values.filter { Digest.number($0["requests"]) > 0 || Digest.number($0["output"]) > 0 }.sorted(by: rank),
                 "sources": bySource.sorted(by: rank),
                 "totals": totals, "unpriced": unpriced.sorted(), "errors": errors,
                 "generatedAt": Int64(Date().timeIntervalSince1970 * 1000),

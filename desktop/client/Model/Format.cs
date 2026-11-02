@@ -64,6 +64,11 @@ public static class Format
         return $"{m / 60}h {m % 60}m";
     }
 
+    /// token 数：「820」「45.2k」「1.3M」（同 Mac 版 Format.tokens）
+    public static string Tokens(int n) =>
+        n < 1000 ? n.ToString() : n < 1_000_000 ? (n / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "k"
+            : (n / 1_000_000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "M";
+
     /// 用量恢复时间：今天的只写时分，别的天带日期
     public static string ResetTime(double ms)
     {

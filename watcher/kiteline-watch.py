@@ -101,8 +101,8 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.31.0"
-FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups"]
+WATCHER_VERSION = "2.33.0"
+FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 MESSAGE_MAX_CHARS = 600
@@ -628,6 +628,20 @@ _EFFORT_RE = re.compile(r"<command-name>/effort</command-name>[\s\S]*?<command-a
 _MODE_RE = re.compile(r'"permissionMode":"(\w+)"')
 
 
+_TURN_FROM = {}   # 对话记录路径 -> 最近一轮是谁发起的（user / peer）：一轮很长时开头会滚出尾部，看到过的要记住
+# Kiteline 送进会话的群消息：每条一行「【群「群名」· 谁】」，谁是「用户」的才是你在群里说的
+_GROUP_SENDER_RE = re.compile(r"【群「[^」\n]*」· ([^】\n]+)】")
+
+
+def turn_from_prompt(text):
+    """你说的一句话（或 Kiteline 送进来的群消息）→ 这一轮是谁发起的：群里只有别的会话发言 = peer，其余都是 user"""
+    if text.startswith(("【Kiteline 会话群「", "【群「")):
+        senders = _GROUP_SENDER_RE.findall(text)
+        if senders and "用户" not in senders:
+            return "peer"
+    return "user"
+
+
 def note_effort(path, text):
     """记录里的 /effort 命令（在 VS Code 里打的，或手机发的）→ 这个会话现在的思考等级 / ultracode"""
     for args in _EFFORT_RE.findall(text or ""):
@@ -662,10 +676,12 @@ def last_permission_mode(path, size, limit=8 * 1024 * 1024):
 def scan_transcript(path):
     """从 transcript 尾部读出「最后一句人话」「待处理的工具调用」和会话标题。
 
-    返回 dict: message, messageUuid, pendingTool, pendingId, pendingBrief, title, customTitle, lastPrompt, mtime
+    返回 dict: message, messageUuid, pendingTool, pendingId, pendingBrief, title, customTitle, lastPrompt, mtime, turnFrom
+    turnFrom：最近一轮是你发起的（user）还是别的会话来信引起的（peer：SendMessage、群里别的会话发言），peer 的答完不提醒你
     """
     result = {"message": None, "messageUuid": None, "pendingTool": None, "pendingId": None,
-              "pendingBrief": None, "title": None, "customTitle": None, "lastPrompt": None, "mtime": None, "error": None}
+              "pendingBrief": None, "title": None, "customTitle": None, "lastPrompt": None, "mtime": None, "error": None,
+              "turnFrom": None}
     if not path:
         return result
     try:
@@ -696,6 +712,7 @@ def scan_transcript(path):
     title = None
     custom_title = None
     last_prompt = None
+    turn_from = None    # 这段尾部里最后开始的一轮是谁发起的；没看到开头就用记着的
 
     for line in lines:
         line = line.strip()
@@ -709,6 +726,13 @@ def scan_transcript(path):
             continue
 
         etype = entry.get("type")
+        if etype == "attachment" and not entry.get("isSidechain"):
+            # 忙时排队进来的话并进当前这一轮：别的会话的来信不改发起方，你插的话要等你看（改成 user）
+            attachment = entry.get("attachment") if isinstance(entry.get("attachment"), dict) else {}
+            origin = attachment.get("origin") if isinstance(attachment.get("origin"), dict) else {}
+            if attachment.get("type") == "queued_command" and origin.get("kind") in (None, "human"):
+                turn_from = "user"
+            continue
         if etype == "ai-title" and isinstance(entry.get("aiTitle"), str):
             title = entry["aiTitle"].strip() or title
             continue
@@ -745,8 +769,12 @@ def scan_transcript(path):
         elif etype == "user" and isinstance(content, str):
             if "<command-name>/effort" in content:
                 note_effort(path, content)
-            if content.strip() and not entry.get("isMeta") and not entry.get("isCompactSummary"):
+            if entry.get("isMeta"):
+                if peer_origin(entry):
+                    turn_from = "peer"   # 空闲时收到别的会话的来信，由它开始一轮
+            elif content.strip() and not entry.get("isCompactSummary"):
                 last_error = None   # 你又说话了，之前的错误就过去了
+                turn_from = turn_from_prompt(content.strip())
         elif etype == "user" and isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text" and "<command-name>/effort" in (block.get("text") or ""):
@@ -757,6 +785,7 @@ def scan_transcript(path):
                         resolved.add(tool_id)
                 elif isinstance(block, dict) and block.get("type") == "text" and not entry.get("isMeta"):
                     last_error = None   # 你又说话了（比如「继续」），之前的错误就过去了
+                    turn_from = turn_from_prompt((block.get("text") or "").strip())
 
     for tool_id in list(pending.keys()):
         if tool_id in resolved:
@@ -774,6 +803,9 @@ def scan_transcript(path):
     result["customTitle"] = custom_title
     result["lastPrompt"] = last_prompt
     result["error"] = last_error
+    if turn_from:
+        _TURN_FROM[path] = turn_from
+    result["turnFrom"] = _TURN_FROM.get(path)
     modes = _MODE_RE.findall(text)
     if modes:
         _EFFORT.setdefault(path, {})["mode"] = modes[-1]
@@ -865,6 +897,234 @@ class UsageMeter:
 
 
 _USAGE = {}
+
+
+# ---------------------------------------------------------------------------
+# 目标（/goal；Claude Code 2.1.139 起、Codex 0.128 起）：agent 围着一个目标跨多轮一直做，每轮结束检查一次，确认达成才停。
+# Claude Code 把设定、每次检查、清除记成对话记录里的 goal_status 附件：
+#   设定 {met:false, sentinel:true, condition}；清除（/goal clear、出了救不回来的错）{met:true, sentinel:true}
+#   没达成 {met:false, reason}；达成 {met:true, reason, iterations, durationMs, tokens}；做不到 {met:false, failed:true, …}
+# 停下来（接口出错、检查超时、用量到上限……）另记一条系统提示「Goal paused · 原因 · send a message to continue」。
+# 快照的 goal（各家同一套，docs/agent-plugins.md 4.6）：
+#   {text 目标, state, checks 检查了几次, reason 最近一次检查的说法（还差什么 / 为什么做不到）, note 停下的原因,
+#    since 设定时间, at 最近变化（毫秒）, turns 用了几轮, durationMs 用时, tokens 用掉的 token, budget token 预算（Codex）}
+#   state：active 进行中 / paused 停下了（发消息继续）/ blocked 受阻 / limited 额度或预算用完 /
+#          met 已达成 / failed 无法达成 / cleared 已清除 / error 出错中止
+# ---------------------------------------------------------------------------
+
+GOAL_RUNNING = ("active", "paused", "blocked", "limited")
+GOAL_KEEP_MS = 6 * 3600 * 1000      # 结束了的目标再挂 6 小时：手机上还看得到结果（达成用了几轮、为什么做不到）
+# 目标还在、会话却闲下来这么久：停下了，发一条消息才会接着做。每轮结束检查目标时会话会短暂「空闲」（检查本身是一次模型调用，
+# 可能要十几秒），所以明确的信号（Claude Code 的暂停提示、你中断了这一轮）才马上算停下，别的要闲满这么久
+GOAL_IDLE_PAUSE_MS = 120000
+CLAUDE_GOAL_SINCE = (2, 1, 139)
+
+# Claude Code 停下目标时提示里的原因 → 中文（英文设备在出口换回英文）
+GOAL_CAUSES = {
+    "the API rejected the last request": "接口拒绝了上一个请求",
+    "the last turn could not finish": "上一轮没能完成",
+    "a hook ended the turn": "钩子结束了这一轮",
+    "the goal check timed out": "目标检查超时",
+    "goal checks kept finding it unmet this turn": "这一轮反复检查仍未达成",
+    "the request was rate limited": "请求被限流",
+    "usage limit reached": "用量已达上限",
+    "the API was unavailable or the connection dropped": "接口不可用或连接中断",
+    "the API returned an unexpected response": "接口返回异常",
+    "the response hit the output token limit": "回复超出输出长度上限",
+    "cloud credentials did not load": "云端凭证没有加载",
+    "sign-in was being refreshed": "登录状态正在刷新",
+    "an image could not be sent": "图片无法发送",
+    "Claude's tool call could not be read": "工具调用无法解析",
+    "the goal check could not complete": "目标检查没能完成",
+    "authentication failed": "登录验证失败",
+    "disk full": "磁盘已满",
+    "organization verification required": "需要组织验证",
+    "credit balance too low": "余额不足",
+    "context limit reached": "上下文已满",
+    "model unavailable": "模型不可用",
+}
+_GOAL_PAUSED_RE = re.compile(r"^Goal paused(?: after (\d+) automatic retries)? · (.+?) · ")
+_GOAL_RETRY_RE = re.compile(r"^Goal still active · (.+?) · retrying in (\d+) min")
+_GOAL_ERROR_RE = re.compile(r"^Goal cleared after an unrecoverable error \((.+?)\)")
+
+
+def goal_cause(text):
+    text = (text or "").strip()
+    return GOAL_CAUSES.get(text, text)
+
+
+def goal_notice(text):
+    """Claude Code 关于目标的系统提示 → (state, 中文说明)：paused 停下了 / error 出错清除了；不是这类提示返回 None"""
+    if not isinstance(text, str) or not text.startswith("Goal "):
+        return None
+    hit = _GOAL_PAUSED_RE.match(text)
+    if hit:
+        cause = goal_cause(hit.group(2))
+        if "continues automatically" in text:
+            return "paused", "%s，额度恢复后自动继续" % cause
+        return "paused", ("自动重试 %s 次未成功：%s" % (hit.group(1), cause)) if hit.group(1) else cause
+    hit = _GOAL_RETRY_RE.match(text)
+    if hit:
+        return "paused", "%s，%s 分钟后自动重试" % (goal_cause(hit.group(1)), hit.group(2))
+    hit = _GOAL_ERROR_RE.match(text)
+    if hit:
+        return "error", goal_cause(hit.group(1))
+    return None
+
+
+def goal_line(raw):
+    """只解析和目标有关的行（goal_status 附件、Goal … 系统提示、用户的话：你中断 / 又发了话）"""
+    return b'"goal_status"' in raw or b'"content":"Goal ' in raw or b'"type":"user"' in raw
+
+
+class ClaudeGoal:
+    """一个 Claude Code 会话的目标：按对话记录里的 goal_status 附件、停下时的系统提示认（见上面的说明）。
+    自己跟着读文件新增的行（poll），快照用的总是最新的：等增量那边喂会慢一拍，第一次检查就落在同一秒时（假模型、很快的轮次）
+    会拿着上一个目标去判断「这一轮停下要不要提醒」"""
+
+    def __init__(self):
+        self.goal = None
+        self.path = None
+        self.offset = 0
+
+    def scan(self, path):
+        """首次见到会话：全文找一遍（目标可能是很久以前设的，尾部看不到）"""
+        self.poll(path)
+
+    def poll(self, path):
+        """读上次之后新写完的行（文件被重写变短了就从头认）"""
+        if not path:
+            return
+        try:
+            size = os.path.getsize(path)
+            if path != self.path or size < self.offset:
+                self.path, self.offset, self.goal = path, 0, None
+            if size == self.offset:
+                return
+            with open(path, "rb") as handle:
+                handle.seek(self.offset)
+                blob = handle.read(size - self.offset)
+        except OSError:
+            return
+        end = blob.rfind(b"\n")
+        if end < 0:
+            return   # 一行还没写完
+        self.offset += end + 1
+        for raw in blob[:end].split(b"\n"):
+            if goal_line(raw) and (self.goal is not None or b'"type":"user"' not in raw or b'"goal_status"' in raw):
+                entry = parse_line(raw)
+                if entry is not None:
+                    self.feed(entry)
+
+    def feed(self, entry):
+        if entry.get("isSidechain"):
+            return
+        etype = entry.get("type")
+        goal = self.goal
+        ts = parse_ts(entry.get("timestamp")) or _now_ms()
+        if etype == "user":
+            if goal is None or entry.get("isMeta") or entry.get("isCompactSummary") or goal["state"] not in GOAL_RUNNING:
+                return
+            content = (entry.get("message") or {}).get("content") if isinstance(entry.get("message"), dict) else None
+            texts = [content] if isinstance(content, str) else [b.get("text") for b in content or []
+                                                               if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)]
+            texts = [t.strip() for t in texts if t and t.strip()]
+            if any(t in INTERRUPT_MARKERS for t in texts):
+                goal.update(note="这一轮被中断", at=ts)   # 你按了中断：目标还在，发消息才接着做
+            elif texts:
+                goal.pop("note", None)   # 你又发了话：之前停下的原因过去了
+            return
+        if etype == "system":
+            hit = goal_notice(entry.get("content"))
+            if hit and goal is not None:
+                state, text = hit
+                if state == "error" and goal["state"] in GOAL_RUNNING + ("cleared",):
+                    goal.update(state="error", reason=text, at=ts)   # 清除那条附件先到，提示紧跟着说为什么
+                elif state == "paused" and goal["state"] in GOAL_RUNNING:
+                    goal.update(note=text, at=ts)
+            return
+        attachment = entry.get("attachment") if etype == "attachment" else None
+        if not isinstance(attachment, dict) or attachment.get("type") != "goal_status":
+            return
+        text = attachment.get("condition") if isinstance(attachment.get("condition"), str) else ""
+        if attachment.get("sentinel"):
+            if not attachment.get("met"):
+                self.goal = {"text": text, "state": "active", "since": ts, "at": ts, "checks": 0}
+            elif goal is not None and goal["state"] in GOAL_RUNNING:
+                goal.update(state="cleared", at=ts)
+                goal.pop("note", None)
+            return
+        if goal is None or goal.get("text") != text or goal["state"] not in GOAL_RUNNING:
+            # 没看到设定那条（记录被截过、会话是恢复的）：从这里接上
+            goal = self.goal = {"text": text, "state": "active", "since": ts, "at": ts, "checks": 0}
+        reason = attachment.get("reason")
+        goal.update(checks=goal["checks"] + 1, at=ts, reason=reason.strip() if isinstance(reason, str) and reason.strip() else None,
+                    state="met" if attachment.get("met") else "failed" if attachment.get("failed") else "active")
+        goal.pop("note", None)
+        for key, field in (("iterations", "turns"), ("durationMs", "durationMs"), ("tokens", "tokens")):
+            if isinstance(attachment.get(key), (int, float)):
+                goal[field] = int(attachment[key])
+
+    def view(self):
+        return dict(self.goal) if self.goal else None
+
+
+_GOALS = {}
+
+
+def goal_supported(version, since=CLAUDE_GOAL_SINCE):
+    """Claude Code 的版本号（2.1.314）够不够用 /goal"""
+    try:
+        return tuple(int(part) for part in str(version).split(".")[:3]) >= since
+    except ValueError:
+        return False
+
+
+class GoalBook:
+    """给快照挂上 goal：Claude Code 的从对话记录认（ClaudeGoal），别家的插件自己给。
+    目标还在、会话闲了一阵 → paused；正在做 → active。结束了的再挂 GOAL_KEEP_MS"""
+
+    def __init__(self):
+        self.idle_since = {}
+
+    def annotate(self, snapshots):
+        now = _now_ms()
+        live = set()
+        for snap in snapshots:
+            sid = snap.get("sessionId")
+            if not sid:
+                continue
+            live.add(sid)
+            claude = (snap.get("agent") or "claude-code") == "claude-code"
+            if claude:
+                meter = _GOALS.get(sid)
+                if meter is not None:
+                    meter.poll(snap.get("transcriptPath"))
+                goal = meter.view() if meter else None
+            else:
+                goal = snap.get("goal") if isinstance(snap.get("goal"), dict) else None
+            if snap.get("activity") == "idle":
+                idle = now - self.idle_since.setdefault(sid, now)
+            else:
+                self.idle_since.pop(sid, None)
+                idle = 0
+            if goal and claude and goal["state"] == "active":
+                # note：停下的原因（Claude Code 的提示）；reason 留着最近一次检查的说法（还差什么）
+                if snap.get("activity") in ("busy", "waiting"):
+                    goal.pop("note", None)
+                elif idle >= GOAL_IDLE_PAUSE_MS or goal.get("note"):
+                    goal["state"] = "paused"
+            if goal and (goal.get("state") == "cleared" or goal.get("state") not in GOAL_RUNNING and now - (goal.get("at") or 0) > GOAL_KEEP_MS):
+                goal = None   # 你自己清除的不用再看；结束了的挂一阵就收
+            if goal:
+                snap["goal"] = goal
+            else:
+                snap.pop("goal", None)
+        for sid in [s for s in self.idle_since if s not in live]:
+            del self.idle_since[sid]
+
+
+GOALS = GoalBook()
 
 # 标题只在 transcript 尾部偶尔出现，记住最近一次看到的，避免列表里标题忽有忽无
 _TITLES = {}
@@ -988,6 +1248,7 @@ def snapshot_session(payload):
         "activityText": scan["pendingBrief"],
         "message": message,
         "messageUuid": scan["messageUuid"],
+        "turnFrom": scan.get("turnFrom"),
         "error": scan.get("error") if activity == "idle" else None,
         "effort": scan.get("effort"),
         "subagents": subagent_count(transcript),
@@ -1011,10 +1272,12 @@ def signature(snap):
     return "|".join(str(x) for x in (
         snap.get("sessionId"), snap.get("status"), snap.get("waitingFor"),
         snap.get("needs"), snap.get("detail"), snap.get("activity"),
-        snap.get("messageUuid"), snap.get("pendingId"), snap.get("title"),
+        snap.get("messageUuid"), snap.get("pendingId"), snap.get("title"), snap.get("turnFrom"),
         snap.get("activityText"), (snap.get("usage") or {}).get("context"), (snap.get("usage") or {}).get("cost"),
         snap.get("terminals"), (snap.get("stage") or {}).get("step"), (snap.get("stage") or {}).get("label"),
         (snap.get("stage") or {}).get("total"), (snap.get("stage") or {}).get("note"),
+        (snap.get("goal") or {}).get("text"), (snap.get("goal") or {}).get("state"), (snap.get("goal") or {}).get("checks"),
+        (snap.get("goal") or {}).get("note"), (snap.get("goal") or {}).get("tokens"),
     ))
 
 
@@ -1157,6 +1420,9 @@ def user_string_item(text, base):
         item = dict(base, t="user", text=(name + " " + args).strip())
         return item if item["text"] else None
     if "<local-command-stdout>" in raw:
+        item = goal_event(raw, base)
+        if item:
+            return item
         body = between(raw, "local-command-stdout") or ""
         body, _ = clip(body, TOOL_RESULT_MAX)
         return dict(base, t="event", text=body) if body else None
@@ -1183,6 +1449,45 @@ def user_string_item(text, base):
 
 COMPACT_TRAILERS = ("If you need specific details from before compaction", "Please continue the conversation",
                     "Continue the conversation from where")
+
+
+def goal_event(text, base):
+    """Claude Code 关于目标的系统消息（/goal 的回显、停下的提示）→ 对话里一行提示；不是这类返回 None。
+    goal 字段给新客户端认（set / cleared / paused / error）"""
+    raw = text.strip()
+    if raw.startswith("<local-command-stdout>"):
+        raw = (between(raw, "local-command-stdout") or "").strip()
+    for prefix, label, kind in (("Goal set: ", "已设定目标", "set"), ("Goal cleared: ", "已清除目标", "cleared")):
+        if raw.startswith(prefix):
+            return dict(base, t="event", text=label, detail=raw[len(prefix):].strip() or None, goal=kind)
+    hit = goal_notice(raw)
+    if hit:
+        state, note = hit
+        if state == "error":
+            return dict(base, t="event", level="error", text="目标因出错中止：%s" % note, goal="error")
+        return dict(base, t="event", text="目标已暂停：%s" % note, goal="paused")
+    return None
+
+
+def goal_status_item(attachment, base):
+    """每轮结束检查目标的结果 → 对话里一行提示，轻点看检查的说法（还差什么）；设定、清除那两条由 /goal 的回显显示"""
+    if attachment.get("sentinel"):
+        return None
+    reason = attachment.get("reason")
+    item = dict(base, t="event")
+    if isinstance(reason, str) and reason.strip():
+        item["detail"] = reason.strip()
+    if attachment.get("met"):
+        item.update(text="目标已达成", goal="met")
+    elif attachment.get("failed"):
+        item.update(text="目标无法达成", level="error", goal="failed")
+    else:
+        item.update(text="目标尚未达成，继续工作", goal="check")
+    stats = {field: int(attachment[key]) for key, field in (("iterations", "turns"), ("durationMs", "durationMs"), ("tokens", "tokens"))
+             if isinstance(attachment.get(key), (int, float))}
+    if stats:
+        item["goalStats"] = stats
+    return item
 
 
 def compact_summary_text(content):
@@ -1479,14 +1784,24 @@ def normalize_line(offset, entry):
                 items.append(dict(base(), t="event", level="error",
                                   text="接口出错：%s" % (error.get("formatted") or error.get("message") or "未知")))
         elif isinstance(entry.get("content"), str) and entry["content"].strip():
-            text, _ = clip(strip_reminders(entry["content"]), TOOL_RESULT_MAX)
-            if text:
-                items.append(dict(base(), t="event", text=text))
+            item = goal_event(entry["content"], base())
+            if item is None:
+                # 斜杠命令的回显（/model、/goal 不带参数……）：去掉外面那层标签
+                raw = entry["content"]
+                if "<local-command-stdout>" in raw or "<local-command-stderr>" in raw:
+                    raw = between(raw, "local-command-stdout") or between(raw, "local-command-stderr") or ""
+                text, _ = clip(strip_reminders(raw), TOOL_RESULT_MAX)
+                item = dict(base(), t="event", text=text) if text else None
+            if item:
+                items.append(item)
         return items
 
     if etype == "attachment":
         # Claude 忙的时候用户插进来的话（VS Code 里排队、中途被吸收）记在这里
         attachment = entry.get("attachment") if isinstance(entry.get("attachment"), dict) else {}
+        if attachment.get("type") == "goal_status":
+            item = goal_status_item(attachment, base())
+            return [item] if item else []
         if attachment.get("type") != "queued_command":
             return []
         origin = peer_origin(entry)
@@ -3053,10 +3368,10 @@ SKILLS_RESYNC_SECONDS = 300   # 隔一会儿再对一遍：新装了一家 agent
 
 _SKILL_SCREENSHOTS = """---
 name: tars-screenshots
-description: 每次给用户回复进展或结论时都要用。用户常在手机上的 Kiteline 里看这个会话，希望每条消息尽量附上相关截图（界面效果、网页、测试和命令结果、图表）。用 shot / send-image 截图并发到他手机上。
+description: 每次给用户回复进展或结论时都要用。用户常在手机上的 Kiteline 里看这个会话，希望每条消息尽量附上相关截图（界面效果、网页、测试和命令结果、图表）。用 shot / send-image 截图并发到他手机上。回复别的会话发来的消息时不用：只回给发信的会话。
 ---
 
-<!-- tars-skill v3 -->
+<!-- tars-skill v4 -->
 
 # 每次回复都附上截图
 
@@ -3087,6 +3402,13 @@ npm test 2>&1 | tail -40 | {{cmd}} shot --text - --title "npm test" --caption "�
 - 截图失败（比如机器上没有浏览器）就算了，照常回复，不要为截图反复折腾。
 - 不要截含密码、密钥、个人隐私的画面。
 - 发完不用在回复里贴图片路径。你自己读过的图片，手机上本来就能看到。
+
+## 别的会话发来的消息
+
+别的会话发来的消息（`<cross-session-message>`，或 Kiteline 会话群里别的会话的发言）是会话之间的往来，不用再告诉用户：
+- 只回给发信的会话：SendMessage 发回来信的 from；群里用 group say。
+- 不给用户截图、发图，也不另写给用户的汇报；回完用一句话说明回了什么就结束。
+- 用户事先交代过由你汇总汇报的，照他的安排。
 """
 
 _SKILL_PLAYWRIGHT = """---
@@ -3328,7 +3650,7 @@ _SKILL_SCREEN = {
 }
 
 SKILLS_BUILTIN = {
-    "version": "1.0.2",   # 整份数据的版本（同插件版本号）：下发的技能包版本更高才换
+    "version": "1.0.3",   # 整份数据的版本（同插件版本号）：下发的技能包版本更高才换
     # 各家 agent 读技能的目录（当前用户的）；when：这个目录在，说明这台电脑装了这家；unless：这个在就不用另装（别家已经读到）
     "targets": [
         {"agent": "claude-code", "dir": "~/.claude/skills", "when": "~/.claude"},          # OpenCode 也读这里
@@ -3387,10 +3709,12 @@ def self_command():
         return given
     path = os.path.abspath(__file__)
     python = os.environ.get("CCPULSE_PYTHON") or "python3"
-    if path.startswith(HOME + os.sep):
+    # Windows 上不写 ~ 和 $HOME：PowerShell、cmd 不展开，那里的 agent（Codex、Cursor）照抄就找不到脚本
+    if path.startswith(HOME + os.sep) and os.name != "nt":
         rest = path[len(HOME):].replace("\\", "/")
         return "%s ~%s" % (python, rest) if " " not in rest else '%s "$HOME%s"' % (python, rest)
-    return '%s "%s"' % (python, path.replace("\\", "/")) if " " in path else "%s %s" % (python, path)
+    path = path.replace("\\", "/")   # Git Bash 里反斜杠是转义符
+    return '%s "%s"' % (python, path) if " " in path else "%s %s" % (python, path)
 
 
 def render_skill(skill):
@@ -3693,6 +4017,107 @@ def codex_limits(codex_home=None, now=None):
             window["minutes"] = minutes
             windows.append(window)
     return {"agent": "codex", "at": at, "windows": windows, "plan": limits.get("plan_type")} if windows else None
+
+
+# --- 别家 agent 的 token 用量（AgentPlugin.usage，用量报表用）：按文件签名缓存，一条条请求按（小时, 模型）并好 ---
+
+_PLUGIN_USAGE_CACHE = {}   # 文件 → (签名, 记录)
+_USAGE_KEYS = ("input", "output", "cacheRead", "cacheWrite", "requests")
+
+
+def usage_bucket(buckets, ts, model, values, cost=None, **extra):
+    """并进（小时, 模型）这一格：values 依次是输入、输出、读缓存、写缓存、请求数；cost 为 None 表示没有花费数据"""
+    key = (ts // 3600000, model)
+    bucket = buckets.get(key)
+    if bucket is None:
+        bucket = buckets[key] = dict({k: 0 for k in _USAGE_KEYS}, ts=key[0] * 3600000, model=model, cost=None, **extra)
+    for name, value in zip(_USAGE_KEYS, values):
+        bucket[name] += max(0, int(value or 0))
+    if cost is not None:
+        bucket["cost"] = (bucket["cost"] or 0.0) + float(cost)
+
+
+def cached_usage(path, scan):
+    """文件没变就用上次扫的结果"""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return []
+    signature = (stat.st_size, stat.st_mtime)
+    hit = _PLUGIN_USAGE_CACHE.get(path)
+    if hit and hit[0] == signature:
+        return hit[1]
+    records = scan(path)
+    _PLUGIN_USAGE_CACHE[path] = (signature, records)
+    return records
+
+
+def recent_files(folders, suffix, since_ms):
+    """这些目录（含子目录）里 since_ms 之后改过的文件"""
+    out = []
+    for folder in folders:
+        for base, _, names in os.walk(folder):
+            for name in names:
+                if name.endswith(suffix):
+                    path = os.path.join(base, name)
+                    try:
+                        if os.path.getmtime(path) * 1000 >= since_ms:
+                            out.append(path)
+                    except OSError:
+                        pass
+    return out
+
+
+def codex_usage_scan(path):
+    """一份 Codex 记录：token_count 事件带这一份到此为止的累计值（total_token_usage），逐次相减就是每次请求的用量——
+    同样的事件 Codex 会重复记（只更新额度时），差为 0 的跳过；第一条、累计值变小的（续接别的会话）用它自己那次（last_token_usage）。
+    Codex 的输入含缓存（cached_input_tokens），拆开记"""
+    buckets, model, cwd, session, last = {}, None, None, None, None
+    try:
+        handle = open(path, "rb")
+    except OSError:
+        return []
+    with handle:
+        for raw in handle:
+            if b'"token_count"' not in raw and b'"turn_context"' not in raw and b'"session_meta"' not in raw:
+                continue
+            entry = parse_line(raw)
+            payload = (entry or {}).get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if entry.get("type") == "session_meta":
+                cwd, session = payload.get("cwd") or cwd, payload.get("id") or session
+                continue
+            if entry.get("type") == "turn_context":
+                model, cwd = payload.get("model") or model, payload.get("cwd") or cwd
+                continue
+            info = payload.get("info") if payload.get("type") == "token_count" else None
+            total = info.get("total_token_usage") if isinstance(info, dict) else None
+            if not isinstance(total, dict):
+                continue
+            keys = ("input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens")
+            if last is not None and all(int(total.get(k) or 0) >= int(last.get(k) or 0) for k in keys):
+                step = {k: int(total.get(k) or 0) - int(last.get(k) or 0) for k in keys}
+            else:
+                step = info.get("last_token_usage") if isinstance(info.get("last_token_usage"), dict) else total
+            last = total
+            ts = parse_ts(entry.get("timestamp"))
+            if ts is None or not any(int(step.get(k) or 0) for k in keys):
+                continue
+            cached = int(step.get("cached_input_tokens") or 0)
+            usage_bucket(buckets, ts, model or "unknown",
+                          (int(step.get("input_tokens") or 0) - cached, step.get("output_tokens"), cached,
+                           step.get("cache_write_input_tokens"), 1), cwd=cwd, session=session)
+    return list(buckets.values())
+
+
+def codex_token_usage(since_ms, codex_home=None):
+    home = codex_home or os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
+    out = []
+    for path in recent_files([os.path.join(home, "sessions"), os.path.join(home, "archived_sessions")], ".jsonl", since_ms):
+        if os.path.basename(path).startswith("rollout-"):
+            out.extend(r for r in cached_usage(path, codex_usage_scan) if r["ts"] + 3600000 > since_ms)
+    return out
 
 
 def claude_limits_pending(sessions, root=None):
@@ -5814,7 +6239,8 @@ def scan_usage(path):
     return scan
 
 
-def usage_report(since_ms, until_ms=None, tz_minutes=0):
+def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
+    """Claude Code 的记录（下面扫 PROJECTS_DIR）+ 各插件报的（AgentPlugin.usage），按天 / 模型 / 项目 / agent 汇总"""
     # 费率至少参考最近 30 天的会话：只看「今天」时，今天还在跑的会话也能借到费率
     scan_since = min(since_ms, int(time.time() * 1000) - 30 * 86400000)
     files = []
@@ -5849,7 +6275,7 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0):
             acc = pooled.setdefault(model, [0.0, 0.0])
             acc[0] += cost
             acc[1] += weight
-    days, models, projects_out = {}, {}, {}
+    days, models, projects_out, agents = {}, {}, {}, {}
     totals = {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "requests": 0, "cost": 0.0, "estimated": 0.0}
     unpriced = set()
 
@@ -5883,15 +6309,47 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0):
             add(models.setdefault(model, blank(model=model)), vals, cost, estimated)
             cwd = scan["cwd"] or ""
             add(projects_out.setdefault(cwd, blank(cwd=cwd)), vals, cost, estimated)
+            add(agents.setdefault("claude", blank(agent="claude", name="Claude Code")), vals, cost, estimated)
             add(totals, vals, cost, estimated)
+    sessions = sum(1 for _, scan in scans if any(hour * 3600000 >= since_ms for hour, _ in scan["buckets"]))
+    # 别家 agent：插件报的一条条记录（花费是 agent 自己记的；没记的模型只算 token）
+    for plugin, records in (plugins.usage(since_ms) if plugins else []):
+        seen = set()
+        for record in records:
+            ts = int(record["ts"])
+            if ts < since_ms or (until_ms and ts >= until_ms):
+                continue
+            vals = [max(0, int(record.get(key) or 0)) for key in ("input", "output", "cacheRead", "cacheWrite", "requests")]
+            if not any(vals):
+                continue
+            model = str(record.get("model") or "unknown")
+            cost = record.get("cost")
+            priced = isinstance(cost, (int, float)) and cost >= 0
+            cost = float(cost) if priced else 0.0
+            if not priced:
+                unpriced.add(model)
+            day = time.strftime("%Y-%m-%d", time.gmtime(ts / 1000.0 + tz_minutes * 60))
+            add(days.setdefault(day, blank(day=day)), vals, cost, False)
+            add(models.setdefault(model, blank(model=model)), vals, cost, False)
+            cwd = record.get("cwd") or ""
+            add(projects_out.setdefault(cwd, blank(cwd=cwd)), vals, cost, False)
+            # 这家一条花费都没记（Codex、DSH、Qwen Code）：界面上写「仅 token」，别显示成 $0
+            row = agents.setdefault(plugin.id, blank(agent=plugin.id, name=plugin.name, unpriced=True))
+            add(row, vals, cost, False)
+            row["unpriced"] = row["unpriced"] and not priced
+            add(totals, vals, cost, False)
+            if record.get("session"):
+                seen.add(record["session"])
+        sessions += len(seen)
     rank = lambda item: (item["cost"], item["output"])
     return {
         "days": sorted(days.values(), key=lambda d: d["day"]),
         "models": sorted(models.values(), key=rank, reverse=True),
         "projects": sorted(projects_out.values(), key=rank, reverse=True)[:30],
+        "agents": sorted(agents.values(), key=rank, reverse=True),
         "totals": totals,
         "unpriced": sorted(unpriced),
-        "sessions": sum(1 for _, scan in scans if any(hour * 3600000 >= since_ms for hour, _ in scan["buckets"])),
+        "sessions": sessions,
     }
 
 
@@ -7948,6 +8406,25 @@ def _codex_output(output):
     return text.rstrip("\n"), failed
 
 
+def codex_goal_event(text):
+    """Codex 关于目标的内部上下文 → 对话里一行提示的字段：source="user_goal" 是你设定 / 暂停 / 继续，source="goal" 是它自己接着做的一轮"""
+    source = re.match(r'^<codex_internal_context source="([\w-]+)"', text)
+    source = source.group(1) if source else ""
+    if source == "goal":
+        return {"text": "继续推进目标", "goal": "check"}
+    if source != "user_goal":
+        return None
+    objective = re.search(r'User set the goal: "(.*?)"\s*\n(?:User set goal status|</codex_internal_context>)', text, re.S)
+    if objective:
+        return {"text": "已设定目标", "detail": objective.group(1), "goal": "set"}
+    status = re.search(r'User set goal status: "(\w+)"', text)
+    if status:
+        return {"paused": {"text": "已暂停目标", "goal": "paused"}, "active": {"text": "已继续目标", "goal": "set"}}.get(status.group(1))
+    if "clear" in text.lower():
+        return {"text": "已清除目标", "goal": "cleared"}
+    return None
+
+
 def normalize_codex_line(offset, entry):
     """Codex rollout 的一行 → 若干对话项（id 规则同 Claude：「行偏移.序号」）。认不出的行返回空"""
     if not isinstance(entry, dict):
@@ -7984,6 +8461,12 @@ def normalize_codex_line(offset, entry):
                     text = block["text"].strip()
                     tag = re.match(r"^<([A-Za-z_ ]+)>", text)
                     if tag and tag.group(1) in CODEX_CONTEXT_TAGS:
+                        continue
+                    if text.startswith("<codex_internal_context"):
+                        # Codex 自己塞给模型的上下文：目标的设定、每一轮「接着做」显示成一行提示，别的不显示
+                        event = codex_goal_event(text)
+                        if event:
+                            items.append(dict(base(), t="event", **event))
                         continue
                     if text.startswith("<turn_aborted>"):
                         continue   # 给模型看的中断说明；同一次中断还有 turn_aborted 事件，那条记成「已中断」
@@ -8452,6 +8935,22 @@ class CodexLink:
         self.reply(request, codex_reply(request, key))
         return "已选择"
 
+    def goal(self, thread_id, action, objective):
+        """/goal：设定、清除、暂停、继续目标（同 Codex 终端里的 /goal）。设定以后 Codex 自己一轮接一轮做，直到它确认达成"""
+        if action == "show":
+            goal = (self.call("thread/goal/get", {"threadId": thread_id}) or {}).get("goal")
+            return "当前目标：%s" % goal["objective"] if isinstance(goal, dict) and goal.get("objective") else "这个会话没有设定目标"
+        if action == "clear":
+            self.call("thread/goal/clear", {"threadId": thread_id, "origin": "user"})
+            return "已清除目标"
+        params = {"threadId": thread_id, "origin": "user"}
+        if action == "set":
+            params.update(objective=objective, status="active")
+        else:
+            params["status"] = "paused" if action == "pause" else "active"
+        self.call("thread/goal/set", params)
+        return {"set": "已设定目标", "pause": "已暂停目标", "resume": "已继续目标"}[action]
+
     def close(self, thread_id):
         # 归档（同 Codex 里的 /archive）：从后台服务卸载、从会话列表拿掉，在 Codex 里能找回。
         # 终端里的 Codex 界面本身关不了：它不认外部的退出请求，发信号要么没反应、要么不收尾就退（终端会停在原始模式）
@@ -8835,6 +9334,84 @@ def codex_state_db():
         if match:
             found.append((int(match.group(1)), path))
     return max(found)[1] if found else None
+
+
+# Codex 的目标（/goal，0.128 起）存在 CODEX_HOME 的 goals_N.sqlite（早几版在 state_N.sqlite）的 thread_goals 表里：
+# 终端、桌面版、VS Code 扩展的会话都记在这，清除了就删掉那一行。状态 → 快照 goal 的 state（见 GoalBook 上面的说明）
+CODEX_GOAL_STATES = {"active": "active", "paused": "paused", "blocked": "blocked", "usage_limited": "limited", "usageLimited": "limited",
+                     "budget_limited": "limited", "budgetLimited": "limited", "complete": "met"}
+CODEX_GOAL_NOTES = {"usage_limited": "用量已达上限", "usageLimited": "用量已达上限",
+                    "budget_limited": "token 预算已用完", "budgetLimited": "token 预算已用完"}
+_CODEX_GOALS = {"sig": None, "goals": {}}
+
+
+def codex_goal_db():
+    for prefix in ("goals_", "state_"):
+        found = []
+        for path in globlib.glob(os.path.join(CODEX_HOME, prefix + "*.sqlite")):
+            match = re.search(r"_(\d+)\.sqlite$", path)
+            if match:
+                found.append((int(match.group(1)), path))
+        if found:
+            return max(found)[1]
+    return None
+
+
+def codex_goals():
+    """各会话的目标 {会话 id: 快照的 goal}；没装带目标的 Codex 返回 None。按库文件（连同 -wal）的修改时间缓存，每秒问也不费事"""
+    path = codex_goal_db()
+    if not path:
+        return None
+    try:
+        sig = (path, os.path.getmtime(path), os.path.getmtime(path + "-wal") if os.path.exists(path + "-wal") else 0)
+    except OSError:
+        return None
+    if sig == _CODEX_GOALS["sig"]:
+        return _CODEX_GOALS["goals"]
+    goals = {}
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % pathname2url(path), uri=True, timeout=2)
+        try:
+            rows = db.execute("select thread_id, objective, status, token_budget, tokens_used, time_used_seconds, created_at_ms, updated_at_ms "
+                              "from thread_goals").fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error as exc:
+        if "no such table" in str(exc):
+            _CODEX_GOALS.update(sig=sig, goals=None)   # 这版 Codex 没有目标：库没变就不再问
+            return None
+        log("读 Codex 目标失败：%r" % exc)
+        return _CODEX_GOALS["goals"]
+    for thread_id, objective, status, budget, used, seconds, created, updated in rows:
+        goal = {"text": objective or "", "state": CODEX_GOAL_STATES.get(status, "active"), "since": created, "at": updated,
+                "tokens": int(used or 0), "durationMs": int(seconds or 0) * 1000}
+        if budget:
+            goal["budget"] = int(budget)
+        if status in CODEX_GOAL_NOTES:
+            goal["note"] = CODEX_GOAL_NOTES[status]
+        goals[thread_id] = goal
+    _CODEX_GOALS.update(sig=sig, goals=goals)
+    return goals
+
+
+GOAL_CLEAR_WORDS = ("clear", "stop", "off", "reset", "none", "cancel")
+
+
+def goal_command(text):
+    """「/goal …」→ (动作, 目标)：set 设定 / clear 清除 / pause 暂停 / resume 继续 / show 看现在的；不是 /goal 命令返回 None。
+    和 Claude Code、Codex 终端里的写法一样（Claude Code 的会话原样投进输入框，它自己认）"""
+    raw = (text or "").strip()
+    if not re.match(r"^/goal(\s|$)", raw):
+        return None
+    arg = raw[5:].strip()
+    word = arg.lower()
+    if not arg:
+        return "show", ""
+    if word in GOAL_CLEAR_WORDS:
+        return "clear", ""
+    if word in ("pause", "resume"):
+        return word, ""
+    return "set", arg
 
 
 class CodexIpcLink:
@@ -11244,6 +11821,14 @@ class AgentPlugin:
         得写进 opt_in 的说明、用户打开才查（Claude 的凭证一律不碰）"""
         return None
 
+    def usage(self, since_ms):
+        """这家 agent 在这台电脑上记下的 token 用量（用量报表、手机「今日用量」的 token 和花费）：since_ms 之后的一条条记录
+        [{"ts": 毫秒, "model": 模型名, "cwd": 工作目录或 None, "session": 会话 id（可选，数会话用）,
+          "input": 不含缓存的输入, "output": 输出, "cacheRead": 读缓存, "cacheWrite": 写缓存, "requests": 请求数,
+          "cost": 美元（agent 自己记的；没有给 None，报表按「无费率」只算 token）}]。
+        电脑端一分钟内可能问好几次、一次可能要 90 天的：按文件签名缓存，别每次全扫；一条一条的请求也可以先按小时、模型并好再给"""
+        return []
+
     def closable(self, snap):
         """这个会话能不能关（决定 caps 里给不给 close）：默认实现了 close() 就都能"""
         return type(self).close is not AgentPlugin.close
@@ -11268,6 +11853,10 @@ class CodexPlugin(AgentPlugin):
         self.daemon = CodexLink()
         self.ipc = CodexIpcLink()
 
+    def usage(self, since_ms):
+        """token 用量：Codex 自己的记录（rollout 里的 token_count）；它不记花费，报表里按「无费率」只算 token"""
+        return codex_token_usage(since_ms)
+
     def detect(self):
         forms = {}
         if shutil.which("codex"):
@@ -11288,13 +11877,26 @@ class CodexPlugin(AgentPlugin):
             out.extend(self.daemon.snapshots())
         except Exception as exc:
             log("CodexLink 快照出错：%r" % exc)
+        with self.daemon.lock:
+            daemon_ids = set(self.daemon.threads.keys())
         try:
             # 桌面版、VS Code 扩展的会话：共享后台服务里已经有的不重复列
-            with self.daemon.lock:
-                daemon_ids = set(self.daemon.threads.keys())
             out.extend(self.ipc.snapshots(daemon_ids))
         except Exception as exc:
             log("CodexIpcLink 快照出错：%r" % exc)
+        try:
+            goals = codex_goals()
+        except Exception as exc:
+            log("Codex 目标出错：%r" % exc)
+            goals = None
+        for snap in out:
+            sid = snap.get("sessionId")
+            if goals and goals.get(sid):
+                snap["goal"] = dict(goals[sid])
+            if goals is not None and sid in daemon_ids:
+                # 终端里的会话在共享后台服务里，能替它设定 / 暂停目标；桌面版、VS Code 扩展的只能看（IPC 总线没有目标的请求）
+                caps = snap.setdefault("caps", list(self.caps))
+                caps.extend(cap for cap in ("goal", "goal-pause") if cap not in caps)
         return out
 
     def via_ipc(self, sid):
@@ -11304,6 +11906,12 @@ class CodexPlugin(AgentPlugin):
         return self.ipc.owns(sid)
 
     def send(self, sid, text, images):
+        command = None if images else goal_command(text)
+        if command:
+            # /goal 不是发给模型的话：交给后台服务设定目标（Codex 终端里的 /goal 也是这样，不进对话）
+            if self.via_ipc(sid):
+                raise RuntimeError("Codex 桌面版、VS Code 扩展中的会话请在 Codex 中设定目标")
+            return self.daemon.goal(sid, *command)
         if self.via_ipc(sid):
             return self.ipc.send_message(sid, text, images)
         return self.daemon.send(sid, text, images)
@@ -11331,11 +11939,69 @@ class CodexPlugin(AgentPlugin):
         return codex_media(path, ref)
 
 
+_OPENCODE_USAGE = {"db": None, "span": None, "parts": {}}
+_OPENCODE_USAGE_LOCK = threading.Lock()
+
+
+def opencode_db():
+    """OpenCode 1.x 的数据库：各平台都在 $XDG_DATA_HOME/opencode 或 ~/.local/share/opencode（Windows 也是），OPENCODE_DB 可另指"""
+    given = os.environ.get("OPENCODE_DB")
+    if given:
+        return given
+    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share"), "opencode", "opencode.db")
+
+
+def opencode_usage(since_ms, db_path=None):
+    """OpenCode 每一步请求的用量在 part 表 type 为 step-finish 的那条（data.tokens、data.cost）：助手消息上的 tokens 只是最后一步的，
+    不能用。tokens.input 不含缓存、output 不含推理（output + reasoning 才是模型的输出，和 Claude、Codex 的口径一样记进输出）；
+    cost 是 OpenCode 按价目算的美元（走订阅的是 0）。只读打开；按 part id 记着，只补新的（和上次接上、重叠一分钟）"""
+    path = db_path or opencode_db()
+    if not os.path.isfile(path):
+        return []
+    now = _now_ms()
+    with _OPENCODE_USAGE_LOCK:
+        cache = _OPENCODE_USAGE
+        if cache["db"] != path:
+            cache.update(db=path, span=None, parts={})
+        span, ranges = cache["span"], []
+        if span is None or since_ms < span[0]:
+            ranges.append((since_ms, span[0] if span else now + 1))
+        if span is not None:
+            ranges.append((span[1] - 60000, now + 1))
+        try:
+            db = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/").replace("?", "%3f"), uri=True, timeout=2)
+            try:
+                for begin, end in ranges:
+                    rows = db.execute("select p.id, p.time_created, p.data, m.data, s.directory from part p join message m on m.id = p.message_id "
+                                      "left join session s on s.id = p.session_id "
+                                      "where p.time_created >= ? and p.time_created < ? and p.data like '%step-finish%'", (begin, end))
+                    for pid, created, data, message, directory in rows:
+                        part, info = json.loads(data or "{}"), json.loads(message or "{}")
+                        tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else None
+                        if part.get("type") != "step-finish" or not tokens:
+                            continue
+                        cache_tokens = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+                        cost = part.get("cost")
+                        cache["parts"][pid] = {"ts": int(created), "model": info.get("modelID") or "unknown",
+                                               "cwd": directory or (info.get("path") or {}).get("cwd"), "session": part.get("sessionID"),
+                                               "input": int(tokens.get("input") or 0),
+                                               "output": int(tokens.get("output") or 0) + int(tokens.get("reasoning") or 0),
+                                               "cacheRead": int(cache_tokens.get("read") or 0), "cacheWrite": int(cache_tokens.get("write") or 0),
+                                               "requests": 1, "cost": float(cost) if isinstance(cost, (int, float)) else None}
+                    span = (min(begin, span[0]), max(end, span[1])) if span else (begin, end)
+                cache["span"] = span
+            finally:
+                db.close()
+        except (sqlite3.Error, ValueError) as exc:
+            log("读 OpenCode 用量出错：%r" % exc)
+        return [r for r in cache["parts"].values() if r["ts"] >= since_ms]
+
+
 class OpenCodePlugin(AgentPlugin):
     """OpenCode 进程里的 Kiteline 插件开桥（OpenCodeLink），对话没有落盘文件，靠桥推"""
 
     id, name = "opencode", "OpenCode"
-    needs = ("locate", "install.file", "net.http", "net.sse", "proc")
+    needs = ("locate", "install.file", "net.http", "net.sse", "proc", "db.read")
     limits_note = "OpenCode 未提供额度查询接口（OpenCode Go 订阅的用量只能在 OpenCode 网页控制台查看），「今日用量」中不显示"
     # 终端界面；Kiteline 自动往 OpenCode 里装一个桥接插件。Mac 10-23 实测；Windows / Linux 10-24 用 OpenCode 1.19.4 + 假模型实测 25/25
     support = {
@@ -11343,6 +12009,10 @@ class OpenCodePlugin(AgentPlugin):
         "windows": {"cli": support_form(verified=True)},
         "linux": {"cli": support_form(verified=True)},
     }
+
+    def usage(self, since_ms):
+        """token 用量和花费：OpenCode 自己的数据库（见 opencode_usage）"""
+        return opencode_usage(since_ms)
 
     def __init__(self):
         self.link = OpenCodeLink()
@@ -11389,6 +12059,65 @@ class OpenCodePlugin(AgentPlugin):
     def closable(self, snap):
         # Windows 上没有能让它照常收尾的信号（强制结束会把终端留在它的界面状态里）
         return not IS_WINDOWS
+
+
+DSH_USAGE_FILE = os.path.join(DATA_DIR, "dsh-usage.json")
+DSH_USAGE_KEEP_MS = 92 * 86400000
+_DSH_USAGE_LOCK = threading.Lock()
+
+
+def dsh_usage(since_ms, home=None, ledger_path=None):
+    """DSH 每个会话只在投影缓存里存累计用量（storages/session_projcache/sessions/<id>.json 的 tokenUsage.totals；
+    逐次的明细在 zstd 压缩的会话日志里，Python 自带的库解不开）。这里记一本账：每个会话上次看到的累计值，涨了多少记一条，
+    时间取它最后一条消息的时间——第一次看到的会话整段算在最后那天，之后按看到的增长分天。DSH 不记花费"""
+    home = home or DSH_HOME
+    path = ledger_path or DSH_USAGE_FILE
+    folder = os.path.join(home, "storages", "session_projcache", "sessions")
+    with _DSH_USAGE_LOCK:
+        ledger = _read_json(path, {})
+        seen, records = ledger.get("seen") or {}, ledger.get("records") or []
+        changed = False
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            names = []
+        for name in names:
+            file = os.path.join(folder, name)
+            try:
+                mtime = os.path.getmtime(file)
+            except OSError:
+                continue
+            sid = name[:-5]
+            if not name.endswith(".json") or (seen.get(sid) or {}).get("mtime") == mtime:
+                continue
+            record = (_read_json(file, {}).get("record") or {})
+            rows = record.get("rows") if isinstance(record.get("rows"), dict) else {}
+            value = lambda row: (rows.get(row) or {}).get("val") if isinstance(rows.get(row), dict) else None
+            totals = (value("tokenUsage") or {}).get("totals") if isinstance(value("tokenUsage"), dict) else None
+            if not isinstance(totals, dict):
+                continue
+            now = [int(totals.get(k) or 0) for k in ("uncachedInputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens")]
+            steps = int((value("sessionStats") or {}).get("steps") or 0) if isinstance(value("sessionStats"), dict) else 0
+            before = seen.get(sid) or {}
+            last = before.get("totals") or [0, 0, 0, 0]
+            delta = [max(0, a - b) for a, b in zip(now, last)]
+            if any(delta):
+                when = (value("timeContext") or {}).get("lastMessageTime") if isinstance(value("timeContext"), dict) else None
+                selection = value("modelSelection") if isinstance(value("modelSelection"), dict) else {}
+                records.append({"ts": int(when or mtime * 1000), "model": (selection.get("lastUsed") or {}).get("model") or "unknown",
+                                "cwd": (record.get("identity") or {}).get("cwd"), "session": sid,
+                                "input": delta[0], "output": delta[1], "cacheRead": delta[2], "cacheWrite": delta[3],
+                                "requests": max(0, steps - int(before.get("steps") or 0)), "cost": None})
+            seen[sid] = {"mtime": mtime, "totals": now, "steps": steps}
+            changed = True
+        if changed:
+            cutoff = _now_ms() - DSH_USAGE_KEEP_MS
+            records = [r for r in records if r.get("ts", 0) >= cutoff]
+            try:
+                _write_json(path, {"seen": seen, "records": records})
+            except OSError as exc:
+                log("记 DSH 用量出错：%r" % exc)
+    return [r for r in records if r.get("ts", 0) + 3600000 > since_ms]
 
 
 class DshPlugin(AgentPlugin):
@@ -11440,6 +12169,10 @@ class DshPlugin(AgentPlugin):
     def close(self, sid):
         return self.link.owner(sid).close(sid)
 
+    def usage(self, since_ms):
+        """token 用量：DSH 投影缓存里各会话的累计值，按增长记（见 dsh_usage）；DSH 不记花费"""
+        return dsh_usage(since_ms)
+
     def limits(self):
         """DeepSeek 按量付费，没有 5 小时 / 每周额度，给账号余额（连着的 DSH 里第一个登录了 DeepSeek 账号的）"""
         for host in list(self.link.hosts.values()):
@@ -11452,6 +12185,46 @@ class DshPlugin(AgentPlugin):
     def pending_options(self, snap):
         options = super().pending_options(snap)
         return options and [option for option in options if option["key"] != "2"]   # 审批只有「允许这一次」
+
+
+def proma_usage_scan(path):
+    """一个 Proma 会话的 token 用量：每轮结尾那条 result（Claude Agent SDK 的格式）带这一轮的 usage、花费 total_cost_usd，
+    有 modelUsage 时按模型分（各带 costUSD）；模型名没给就用这一轮助手消息的"""
+    buckets, model = {}, None
+    try:
+        handle = open(path, "rb")
+    except OSError:
+        return []
+    with handle:
+        for raw in handle:
+            if b'"result"' not in raw and b'"model"' not in raw:
+                continue
+            entry = parse_line(raw)
+            if not entry:
+                continue
+            if entry.get("type") == "assistant" and isinstance(entry.get("message"), dict):
+                model = entry["message"].get("model") or model
+                continue
+            if entry.get("type") != "result":
+                continue
+            ts = entry.get("_createdAt") if isinstance(entry.get("_createdAt"), (int, float)) else parse_ts(entry.get("timestamp"))
+            if not ts:
+                continue
+            requests = int(entry.get("num_turns") or 1)
+            per_model = entry.get("modelUsage") if isinstance(entry.get("modelUsage"), dict) else {}
+            if per_model:
+                for name, info in per_model.items():
+                    if isinstance(info, dict):
+                        usage_bucket(buckets, int(ts), name, (info.get("inputTokens"), info.get("outputTokens"), info.get("cacheReadInputTokens"),
+                                                               info.get("cacheCreationInputTokens"), requests if name == model or len(per_model) == 1 else 0),
+                                      info.get("costUSD") if isinstance(info.get("costUSD"), (int, float)) else None)
+                continue
+            usage = entry.get("usage") if isinstance(entry.get("usage"), dict) else {}
+            cost = entry.get("total_cost_usd")
+            usage_bucket(buckets, int(ts), model or "unknown", (usage.get("input_tokens"), usage.get("output_tokens"), usage.get("cache_read_input_tokens"),
+                                                                 usage.get("cache_creation_input_tokens"), requests),
+                          cost if isinstance(cost, (int, float)) else None)
+    return list(buckets.values())
 
 
 class PromaPlugin(AgentPlugin):
@@ -11471,6 +12244,20 @@ class PromaPlugin(AgentPlugin):
 
     def __init__(self):
         self.link = PromaLink()
+
+    def usage(self, since_ms):
+        """token 用量和花费：Proma 每轮结尾记的（见 proma_usage_scan）；项目目录按它的会话索引算"""
+        index = os.path.join(PROMA_HOME, "agent-sessions.json")
+        metas = {m["id"]: m for m in ((_proma_json(index, self.link.cache) or {}).get("sessions") or []) if isinstance(m, dict) and m.get("id")}
+        workspaces = {w.get("id"): w for w in ((_proma_json(os.path.join(PROMA_HOME, "agent-workspaces.json"), self.link.cache) or {})
+                                               .get("workspaces") or []) if isinstance(w, dict)}
+        out = []
+        for path in recent_files([os.path.join(PROMA_HOME, "agent-sessions")], ".jsonl", since_ms):
+            sid = os.path.basename(path)[:-6]
+            meta = metas.get(sid)
+            cwd = self.link.cwd(meta, workspaces) if meta else None
+            out.extend(dict(r, cwd=cwd, session=sid) for r in cached_usage(path, proma_usage_scan) if r["ts"] + 3600000 > since_ms)
+        return out
 
     def normalizer_for(self, path):
         """这个会话文件的规整函数：时间按 PromaClock 修成不倒退（见那里的说明）"""
@@ -11659,6 +12446,21 @@ class AgentPlugins:
                 continue
             if isinstance(item, dict) and (item.get("windows") or item.get("balances")):
                 out.append(dict(item, agent=plugin.id, windows=list(item.get("windows") or [])))
+        return out
+
+    def usage(self, since_ms):
+        """各插件报的 token 用量（usage_report 用）：[(插件, 记录)]；读不到只记日志，不算插件出错"""
+        out = []
+        for plugin in list(self.all):
+            if type(plugin).usage is AgentPlugin.usage:
+                continue
+            try:
+                records = [r for r in plugin.usage(since_ms) or [] if isinstance(r, dict) and isinstance(r.get("ts"), (int, float))]
+            except Exception as exc:
+                log("插件 %s 读用量出错：%r" % (plugin.id, exc))
+                continue
+            if records:
+                out.append((plugin, records))
         return out
 
     def failed(self, plugin, where, exc):
@@ -12150,10 +12952,13 @@ class Watcher:
                 self.tailers[sid] = Tailer(path)
                 if tailer is None and not self.tailers[sid].missing:
                     STAGES.bootstrap(sid, path, self.normalizer(sid))
-                if agent == "claude-code":   # 别家的用量在快照里直接给
+                if agent == "claude-code":   # 别家的用量、目标在快照里直接给
                     meter = UsageMeter()
                     meter.scan(path)
                     _USAGE[sid] = meter
+                    goal = ClaudeGoal()
+                    goal.scan(path)
+                    _GOALS[sid] = goal
             if sid not in self.outboxes:
                 self.outboxes[sid] = Tailer(outbox_path(sid))
         self.live = live
@@ -12161,6 +12966,7 @@ class Watcher:
             if sid not in live:
                 del self.tailers[sid]
                 self.outboxes.pop(sid, None)
+                _GOALS.pop(sid, None)
 
     def normalizer(self, session_id):
         plugin = self.plugins.get(self.agents.get(session_id))
@@ -12178,6 +12984,9 @@ class Watcher:
                     meter = UsageMeter()
                     meter.scan(tailer.path)
                     _USAGE[sid] = meter
+                    goal = ClaudeGoal()
+                    goal.scan(tailer.path)
+                    _GOALS[sid] = goal
             items = []
             meter = _USAGE.get(sid) if claude else None
             normalize = self.normalizer(sid)
@@ -12390,7 +13199,7 @@ class Watcher:
             return call_with_timeout(60, get_file, request.get("path"), request.get("cwd"), bool(request.get("reveal")))
         if cmd == "usage_report":
             return usage_report(int(request.get("since") or 0), int(request.get("until") or 0) or None,
-                                int(request.get("tz") or 0))
+                                int(request.get("tz") or 0), self.plugins)
         if cmd == "sessions_list":
             return {"sessions": list_sessions(int(request.get("limit") or 80), request.get("cwd"), request.get("project"))}
         if cmd == "session_info":
@@ -13021,6 +13830,7 @@ def main():
             TERMS.annotate(snapshots)
             STAGES.annotate(snapshots)
             watcher.track(snapshots)
+            GOALS.annotate(snapshots)
             write_live_sessions(snapshots)
             if time.time() - last_skills > SKILLS_RESYNC_SECONDS:
                 last_skills = time.time()

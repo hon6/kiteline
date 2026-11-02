@@ -22,8 +22,10 @@ import re
 import shlex
 import shutil
 import sqlite3
+import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -39,6 +41,8 @@ KEEP_DAYS = 14             # 事件记录留这么久
 BEAT_FRESH = 15            # 扩展的心跳多久以内算它还在
 USAGE_BACKEND = "https://api2.cursor.sh"
 USAGE_TTL, USAGE_RETRY = 600, 180   # 月用量：读到了 10 分钟内不再问，没读到 3 分钟后再试
+EVENTS_KEEP_MS = 92 * 86400000      # 每次请求的用量（用量报表）：最多往前拿这么久
+EVENTS_PAGE, EVENTS_PAGES = 100, 50   # 一页多少条、一次最多翻几页
 # 命令行 agent 的审批菜单（tmux 界面上）
 APPROVAL_MARKS = ("Run this command?", "Waiting for approval", "Skip & tell the agent")
 CLI_OPTIONS = ({"key": "esc", "label": "拒绝", "labelEn": "Skip", "style": "destructive"},
@@ -187,12 +191,24 @@ def create(kl):
             backend = USAGE_BACKEND
         return (str(token) if token else None), backend.rstrip("/")
 
-    def dashboard(backend, token, method):
+    def tls_context():
+        """系统根证书再加上 certifi 的（有就加）：Windows 的根证书用到才下载，新装的系统里常常没有 Cursor 服务器用的
+        Amazon 根证书（Cursor 自己带一套所以它连得上），Python 只认已经有的；Windows / Linux 版 Kiteline 打包时带着 certifi"""
+        context = ssl.create_default_context()
+        try:
+            import certifi
+            context.load_verify_locations(certifi.where())
+        except (ImportError, OSError, ssl.SSLError):
+            pass
+        return context
+
+    def dashboard(backend, token, method, body=None):
         """Cursor 服务器的 DashboardService（Connect 协议的 JSON 形式），设置页查用量、套餐用的就是它"""
-        request = urllib.request.Request("%s/aiserver.v1.DashboardService/%s" % (backend, method), data=b"{}", method="POST",
+        request = urllib.request.Request("%s/aiserver.v1.DashboardService/%s" % (backend, method), data=json.dumps(body or {}).encode(),
+                                         method="POST",
                                          headers={"Authorization": "Bearer " + token, "Content-Type": "application/json",
                                                   "Connect-Protocol-Version": "1"})
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=10, context=tls_context()) as response:
             return json.loads(response.read() or b"{}")
 
     class HostLog:
@@ -451,8 +467,11 @@ def create(kl):
             self.log = HostLog()
             self.running = (0, False)   # (查的时间, Cursor 编辑器在不在运行)
             self.fills = {}             # 会话 id → 等电脑端切好窗口再填的字（send 回动作单、ui_step 填）
-            self.usage = (0.0, None)    # (上次问月用量的时间, 读数)
+            self.month = (0.0, None)    # (上次问月用量的时间, 读数)
             self.usage_error = None
+            # 每次请求的用量（用量报表）：事件 id → 记录；已经拿到的时间段；上次拿到、上次试的时间
+            self.events, self.events_span, self.events_at, self.events_tried = {}, None, 0.0, 0.0
+            self.events_lock = threading.Lock()
 
         normalize = staticmethod(cursor_normalize)
 
@@ -474,7 +493,7 @@ def create(kl):
             option_on = getattr(self, "option_on", None)
             if option_on is None or not option_on("usage"):
                 return None
-            asked, reading = self.usage
+            asked, reading = self.month
             if time.time() - asked < (USAGE_TTL if reading else USAGE_RETRY):
                 return reading
             fresh, failed = None, False
@@ -502,8 +521,63 @@ def create(kl):
             # 一时连不上：上次的读数一天内照样给（卡片上写着是多久前的）
             if fresh is None and failed and reading and time.time() * 1000 - reading["at"] < 86400000:
                 fresh = reading
-            self.usage = (time.time(), fresh)
+            self.month = (time.time(), fresh)
             return fresh
+
+        def usage(self, since_ms):
+            """token 用量（用量报表）：Cursor 本机不记，同样是打开了「显示本月用量」才问它的服务器（GetFilteredUsageEvents：
+            每次请求的时间、模型、token、花费和对话 id，对话 id 对上 hook 记的项目目录）。10 分钟内不重复问，只补新的
+            （和上次接上、重叠 10 分钟），要更早的再往前补，最多 92 天"""
+            option_on = getattr(self, "option_on", None)
+            if option_on is None or not option_on("usage"):
+                return []
+            now = int(time.time() * 1000)
+            since_ms = max(int(since_ms), now - EVENTS_KEEP_MS)
+            with self.events_lock:
+                span = self.events_span
+                ranges = []
+                if span is None or since_ms < span[0]:
+                    ranges.append((since_ms, span[0] if span else now))
+                if span is not None and time.time() - self.events_at >= USAGE_TTL:
+                    ranges.append((span[1] - 600000, now))
+                if ranges and time.time() - self.events_tried >= USAGE_RETRY:
+                    self.events_tried = time.time()
+                    token, backend = cursor_login()
+                    try:
+                        for begin, end in (ranges if token else []):
+                            self.fetch_events(backend, token, begin, end)
+                            span = (min(begin, span[0]), max(end, span[1])) if span else (begin, end)
+                            self.events_span, self.events_at = span, time.time()
+                    except urllib.error.HTTPError as exc:
+                        self.note_usage_error("HTTP %d" % exc.code)
+                    except (OSError, ValueError, urllib.error.URLError) as exc:
+                        self.note_usage_error(repr(exc))
+                out = []
+                for event in self.events.values():
+                    if event["ts"] >= since_ms:
+                        meta = self.meta(event["session"]) if event["session"] else None
+                        out.append(dict(event, cwd=((meta or {}).get("roots") or [None])[0]))
+                return out
+
+        def fetch_events(self, backend, token, begin, end):
+            for page in range(1, EVENTS_PAGES + 1):
+                data = dashboard(backend, token, "GetFilteredUsageEvents",
+                                 {"startDate": str(begin), "endDate": str(end), "page": page, "pageSize": EVENTS_PAGE})
+                rows = [r for r in (data.get("usageEventsDisplay") or []) if isinstance(r, dict)] if isinstance(data, dict) else []
+                for row in rows:
+                    tokens = row.get("tokenUsage") if isinstance(row.get("tokenUsage"), dict) else {}
+                    cents = tokens.get("totalCents")
+                    key = row.get("usageEventId") or "%s-%s" % (row.get("timestamp"), row.get("model"))
+                    self.events[key] = {"ts": int(row.get("timestamp") or 0), "model": row.get("model") or "unknown",
+                                        "session": row.get("conversationId") or None,
+                                        "input": int(tokens.get("inputTokens") or 0), "output": int(tokens.get("outputTokens") or 0),
+                                        "cacheRead": int(tokens.get("cacheReadTokens") or 0), "cacheWrite": int(tokens.get("cacheWriteTokens") or 0),
+                                        "requests": 1, "cost": cents / 100.0 if isinstance(cents, (int, float)) else None}
+                if len(rows) < EVENTS_PAGE or page * EVENTS_PAGE >= int(data.get("totalUsageEventsCount") or 0):
+                    break
+            cutoff = int(time.time() * 1000) - EVENTS_KEEP_MS
+            for key in [k for k, v in self.events.items() if v["ts"] < cutoff]:
+                self.events.pop(key, None)
 
         def note_usage_error(self, text):
             if text != self.usage_error:

@@ -331,6 +331,27 @@ final class MobileServer {
                       except: inApp)
     }
 
+    /// 目标（/goal）达成、做不到、停下：标题「会话 · 目标已达成」，正文是目标和结果。中英两份在源头拼好（正文里夹着目标原文，按句式反推会切错）
+    func notifyGoal(title: String, head: String, body: String, bodyEn: String, key: String) {
+        let inApp = inAppDevices()
+        let wantsPush = config.shouldPush(kind: "goal", key: key)
+        let shown = "\(title) · \(head)", shownEn = "\(title) · \(Lang.shared.english(head))"
+        let entry = record(kind: "goal", title: shown, body: body, key: key, route: nil, inApp: inApp, english: (shownEn, bodyEn))
+        publish(event: "notify", payload: ["kind": "goal", "title": shown, "body": body, "titleEn": shownEn, "bodyEn": bodyEn, "key": key,
+                                           "inbox": entry?.id ?? "", "pushed": wantsPush ? Array(push.deviceIds(except: inApp)) : [],
+                                           "at": Date().timeIntervalSince1970 * 1000])
+        guard wantsPush else {
+            Log.write("免打扰：「\(shown)」不推送")
+            return
+        }
+        if inApp.isEmpty, Bark.wants("goal", config: config) {
+            Bark.send(title: Lang.shared.isEnglish ? shownEn : shown, body: Lang.shared.isEnglish ? bodyEn : body, kind: "goal", config: config)
+        }
+        guard !push.subscriptions.isEmpty else { return }
+        pushLocalized(["title": shown, "body": String(body.prefix(240)), "key": key, "kind": "goal"],
+                      ["title": shownEn, "body": String(bodyEn.prefix(240)), "key": key, "kind": "goal"], except: inApp)
+    }
+
     /// 日报：点开直接进「今日动态」页
     func notifyDigest(title: String, body: String, english: (title: String, body: String)? = nil) {
         notifyRoute(kind: "digest", title: title, body: body, route: "today", english: english)
@@ -410,7 +431,7 @@ final class MobileServer {
         guard kind != "test" else { return nil }
         let delivery: String
         if !config.shouldPush(kind: kind, key: key) {
-            delivery = key.map { config.mutedSessions.contains($0) } == true && ["conclusion", "image", "error", "stuck"].contains(kind) ? "muted" : "quiet"
+            delivery = key.map { config.mutedSessions.contains($0) } == true && ["conclusion", "image", "error", "stuck", "goal"].contains(kind) ? "muted" : "quiet"
         } else {
             let pushed = !push.deviceIds(except: inApp).isEmpty || push.subscriptions.contains { $0.deviceId == nil }
             let bark = inApp.isEmpty && Bark.wants(kind, config: config)

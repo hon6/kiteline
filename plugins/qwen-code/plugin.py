@@ -149,6 +149,39 @@ def create(kl):
             note["pending"] = list(calls.values())[-1]
         return note
 
+    def usage_scan(path):
+        """一份对话记录的 token 用量：每次请求一条助手记录，带 usageMetadata（Gemini 的格式：promptTokenCount 含缓存，
+        cachedContentTokenCount 是读缓存；candidatesTokenCount 含不含思考看接的是哪家，所以输出按 totalTokenCount - promptTokenCount 算，
+        落在 candidates ~ candidates + thoughts 之间才信，不然取 candidates）。/branch 分出来的会话把原来的记录原样抄一份（带 forkedFrom），
+        跳过；同一条（uuid）只算一次。Qwen Code 不记花费"""
+        buckets, seen = {}, set()
+        try:
+            handle = open(path, "rb")
+        except OSError:
+            return []
+        with handle:
+            for raw in handle:
+                if b'"usageMetadata"' not in raw:
+                    continue
+                try:
+                    entry = json.loads(raw.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                meta = entry.get("usageMetadata") if isinstance(entry, dict) else None
+                if entry.get("type") != "assistant" or entry.get("forkedFrom") or not isinstance(meta, dict) or entry.get("uuid") in seen:
+                    continue
+                seen.add(entry.get("uuid"))
+                ts = kl.parse_ts(entry.get("timestamp"))
+                if ts is None:
+                    continue
+                prompt, cached = int(meta.get("promptTokenCount") or 0), int(meta.get("cachedContentTokenCount") or 0)
+                candidates, thoughts = int(meta.get("candidatesTokenCount") or 0), int(meta.get("thoughtsTokenCount") or 0)
+                total = int(meta.get("totalTokenCount") or 0)
+                output = total - prompt if total and candidates <= total - prompt <= candidates + thoughts else candidates
+                kl.usage_bucket(buckets, ts, entry.get("model") or "unknown", (max(0, prompt - cached), output, cached, 0, 1),
+                                cwd=entry.get("cwd"), session=entry.get("sessionId"))
+        return list(buckets.values())
+
     class QwenCode(kl.AgentPlugin):
         name = "Qwen Code"
 
@@ -165,6 +198,14 @@ def create(kl):
         def detect(self):
             import shutil
             return {"installed": os.path.isdir(QWEN_HOME) or bool(shutil.which("qwen")), "forms": {"cli": ""} if shutil.which("qwen") else {}}
+
+        def usage(self, since_ms):
+            """token 用量（用量报表）：各项目 chats 下的对话记录（见 usage_scan）；只有带用量接口的中台才会来问"""
+            out = []
+            for path in kl.recent_files([os.path.join(QWEN_HOME, "projects")], ".jsonl", since_ms):
+                if os.path.basename(os.path.dirname(path)) == "chats":
+                    out.extend(r for r in kl.cached_usage(path, usage_scan) if r["ts"] + 3600000 > since_ms)
+            return out
 
         def sessions(self):
             out = []

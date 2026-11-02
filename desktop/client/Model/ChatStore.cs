@@ -52,15 +52,19 @@ public sealed partial class ChatStore : ObservableObject
     {
         var users = new List<ChatItem>();
         var any = false;
+        var goalNoted = false;
         foreach (var item in incoming)
         {
             any = true;
             if (item.T == "result" && item.ToolId is string toolId) results[toolId] = item;
             if (item.T == "user") users.Add(item);
+            if (item.T == "event" && item.Goal is not null) goalNoted = true;
             items[item.Id] = item;
         }
         if (!any) return;
         if (users.Count > 0 && pending.Count > 0) Settle(users);
+        // 发的 /goal：对话里出了「已设定目标」这类提示就算到了（Codex 的目标不当成一句话回显）
+        if (goalNoted) pending = pending.Where(p => p.IsFailed || !p.Text.StartsWith("/goal")).ToList();
         Revision++;
     }
 

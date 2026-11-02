@@ -26,7 +26,7 @@ public enum KitelineKit {
 
     /// 标题栏上的按钮
     public enum Action: String, Sendable {
-        case files, changes, tests, agents, search, stop, mode, model, compact, info, agentInfo, newTask, bottom, terminal, group
+        case files, changes, tests, agents, search, stop, mode, model, goal, compact, info, agentInfo, newTask, bottom, terminal, group
     }
 
     /// 自测用：往某个会话的输入框里填字（测试实例按脚本截图时用）
@@ -78,6 +78,7 @@ public enum KitelineKit {
         case .stop: .stop
         case .mode: .mode
         case .model: .model
+        case .goal: .goal
         case .compact: .compact
         case .info: .info
         case .agentInfo: .agentInfo

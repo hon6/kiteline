@@ -56,6 +56,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     var worktree: String?
     /// 这一轮任务做到第几步（「2/4 开发中」，见 StageViews.swift）：电脑只在忙、等确认时给，老版本电脑端没有
     var stage: StageInfo?
+    /// 目标（/goal，见 GoalViews.swift）：agent 围着它跨多轮一直做；没设目标、老版本电脑端没有
+    var goal: GoalInfo?
 
     var id: String { key }
     var isWaiting: Bool { activity == "waiting" }
@@ -74,7 +76,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case key, title, name, sourceId, sourceName, sourceKind, activity, activityText, blocking, reason, preview
         case pendingTool, canReply, cwd, updatedAt, startedAt, usage, error, effort, ultracode, permissionMode, cwdShort, subagents, terminals
-        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage
+        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal
     }
 
     init(from decoder: Decoder) throws {
@@ -112,6 +114,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         branch = ((try? c.decodeIfPresent(String.self, forKey: .branch)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         worktree = ((try? c.decodeIfPresent(String.self, forKey: .worktree)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         stage = ((try? c.decodeIfPresent(StageInfo.self, forKey: .stage)) ?? nil).flatMap { $0.valid ? $0 : nil }
+        goal = ((try? c.decodeIfPresent(GoalInfo.self, forKey: .goal)) ?? nil).flatMap { $0.valid ? $0 : nil }
     }
 }
 
@@ -224,6 +227,10 @@ struct ChatItem: Codable, Identifiable, Hashable {
     /// agent 发到会话群的（group_say）：哪个群（群 id；老 watcher 可能是空的）、只发给了谁（成员 key）
     var group: String?
     var to: [String]?
+    /// 目标的那几行提示（event）：set 设定 / check 检查未达成、继续 / met 达成 / failed 做不到 / paused 停下 / cleared 清除 / error 出错中止
+    var goal: String?
+    /// 目标达成、做不到那一行带的：用了几轮、多久、多少 token
+    var goalStats: GoalStats?
 
     /// 排序：时间 → transcript 里的偏移 → 同一行里的第几块（id 形如「偏移.序号」，Claude 发图的是 o 开头）
     var offset: Int { id.hasPrefix("o") ? 0 : Int(id.split(separator: ".").first ?? "") ?? 0 }
@@ -235,6 +242,12 @@ struct ChatItem: Codable, Identifiable, Hashable {
         if a.offset != b.offset { return a.offset < b.offset }
         return a.sub < b.sub
     }
+}
+
+struct GoalStats: Codable, Hashable {
+    var turns: Int?
+    var durationMs: Double?
+    var tokens: Int?
 }
 
 /// 关键信息里的一项：名称 + 值；secret（密码、令牌）默认遮住，点一下才显示

@@ -729,7 +729,7 @@ final class PluginStore: ObservableObject {
 
 /// 插件出错的弹窗（同电脑端 PluginReport.Ask）：右上角一张不抢焦点的小面板（Kiteline 不切到前台，免得把 VS Code 挤到后台，
 /// 手机发的消息就不回车了），问要不要发报告。一次一张，后面的排队
-final class PluginErrorPanel {
+final class PluginErrorPanel: NSObject, NSWindowDelegate {
     static let shared = PluginErrorPanel()
     private var panel: NSPanel?
     private var queue: [PluginStore.PluginError] = []
@@ -748,6 +748,12 @@ final class PluginErrorPanel {
         if panel == nil { next() }
     }
 
+    /// 左上角关闭：同「以后再说」
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        next()
+        return false
+    }
+
     private func next() {
         panel?.orderOut(nil)
         panel = nil
@@ -756,13 +762,11 @@ final class PluginErrorPanel {
         let close: () -> Void = { [weak self] in self?.next() }
         let hosting = NSHostingView(rootView: PluginErrorCard(error: error, close: close).tarsLook())
         hosting.frame.size = hosting.fittingSize
+        // 同别的弹窗（11-02 反馈：要有标题栏、关闭）：标题栏写明是什么，左上角能关（关了 = 「以后再说」，轮到下一张）
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: hosting.fittingSize),
-                            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView], backing: .buffered, defer: false)
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
+                            styleMask: [.nonactivatingPanel, .titled, .closable], backing: .buffered, defer: false)   // 标题栏单独一条，内容大小不变
+        panel.title = L("插件出错")
+        panel.delegate = self
         panel.isMovableByWindowBackground = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
