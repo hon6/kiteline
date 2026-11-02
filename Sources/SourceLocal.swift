@@ -20,6 +20,8 @@ final class LocalSource: SourceConnection {
     private var lastEventAt = Date()
     private var restartAttempt = 0
     private var stoppedByUser = false
+    /// 进程是 reload() 换掉的：退出后马上再起，不算断线
+    private var reloading = false
     private var stderrTail: [String] = []
     private let queue = DispatchQueue(label: "ccpulse.local")
     private let rpc = WatcherRPC()
@@ -37,7 +39,9 @@ final class LocalSource: SourceConnection {
 
     func stop() {
         stoppedByUser = true
+        reloading = false
         rpc.attach(nil)
+        rpc.release(failing: "watcher 通道已断开")
         try? stdinPipe?.fileHandleForWriting.close()
         watchdog?.cancel()
         watchdog = nil
@@ -50,6 +54,26 @@ final class LocalSource: SourceConnection {
         update(state: .stopped)
     }
 
+    func reload() {
+        // 没在跑的（等着重连、已停）不用管：下次起进程自然按新开关
+        guard !stoppedByUser, process?.isRunning == true else { return }
+        reloading = true
+        if state.isLive {
+            rpc.hold(for: LocalSource.reloadGrace) { [weak self] in
+                // 新进程这么久还没就绪：照常算连接中
+                guard let self = self, !self.stoppedByUser, self.state.isLive else { return }
+                self.update(state: .connecting)
+            }
+        }
+        rpc.drain(until: Date().addingTimeInterval(5)) { [weak self] in
+            guard let self = self, self.reloading, let process = self.process, process.isRunning else { return }
+            process.terminate()
+        }
+    }
+
+    /// 换 watcher 进程（reload）：这么久内新进程就绪就不算断线
+    static let reloadGrace: TimeInterval = 30
+
     // MARK: - 进程
 
     private func launch() {
@@ -58,7 +82,7 @@ final class LocalSource: SourceConnection {
             update(state: .failed(reason: "App 内缺少 ccpulse-watch.py"))
             return
         }
-        update(state: .connecting)
+        if !rpc.isHolding { update(state: .connecting) }
 
         let process = Process()
         let stdinPipe = Pipe()
@@ -121,6 +145,12 @@ final class LocalSource: SourceConnection {
                 self.watchdog?.cancel()
                 self.watchdog = nil
                 guard !self.stoppedByUser else { return }
+                if self.reloading {
+                    self.reloading = false
+                    self.delegate?.source(self, didLog: "本机 watcher 换进程载入插件变化")
+                    self.launch()
+                    return
+                }
                 let reason = self.stderrTail.last ?? "watcher 退出码 \(proc.terminationStatus)"
                 self.delegate?.source(self, didLog: "本机 watcher 退出：\(reason)")
                 self.scheduleRestart(reason: reason)
@@ -147,6 +177,7 @@ final class LocalSource: SourceConnection {
 
     private func scheduleRestart(reason: String) {
         guard !stoppedByUser else { return }
+        rpc.release(failing: reason)
         restartAttempt += 1
         let delay = min(30.0, pow(2.0, Double(min(restartAttempt, 5))))
         update(state: .failed(reason: reason))
@@ -182,6 +213,7 @@ final class LocalSource: SourceConnection {
         if rpc.consume(event) { return }
         if event.kind == "hello" {
             if let home = event.raw["home"] as? String { hostHome = home }
+            rpc.release()   // 换进程期间排着的请求发给新进程
             update(state: .live(host: event.host ?? "本机", watcher: event.watcherVersion, sessionCount: 0))
             delegate?.source(self, didLog: "本机 watcher v\(event.watcherVersion ?? "?") 就绪")
         }

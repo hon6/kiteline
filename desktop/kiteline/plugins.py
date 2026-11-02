@@ -231,8 +231,8 @@ class PluginStore:
         return (row.get("optIn") or entry.get("optIn") or None), (row.get("optInEn") or entry.get("optInEn") or None)
 
     def _reconnect(self):
-        """插件变了：重连各来源（watcher 重启才载入插件），过几秒再问一遍状态，设置页上的版本、能力、装在哪跟着更新"""
-        self.app.reconnect_sources()
+        """插件变了：各来源换个 watcher 进程载入（会话照旧显示、不报离线），过几秒再问一遍状态，设置页上的版本、能力、装在哪跟着更新"""
+        self.app.reconnect_sources(seamless=True)
         timer = threading.Timer(8, self.refresh_local)
         timer.daemon = True
         timer.start()

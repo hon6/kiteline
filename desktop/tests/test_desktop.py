@@ -883,5 +883,111 @@ check("停下的正文写原因；没有原因提示发消息继续", _goal_body
 check("Claude Code 2.1.139 起才给「目标」，别家看插件给的", "goal" in _caps({"version": "2.1.314"}) and "goal" not in _caps({"version": "2.1.120"})
       and "goal" not in _caps({"agent": "opencode"}) and _caps({"agent": "codex", "caps": ["goal", "goal-pause"]}) == ["goal", "goal-pause"])
 
+print("== 插件变了换 watcher 进程：会话照旧显示、请求排队等新进程（LocalSource.restart）")
+import time as _time  # noqa: E402
+from kiteline import watcher as _wmod  # noqa: E402
+
+_fake_dir = tempfile.mkdtemp(prefix="kl-fakewatch-")
+_fake_ok = os.path.join(_fake_dir, "ok.py")
+_fake_bad = os.path.join(_fake_dir, "bad.py")
+with open(_fake_ok, "w", encoding="utf-8") as _h:
+    _h.write("""import json, os, sys, threading, time
+lock = threading.Lock()
+def emit(obj):
+    with lock:
+        sys.stdout.write(json.dumps(obj) + "\\n"); sys.stdout.flush()
+time.sleep(float(os.environ.get("FAKE_BOOT", "0.3")))
+emit({"event": "hello", "watcher": "fake", "host": "fake", "home": "/tmp"})
+def answer(req):
+    if req.get("cmd") == "slow":
+        time.sleep(1.0)
+    emit({"event": "response", "id": req["id"], "ok": True, "pid": os.getpid()})
+for line in sys.stdin:
+    if line.strip():
+        threading.Thread(target=answer, args=(json.loads(line),), daemon=True).start()
+""")
+with open(_fake_bad, "w", encoding="utf-8") as _h:
+    _h.write("import sys, time\ntime.sleep(0.3)\nsys.stderr.write('坏了\\n')\nsys.exit(3)\n")
+
+_states = []
+_src = _wmod.LocalSource({"id": "local"}, lambda *_a: None, lambda src: _states.append(src.state))
+_src._script = lambda: _fake_now[0]
+_fake_now = [_fake_ok]
+_wmod.RESTART_GRACE = 8
+
+
+def _wait(cond, limit=10):
+    end = _time.time() + limit
+    while not cond() and _time.time() < end:
+        _time.sleep(0.05)
+    return cond()
+
+
+_src.start()
+check("起来了", _wait(lambda: _src.live), str(_states))
+_pid1 = _src.request({"cmd": "ping"})["pid"]
+_slow, _during = {}, {}
+_t1 = threading.Thread(target=lambda: _slow.update(_src.request({"cmd": "slow"})))
+_t1.start()
+_time.sleep(0.2)
+del _states[:]
+_src.restart({"id": "local"})
+_time.sleep(0.1)
+
+
+def _ping_during():
+    try:
+        _during.update(_src.request({"cmd": "ping"}))
+    except Exception as exc:  # noqa: BLE001
+        _during["error"] = str(exc)
+
+
+_t2 = threading.Thread(target=_ping_during)
+_t2.start()
+_t1.join(10)
+_t2.join(15)
+check("换之前手上的请求先答完（旧进程答的）", _slow.get("pid") == _pid1, str(_slow))
+check("换进程期间的请求等新进程就绪再发", _during.get("pid") not in (None, _pid1), str(_during))
+check("全程不报连接中 / 断线（会话照旧显示）", set(_states) <= {"live"}, str(_states))
+check("换完照常可用", _src.request({"cmd": "ping"})["pid"] == _during.get("pid"))
+
+# 新进程起不来：照常算断线、排队的请求不白等到期限
+del _states[:]
+_fake_now[0] = _fake_bad
+_src.restart()
+_t0 = _time.time()
+try:
+    _src.request({"cmd": "ping"}, timeout=20)
+    _err = ""
+except Exception as exc:  # noqa: BLE001
+    _err = str(exc)
+check("新进程起不来：请求报错、不白等（%.1f 秒）" % (_time.time() - _t0), _err and _time.time() - _t0 < 5, _err)
+check("新进程起不来：照常报断线（会话清掉、退避重连）", _wait(lambda: "failed" in _states, 5), str(_states))
+_src.stop()
+
+# 等着重连的（起不来、过几秒再试）：restart 不多起进程，下次重连自然按新开关
+_fake_now[0] = _fake_bad
+_src2 = _wmod.LocalSource({"id": "local"}, lambda *_a: None, lambda src: None)
+_src2._script = lambda: _fake_now[0]
+_src2.start()
+_wait(lambda: _src2.state == "failed", 5)
+_fake_now[0] = _fake_ok
+_src2.restart()
+check("等着重连的 restart：到点重连上、只有一个进程", _wait(lambda: _src2.live, 15) and _src2.request({"cmd": "ping"}).get("ok")
+      and not _src2._relaunch and _src2._proc.poll() is None)
+_src2.stop()
+
+# 还在连（进程起了、没报 hello）：照样换成新开关的进程
+_src3 = _wmod.LocalSource({"id": "local"}, lambda *_a: None, lambda src: None)
+_src3._script = lambda: _fake_ok
+os.environ["FAKE_BOOT"] = "1.5"
+_src3.start()
+_wait(lambda: _src3._proc is not None, 5)
+_first = _src3._proc
+_src3.restart()
+os.environ.pop("FAKE_BOOT")
+check("还在连的 restart：换掉没就绪的进程、新进程连上", _wait(lambda: _src3.live, 15) and _src3._proc is not _first and _first.poll() is not None)
+_src3.stop()
+
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

@@ -25,6 +25,8 @@ $env:CCPULSE_CONFIG_DIR = "$tmp\config"; $env:CCPULSE_DRY_RUN = "1"; $env:CCPULS
 $env:CCPULSE_SESSIONS_DIR = "$tmp\fake\sessions"; $env:CCPULSE_DATA_DIR = "$tmp\fake\data"
 # 额度读数在夹具里（<夹具>/claude/kiteline/limits.json），别读这台电脑真实的 ~/.claude、~/.codex
 $env:CLAUDE_CONFIG_DIR = "$tmp\fake\claude"; $env:CODEX_HOME = "$tmp\codex"
+# 插件索引指向不通的地址：测试中途别从官网自动装插件、重启 watcher（打包机装着 Cursor 时会这样，后面调 watcher 的接口全失败）
+$env:CCPULSE_PLUGIN_INDEX = "http://127.0.0.1:9/plugins/index.json"
 if ($Exe) { $file, $args_ = $Exe, "--headless --no-tray" } else { $file, $args_ = $Python, "-m kiteline --headless --no-tray" }
 $app = Start-Process -PassThru -NoNewWindow -WorkingDirectory $desktop -FilePath $file -ArgumentList $args_ `
     -RedirectStandardOutput "$tmp\app.out" -RedirectStandardError "$tmp\app.err"

@@ -34,7 +34,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.22"
+VERSION = "1.0.23"
 
 
 class App:
@@ -259,11 +259,16 @@ class App:
         log.write("已移除来源：%s" % source_id)
         return True
 
-    def reconnect_sources(self, source_id=None):
-        """重新连接（全部或一个）；Remote-SSH 来源每次连接都会把观察器重新传一遍，「重新部署观察器」也走这里"""
+    def reconnect_sources(self, source_id=None, seamless=False):
+        """重新连接（全部或一个）；Remote-SSH 来源每次连接都会把观察器重新传一遍，「重新部署观察器」也走这里。
+        seamless：插件变了，只换 watcher 进程载入，会话照旧显示、不报离线（LocalSource.restart）"""
         for entry in self.cfg.sources:
             if entry.get("enabled", True) and (source_id is None or entry.get("id") == source_id):
-                self._start_source(entry)
+                current = self.store.source(entry["id"])
+                if seamless and current is not None and current.kind == ("ssh" if entry.get("kind") == "ssh" else "local"):
+                    current.restart(entry)
+                else:
+                    self._start_source(entry)
 
     def stop(self):
         for source in list(self.store.sources.values()):

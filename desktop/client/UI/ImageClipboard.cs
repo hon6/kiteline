@@ -3,14 +3,65 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 
 namespace Kiteline.UI;
 
 /// 把一张图放进剪贴板（看大图的「拷贝」，同 Mac 版写 NSPasteboard）。
 /// Windows：写 CF_DIB（画图、微信、Office、浏览器都认），另带一份 PNG 格式保留透明；Avalonia 只会写自定义格式，系统格式自己写。
 /// Linux：交给 Avalonia 写 image/png（X11 / XWayland 的剪贴板目标就是 MIME 类型）
+/// 粘贴截图（PasteImages）也在这里
 public static class ImageClipboard
 {
+    /// 文本框粘贴（Ctrl+V、Shift+Insert、右键「粘贴」）时剪贴板里是图就交给 attach，不是图照常粘贴文字（同 Mac 版 MacComposer 的 paste）。
+    /// 拦下文本框自己的粘贴、await 读一次剪贴板再决定。别在界面线程上 GetResult() 同步等剪贴板：Windows 剪贴板正被别的程序占着时
+    /// Avalonia 隔 100 毫秒重试、续上要回界面线程，X11 要等界面线程收选区事件，同步等就互相等死（11-02 在输入框 Ctrl+V 整个卡死）。
+    /// 文字也用这次读到的，不再交回文本框自己的 Paste()：剪贴板一直被占着时它重试完抛的不是超时异常，没人接住整个程序会退出
+    public static void PasteImages(this TextBox box, int max, Action<IReadOnlyList<byte[]>> attach)
+    {
+        box.PastingFromClipboard += async (_, e) =>
+        {
+            e.Handled = true;
+            var (images, text) = await Read(TopLevel.GetTopLevel(box), max);
+            if (images.Count > 0) attach(images);
+            else if (!string.IsNullOrEmpty(text)) box.SelectedText = text;   // 同文本框自己的粘贴：替换选中的字，光标落在贴进去的字后面
+        };
+    }
+
+    /// 读剪贴板：从资源管理器 / 文件管理器拷贝的图片文件（最多 max 张），或截图（截图键、截图工具、微信 / QQ 截图、浏览器「复制图片」）放进 Images；
+    /// 同时带了一段文字的（如 Excel 单元格，会附带一张位图）照常按文字粘贴，只是网址的还是当图。读不了（一直被别的程序占着）两样都空，这次粘贴不做
+    public static async Task<(List<byte[]> Images, string? Text)> Read(TopLevel? top, int max)
+    {
+        var images = new List<byte[]>();
+        if (top?.Clipboard is not { } clipboard) return (images, null);
+        try
+        {
+            using var data = await clipboard.TryGetDataAsync();
+            if (data is null) return (images, null);
+            var text = data.Contains(DataFormat.Text) ? await data.TryGetValueAsync(DataFormat.Text) : null;
+            if (data.Contains(DataFormat.File) && await data.TryGetValuesAsync(DataFormat.File) is { } files)
+            {
+                foreach (var path in files.Select(f => f.TryGetLocalPath()).Where(IsImage).Take(max))
+                    images.Add(await File.ReadAllBytesAsync(path!));
+                if (images.Count > 0) return (images, null);
+            }
+            if (data.Contains(DataFormat.Bitmap) && (text?.Trim() is not { Length: > 0 } words || words.StartsWith("http"))
+                && await data.TryGetValueAsync(DataFormat.Bitmap) is { } bitmap)
+            {
+                using (bitmap)
+                using (var stream = new MemoryStream())
+                {
+                    bitmap.Save(stream);
+                    images.Add(stream.ToArray());
+                }
+            }
+            return (images, text);
+        }
+        catch (Exception) { return ([], null); }
+    }
+
+    static bool IsImage(string? path) => path is not null && new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic" }.Contains(Path.GetExtension(path).ToLowerInvariant());
+
     public static async Task<bool> Copy(TopLevel? top, byte[] data)
     {
         if (top is null) return false;

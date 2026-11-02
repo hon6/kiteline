@@ -718,6 +718,7 @@ public sealed class TodoEditor
         };
         input.Classes.Add("plain");
         input.AddHandler(InputElement.KeyDownEvent, OnKey, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        input.PasteImages(MaxShots, Add);
         var field = new Border
         {
             CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(0.5),
@@ -790,17 +791,6 @@ public sealed class TodoEditor
     void OnKey(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { e.Handled = true; if (CanSave) Save(); }
-        else if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control) && PasteImage()) e.Handled = true;
-    }
-
-    bool PasteImage()
-    {
-        if (window.Clipboard is not { } clipboard) return false;
-        var formats = clipboard.GetFormatsAsync().GetAwaiter().GetResult();
-        var format = formats.FirstOrDefault(f => f is "image/png" or "PNG" or "image/jpeg" or "Bitmap" or "DeviceIndependentBitmap");
-        if (format is null) return false;
-        if (clipboard.GetDataAsync(format).GetAwaiter().GetResult() is byte[] data) { Add([data]); return true; }
-        return false;
     }
 
     void OnDrop(DragEventArgs e)

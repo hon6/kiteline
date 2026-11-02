@@ -107,6 +107,9 @@ protocol SourceConnection: AnyObject {
 
     func start()
     func stop()
+    /// 插件、开关变了，要换个 watcher 进程才载入：连着的会话照旧显示、不报离线；手上的请求先答完，
+    /// 换进程期间的请求排队、新进程就绪再发（WatcherRPC.hold）。没在跑的（等着重连）下次起进程自然按新开关
+    func reload()
     /// 经 watcher 的 stdin 发一个请求，等 stdout 上同 id 的 response。回调在主线程。
     func request(_ payload: [String: Any], timeout: TimeInterval,
                  completion: @escaping (Result<[String: Any], RemoteError>) -> Void)
@@ -118,6 +121,10 @@ final class WatcherRPC {
     typealias Completion = (Result<[String: Any], RemoteError>) -> Void
 
     private var pending: [String: (completion: Completion, timer: DispatchWorkItem)] = [:]
+    /// 换 watcher 进程期间（reload）新来的请求先排着，新进程报 hello 再发
+    private var held: [(id: Int, payload: [String: Any], deadline: Date, completion: Completion, timer: DispatchWorkItem)] = []
+    private var holdUntil: Date?
+    private var heldCounter = 0
     private var writer: FileHandle?
     private var counter = 0
     private let lock = NSLock()
@@ -132,8 +139,69 @@ final class WatcherRPC {
         if handle == nil { failAll("watcher 通道已断开") }
     }
 
+    /// 换进程（reload）期间：新请求排队，最多 seconds 秒；到期新进程还没就绪，排着的都算失败、调 expired
+    func hold(for seconds: TimeInterval, expired: @escaping () -> Void) {
+        lock.lock()
+        holdUntil = Date().addingTimeInterval(seconds)
+        lock.unlock()
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds + 0.1) { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            let lapsed = self.holdUntil.map { $0 <= Date() } ?? false
+            self.lock.unlock()
+            guard lapsed else { return }   // 已经就绪（release 过）或又延长了
+            self.release(failing: "来源未连接")
+            expired()
+        }
+    }
+
+    var isHolding: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return holdUntil.map { $0 > Date() } ?? false
+    }
+
+    /// 新进程就绪：排着的请求照发；给了 failing 就都按失败回（新进程起不来、来源停了）
+    func release(failing reason: String? = nil) {
+        lock.lock()
+        let items = held
+        held.removeAll()
+        holdUntil = nil
+        lock.unlock()
+        for item in items {
+            item.timer.cancel()
+            if let reason = reason {
+                DispatchQueue.main.async { item.completion(.failure(RemoteError(reason))) }
+            } else {
+                send(item.payload, timeout: max(1, item.deadline.timeIntervalSinceNow), completion: item.completion)
+            }
+        }
+    }
+
+    /// 手上的请求都答完（最晚到 deadline）再做 then：换进程前用，别把正在答的请求掐断
+    func drain(until deadline: Date, then: @escaping () -> Void) {
+        lock.lock()
+        let busy = !pending.isEmpty
+        lock.unlock()
+        guard busy, Date() < deadline else { then(); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.drain(until: deadline, then: then)
+        }
+    }
+
     func send(_ payload: [String: Any], timeout: TimeInterval, completion: @escaping Completion) {
         lock.lock()
+        if let until = holdUntil, until > Date() {
+            heldCounter += 1
+            let heldId = heldCounter
+            let timer = DispatchWorkItem { [weak self] in
+                self?.dropHeld(heldId, RemoteError("请求超时（\(Int(timeout)) 秒）"))
+            }
+            held.append((heldId, payload, Date().addingTimeInterval(timeout), completion, timer))
+            lock.unlock()
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timer)
+            return
+        }
         counter += 1
         let requestId = "r\(counter)"
         let handle = writer
@@ -187,6 +255,14 @@ final class WatcherRPC {
             entry.timer.cancel()
             DispatchQueue.main.async { entry.completion(.failure(RemoteError(reason))) }
         }
+    }
+
+    private func dropHeld(_ heldId: Int, _ error: RemoteError) {
+        lock.lock()
+        let item = held.firstIndex { $0.id == heldId }.map { held.remove(at: $0) }
+        lock.unlock()
+        guard let item = item else { return }
+        DispatchQueue.main.async { item.completion(.failure(error)) }
     }
 
     private func finish(_ requestId: String, _ result: Result<[String: Any], RemoteError>) {

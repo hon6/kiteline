@@ -27,6 +27,7 @@ JSON
 cd "$DESKTOP"
 CCPULSE_CONFIG_DIR="$TMP/config" CCPULSE_DRY_RUN=1 CCPULSE_FAKE_TRANSCRIPT="帮我看一下首页的按钮" \
   CCPULSE_SESSIONS_DIR="$TMP/fake/sessions" CCPULSE_DATA_DIR="$TMP/fake/data" CLAUDE_CONFIG_DIR="$TMP/fake/claude" CODEX_HOME="$TMP/codex" \
+  CCPULSE_PLUGIN_INDEX="http://127.0.0.1:9/plugins/index.json" \
   "$PY" -m kiteline --headless --no-tray > "$TMP/app.out" 2>&1 &
 APP_PID=$!
 for _ in $(seq 1 60); do

@@ -1,5 +1,11 @@
 # Kiteline Release Notes
 
+## 3.49.18 (2026-11-02)
+
+### Improvements
+
+- **No more brief "computer offline" during plugin updates** (Mac, iPhone, iPad): When Kiteline installs or updates an agent plugin automatically, or you turn a plugin on or off in Settings → Plugins, the plugins have to be reloaded. Previously, for a few seconds during the reload your phone showed the computer as offline, the session list was emptied, and messages or actions sent in that window failed. Now sessions stay visible and the computer stays online throughout; messages and actions sent in the meantime are carried out as soon as the reload finishes, and actions already in progress are completed first.
+
 ## 3.49.17 (2026-11-02)
 
 ### New Features

@@ -50,6 +50,7 @@ public sealed class Composer : StackPanel
         };
         input.TextChanged += (_, _) => { AppModel.Shared.SetDraft(key, input.Text ?? ""); UpdateButtons(); };
         input.AddHandler(KeyDownEvent, OnKey, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        input.PasteImages(6, Attach);
         field = new Border { Child = input, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(0.5) };
         field.Res(Border.BackgroundProperty, "Surface").Res(Border.BorderBrushProperty, "Separator");
         var fieldShadow = new Border { CornerRadius = new CornerRadius(14), Background = Brushes.Transparent, BoxShadow = BoxShadows.Parse("0 2 10 0 #0F000000") };
@@ -245,22 +246,6 @@ public sealed class Composer : StackPanel
             e.Handled = true;
             Send();
         }
-        else if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control))
-        {
-            // Ctrl+V：剪贴板里是图就附上，是文字照常粘贴
-            if (PasteImage()) e.Handled = true;
-        }
-    }
-
-    bool PasteImage()
-    {
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is null) return false;
-        var formats = clipboard.GetFormatsAsync().GetAwaiter().GetResult();
-        var image = formats.FirstOrDefault(f => f is "image/png" or "PNG" or "image/jpeg" or "Bitmap" or "DeviceIndependentBitmap");
-        if (image is null) return false;
-        if (clipboard.GetDataAsync(image).GetAwaiter().GetResult() is byte[] data) { Attach([data]); return true; }
-        return false;
     }
 
     void OnDrop(object? sender, DragEventArgs e)

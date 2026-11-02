@@ -54,6 +54,10 @@ PLUGINS_ON = ""
 # 用户打开了的插件单项开关「插件 id.开关 id」（同上；如 cursor.usage 查 Cursor 月用量）
 PLUGIN_OPTIONS_ON = ""
 
+# 插件变了要换个 watcher 进程才载入（LocalSource.restart）：这么久内新进程就绪就不算断线；换之前手上的请求最多等这么久答完
+RESTART_GRACE = 30
+RESTART_DRAIN = 5
+
 
 def watcher_env():
     env = {} if OPENCODE_PLUGIN else {"CCPULSE_OPENCODE_PLUGIN": "0"}
@@ -97,6 +101,9 @@ class LocalSource:
         self._last_event = time.time()
         self._restart_attempt = 0
         self._stderr_tail = []
+        self._ready = threading.Event()   # 当前进程报过 hello
+        self._relaunch = False            # 进程是 restart() 换掉的：退出后马上再起，不算断线
+        self._handover_until = 0.0        # 换进程期间到这个时间：会话照旧显示，请求等新进程就绪再发
 
     @property
     def live(self):
@@ -119,6 +126,8 @@ class LocalSource:
 
     def stop(self):
         self._stopped = True
+        self._relaunch, self._handover_until = False, 0.0
+        self._ready.clear()
         proc, self._proc = self._proc, None
         if proc and proc.poll() is None:
             try:
@@ -127,6 +136,59 @@ class LocalSource:
                 pass
         self._fail_all("watcher 通道已断开")
         self._set_state("stopped")
+
+    def restart(self, source_config=None):
+        """插件、开关变了，要换个 watcher 进程才载入（同 Mac 版 reload）：连着的这台机器会话照旧显示、不报离线，
+        手上的请求先答完，换进程期间来的请求等新进程就绪再发；新进程 RESTART_GRACE 秒内没就绪才算断线。
+        还在连的照样换；没在跑的（等着重连）不用管，下次起进程自然按新开关"""
+        if source_config is not None:
+            self.config = source_config
+        if self._stopped:
+            return
+        if self.live:
+            self._handover_until = time.time() + RESTART_GRACE
+            self._ready.clear()
+        self._relaunch = True
+        threading.Thread(target=self._handover, daemon=True).start()
+
+    def _handover(self):
+        # 上一次 restart 的新进程还在起（_proc 是空的）就等它起来再换：它可能是按旧开关起的
+        end = time.time() + RESTART_DRAIN
+        while (self._pending or not self._proc) and time.time() < end and not self._stopped:
+            time.sleep(0.1)
+        proc = self._proc
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+        else:
+            self._relaunch = False
+        if not self._handing_over():
+            return
+        time.sleep(max(0.0, self._handover_until - time.time()) + 0.1)
+        if not self._stopped and not self._ready.is_set() and 0 < self._handover_until <= time.time():
+            self._handover_until = 0.0
+            if self.live:
+                self._set_state("connecting")
+
+    def _handing_over(self):
+        return self._handover_until > time.time()
+
+    def _exited(self, proc):
+        """进程退出：restart() 换掉的马上再起；返回 False 表示要按断线处理（调用方记原因、退避重连）"""
+        if self._proc is proc:
+            self._proc = None
+        self._ready.clear()
+        self._fail_all("watcher 通道已断开")
+        if self._stopped:
+            return True
+        if self._relaunch:
+            self._relaunch = False
+            log.write("%s watcher 换进程载入插件变化" % self.name)
+            threading.Thread(target=self._launch, daemon=True).start()
+            return True
+        return False
 
     # MARK: 进程
 
@@ -159,7 +221,8 @@ class LocalSource:
         if not script:
             self._set_state("failed", "程序内缺少 ccpulse-watch.py")
             return
-        self._set_state("connecting")
+        if not self._handing_over():
+            self._set_state("connecting")
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
@@ -186,10 +249,7 @@ class LocalSource:
         self._read_stdout(proc)
         # stdout 读完 = 进程退出
         proc.wait()
-        if self._proc is proc:
-            self._proc = None
-        self._fail_all("watcher 通道已断开")
-        if self._stopped:
+        if self._exited(proc):
             return
         reason = self._stderr_tail[-1] if self._stderr_tail else "watcher 退出码 %s" % proc.returncode
         log.write("本机 watcher 退出：%s" % reason)
@@ -200,6 +260,7 @@ class LocalSource:
             return
         self._restart_attempt += 1
         delay = min(30.0, 2.0 ** min(self._restart_attempt, 5))
+        self._handover_until = 0.0
         self._set_state("failed", reason)
         log.write("%d 秒后重启本机 watcher（第 %d 次）" % (delay, self._restart_attempt))
 
@@ -250,6 +311,8 @@ class LocalSource:
                 self.host = event.get("host") or "本机"
                 self.platform = event.get("platform") or self.platform
                 self.watcher_version = event.get("watcher")
+                self._handover_until = 0.0
+                self._ready.set()
                 self._set_state("live")
                 log.write("本机 watcher v%s 就绪" % (self.watcher_version or "?"))
             if kind == "snapshots":
@@ -270,6 +333,12 @@ class LocalSource:
 
     def request(self, payload, timeout=30):
         """同步请求：返回 watcher 的应答字典；失败抛 RemoteError"""
+        if not self._ready.is_set() and self._handing_over():
+            # 插件变了正在换 watcher 进程：等新进程就绪再发
+            started = time.time()
+            while not self._ready.is_set() and self._handing_over() and time.time() - started < timeout:
+                self._ready.wait(0.2)
+            timeout = max(1.0, timeout - (time.time() - started))
         proc = self._proc
         if not proc or proc.poll() is not None:
             raise RemoteError("来源未连接")
@@ -354,7 +423,8 @@ class SSHSource(LocalSource):
         if not bundled:
             self._set_state("failed", "程序内缺少 ccpulse-watch.py")
             return
-        self._set_state("connecting")
+        if not self._handing_over():
+            self._set_state("connecting")
         remote_path = self.config.get("remoteWatcherPath") or "~/.ccpulse/ccpulse-watch.py"
         python = self.config.get("remotePython") or "python3"
         # 先把 watcher 传过去（内容不同才写）
@@ -385,8 +455,5 @@ class SSHSource(LocalSource):
         threading.Thread(target=self._read_stderr, args=(proc,), daemon=True).start()
         self._read_stdout(proc)
         proc.wait()
-        if self._proc is proc:
-            self._proc = None
-        self._fail_all("watcher 通道已断开")
-        if not self._stopped:
+        if not self._exited(proc):
             self._schedule_restart(self._stderr_tail[-1] if self._stderr_tail else "ssh 退出码 %s" % proc.returncode)

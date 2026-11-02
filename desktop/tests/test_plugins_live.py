@@ -196,6 +196,34 @@ try:
     state = api("/api/desktop/plugins/check", {})
     again = next(r for r in state["plugins"] if r["id"] == "livetest")
     check("坏版本以后不再给装（没有可更新的版本）", again["action"] is None and again["version"] == "1.0.0", again)
+
+    print("== 插件升级换 watcher 进程：会话不掉、机器不报离线、期间的请求照常答")
+    publish([package("1.0.0", GOOD), package("2.0.0", BAD), package("2.0.1", GOOD)])
+    api("/api/desktop/plugins/check", {})
+    trace, stop = [], threading.Event()
+
+    def poll():
+        while not stop.is_set():
+            try:
+                state = api("/api/state", timeout=20)
+                usage = api("/api/usage?days=1", timeout=60)
+                mine = next((s for s in state.get("sessions") or [] if s.get("agent") == "livetest"), None)
+                local = next((s for s in state.get("sources") or [] if s.get("id") == "local"), {})
+                trace.append((mine and mine.get("reason"), local.get("online"), usage.get("errors") or []))
+            except Exception as exc:  # noqa: BLE001
+                trace.append(("请求失败", False, [str(exc)]))
+            time.sleep(0.1)
+    poller = threading.Thread(target=poll, daemon=True)
+    poller.start()
+    result = api("/api/desktop/plugins/install", {"id": "livetest"})
+    upgraded = until(lambda: (session() or {}).get("reason") == "2.0.1", 40)
+    time.sleep(1)
+    stop.set()
+    poller.join(70)
+    check("装上 2.0.1、换进程后新版本的会话出来", result.get("ok") and upgraded, result)
+    check("换进程期间会话一直在、机器一直在线、用量照常答（问了 %d 轮）" % len(trace),
+          len(trace) > 3 and all(r in ("1.0.0", "2.0.1") and online and not errs for r, online, errs in trace),
+          [t for t in trace if t[0] not in ("1.0.0", "2.0.1") or not t[1] or t[2]][:5])
 finally:
     app.terminate()
     try:

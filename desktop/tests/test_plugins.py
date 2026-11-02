@@ -163,9 +163,11 @@ class FakeApp:
         self.server = FakeServer()
         self.updater = FakeUpdater()
         self.reconnects = 0
+        self.seamless = None
 
-    def reconnect_sources(self, source_id=None):
+    def reconnect_sources(self, source_id=None, seamless=False):
         self.reconnects += 1
+        self.seamless = seamless
 
 
 print("== 签名")
@@ -208,7 +210,7 @@ result = store.install("newagent")
 folder = os.path.join(plugins.plugins_dir(), "newagent")
 check("下载、校验、解开到插件目录", result.get("ok") and plugins.read_manifest(folder)["version"] == "1.0.0"
       and os.path.isfile(os.path.join(folder, "plugin.py")), result)
-check("装完重启 watcher", app.reconnects == 1)
+check("装完重启 watcher（只换进程，会话照旧显示）", app.reconnects == 1 and app.seamless is True)
 same = store.install("newagent", restart=False)
 check("已经是这个版本：不重复装（不会把同一个版本备份成「上一版本」）", same.get("unchanged") and not os.path.isdir(os.path.join(plugins.plugins_dir(), ".previous", "newagent")), same)
 shutil.rmtree(os.path.join(plugins.plugins_dir(), "newagent"))   # 先删掉，下面才会去下载、校验
@@ -421,9 +423,10 @@ mobile_store.apply_snapshots(SnapSource(), [
      "readOnlyReasonEn": "Not running in tmux, so view-only.", "caps": ["compact"]},
 ])
 by_id = {item["sessionId"]: item for item in mobile_store.state_payload("host", "1.0", {})["sessions"]}
-check("Claude Code 的会话（watcher 不带 caps）：按 Claude Code 补全套", by_id["c1"]["caps"] == kstore.CLAUDE_CAPS, str(by_id["c1"].get("caps")))
-check("老 watcher 的别家会话：caps 为空", by_id["o1"]["caps"] == [])
-check("插件给的 caps 原样转", by_id["q1"]["caps"] == ["compact"] and by_id["x1"]["caps"] == [])
+# 终端（term）开在会话所在的电脑上，哪家 agent 的会话都带
+check("Claude Code 的会话（watcher 不带 caps）：按 Claude Code 补全套", by_id["c1"]["caps"] == kstore.CLAUDE_CAPS + ["term"], str(by_id["c1"].get("caps")))
+check("老 watcher 的别家会话：只有终端", by_id["o1"]["caps"] == ["term"], str(by_id["o1"].get("caps")))
+check("插件给的 caps 原样转", by_id["q1"]["caps"] == ["compact", "term"] and by_id["x1"]["caps"] == ["term"])
 check("待确认的按钮：原样转，缺字段、写坏的丢掉", by_id["x1"].get("pendingOptions") == [
     {"key": "esc", "label": "拒绝", "style": "destructive"}, {"key": "1", "label": "允许", "style": "primary"},
     {"key": "3", "label": "拒绝并告诉它怎么做", "style": "normal", "labelEn": "Deny and Tell It What to Do"}], str(by_id["x1"].get("pendingOptions")))

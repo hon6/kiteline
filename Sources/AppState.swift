@@ -92,6 +92,13 @@ final class AppState {
         sources.values.forEach { $0.start() }
     }
 
+    /// 插件变了：各来源换个 watcher 进程载入，会话照旧显示、不报离线（SourceConnection.reload）；来源有增减就整个重连
+    func reloadWatchers() {
+        let enabled = config.sources.filter { $0.enabled }
+        guard Set(enabled.map { $0.id }) == Set(sources.keys) else { reconnect(); return }
+        enabled.forEach { sources[$0.id]?.reload() }
+    }
+
     /// 用 pid 文件做单实例判断；上一个实例异常退出时（pid 已不存在）会接管
     private func claimSingleInstance() -> Bool {
         let lockURL = AppConfig.directoryURL.appendingPathComponent("instance.pid")

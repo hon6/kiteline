@@ -23,6 +23,8 @@ final class RemoteSession: SourceConnection {
     private var lastEventAt = Date()
     let config: SourceConfig
     private var stoppedByUser = false
+    /// 进程是 reload() 换掉的：退出后马上重连（重新同步插件），不算断线
+    private var reloading = false
     private let queue = DispatchQueue(label: "ccpulse.transport")
     private let rpc = WatcherRPC()
     private(set) var hostHome: String?
@@ -49,7 +51,9 @@ final class RemoteSession: SourceConnection {
 
     func stop() {
         stoppedByUser = true
+        reloading = false
         rpc.attach(nil)
+        rpc.release(failing: "watcher 通道已断开")
         try? stdinPipe?.fileHandleForWriting.close()
         reconnectWorkItem?.cancel()
         reconnectWorkItem = nil
@@ -71,11 +75,27 @@ final class RemoteSession: SourceConnection {
         }
     }
 
+    func reload() {
+        // 没在跑的（等着重连、已停）不用管：下次连接时自然重新同步插件
+        guard !stoppedByUser, process?.isRunning == true else { return }
+        reloading = true
+        if state.isLive {
+            rpc.hold(for: LocalSource.reloadGrace) { [weak self] in
+                guard let self = self, !self.stoppedByUser, self.state.isLive else { return }
+                self.update(state: .connecting)
+            }
+        }
+        rpc.drain(until: Date().addingTimeInterval(5)) { [weak self] in
+            guard let self = self, self.reloading, let process = self.process, process.isRunning else { return }
+            process.terminate()
+        }
+    }
+
     // MARK: - 连接
 
     private func connect() {
         guard !stoppedByUser else { return }
-        update(state: .connecting)
+        if !rpc.isHolding { update(state: .connecting) }
 
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -234,6 +254,12 @@ final class RemoteSession: SourceConnection {
                 self.watchdog?.cancel()
                 self.watchdog = nil
                 guard !self.stoppedByUser else { return }
+                if self.reloading {
+                    self.reloading = false
+                    self.delegate?.source(self, didLog: "换进程载入插件变化")
+                    self.connect()
+                    return
+                }
                 let err = String(data: self.stderrBuffer, encoding: .utf8)?
                     .split(separator: "\n").last.map(String.init) ?? ""
                 let reason = err.isEmpty ? "ssh 退出码 \(proc.terminationStatus)" : err
@@ -278,6 +304,7 @@ final class RemoteSession: SourceConnection {
 
     private func scheduleReconnect(reason: String) {
         guard !stoppedByUser else { return }
+        rpc.release(failing: reason)
         reconnectAttempt += 1
         let delay = min(30.0, pow(2.0, Double(min(reconnectAttempt, 5))))
         update(state: .failed(reason: reason))
@@ -316,6 +343,7 @@ final class RemoteSession: SourceConnection {
         if rpc.consume(event) { return }
         if event.kind == "hello" {
             if let home = event.raw["home"] as? String { hostHome = home }
+            rpc.release()   // 换进程期间排着的请求发给新进程
             update(state: .live(host: event.host, watcher: event.watcherVersion, sessionCount: 0))
             delegate?.source(self, didLog: "远端 \(event.host ?? "?") watcher v\(event.watcherVersion ?? "?")")
         }

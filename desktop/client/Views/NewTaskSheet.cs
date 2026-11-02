@@ -91,6 +91,7 @@ public sealed class NewTaskSheet
         };
         input.Classes.Add("plain");
         input.AddHandler(InputElement.KeyDownEvent, OnKey, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        input.PasteImages(MaxImages, Attach);
         input.TextChanged += (_, _) => Update();
         var addImage = new Tap(Ui.H(4, Ui.Sym("photo.badge.plus", 12, "Accent"), Ui.Text(L("添加图片"), 12, color: "Accent")).Pad(4, 2), Pick, 4).Keys("Transparent", "Fill05");
         var field = new Border
@@ -279,17 +280,6 @@ public sealed class NewTaskSheet
     void OnKey(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { e.Handled = true; Start(); }
-        else if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control) && PasteImage()) e.Handled = true;
-    }
-
-    bool PasteImage()
-    {
-        if (window.Clipboard is not { } clipboard) return false;
-        var formats = clipboard.GetFormatsAsync().GetAwaiter().GetResult();
-        var format = formats.FirstOrDefault(f => f is "image/png" or "PNG" or "image/jpeg" or "Bitmap" or "DeviceIndependentBitmap");
-        if (format is null) return false;
-        if (clipboard.GetDataAsync(format).GetAwaiter().GetResult() is byte[] data) { Attach([data]); return true; }
-        return false;
     }
 
     void OnDrop(DragEventArgs e)
