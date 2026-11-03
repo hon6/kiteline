@@ -737,6 +737,8 @@ struct NewTaskView: View {
     /// 从待办「创建会话」进来：任务内容先填好（选了哪个项目都带进去，用户看过、改好再开始），能找到原项目就直接选中
     var initialText: String? = nil
     var match: TaskOrigin? = nil
+    /// 从提示词链接进来：链接里写的项目（目录名、路径或 owner/repo）。只对上一个就直接选中，几台电脑上都有就筛出来让你挑
+    var hint: String? = nil
     @State private var projects: [ProjectInfo]?
     @State private var error: String?
     @State private var query = ""
@@ -767,6 +769,15 @@ struct NewTaskView: View {
                     picked = found
                 }
                 carryFilters()
+                if picked == nil, let hint {
+                    let found = projects?.filter { PromptLink.matches(hint, cwd: $0.cwd, name: $0.name) } ?? []
+                    if found.count == 1 {
+                        picked = found[0]
+                    } else if let first = found.first {
+                        sourceFilter = ""
+                        projectFilter = first.name
+                    }
+                }
             } catch { self.error = error.localizedDescription }
         }
         .onChange(of: picked?.id) { _, _ in fill() }

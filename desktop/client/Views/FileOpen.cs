@@ -60,6 +60,25 @@ public static class FileOpen
         catch (Exception e) { model.Flash(L("无法取回文件：%@", e.Message)); }
     }
 
+    /// agent 发来的网页（agent_page）：取一份到临时目录，用默认浏览器打开（图表库这些脚本照常跑）
+    public static async void OpenPage(string key, ChatItem item)
+    {
+        if (item.Images is not { Count: > 0 } pages) return;
+        var model = AppModel.Shared;
+        var title = item.Title ?? L("网页");
+        model.Flash(L("正在打开「%@」…", title));
+        try
+        {
+            var data = await model.Api.MediaData("/api/media", new Dictionary<string, string> { ["key"] = key, ["ref"] = pages[0].Ref });
+            var dir = Path.Combine(Path.GetTempPath(), "Kiteline-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, (string.Concat(title.Split(Path.GetInvalidFileNameChars())) is { Length: > 0 } safe ? safe : "page") + ".html");
+            await File.WriteAllBytesAsync(file, data);
+            Launch(file);
+        }
+        catch (Exception e) { model.Flash(L("无法打开网页：%@", e.Message)); }
+    }
+
     /// 本机路径：~/ 换成用户目录，相对路径按会话目录算
     static string? Local(string path, string? cwd)
     {

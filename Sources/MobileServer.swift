@@ -21,6 +21,9 @@ import KitelineKit
 ///   GET  /api/ping[?bytes=N]     网络检测（延迟 / 下行速率）
 ///   GET  /api/info               连接信息（https 地址、推送订阅数、辅助功能权限）
 ///   GET  /api/push/key           推送公钥；POST /api/push/subscribe|unsubscribe|test
+///   POST /api/live/register      iPhone 实时活动的令牌和开关（见 LiveActivities.swift）
+///   GET  /api/share[?key=]       游客链接（局域网只读分享）；POST /api/share {key, hours}、POST /api/share/stop {id}（见 GuestLinks.swift）
+///   GET  /g/<编号>、/g/api/<编号>  游客看的页面和内容（不要令牌，只认分享中的编号）
 ///   POST /api/voice?key=         按住说话：{data(base64), mime, duration, mode: send|text} → 转写（并发送）
 ///   GET  /api/voices?key=        这个会话发过的语音（手机按文字认出哪条消息是语音）
 ///   GET  /api/agents?key=        子 agent 和后台任务（Agent map）
@@ -244,6 +247,8 @@ final class MobileServer {
         let previous = lastState, base = stateSeq
         lastState = payload
         stateSeq += 1
+        // iPhone 锁屏 / 灵动岛上的实时活动跟着会话状态走
+        LiveActivities.shared.update(sessions: payload["sessions"] as? [[String: Any]] ?? [])
         var full = payload
         full["stateSeq"] = stateSeq
         guard let fullData = try? JSONSerialization.data(withJSONObject: full, options: [.sortedKeys]) else { return }
@@ -536,6 +541,9 @@ final class MobileServer {
             return
         case ("GET", "/pair"), ("POST", "/pair"):
             pair(request, respond: respond); return
+        case ("GET", let path) where path.hasPrefix("/g/"):
+            // 游客链接（局域网只读分享）：页面和内容都由这台电脑给，只认分享中的编号
+            GuestLinks.shared.serve(request, respond: respond); return
         case ("GET", _) where !request.path.hasPrefix("/api/"):
             // 网页版已下线：浏览器打开根路径只看到说明页，别的路径（app.js、manifest……）一律 404
             respond(["/", "", "/index.html"].contains(request.path) ? MobileServer.noticePage() : .text("not found", status: 404)); return
@@ -977,6 +985,20 @@ final class MobileServer {
                 respond(.json(["ok": true, "publicKey": self.push.publicKey, "subscriptions": self.push.subscriptions.count]))
             case ("POST", "/api/push/subscribe"):
                 self.subscribe(request, deviceId: auth.deviceId, respond: respond)
+            case ("GET", "/api/share"):
+                respond(.json(["ok": true, "shares": GuestLinks.shared.list(sessionKey: request.query["key"]).map(GuestLinks.payload)]))
+            case ("POST", "/api/share"):
+                guard let key = request.jsonBody?["key"] as? String, !key.isEmpty else { respond(.error("缺少会话", status: 400)); return }
+                guard let share = GuestLinks.shared.create(sessionKey: key, hours: request.jsonBody?["hours"] as? Int ?? 24) else {
+                    respond(.error("有效期只能是 1 小时、24 小时或 7 天", status: 400)); return
+                }
+                respond(.json(["ok": true].merging(GuestLinks.payload(share)) { $1 }))
+            case ("POST", "/api/share/stop"):
+                GuestLinks.shared.stop(id: request.jsonBody?["id"] as? String ?? "")
+                respond(.json(["ok": true]))
+            case ("POST", "/api/live/register"):
+                LiveActivities.shared.register(deviceId: auth.deviceId, body: request.jsonBody ?? [:])
+                respond(.json(["ok": true]))
             case ("POST", "/api/push/unsubscribe"):
                 if let endpoint = request.jsonBody?["endpoint"] as? String { self.push.remove(endpoint: endpoint) }
                 respond(.json(["ok": true]))
@@ -1244,6 +1266,10 @@ final class MobileServer {
     /// 只读查询（历史、图片、概要）用：会话还在跑就用它的记录，已经结束的按 key「来源#会话 id」去那台机器找
     private func resolveAny(_ request: HTTPRequest) -> (key: String, sessionId: String, connection: SourceConnection)? {
         guard let key = request.query["key"] else { return nil }
+        return resolveAny(key: key)
+    }
+
+    private func resolveAny(key: String) -> (key: String, sessionId: String, connection: SourceConnection)? {
         if let record = AppState.shared.store.record(withKey: key) {
             guard let connection = AppState.shared.source(withId: record.sourceId) else { return nil }
             return (key, record.snapshot.sessionId, connection)
@@ -1335,6 +1361,18 @@ final class MobileServer {
                                "hasMore": response["hasMore"] ?? false]))
             case .failure(let error):
                 respond(.error(error.description, status: 502))
+            }
+        }
+    }
+
+    /// 游客链接取会话最近的记录（同 /api/history，见 GuestLinks）：取不到回 nil；第二个值 = 前面还有更早的
+    func historyItems(key: String, limit: Int, completion: @escaping ([[String: Any]]?, Bool) -> Void) {
+        guard let target = resolveAny(key: key) else { completion(nil, false); return }
+        target.connection.request(["cmd": "history", "sessionId": target.sessionId, "limit": limit], timeout: 30) { result in
+            if case .success(let response) = result {
+                completion(response["items"] as? [[String: Any]] ?? [], response["hasMore"] as? Bool ?? false)
+            } else {
+                completion(nil, false)
             }
         }
     }
@@ -1538,6 +1576,7 @@ final class MobileServer {
         lock.unlock()
         victims.forEach { $0.close() }
         push.remove(deviceId: id)
+        LiveActivities.shared.forget(deviceId: id)
         return device
     }
 

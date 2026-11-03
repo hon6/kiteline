@@ -220,6 +220,8 @@ enum SelfTest {
             let server = env["TARS_RENDER_SERVER"].flatMap(URL.init(string:)) ?? URL(string: "http://127.0.0.1:9")!
             MainActor.assumeIsolated { KitelineKit.connect(baseURL: server, token: env["TARS_RENDER_TOKEN"] ?? "") }
             let images = (env["TARS_RENDER_IMAGES"] ?? "").split(separator: ",").compactMap { FileManager.default.contents(atPath: String($0)) }
+            // TARS_RENDER_LINK：当作点了这条提示词链接（同 AppDelegate 收到 kiteline://new#…）
+            if let raw = env["TARS_RENDER_LINK"], let url = URL(string: raw), let link = PromptLink.parse(url) { KitelineModel.shared.newTaskLink = link }
             root = AnyView(NewTaskSheet(attach: images.compactMap { TarsTaskImage.make($0) }).background(Color(nsColor: .windowBackgroundColor)))
         case "usage":
             Limits.inject(fakeLimits())
@@ -853,6 +855,10 @@ extension SelfTest {
         case "phoneshot":
             if let panel = UpdateWindowController.phones.window { write(panel.contentView?.superview ?? panel.contentView, to: arg) }
         case "open": KitelineKit.show(arg, key: KitelineModel.shared.selection ?? "")
+        case "link":
+            // 当作点了提示词链接：link:kiteline://new#p=…&project=…（同 AppDelegate 收到网址，只是不把窗口拿到前台）
+            if let url = URL(string: arg), let link = PromptLink.parse(url) { KitelineModel.shared.newTask(link: link) } else { Log.write("[capture] 不是提示词链接：\(arg)") }
+            delay = 3
         case "type": KitelineKit.setDraft(key: KitelineModel.shared.selection ?? "", arg)
         case "shot": capture(window, to: arg)
         case "glassshot":

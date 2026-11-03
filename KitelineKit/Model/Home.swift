@@ -318,13 +318,17 @@ final class HomeStats {
     /// 近 7 天每天的用量（概览看板的小柱图；只在显示概览时取）
     private(set) var week: [UsageItem] = []
     private(set) var budget: Budget?
+    /// 卡片上的刷新按钮转圈
+    private(set) var limitsBusy = false
     private var refreshedAt: Date?
+    private var limitsRefreshedAt: Date?
     private var weekRefreshedAt: Date?
 
     /// 一分钟内不重复拉（回到首页、下拉刷新时 force）
     func refresh(_ api: MacAPI, force: Bool = false) async {
         if !force, let refreshedAt, Date().timeIntervalSince(refreshedAt) < 60 { return }
         refreshedAt = Date()
+        limitsRefreshedAt = Date()
         async let digest = try? api.get(DigestPayload.self, "/api/digest", ["since": Self.dayStart(0)])
         async let usage = try? api.get(UsagePayload.self, "/api/usage", ["days": "1"])
         async let projects = try? api.get(ProjectsReply.self, "/api/projects", ["detail": "1"])
@@ -333,6 +337,23 @@ final class HomeStats {
         if let usage = await usage { self.usage = usage.totals }
         if let limits = await limits { self.limits = limits.devices }
         if let projects = await projects { self.projects = projects.projects }
+    }
+
+    /// 只拉额度和今天的 token 数：首页开着时每 5 分钟一次（11-03：要 5～10 分钟一更），older 内拉过的跳过；
+    /// 卡片上的刷新按钮 fresh，让电脑端跳过 30 秒缓存、当场问各台电脑
+    func refreshLimits(_ api: MacAPI, older: TimeInterval = 0, fresh: Bool = false) async {
+        if older > 0, let limitsRefreshedAt, Date().timeIntervalSince(limitsRefreshedAt) < older { return }
+        if fresh {
+            if limitsBusy { return }
+            limitsBusy = true
+        }
+        defer { if fresh { limitsBusy = false } }
+        limitsRefreshedAt = Date()
+        let skipCache = fresh ? ["fresh": "1"] : [:]
+        async let usage = try? api.get(UsagePayload.self, "/api/usage", skipCache.merging(["days": "1"]) { $1 })
+        async let limits = try? api.get(LimitsPayload.self, "/api/limits", skipCache)
+        if let usage = await usage { self.usage = usage.totals }
+        if let limits = await limits { self.limits = limits.devices }
     }
 
     /// 概览看板：近 7 天每天的花费、每日预算。和上面分开取：只有 iPhone Duo 外屏、宽屏的概览页用得到

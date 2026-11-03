@@ -206,7 +206,8 @@ public sealed class SidebarView : Panel
         return Ui.VFill(8,
             new SidebarLimitsTile(tiles.Limits, (u?.Tokens ?? 0) > 0 ? L("%@ token", UsageFormat.Compact(u!.Value.Tokens)) : "",
                 u is null ? L("Claude Code 回复后显示 5 小时与本周额度")
-                : L("%@ · %@ 输出 · %@ 次", UsageFormat.Money(u.Value.Cost), UsageFormat.Compact(u.Value.Output), (int)u.Value.Requests), main),
+                : L("%@ · %@ 输出 · %@ 次", UsageFormat.Money(u.Value.Cost), UsageFormat.Compact(u.Value.Output), (int)u.Value.Requests), main,
+                tiles.LimitsBusy, tiles.RefreshLimits),
             new EqualRow(8,
                 new SidebarTile(MainModel.HistoryId, "clock.arrow.circlepath", L("历史会话"), "", "", 0, Ui.Text(L("浏览 · 搜索 · 恢复"), 11, color: "Text2"), main),
                 new SidebarTile(MainModel.TodayId, "sun.max.fill", L("今日动态"), (t?.Prompts ?? 0) > 0 ? t!.Value.Prompts.ToString() : "", L("轮"), 0, TodaySub(), main)),
@@ -764,6 +765,8 @@ public sealed class SidebarTilesModel
     public (int Prompts, int Sessions, int Files, int TestFailed)? Today { get; private set; }
     public (double Cost, double Output, double Requests, double Tokens)? Usage { get; private set; }
     public List<LimitDevice> Limits { get; private set; } = [];
+    /// 卡片上的刷新按钮转圈
+    public bool LimitsBusy { get; private set; }
     public event Action? Changed;
     DispatcherTimer? timer;
     DispatcherTimer? limitsTimer;
@@ -790,14 +793,7 @@ public sealed class SidebarTilesModel
             Today = (t.Int("prompts") ?? 0, t.Int("sessions") ?? 0, t.Int("files") ?? 0, t.Int("testFailed") ?? 0);
         }
         catch (Exception) { }
-        try
-        {
-            var usage = await api.Get("/api/usage", new Dictionary<string, string> { ["days"] = "1" });
-            var t = usage.Obj("totals");
-            Usage = (t.Num("cost") ?? 0, t.Num("output") ?? 0, t.Num("requests") ?? 0,
-                     new[] { "input", "output", "cacheRead", "cacheWrite" }.Sum(k => t.Num(k) ?? 0));
-        }
-        catch (Exception) { }
+        await FetchUsage();
         await FetchLimits();
         Changed?.Invoke();
     }
@@ -808,10 +804,35 @@ public sealed class SidebarTilesModel
         Changed?.Invoke();
     }
 
-    /// 旧版电脑端没有这个接口：当没有读数，卡片退回一行花费
-    async Task FetchLimits()
+    /// 卡片上的刷新按钮（11-03）：额度、今天的 token 数都跳过缓存当场问各台电脑
+    public async void RefreshLimits()
     {
-        try { Limits = LimitDevice.ParseAll(await AppModel.Shared.Api.Get("/api/limits")); }
+        if (LimitsBusy) return;
+        LimitsBusy = true;
+        Changed?.Invoke();
+        await Task.WhenAll(FetchUsage(fresh: true), FetchLimits(fresh: true));
+        LimitsBusy = false;
+        Changed?.Invoke();
+        AppModel.Shared.Flash(LimitsBoard.RefreshedNote(Limits));
+    }
+
+    async Task FetchUsage(bool fresh = false)
+    {
+        try
+        {
+            var query = new Dictionary<string, string> { ["days"] = "1" };
+            if (fresh) query["fresh"] = "1";
+            var t = (await AppModel.Shared.Api.Get("/api/usage", query)).Obj("totals");
+            Usage = (t.Num("cost") ?? 0, t.Num("output") ?? 0, t.Num("requests") ?? 0,
+                     new[] { "input", "output", "cacheRead", "cacheWrite" }.Sum(k => t.Num(k) ?? 0));
+        }
+        catch (Exception) { }
+    }
+
+    /// 旧版电脑端没有这个接口：当没有读数，卡片退回一行花费
+    async Task FetchLimits(bool fresh = false)
+    {
+        try { Limits = LimitDevice.ParseAll(await AppModel.Shared.Api.Get("/api/limits", fresh ? new Dictionary<string, string> { ["fresh"] = "1" } : null)); }
         catch (Exception) { }
     }
 }

@@ -409,7 +409,7 @@ final class AppState {
             // 这版电脑端能做的（手机按它决定给不给入口）：files = 收手机发来的文件（PDF、Excel……）、按路径取回文件
             // groups = 会话群（拉群、群里发言、历史群恢复）；groupMedia = 群里能发图、文件；
             // hostUpdate = 手机上能看这台电脑的新版本、让它下载安装和重启（/api/host-update）
-            "features": ["files", "groups", "groupMedia", "hostUpdate"],
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share"],
         ]
     }
 
@@ -577,6 +577,12 @@ extension AppState: SourceConnectionDelegate {
                 guard record?.snapshot.fromPeer != true else { continue }
                 let caption = item["text"] as? String ?? ""
                 mobile.notify(kind: "image", title: title, body: caption.isEmpty ? "\(speaker) 发来一张图片" : caption, key: key)
+            case "agent_page":
+                // agent 发来的网页（send-page）：同发图，推一条（推送开关也跟发图走）
+                guard record?.snapshot.fromPeer != true else { continue }
+                let caption = item["caption"] as? String ?? ""
+                let name = item["title"] as? String ?? "网页"
+                mobile.notify(kind: "image", title: title, body: caption.isEmpty ? "\(speaker) 发来网页「\(name)」" : "\(name)：\(caption)", key: key)
             case "agent_todo":
                 guard let id = item["id"] as? String, let text = item["text"] as? String, !text.isEmpty else { continue }
                 let ts = Digest.number(item["ts"])

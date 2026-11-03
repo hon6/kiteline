@@ -7,6 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Kiteline.Model;
 using Kiteline.Net;
 using Kiteline.UI;
@@ -35,6 +36,8 @@ public sealed class NewTaskSheet
     readonly Window window;
     readonly TextBox search;
     readonly StackPanel rows = new();
+    /// 选中的那一行（列表长时，从链接、会话带进来的选中项要滚到眼前）
+    Control? selectedRow;
     /// 设备、项目两排胶囊（同侧栏会话列表）
     readonly StackPanel scopes = new() { Spacing = 8 };
     readonly ContentControl listOverlay = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -57,7 +60,8 @@ public sealed class NewTaskSheet
     readonly List<ComposeAttachment> attached = [];
 
     /// text：任务内容先填好（待办「创建会话」带进来的，用户看过、改好再开始）
-    public static void Open((string SourceId, string Cwd)? preset = null, string? text = null)
+    /// hint：提示词链接里写的项目（目录名、路径或 owner/repo）：只对上一个就选中，几台电脑上都有就筛出来让你挑
+    public static void Open((string SourceId, string Cwd)? preset = null, string? text = null, string? hint = null)
     {
         if (shown is not null)
         {
@@ -65,12 +69,15 @@ public sealed class NewTaskSheet
             shown.window.Activate();
             return;
         }
-        shown = new NewTaskSheet(preset);
+        shown = new NewTaskSheet(preset, hint);
         if (!string.IsNullOrEmpty(text)) shown.input.Text = text;
     }
 
-    NewTaskSheet((string SourceId, string Cwd)? preset)
+    readonly string? hint;
+
+    NewTaskSheet((string SourceId, string Cwd)? preset, string? hint = null)
     {
+        this.hint = hint;
         search = new TextBox { Watermark = L("搜索项目"), Width = 200, FontSize = Look.Pt(13), Padding = new Thickness(10, 5) };
         search.Classes.Add("search");
         search.TextChanged += (_, _) => DrawRows();
@@ -155,11 +162,19 @@ public sealed class NewTaskSheet
                 if (projectFilter.Length > 0 && projectFilter != found.Name) projectFilter = "";
                 selection = found.Id;
             }
+            else if (hint is { Length: > 0 } && projects.Where(x => PromptLinks.Matches(hint, x.Cwd, x.Name)).ToList() is { Count: > 0 } matched)
+            {
+                sourceFilter = "";
+                if (matched.Count == 1) { projectFilter = ""; selection = matched[0].Id; }
+                else projectFilter = matched[0].Name;
+            }
         }
         catch (Exception e) { status.Text = e.Message; }
         loading = false;
         DrawRows();
         Update();
+        // 带进来的项目排在下面时滚到眼前（不然看着像没选中）
+        if (selectedRow is { } row) Dispatcher.UIThread.Post(() => row.BringIntoView(), DispatcherPriority.Background);
     }
 
     Project? Selected => projects.FirstOrDefault(p => p.Id == selection);
@@ -212,6 +227,7 @@ public sealed class NewTaskSheet
         if (selection is null && shownList.Count == 1) selection = shownList[0].Id;
         if (selection != before) Update();
         rows.Children.Clear();
+        selectedRow = null;
         foreach (var project in shownList)
         {
             var on = project.Id == selection;
@@ -228,6 +244,7 @@ public sealed class NewTaskSheet
             // 选中：淡色底 + 一道细边（不用整块饱和色）
             if (on) row.Keys("AccentFill14", "AccentFill14").Res(Border.BorderBrushProperty, "AccentEdge32"); else { row.Keys("Transparent", "Fill05"); row.BorderBrush = Brushes.Transparent; }
             row.Cursor = Cursor.Default;
+            if (on) selectedRow = row;
             rows.Children.Add(row);
         }
         listOverlay.Content = loading ? new Spinner(18)

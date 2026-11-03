@@ -64,6 +64,8 @@ public static class SessionMenu
         yield return Ui.Item(L("会话信息"), () => ChatActions.Perform(key, SessionAction.Info));
         if (item.Can("term")) yield return Ui.Item(L("切换终端"), () => ChatActions.Perform(key, SessionAction.Terminal));
         yield return Ui.Item(L("Agent 详情…"), () => AgentDetails.Open(key));
+        // 游客链接：没装 Kiteline 的人用浏览器只读查看（后台支持才有）
+        if (model.Features.Contains("share")) yield return Ui.Item(L("分享只读链接…"), () => GuestShare.Open(key));
         yield return Ui.Divider();
         yield return Ui.Item(L("复制工作目录"), () => Copy(item.Cwd ?? ""));
         yield return Ui.Item(L("复制会话名"), () => Copy(item.Title));

@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 
-from . import aggregate, bark, config, delivery, faces, i18n, log, netinfo, setup_tools, tls, tts
+from . import aggregate, bark, config, delivery, faces, guest, i18n, log, netinfo, setup_tools, tls, tts
 from .httpd import Response, StreamReply
 
 AUDIO_TYPES = ("audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
@@ -190,6 +190,8 @@ class MobileServer:
             previous, base = self._state, self._state_seq
             self._state = payload
             self._state_seq += 1
+            # iPhone 锁屏 / 灵动岛上的实时活动跟着会话状态走
+            self.app.live.update(payload.get("sessions") or [])
             full = dict(payload, stateSeq=self._state_seq)
             full_text = json.dumps(full, ensure_ascii=False, sort_keys=True)
             patch = state_patch(previous, payload, base, self._state_seq, len(full_text.encode("utf-8"))) if previous else None
@@ -441,6 +443,10 @@ class MobileServer:
         if method == "GET" and (path == "/world" or path.startswith("/world/")):
             # 世界模式（Windows 客户端的 WebView2、Linux 的浏览器窗口打开这里）：静态文件不要令牌，数据接口照旧要
             return self._world_file(path)
+        if method == "GET" and path.startswith("/g/"):
+            # 游客链接（局域网只读分享）：页面和内容都由这台电脑给，只认分享中的编号（见 guest.py）
+            status, headers, body = self.app.guest.serve(path, request.headers.get("if-none-match"))
+            return Response(status, headers, body)
         if method == "GET" and not path.startswith("/api/"):
             # 网页版已下线：根路径只有说明页，别的路径（app.js、manifest……）一律 404
             return self._notice() if path in ("/", "", "/index.html") else Response.text("not found", 404)
@@ -669,6 +675,7 @@ class MobileServer:
         for stream in victims:
             stream.close()
         self.app.push.remove(device_id=device_id)
+        self.app.live.forget(device_id)
         return device
 
     def set_foreground(self, device_id, visible):
@@ -1491,6 +1498,38 @@ def r_push_subscribe(s, request, kind, who, device_id):
     return Response.json({"ok": True, "subscriptions": len(s.app.push.subscriptions)})
 
 
+def r_share_list(s, request, *_):
+    """游客链接（局域网只读分享，见 guest.py）：这个会话正在分享的网址"""
+    port = guest.guest_port(s.app)
+    return Response.json({"ok": True, "shares": [guest.payload_of(x, port) for x in s.app.guest.list(request.query.get("key") or None)]})
+
+
+def r_share_create(s, request, *_):
+    body = request.json or {}
+    key = body.get("key") or ""
+    if not key:
+        return Response.error("缺少会话", 400)
+    try:
+        hours = int(body.get("hours") or 24)
+    except (TypeError, ValueError):
+        hours = 0
+    share = s.app.guest.create(key, hours)
+    if not share:
+        return Response.error("有效期只能是 1 小时、24 小时或 7 天", 400)
+    return Response.json(dict(guest.payload_of(share, guest.guest_port(s.app)), ok=True))
+
+
+def r_share_stop(s, request, *_):
+    s.app.guest.stop((request.json or {}).get("id") or "")
+    return Response.json({"ok": True})
+
+
+def r_live_register(s, request, kind, who, device_id):
+    """iPhone 实时活动的令牌和开关（见 live.py）"""
+    s.app.live.register(device_id, request.json or {})
+    return Response.json({"ok": True})
+
+
 def r_push_unsubscribe(s, request, *_):
     endpoint = (request.json or {}).get("endpoint")
     if endpoint:
@@ -1704,7 +1743,8 @@ ROUTES = {
     ("POST", "/api/agent-face"): r_agent_face, ("GET", "/api/agent-avatar"): r_agent_avatar,
     ("GET", "/api/agent-info"): r_agent_info, ("GET", "/api/machine"): r_machine, ("POST", "/api/feedback"): r_feedback,
     ("POST", "/api/watch/status"): r_watch_status, ("POST", "/api/p2p/join"): r_p2p_join, ("POST", "/api/clientlog"): r_clientlog,
-    ("POST", "/api/presence"): r_presence, ("GET", "/api/push/key"): r_push_key, ("POST", "/api/push/subscribe"): r_push_subscribe,
+    ("POST", "/api/presence"): r_presence, ("GET", "/api/push/key"): r_push_key, ("POST", "/api/push/subscribe"): r_push_subscribe, ("POST", "/api/live/register"): r_live_register,
+    ("GET", "/api/share"): r_share_list, ("POST", "/api/share"): r_share_create, ("POST", "/api/share/stop"): r_share_stop,
     ("POST", "/api/push/unsubscribe"): r_push_unsubscribe, ("POST", "/api/push/test"): r_push_test,
     ("GET", "/api/readiness"): r_readiness, ("POST", "/api/readiness/fix"): r_readiness_fix, ("GET", "/api/changelog"): r_changelog, ("GET", "/api/schedules"): r_schedules,
     ("GET", "/api/host-update"): r_host_update, ("POST", "/api/host-update"): r_host_update_post,

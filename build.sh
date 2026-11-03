@@ -149,6 +149,8 @@ cp -R "$ROOT/Resources/en.lproj" "$APP/Contents/Resources/"
 cp -R "$ROOT/Resources/world" "$APP/Contents/Resources/"
 # 代码 IDE 的编辑器内核（CodeMirror 6 打成一个 HTML，iPhone / Mac 共用；tools/editor/build.sh 生成）
 cp -R "$ROOT/Resources/editor" "$APP/Contents/Resources/"
+# 游客链接（局域网只读分享）看的页面：电脑自己在 /g/<编号> 给（见 Sources/GuestLinks.swift）
+cp -R "$ROOT/Resources/guest" "$APP/Contents/Resources/"
 # 本机离线语音识别库（sherpa-onnx，只有 arm64）：运行时 dlopen，加载不到就退回系统语音识别（见 Sources/LocalASR.swift）
 if ls "$ROOT/vendor/sherpa-onnx/lib/"*.dylib >/dev/null 2>&1; then
   mkdir -p "$APP/Contents/Frameworks"

@@ -239,6 +239,13 @@ struct UsageView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task(id: days) { await load() }
+        // 额度每 5 分钟重拉一次（同首页）
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                if !Task.isCancelled, let fresh = try? await model.api.get(LimitsPayload.self, "/api/limits") { limits = fresh.devices }
+            }
+        }
         .refreshable { await load() }
         .confirmationDialog(picking == .cap ? "每日花费上限：超出后将跳过定时任务，新建任务、恢复会话和手机发送消息均需先确认（允许操作与回答提问不受影响）"
                                 : "每日花费达到该金额时提醒（达到 80% 时提前提醒一次）",

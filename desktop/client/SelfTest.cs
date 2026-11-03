@@ -103,6 +103,7 @@ static class SelfTest
                 case "dialogshot": Pump(0.4); if ((Views.Dialog.Last ?? Views.UpdateDialog.Current ?? Views.PhoneUpdateDialog.Current) is Window dialog) Shot(dialog, arg); break;
                 case "updateshot": Pump(0.4); if (Views.UpdateDialog.Current is Window updateDialog) Shot(updateDialog, arg); else Console.Error.WriteLine("更新弹窗没开"); break;
                 case "phoneshot": Pump(0.4); if (Views.PhoneUpdateDialog.Current is Window phoneDialog) Shot(phoneDialog, arg); else Console.Error.WriteLine("手机端弹窗没开"); break;
+                case "link": Model.PromptLinks.Handle(arg); break;   // 当作点了这条提示词链接（kiteline://new#p=…）
                 case "newtask": Views.NewTaskSheet.Open(arg.Length > 0 && Model.AppModel.Shared.Sessions.FirstOrDefault(x => x.Title == arg) is { } picked ? (picked.SourceId, picked.Cwd ?? "") : null); break;
                 case "todoedit": Views.TodoEditor.Open(Views.TodoEditor.Target.New()); break;
                 // 对话里的面板：action:files / changes / tests / agents / search / info / mode / model；openfile:<路径>；closedialog

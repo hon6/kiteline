@@ -68,7 +68,7 @@ enum ChatRow: Identifiable, Hashable {
 /// 把一个会话的所有条目排成对话页的行（和手机网页的 renderChat 同一套规则）
 enum ChatLayout {
     /// 认得的对话项种类；以后的插件新加的种类按一行提示（event）显示：不丢、不报错，也不当成回复
-    static let knownKinds: Set<String> = ["user", "text", "thinking", "tool", "result", "agent_image", "agent_todo", "agent_key", "group_say", "event"]
+    static let knownKinds: Set<String> = ["user", "text", "thinking", "tool", "result", "agent_image", "agent_page", "agent_todo", "agent_key", "group_say", "event"]
 
     static func isStep(_ item: ChatItem) -> Bool {
         item.t == "thinking" || item.t == "result" || (item.t == "tool" && item.name != "TodoWrite" && !isPeerCard(item))

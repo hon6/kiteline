@@ -237,7 +237,7 @@ final class FileOpener {
     private final class Progress: @unchecked Sendable { var shown = -1 }
 
     /// 取回的文件放临时目录（每个一个子目录，名字保持原样：预览页标题、转发到微信时对方看到的都是它）；一小时前的清掉
-    private static func save(_ data: Data, name: String) throws -> URL {
+    static func save(_ data: Data, name: String) throws -> URL {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("Downloads", isDirectory: true)
         let fm = FileManager.default
         if let old = try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: [.contentModificationDateKey]) {

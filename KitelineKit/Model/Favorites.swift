@@ -101,7 +101,7 @@ extension AppModel {
     func addFavorite(key: String, item: ChatItem, mine: Bool) {
         guard !favorites.contains(key: key, itemId: item.id) else { return }
         let text = (item.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let images = item.images ?? []
+        let images = item.t == "agent_page" ? [] : item.images ?? []   // 网页（agent_page）只收藏标题和说明
         guard !text.isEmpty || !images.isEmpty else { return }
         Task {
             var body: [String: Any] = ["key": key, "itemId": item.id, "who": mine ? "me" : "bot",

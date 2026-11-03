@@ -379,11 +379,17 @@ struct UserMessage: View {
         let favorite = [model.favoriteAction(key: key, item: item, mine: true)].compactMap { $0 }
         let forward = [model.forwardImagesAction(key: key, images: item.images ?? []),
                        model.forwardFilesAction(key: key, paths: files) { picking = files }].compactMap { $0 }
-        guard !text.isEmpty, !readOnly else { return forward + favorite }
+        let prompt = FileLink.splitAttached(text).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 把这句要求做成提示词链接（发给同事、贴进 PR 评论）：对方用 Kiteline 打开就是填好的「新任务」，项目按这个会话的目录名对
+        let link = prompt.isEmpty ? [] : [MenuAction(title: L("复制为提示词链接"), symbol: "link") {
+            let cwd = model.session(key)?.cwd ?? model.pastMeta[key]?.cwd
+            Clipboard.copy(PromptLink.make(prompt: prompt, project: cwd.map { ($0 as NSString).lastPathComponent }))
+        }]
+        guard !text.isEmpty, !readOnly else { return forward + link + favorite }
         return [
             MenuAction(title: L("引用"), symbol: "quote.opening") { model.chat(key).quote = Quote.make(FileLink.splitAttached(text).text) },
             MenuAction(title: L("重新发送"), symbol: "arrow.clockwise") { model.send(key, text: text, images: []) },
-        ] + forward + favorite
+        ] + forward + link + favorite
     }
 }
 
@@ -437,6 +443,47 @@ struct AgentImageMessage: View {
                 if let text = item.text, !text.isEmpty { MarkdownView(text) }
             }
             .frame(maxWidth: 360, alignment: .leading)   // 气泡贴着图走，不撑满一行
+        }
+    }
+}
+
+/// agent 发来的网页（agent_page，watcher 的 send-page）：一张卡片，轻点打开（手机上在 App 里，电脑上用浏览器），下面是一句说明
+struct AgentPageMessage: View {
+    @Environment(AppModel.self) private var model
+    let key: String
+    let item: ChatItem
+
+    var body: some View {
+        Bubble(mine: false, text: item.text, actions: [model.favoriteAction(key: key, item: item, mine: false)].compactMap { $0 }) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(L("%@ 发来网页", model.sessionSlot(key).speaker), systemImage: "doc.richtext").font(.ui(.caption)).foregroundStyle(.secondary)
+                Button { PageOpener.shared.open(model, key: key, item: item) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "chart.bar.doc.horizontal")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(Theme.claude)
+                            .frame(width: 36, height: 40)
+                            .background(Theme.claude.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title ?? L("网页")).font(.ui(.subheadline)).fontWeight(.semibold).lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            #if os(macOS)
+                            Text(L("在浏览器中打开")).font(.ui(.caption2)).opacity(0.7)
+                            #else
+                            Text(L("轻点打开，可缩放、可交互")).font(.ui(.caption2)).opacity(0.7)
+                            #endif
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right").font(.ui(.caption)).foregroundStyle(.tertiary)
+                    }
+                    .padding(8)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.steady(.plain))
+                if let caption = item.caption, !caption.isEmpty { MarkdownView(caption) }
+            }
+            .frame(maxWidth: 360, alignment: .leading)
         }
     }
 }

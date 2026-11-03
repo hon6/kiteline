@@ -139,6 +139,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// 提示词链接（kiteline://new#p=…，官网 /new 页上的「在 Kiteline 中打开」）：打开主窗口，弹出填好提示词的「新任务」（见 PromptLink.swift）
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let link = urls.lazy.compactMap(PromptLink.parse).first else { return }
+        MainWindowController.shared.show()
+        NSApp.activate(ignoringOtherApps: true)
+        KitelineModel.shared.newTask(link: link)
+    }
+
     // MARK: - 菜单栏图标
 
     private func updateGlyph(_ glyph: TarsGlyph.State) {

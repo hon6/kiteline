@@ -194,6 +194,10 @@ public static class UserMessage
             [
                 (L("引用"), () => chat.Quote = Quote.Make(text)),
                 (L("重新发送"), () => model.Send(key, text, [])),
+                // 把这句要求做成提示词链接（发给同事、贴进 PR 评论）：对方用 Kiteline 打开就是填好的「新任务」，项目按这个会话的目录名对
+                (L("复制为提示词链接"), () => SessionMenu.Copy(PromptLinks.Make(shown.Trim(),
+                    (model.Session(key)?.Cwd ?? (model.PastMeta.TryGetValue(key, out var past) ? past.Cwd : null)) is string cwd
+                        ? System.IO.Path.GetFileName(cwd.TrimEnd('/', '\\')) : null))),
             ], () => FavoriteState.Shared.MenuAction(key, item, true)));
         }
         if (item.Queued == true) stack.Children.Add(Ui.Text(L("Claude 工作时插入"), 11, color: "Text2").HAlign(HorizontalAlignment.Right));
@@ -233,6 +237,39 @@ public static class AgentImageMessage
         stack.Children.Add(Ui.H(5, Ui.Sym("photo", 12, "Text2"), Ui.Text(L("%@ 发来图片", AppModel.Shared.Session(key)?.Speaker ?? "Claude"), 11.5, color: "Text2")));
         if (item.Images is { Count: > 0 } images) stack.Children.Add(new MessageImages(key, images));
         if (item.Text is { Length: > 0 } text) stack.Children.Add(new MarkdownView(text, true, openLink));
+        return new Bubble(false, first, stack, item.Text, later: () => FavoriteState.Shared.MenuAction(key, item, false));
+    }
+}
+
+/// agent 发来的网页（agent_page，watcher 的 send-page，同 Mac 版 AgentPageMessage）：一张卡片，点了取回来用默认浏览器打开，下面是一句说明
+public static class AgentPageMessage
+{
+    public static Control Make(string key, ChatItem item, bool first, Action<string> openLink)
+    {
+        var stack = new StackPanel { Spacing = 8, MaxWidth = 360 };
+        stack.Children.Add(Ui.H(5, Ui.Sym("doc.text", 12, "Text2"), Ui.Text(L("%@ 发来网页", AppModel.Shared.Session(key)?.Speaker ?? "Claude"), 11.5, color: "Text2")));
+        var glyph = Ui.Sym("chart.bar", 18, "Accent");
+        glyph.HorizontalAlignment = HorizontalAlignment.Center;
+        glyph.VerticalAlignment = VerticalAlignment.Center;
+        var icon = Ui.Box(glyph, new Avalonia.Thickness(0), "Fill10", 7);
+        icon.Width = 34;
+        icon.Height = 38;
+        var hint = Ui.Text(L("在浏览器中打开"), 11);
+        hint.Opacity = 0.7;
+        var texts = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        texts.Children.Add(Ui.Text(item.Title ?? L("网页"), 13, FontWeight.SemiBold, lines: 2).Wrap());
+        texts.Children.Add(hint);
+        var row = new DockPanel { LastChildFill = true };
+        var chevron = Ui.Sym("chevron.right", 11, "Text3");
+        chevron.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(icon, Dock.Left);
+        DockPanel.SetDock(chevron, Dock.Right);
+        icon.Margin = new Avalonia.Thickness(0, 0, 10, 0);
+        row.Children.Add(icon);
+        row.Children.Add(chevron);
+        row.Children.Add(texts);
+        stack.Children.Add(new Tap(row.Pad(8, 8), () => FileOpen.OpenPage(key, item), 10).Keys("Fill05", "Fill10"));
+        if (item.Caption is { Length: > 0 } caption) stack.Children.Add(new MarkdownView(caption, true, openLink));
         return new Bubble(false, first, stack, item.Text, later: () => FavoriteState.Shared.MenuAction(key, item, false));
     }
 }

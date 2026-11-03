@@ -206,6 +206,21 @@ final class KitelineModel: ObservableObject {
         showNewTask = true
     }
 
+    /// 从提示词链接来的：提示词先填好、链接里的项目对得上就选中（NewTaskSheet 打开时取走）
+    var newTaskLink: PromptLink?
+
+    func newTask(link: PromptLink) {
+        newTaskPreset = nil
+        newTaskLink = link
+        if showNewTask {
+            // 面板已经开着：关了重开，带上新链接
+            showNewTask = false
+            DispatchQueue.main.async { self.showNewTask = true }
+        } else {
+            showNewTask = true
+        }
+    }
+
     /// 菜单栏图标状态变化时通知 AppDelegate 重画
     var onGlyphChange: ((TarsGlyph.State) -> Void)?
 

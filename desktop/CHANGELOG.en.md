@@ -1,5 +1,18 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.25 (2026-11-03)
+
+### New Features
+
+- **Agents can reply with a web page** (Windows, Linux): When a conclusion is easier to follow as a chart, comparison table or flow diagram, the agent can write it as a web page and send it to the conversation. It appears as a card with a title and a short summary and is also sent to your phone; click the card to open it in your default browser. Kiteline updates its screenshot skill automatically so agents know when a web page is the better reply.
+- **Prompt links** (Windows, Linux): Opening a Kiteline prompt link opens New Task with the prompt filled in, and selects the project named in the link if it exists on your computer. Nothing runs until you confirm it. Right-click a message you sent and choose Copy as Prompt Link to share a request with a teammate or paste it into a pull request comment. Kiteline registers kiteline:// links automatically when it starts.
+- **iPhone Live Activities** (Windows, Linux): While agents on this computer are working or waiting for approval, your paired iPhone shows the session title and status live on the Lock Screen and in the Dynamic Island; tap to open that session. Requires Kiteline 1.8 or later on iPhone, and can be turned off in the app under Settings → Push Notifications. Apple does not allow Live Activity content to be encrypted, so session titles and status are sent in plain text through the Apple Push Notification service; conversation content is never sent.
+- **Share a read-only link** (Windows, Linux): Choose Share Read-Only Link… in the session menu to create a local network address for a teammate. Anyone on the same network (Wi-Fi) as the computer can view the session's conversation and the steps taken in a browser without installing Kiteline (thinking, images and key information are left out), and their page updates automatically as the session progresses. The page and its content come straight from the computer and never pass through any server. Links last 1 hour, 24 hours or 7 days, and you can stop sharing at any time.
+
+### Improvements
+
+- **Refresh Today’s Usage at any time** (Windows, Linux): A refresh button next to the Today’s Usage title reloads every computer's plan limits and today's usage on the spot. Claude Code and Codex report their limits with each reply, so a computer that hasn't been used for a while keeps its last reading.
+
 ## 1.0.24 (2026-11-03)
 
 ### Bug Fixes

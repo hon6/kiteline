@@ -38,6 +38,12 @@ ccpulse-watch — Claude Code 会话观察器 + 会话内容通道
 子命令（给智能体用）:
   ccpulse-watch.py send-image <图片>... [--caption 说明] [--session 会话id]
       把图片发到用户手机上该会话的对话里。
+  ccpulse-watch.py prompt-link <提示词> [--project 项目名|路径|owner/repo] [--no-project]
+      生成提示词链接（https://tars.betac.cn/new#p=…）：贴进 PR 评论、文档、聊天里，别人用 Kiteline 打开就是填好提示词的「新任务」，
+      先看过、选好项目再开始，不会自动执行。不写 --project 时用当前目录名。提示词写成 - 时从标准输入读。
+  ccpulse-watch.py send-page <html文件> [--title 标题] [--caption 说明] [--session 会话id]
+      把一个网页（图表、对比表、架构图、报告）发到对话里：手机上轻点在 App 里打开（能交互），电脑上用浏览器打开。
+      同目录引用的图片、CSS、JS 会一起打包进去；外部 CDN 的脚本照常加载。
   ccpulse-watch.py shot <网址|html文件> [--desktop] [--width W --height H] [--caption 说明]
   ccpulse-watch.py shot --text <文件|-> [--title 标题] [--caption 说明]
       截网页 / 把文本输出渲染成图，然后像 send-image 一样发到手机。
@@ -101,7 +107,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.33.0"
+WATCHER_VERSION = "2.34.0"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -2129,6 +2135,15 @@ def outbox_item(offset, entry):
             item["name"] = str(entry["name"])[:40]
         return item
     files = entry.get("files") if isinstance(entry.get("files"), list) else []
+    if kind == "page":
+        # agent 发来的网页（send-page）：各端画成一张「页面」卡片，手机上在 App 里打开、电脑上用浏览器打开；
+        # 网页本身照图片的路子取（media，ref 同 agent_image）。不认识的老客户端当一行提示显示 text
+        title = entry.get("title") or "页面"
+        caption = entry.get("caption") or ""
+        pages = [{"ref": "o%d.%d" % (offset, index), "mime": info.get("mime") or "text/html", "name": info.get("name")}
+                 for index, info in enumerate(files) if isinstance(info, dict)]
+        return {"id": "o%d" % offset, "ts": entry.get("ts"), "t": "agent_page", "title": title, "caption": caption,
+                "images": pages, "text": "发来网页「%s」%s" % (title, "：" + caption if caption else "")}
     images = []
     for index, info in enumerate(files):
         if isinstance(info, dict):
@@ -2261,6 +2276,127 @@ def command_send_image(argv):
     print("已发送 %d 张图片到用户手机（会话 %s）" % (len(stored), name or session_id[:8]))
     todo_nudge(session_id)
     stage_nudge(session_id)
+    return 0
+
+
+_PAGE_REF = re.compile(r"""(<(?:img|script|source)\b[^>]*?\bsrc\s*=\s*|<link\b[^>]*?\bhref\s*=\s*)(["'])([^"']+)\2""", re.I)
+
+
+def _inline_page(html, base):
+    """send-page：网页里引用的同目录文件（图片、CSS、JS）换成 data: 地址打包进去，手机上单独一个文件也能显示全。
+    http(s)、//、data:、# 开头的不动（CDN 脚本照常从网上加载）；读不到的也不动"""
+    def swap(match):
+        prefix, quote, ref = match.group(1), match.group(2), match.group(3)
+        if re.match(r"^(?:[a-z][a-z0-9+.-]*:|//|#)", ref, re.I):
+            return match.group(0)
+        path = os.path.normpath(os.path.join(base, ref.split("?")[0].split("#")[0]))
+        try:
+            if os.path.getsize(path) > SEND_IMAGE_MAX:
+                return match.group(0)
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except OSError:
+            return match.group(0)
+        mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        return "%s%s%s%s" % (prefix, quote, "data:%s;base64,%s" % (mime, base64.b64encode(data).decode("ascii")), quote)
+    return _PAGE_REF.sub(swap, html)
+
+
+def command_send_page(argv):
+    title, caption, session_id, source = "", "", None, None
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        value = argv[index + 1] if index + 1 < len(argv) else None
+        if arg == "--title" and value is not None:
+            title = value; index += 2; continue
+        if arg in ("--caption", "-m") and value is not None:
+            caption = value; index += 2; continue
+        if arg == "--session" and value is not None:
+            session_id = value
+            if not _SID_RE.match(session_id):
+                print("会话 id 不对：%s" % session_id, file=sys.stderr)
+                return 2
+            index += 2; continue
+        if arg in ("-h", "--help"):
+            print("用法: ccpulse-watch.py send-page <html文件> [--title 标题] [--caption 说明] [--session 会话id]")
+            return 0
+        source = arg
+        index += 1
+    if not source:
+        print("没有指定网页。用法: ccpulse-watch.py send-page <html文件> [--title 标题] [--caption 说明]", file=sys.stderr)
+        return 2
+    path = os.path.abspath(os.path.expanduser(source))
+    if os.path.splitext(path)[1].lower() not in (".html", ".htm"):
+        print("不是网页文件（.html / .htm）：%s" % path, file=sys.stderr)
+        return 4
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        print("文件不存在：%s" % path, file=sys.stderr)
+        return 4
+    html = _inline_page(raw.decode("utf-8", "replace"), os.path.dirname(path))
+    data = html.encode("utf-8")
+    if len(data) > SEND_IMAGE_MAX:
+        print("网页太大（连同引用的文件 %.1f MB，上限 15 MB）：%s" % (len(data) / 1048576.0, path), file=sys.stderr)
+        return 4
+    if not title:
+        found = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        title = re.sub(r"\s+", " ", found.group(1)).strip() if found else ""
+        title = title or os.path.splitext(os.path.basename(path))[0]
+
+    session_id, name = target_session(session_id)
+    if not session_id:
+        return 3
+    stored_dir = os.path.join(OUTBOX_DIR, "files")
+    os.makedirs(stored_dir, exist_ok=True)
+    target = os.path.join(stored_dir, uuid.uuid4().hex + ".html")
+    with open(target, "wb") as handle:
+        handle.write(data)
+    append_outbox(session_id, {"kind": "page", "title": title[:200], "caption": caption,
+                               "files": [{"path": target, "mime": "text/html", "name": os.path.basename(path)}]})
+    print("已发送网页「%s」到用户手机（会话 %s）" % (title[:60], name or session_id[:8]))
+    todo_nudge(session_id)
+    stage_nudge(session_id)
+    return 0
+
+
+PROMPT_LINK_BASE = "https://tars.betac.cn/new"
+
+
+def prompt_link(prompt, project=None):
+    """提示词链接（各端 PromptLink 解析同一个格式）：提示词放在 # 后面，浏览器不会把它发到服务器"""
+    from urllib.parse import quote
+    link = PROMPT_LINK_BASE + "#p=" + quote(prompt, safe="")
+    if project:
+        link += "&project=" + quote(project, safe="")
+    return link
+
+
+def command_prompt_link(argv):
+    prompt, project, use_cwd = None, None, True
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--project" and index + 1 < len(argv):
+            project = argv[index + 1]; index += 2; continue
+        if arg == "--no-project":
+            use_cwd = False; index += 1; continue
+        if arg in ("-h", "--help"):
+            print("用法: ccpulse-watch.py prompt-link <提示词|-> [--project 项目名|路径|owner/repo] [--no-project]")
+            return 0
+        prompt = arg
+        index += 1
+    if prompt == "-":
+        prompt = sys.stdin.read()
+    prompt = (prompt or "").strip()
+    if not prompt:
+        print("没有提示词。用法: ccpulse-watch.py prompt-link <提示词> [--project 项目名]", file=sys.stderr)
+        return 2
+    if project is None and use_cwd:
+        project = os.path.basename(os.getcwd().rstrip("/\\")) or None
+    print(prompt_link(prompt, project))
     return 0
 
 
@@ -3441,10 +3577,10 @@ SKILLS_RESYNC_SECONDS = 300   # 隔一会儿再对一遍：新装了一家 agent
 
 _SKILL_SCREENSHOTS = """---
 name: tars-screenshots
-description: 每次给用户回复进展或结论时都要用。用户常在手机上的 Kiteline 里看这个会话，希望每条消息尽量附上相关截图（界面效果、网页、测试和命令结果、图表）。用 shot / send-image 截图并发到他手机上。回复别的会话发来的消息时不用：只回给发信的会话。
+description: 每次给用户回复进展或结论时都要用。用户常在手机上的 Kiteline 里看这个会话，希望每条消息尽量附上相关截图（界面效果、网页、测试和命令结果、图表）。用 shot / send-image 截图并发到他手机上；要用图表、表格讲清楚的结论，写成网页用 send-page 发。回复别的会话发来的消息时不用：只回给发信的会话。
 ---
 
-<!-- tars-skill v4 -->
+<!-- tars-skill v5 -->
 
 # 每次回复都附上截图
 
@@ -3469,6 +3605,19 @@ npm test 2>&1 | tail -40 | {{cmd}} shot --text - --title "npm test" --caption "�
 ```
 
 {{screen}}
+
+## 用网页回复（可视化）
+
+结论要靠图表、对比表、流程图、架构图才讲得清时（数据分析、性能对比、方案比较、调用关系），写一个网页发过去，比一大段文字好懂。用户在手机上轻点就能在 Kiteline 里打开，可以缩放、点开交互；在电脑上用浏览器打开。
+
+```bash
+{{cmd}} send-page report.html --title "接口耗时对比" --caption "一句话结论"
+```
+
+- 写成一个 .html 文件：样式写在页面里，深色、浅色都看得清，先按手机竖屏宽度排版（`<meta name="viewport" content="width=device-width, initial-scale=1">`）。
+- 图表可以用 CDN 上的库（如 cdn.jsdelivr.net 的 Chart.js、ECharts、Mermaid）；同目录引用的图片、CSS、JS 会自动打包进去。
+- --caption 写一句结论，推送和对话里会直接显示；文字回复里照常写要点，网页是补充。
+- 简单的结果用截图（shot）就够，别为了发网页而发网页。
 
 ## 注意
 
@@ -3723,7 +3872,7 @@ _SKILL_SCREEN = {
 }
 
 SKILLS_BUILTIN = {
-    "version": "1.0.3",   # 整份数据的版本（同插件版本号）：下发的技能包版本更高才换
+    "version": "1.0.4",   # 整份数据的版本（同插件版本号）：下发的技能包版本更高才换
     # 各家 agent 读技能的目录（当前用户的）；when：这个目录在，说明这台电脑装了这家；unless：这个在就不用另装（别家已经读到）
     "targets": [
         {"agent": "claude-code", "dir": "~/.claude/skills", "when": "~/.claude"},          # OpenCode 也读这里
@@ -4816,7 +4965,7 @@ STAGE_WORDS = (
 )
 _STAGE_READ_TOOLS = {"read", "grep", "glob", "ls", "websearch", "webfetch", "toolsearch", "notebookread", "enterplanmode"}
 _STAGE_EDIT_TOOLS = {"edit", "write", "multiedit", "notebookedit", "apply_patch", "patch", "str_replace_editor"}
-_STAGE_SELF = re.compile(r"ccpulse-watch\.py\s+(send-image|report|keyinfo|shot|e2e-setup)\b")
+_STAGE_SELF = re.compile(r"ccpulse-watch\.py\s+(send-image|send-page|report|keyinfo|shot|e2e-setup)\b")
 _STAGE_REPORTED = re.compile(r"ccpulse-watch\.py[\"']?\s+stage\b")
 # 每一段命令开头的「外壳」：ssh 主机、sudo、timeout、环境变量……去掉后看真正跑的是什么
 _STAGE_WRAP = re.compile(r"^\s*(?:ssh\s+(?:-[bcDEeFIiJLlmOopQRSWw]\s*\S+\s+|-\w+\s+)*\S+\s+)?"
@@ -5913,7 +6062,8 @@ def digest_all(since_ms, live, until_ms=None, limit=300):
         runs = [r for r in find_test_runs(path, limit=200)
                 if (r.get("ts") or 0) >= since_ms and not (until_ms and (r.get("ts") or 0) >= until_ms)]
         shots = [{"ref": image["ref"], "caption": item["text"], "ts": item["ts"]}
-                 for item in read_outbox(session_id, since_ms, until_ms) for image in item.get("images") or []]
+                 for item in read_outbox(session_id, since_ms, until_ms) if item.get("t") == "agent_image"
+                 for image in item.get("images") or []]
         summary.update({
             "sessionId": session_id,
             "title": _TITLES.get(session_id) or find_title(path),
@@ -14590,6 +14740,10 @@ _STAGE_TEXT_MODEL = (
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "send-image":
         sys.exit(command_send_image(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "send-page":
+        sys.exit(command_send_page(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "prompt-link":
+        sys.exit(command_prompt_link(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "shot":
         sys.exit(command_shot(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "report":

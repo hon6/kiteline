@@ -39,6 +39,13 @@ public partial class App : Application
             {
                 Boot(host, remember: true);
                 desktop.MainWindow = new MainWindow();
+                // 提示词链接：协议每次启动都对一遍；冷启动带来的链接等主窗口出来再弹「新任务」
+                Model.PromptLinks.Register();
+                if (Model.PromptLinks.Pending is string link)
+                {
+                    Model.PromptLinks.Pending = null;
+                    desktop.MainWindow.Opened += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() => Model.PromptLinks.Handle(link), Avalonia.Threading.DispatcherPriority.Background);
+                }
                 desktop.ShutdownRequested += (_, _) => Prefs.Save();
             }
         }

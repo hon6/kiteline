@@ -23,6 +23,8 @@ from .httpd import HTTPServer, Response
 from .p2p import P2P
 from .plugins import PluginStore
 from .push import WebPush
+from .live import LiveActivities
+from .guest import GuestLinks
 from .groups import Groups
 from .idleclose import IdleClose
 from .records import Audit, Favorites, Inbox, MediaCache, Todos, VoiceStore
@@ -34,7 +36,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.24"
+VERSION = "1.0.25"
 
 
 class App:
@@ -45,6 +47,8 @@ class App:
         self.devices = DeviceStore()
         self.pairing = Pairing()
         self.push = WebPush()
+        self.live = LiveActivities(self.host)   # iPhone 锁屏 / 灵动岛的实时活动（见 live.py）
+        self.guest = GuestLinks(self)   # 游客链接：会话的局域网只读分享（见 guest.py）
         self.push.contact = self.cfg.mobile["pushContact"]
         self.inbox = Inbox()
         self.audit = Audit()
@@ -413,6 +417,12 @@ class App:
                 # 回别的会话来信的那一轮里发的图：对话里照常显示，不推送
                 if not (record and record.snap.get("turnFrom") == "peer"):
                     self.server.notify("image", title, item.get("text") or "%s 发来一张图片" % self._speaker(record), key)
+            elif kind == "agent_page":
+                # agent 发来的网页（send-page）：同发图，推一条
+                if not (record and record.snap.get("turnFrom") == "peer"):
+                    name = item.get("title") or "网页"
+                    caption = item.get("caption") or ""
+                    self.server.notify("image", title, "%s：%s" % (name, caption) if caption else "%s 发来网页「%s」" % (self._speaker(record), name), key)
             elif kind == "agent_todo" and item.get("id") and item.get("text"):
                 ts = aggregate.number(item.get("ts")) or None
                 if item.get("forUser"):
@@ -546,7 +556,7 @@ class App:
         payload["alerts"] = self.alerts.payload()        # 要人处理的状况（见 alerts.py）
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate"]
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share"]
         return payload
 
     def profile_payload(self):

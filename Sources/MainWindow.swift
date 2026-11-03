@@ -470,6 +470,8 @@ struct SidebarTiles: View {
     @State private var usage: (cost: Double, output: Double, requests: Double, tokens: Double)?
     /// 各台电脑的订阅额度（Limits.collect 的 JSON，交给 KitelineKit 画额度条）
     @State private var limits: Data?
+    /// 卡片上的刷新按钮转圈
+    @State private var limitsBusy = false
 
     var body: some View {
         let todos = KitelineKit.todoCounts
@@ -483,6 +485,7 @@ struct SidebarTiles: View {
                               tokens: (usage?.tokens ?? 0) > 0 ? L("%@ token", UsageInfo.compact(Int(usage!.tokens))) : "",
                               fallback: Text(usage.map { L("%@ · %@ 输出 · %@ 次", UsageReportModel.money($0.cost), UsageInfo.compact(Int($0.output)), "\(Int($0.requests))") }
                                              ?? L("Claude Code 回复后显示 5 小时与本周额度")),
+                              busy: limitsBusy, refresh: refreshLimits,
                               selection: $model.selection)
             HStack(spacing: 8) {
                 SidebarTile(id: KitelineModel.historyID, symbol: "clock.arrow.circlepath", title: L("历史会话"),
@@ -509,15 +512,38 @@ struct SidebarTiles: View {
         // 侧栏一直开着：来源连上 / 断开时、每 5 分钟重新汇总一次，不然一直是刚启动时那份
         .liveReload(every: 300) {
             if today.range == .today || today.report == nil { today.load() }
-            UsageReport.collect(days: 1) { payload in
-                let t = payload["totals"] as? [String: Any] ?? [:]
-                usage = (Digest.number(t["cost"]), Digest.number(t["output"]), Digest.number(t["requests"]),
-                         ["input", "output", "cacheRead", "cacheWrite"].reduce(0) { $0 + Digest.number(t[$1]) })
-            }
+            UsageReport.collect(days: 1) { setUsage($0) }
         }
         // 额度每次回复都在变：一分钟问一次各台电脑
         .liveReload(every: 60) {
             Limits.collect { payload in limits = try? JSONSerialization.data(withJSONObject: payload) }
+        }
+    }
+
+    private func setUsage(_ payload: [String: Any]) {
+        let t = payload["totals"] as? [String: Any] ?? [:]
+        usage = (Digest.number(t["cost"]), Digest.number(t["output"]), Digest.number(t["requests"]),
+                 ["input", "output", "cacheRead", "cacheWrite"].reduce(0) { $0 + Digest.number(t[$1]) })
+    }
+
+    /// 卡片上的刷新按钮（11-03）：额度、今天的 token 数都跳过缓存当场问各台电脑
+    private func refreshLimits() {
+        guard !limitsBusy else { return }
+        limitsBusy = true
+        let group = DispatchGroup()
+        group.enter()
+        Limits.collect(fresh: true) { payload in
+            limits = try? JSONSerialization.data(withJSONObject: payload)
+            group.leave()
+        }
+        group.enter()
+        UsageReport.collect(days: 1, fresh: true) { payload in
+            setUsage(payload)
+            group.leave()
+        }
+        group.notify(queue: .main) {
+            limitsBusy = false
+            KitelineKit.flash(TarsLimitsBoard(json: limits).refreshedNote)
         }
     }
 
@@ -538,6 +564,9 @@ private struct SidebarLimitsTile: View {
     /// 右上角：今天各台电脑一共用了多少 token
     let tokens: String
     let fallback: Text
+    /// 标题后面的刷新按钮：拉的时候转圈
+    let busy: Bool
+    let refresh: () -> Void
     @Binding var selection: String?
     @State private var hovering = false
 
@@ -549,6 +578,9 @@ private struct SidebarLimitsTile: View {
                 HStack(spacing: 6) {
                     DuoIcon(symbol: "chart.bar.fill", size: 28)
                     Text("今日用量").font(.app(size: 13, weight: .semibold)).lineLimit(1)
+                    // 刷新按钮的空位：真按钮从外面盖上来（按钮里再放按钮点起来不可靠）
+                    Color.clear.frame(width: 22, height: 22).padding(.leading, -2)
+                        .anchorPreference(key: RefreshSlot.self, value: .bounds) { $0 }
                     Spacer(minLength: 6)
                     if !tokens.isEmpty { Text(tokens).font(.app(size: 13, weight: .semibold).monospacedDigit()).lineLimit(1) }
                     Image(systemName: "chevron.right").font(.app(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
@@ -566,8 +598,36 @@ private struct SidebarLimitsTile: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .overlayPreferenceValue(RefreshSlot.self) { slot in
+            GeometryReader { geo in
+                if let slot {
+                    let rect = geo[slot]
+                    Button(action: refresh) {
+                        Group {
+                            if busy {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "arrow.clockwise").font(.app(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: rect.width, height: rect.height)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy)
+                    .help(L("刷新额度"))
+                    .position(x: rect.midX, y: rect.midY)
+                }
+            }
+        }
+        // 悬停算上刷新按钮：移到按钮上卡片底色不跳
         .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private struct RefreshSlot: PreferenceKey {
+        static var defaultValue: Anchor<CGRect>? { nil }
+        static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = value ?? nextValue() }
     }
 }
 

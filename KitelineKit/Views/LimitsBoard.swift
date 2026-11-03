@@ -238,9 +238,11 @@ struct LimitsBoard: View {
                 Image(systemName: device.local ? "laptopcomputer" : "server.rack").font(.app(size: 11)).foregroundStyle(.secondary)
                 Text(device.name).font(.app(size: compact ? 12 : 13, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
-                // 读数是多久前的（旧了说明那台电脑一阵子没回复，额度可能已经变了）
+                // 读数是多久前的（旧了说明那台电脑一阵子没回复，额度可能已经变了）；每分钟重算，别停在拉到时的「刚刚」
                 if agent.at > 0 {
-                    Text(Bytes.relative(agent.at)).font(.app(size: 11)).foregroundStyle(.tertiary).lineLimit(1)
+                    TimelineView(.everyMinute) { _ in
+                        Text(Bytes.relative(agent.at)).font(.app(size: 11)).foregroundStyle(.tertiary).lineLimit(1)
+                    }
                 }
                 AgentGlyph(agent.agent, size: compact ? 13 : 14)
                 Text(Agents.info(agent.agent).name + (agent.plan.map { $0.isEmpty ? "" : " · " + $0.capitalized } ?? ""))
@@ -275,12 +277,18 @@ struct LimitsBoard: View {
 struct LimitsTile: View {
     let devices: [LimitDevice]
     let usage: UsageItem?
+    /// 标题后面给刷新按钮留个位（LimitsRefreshSlot）：卡片本身是个按钮，刷新按钮要从外面盖上去
+    var refreshable = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 TarsIcon(symbol: "chart.bar.fill", size: 34)
                 Text("今日用量").font(.ui(.subheadline).weight(.semibold)).lineLimit(1)
+                if refreshable {
+                    Color.clear.frame(width: 30, height: 30).padding(.leading, -6)
+                        .anchorPreference(key: LimitsRefreshSlot.self, value: .bounds) { $0 }
+                }
                 Spacer(minLength: 4)
                 // 今天各台电脑一共用了多少 token（输入、输出、读写缓存都算）
                 if let usage, usage.tokens > 0 {
@@ -300,5 +308,45 @@ struct LimitsTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.tile, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+/// 「今日用量」卡片标题后面刷新按钮的位置。卡片整块是按钮（点开用量页），按钮里再放按钮点起来不可靠，
+/// 所以卡片里只留个空位，外面按这个位置盖一个真按钮（.overlayPreferenceValue）
+struct LimitsRefreshSlot: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = value ?? nextValue() }
+}
+
+/// 手动刷新额度的小按钮（11-03）：拉的时候转圈
+struct LimitsRefreshButton: View {
+    let busy: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if busy {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "arrow.clockwise").font(.app(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 30, height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(busy)
+        .accessibilityLabel(Text("刷新额度"))
+    }
+}
+
+extension LimitsPayload {
+    /// 手动刷新后的提示：有电脑的读数已经旧了（那台电脑一阵子没回复，Claude、Codex 只在回复时带出额度）就说明一句，
+    /// 免得看到「4 小时前」没变以为没刷新
+    static func refreshedNote(_ devices: [LimitDevice]) -> String {
+        let now = Date().timeIntervalSince1970 * 1000
+        let idle = devices.contains { $0.agents.contains { $0.at > 0 && now - $0.at > 10 * 60_000 } }
+        return idle ? L("已刷新；额度随每次回复更新，空闲的电脑保持上次读数") : L("额度已刷新")
     }
 }

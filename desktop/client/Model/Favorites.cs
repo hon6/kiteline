@@ -59,7 +59,7 @@ public sealed partial class FavoriteState : ObservableObject
         if (Contains(key, item.Id)) return;
         var model = AppModel.Shared;
         var text = (item.Text ?? "").Trim();
-        var images = item.Images ?? [];
+        var images = item.T == "agent_page" ? [] : item.Images ?? [];   // 网页（agent_page）只收藏标题和说明
         if (text.Length == 0 && images.Count == 0) return;
         var body = new JsonObject
         {

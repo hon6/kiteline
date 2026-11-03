@@ -34,6 +34,8 @@ struct NewTaskSheet: View {
     @ObservedObject var model = KitelineModel.shared
     @State private var projects: [Project] = []
     @State private var selection: Project.ID?
+    /// 从链接、会话带进来的选中项：列表长、它排在下面时滚到眼前（不然看着像没选中）
+    @State private var reveal: Project.ID?
     @State private var query = ""
     /// 设备（来源 id）、项目（项目名 = 目录最后一级）筛选，空 = 全部：打开时带入侧栏会话列表正筛着的，在这里改不影响侧栏
     @State private var sourceFilter = ""
@@ -103,8 +105,15 @@ struct NewTaskSheet: View {
             }
             .panelDragBackground()   // 这一行的空白处按住能拖动面板
             scopeBars
-            List(shown, selection: $selection) { project in
-                row(project).tag(project.id)
+            ScrollViewReader { proxy in
+                List(shown, selection: $selection) { project in
+                    row(project).tag(project.id)
+                }
+                .onChange(of: reveal) { _, id in
+                    guard let id else { return }
+                    reveal = nil
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) }
+                }
             }
             .listStyle(.bordered(alternatesRowBackgrounds: false))
             .frame(minHeight: 140, idealHeight: 220, maxHeight: .infinity)   // 面板拉高时多出来的给项目列表
@@ -213,6 +222,10 @@ struct NewTaskSheet: View {
     }
 
     private func load() {
+        // 从提示词链接来的：提示词先填进去（用户看过、改好再开始）
+        let link = model.newTaskLink
+        model.newTaskLink = nil
+        if let link, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { text = link.prompt }
         Projects.collect { payload in
             projects = ((payload["projects"] as? [[String: Any]]) ?? []).compactMap(Project.init)
             loading = false
@@ -228,6 +241,20 @@ struct NewTaskSheet: View {
                 if !sourceFilter.isEmpty, sourceFilter != project.sourceId { sourceFilter = "" }
                 if !projectFilter.isEmpty, projectFilter != project.name { projectFilter = "" }
                 selection = project.id
+                reveal = project.id
+            }
+            // 链接里写了项目：只对上一个就选中，几台电脑上都有就筛出来让你挑
+            if let hint = link?.project {
+                let found = projects.filter { PromptLink.matches(hint, cwd: $0.cwd, name: $0.name) }
+                if found.count == 1 {
+                    sourceFilter = ""
+                    projectFilter = ""
+                    selection = found[0].id
+                    reveal = found[0].id
+                } else if let first = found.first {
+                    sourceFilter = ""
+                    projectFilter = first.name
+                }
             }
         }
     }

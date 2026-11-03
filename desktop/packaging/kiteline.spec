@@ -16,6 +16,8 @@ datas = [
     (os.path.join(DESKTOP, "kiteline", "i18n_en.json"), "kiteline"),
     # 世界模式的网页（客户端打开 http://127.0.0.1:端口/world/，见 docs/world.md）
     (os.path.join(ROOT, "Resources", "world"), "world"),
+    # 游客链接（局域网只读分享）看的页面（后台 /g/<编号> 给，见 kiteline/guest.py）
+    (os.path.join(ROOT, "Resources", "guest"), "guest"),
 ]
 datas += collect_data_files("tzdata")
 datas += collect_data_files("certifi")   # edge-tts 连微软时校验证书用的根证书包

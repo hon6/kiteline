@@ -224,6 +224,8 @@ struct ChatItem: Codable, Identifiable, Hashable {
     var title: String?
     var fields: [KeyField]?
     var note: String?
+    /// agent 发来的网页（agent_page）：标题在 title，一句说明在这里，网页本身在 images 里（照图片的路子取）
+    var caption: String?
     /// agent 发到会话群的（group_say）：哪个群（群 id；老 watcher 可能是空的）、只发给了谁（成员 key）
     var group: String?
     var to: [String]?

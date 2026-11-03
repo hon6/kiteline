@@ -190,6 +190,9 @@ public struct TarsLimitsBoard: View {
     /// 哪台电脑都还没有额度读数（没用订阅登录、电脑端插件还没装上）
     public var isEmpty: Bool { devices.isEmpty }
 
+    /// 手动刷新后的提示（有电脑一阵子没回复、读数没变时说明一句）
+    public var refreshedNote: String { LimitsPayload.refreshedNote(devices) }
+
     public var body: some View {
         LimitsBoard(devices: devices, compact: compact, wide: wide).tint(Theme.claude)
     }

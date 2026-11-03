@@ -10,15 +10,15 @@ public static class SingleInstance
 {
     static string PipeName => "kiteline-client-" + Environment.UserName;
 
-    /// 已经有一份在跑：让它到前面来，返回 true（这份该退出了）
-    public static bool ActivateExisting()
+    /// 已经有一份在跑：让它到前面来（带着提示词链接的，让它弹「新任务」），返回 true（这份该退出了）
+    public static bool ActivateExisting(string? link = null)
     {
         try
         {
             using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
             client.Connect(300);
             using var writer = new StreamWriter(client);
-            writer.WriteLine("show");
+            writer.WriteLine(link is null ? "show" : "open " + link);
             writer.Flush();
             return true;
         }
@@ -37,7 +37,9 @@ public static class SingleInstance
                     using var server = new NamedPipeServerStream(PipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.CurrentUserOnly);
                     server.WaitForConnection();
                     using var reader = new StreamReader(server);
-                    if (reader.ReadLine() == "show") Dispatcher.UIThread.Post(Show);
+                    var line = reader.ReadLine();
+                    if (line == "show") Dispatcher.UIThread.Post(Show);
+                    else if (line?.StartsWith("open ") == true) Dispatcher.UIThread.Post(() => { Show(); Model.PromptLinks.Handle(line[5..]); });
                 }
                 catch { Thread.Sleep(1000); }
             }

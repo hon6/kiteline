@@ -391,6 +391,8 @@ public sealed class ChatItem : IEquatable<ChatItem>
     public bool? ForUser;
     /// agent 发来的关键信息（agent_key）：标题、一项项的值、补充说明；Text 是拼好的纯文字（收藏、复制用）
     public string? Title, Note;
+    /// agent 发来的网页（agent_page）：标题在 Title，一句说明在这里，网页本身在 Images 里（照图片的路子取）
+    public string? Caption;
     public List<KeyField>? Fields;
     /// agent 发到会话群的（group_say）：哪个群、只发给了谁（成员 key）
     public string? Group;
@@ -429,6 +431,7 @@ public sealed class ChatItem : IEquatable<ChatItem>
             ForUser = n.Bool("forUser"),
             Title = n.Str("title"),
             Note = n.Str("note"),
+            Caption = n.Str("caption"),
             Fields = n.Arr("fields") is JsonArray fields ? fields.Items().Select(f => new KeyField(f.Str("name"), f.Str("value"), f.Truthy("secret"))).ToList() : null,
             Group = n.Str("group"),
             To = n.Get("to") is JsonArray ? n.Strings("to") : null,

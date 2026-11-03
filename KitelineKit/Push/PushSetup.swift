@@ -156,6 +156,7 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate {
 final class PushAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         PushSetup.shared.start()
+        LiveActivities.shared.start()
         return true
     }
 

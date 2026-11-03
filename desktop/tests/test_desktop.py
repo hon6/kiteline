@@ -989,5 +989,217 @@ os.environ.pop("FAKE_BOOT")
 check("还在连的 restart：换掉没就绪的进程、新进程连上", _wait(lambda: _src3.live, 15) and _src3._proc is not _first and _first.poll() is not None)
 _src3.stop()
 
+print("== 实时活动：开始、更新、划掉、结束（假网关）")
+import http.server as _lv_http  # noqa: E402
+import json as _lv_json  # noqa: E402
+import threading as _lv_threading  # noqa: E402
+import time as _lv_time  # noqa: E402
+
+from kiteline import live as _live  # noqa: E402
+
+_lv_posts = []
+_lv_dead = set()
+
+
+class _LvHandler(_lv_http.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = _lv_json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        _lv_posts.append(body)
+        code = 410 if body.get("token") in _lv_dead else 200
+        self.send_response(code)
+        self.end_headers()
+        self.wfile.write(b'{"ok":true}')
+
+    def log_message(self, *_):
+        pass
+
+
+_lv_server = _lv_http.ThreadingHTTPServer(("127.0.0.1", 0), _LvHandler)
+_lv_threading.Thread(target=_lv_server.serve_forever, daemon=True).start()
+_live.LIVE_GATEWAY = "http://127.0.0.1:%d/push/live" % _lv_server.server_address[1]
+_T_START, _T_ACT, _T_EN = "a1" * 32, "b2" * 32, "c3" * 32
+
+
+def _lv_take(count, timeout=5):
+    deadline = _lv_time.time() + timeout
+    while len(_lv_posts) < count and _lv_time.time() < deadline:
+        _lv_time.sleep(0.05)
+    _lv_time.sleep(0.15)
+    taken = list(_lv_posts)
+    del _lv_posts[:]
+    return taken
+
+
+lv = _live.LiveActivities("测试电脑")
+lv.register("d1", {"enabled": True, "env": "development", "lang": "zh", "startToken": _T_START})
+_busy = {"key": "local#s1", "title": "修复订单导出", "activity": "busy", "updatedAt": 2,
+         "stage": {"step": 2, "total": 4, "label": "开发中"}}
+lv.update([_busy])
+_posts = _lv_take(1)
+_start = _posts[0] if _posts else {}
+_item = (_start.get("state") or {}).get("items", [{}])[0]
+check("开始干活：用推送启动令牌开一个", len(_posts) == 1 and _start.get("event") == "start" and _start.get("token") == _T_START
+      and _start.get("env") == "development" and _start.get("attributes") == {"host": "测试电脑"} and _start.get("urgency") == "high", _posts)
+check("内容：标题、进行中、阶段", _item.get("t") == "修复订单导出" and _item.get("s") == "busy" and _item.get("l") == "进行中"
+      and _item.get("d") == "2/4 开发中" and _start["state"].get("head") == "1 个进行中" and _start.get("alert", {}).get("title") == "修复订单导出", _item)
+lv.update([dict(_busy, updatedAt=3)])
+check("内容没变不重复发、同一轮不再开", _lv_take(0, 0.5) == [])
+
+lv.register("d1", {"enabled": True, "env": "development", "lang": "zh", "startToken": _T_START, "activities": [{"id": "act1", "token": _T_ACT}]})
+_posts = _lv_take(1)
+check("App 报了实时活动的令牌：马上补一份更新", len(_posts) == 1 and _posts[0].get("event") == "update" and _posts[0].get("token") == _T_ACT, _posts)
+_wait = dict(_busy, activity="waiting", blocking="Bash: npm install", updatedAt=4)
+lv.update([_wait])
+_posts = _lv_take(1)
+_upd = _posts[0] if _posts else {}
+_item = (_upd.get("state") or {}).get("items", [{}])[0]
+check("变成等你确认：高优先级更新", _upd.get("urgency") == "high" and _upd["state"].get("waiting") == 1 and _item.get("l") == "待确认"
+      and _item.get("d") == "Bash: npm install" and _upd["state"].get("head") == "1 个待确认", _posts)
+
+lv.register("d1", {"enabled": True, "env": "development", "lang": "zh", "startToken": _T_START, "activities": [], "ended": "act1"})
+lv._last_flush = 0
+lv.update([dict(_busy, updatedAt=5)])
+check("用户在锁屏上划掉：这一轮不再开", _lv_take(0, 0.5) == [] and lv._devices["d1"]["dismissedRound"] == lv._round)
+
+lv.update([dict(_busy, activity="idle", updatedAt=6)])
+lv._idle_since = _lv_time.time() - 100
+lv._end_if_idle()
+check("全部停下满 90 秒：这一轮结束", not lv._active and _lv_take(0, 0.5) == [])
+lv.update([dict(_busy, title="第二个任务", updatedAt=7)])
+_posts = _lv_take(1)
+check("下一轮干活：又开一个", len(_posts) == 1 and _posts[0].get("event") == "start" and lv._round == 2, _posts)
+
+lv.register("d1", {"enabled": True, "env": "development", "lang": "zh", "startToken": _T_START, "activities": [{"id": "act2", "token": _T_ACT}]})
+_lv_take(1)
+lv.update([dict(_busy, title="第二个任务", activity="idle", updatedAt=8)])
+_lv_take(1)
+lv._idle_since = _lv_time.time() - 100
+lv._end_if_idle()
+_posts = _lv_take(1)
+_end = _posts[0] if _posts else {}
+_items = (_end.get("state") or {}).get("items", [])
+check("结束：全部完成、刚做完的标已完成、锁屏留一会儿", _end.get("event") == "end" and _end["state"].get("head") == "全部完成"
+      and _items and _items[0].get("s") == "done" and _items[0].get("l") == "已完成" and _end.get("dismiss", 0) > _lv_time.time(), _posts)
+check("结束后不再记着这个实时活动", lv._devices["d1"]["activities"] == {})
+
+print("== 实时活动：英文、关掉、令牌失效")
+lv2 = _live.LiveActivities("PC")
+lv2.register("d2", {"enabled": True, "env": "production", "lang": "en", "startToken": _T_EN})
+_lv_dead.add(_T_EN)
+lv2.update([{"key": "k", "title": "Fix export", "activity": "waiting", "updatedAt": 1}])
+_posts = _lv_take(1)
+_st = (_posts[0] if _posts else {}).get("state") or {}
+check("英文手机：英文的状态文字", _st.get("head") == "1 waiting" and _st.get("items", [{}])[0].get("l") == "Needs approval", _st)
+_lv_time.sleep(0.3)
+check("网关说令牌失效（410）：删掉推送启动令牌", lv2._devices["d2"].get("startToken") is None)
+lv2.register("d2", {"enabled": False, "lang": "en"})
+check("App 里关掉实时活动：令牌全清", lv2._devices["d2"].get("startToken") is None and lv2._devices["d2"]["activities"] == {})
+lv2.forget("d2")
+check("停用设备：登记一起删", "d2" not in lv2._devices)
+check("登记存在配置目录、只有自己能读", os.path.exists(_live._path()) and (os.name == "nt" or (os.stat(_live._path()).st_mode & 0o077) == 0))
+_lv_server.shutdown()
+
+print("== 游客链接（局域网）：网址、页面、内容过滤、304、停止")
+from kiteline import guest as _guest  # noqa: E402
+
+_gl_items = [
+    {"t": "user", "text": "修一下订单导出", "ts": 1},
+    {"t": "thinking", "text": "（思考过程不该出去）"},
+    {"t": "tool", "name": "Bash", "brief": "npm test", "ts": 2},
+    {"t": "tool", "name": "TodoWrite", "brief": "清单"},
+    {"t": "agent_key", "text": "密码：hunter2", "title": "测试账号"},
+    {"t": "agent_image", "images": [{"ref": "a"}, {"ref": "b"}]},
+    {"t": "text", "text": "已修好，测试全部通过。", "ts": 3},
+]
+_gl_calls = []
+
+
+class _GlSource:
+    def request(self, payload, timeout=30):
+        _gl_calls.append(payload)
+        return {"items": _gl_items, "hasMore": True}
+
+
+class _GlStore:
+    def resolve_any(self, key):
+        return ("sess-1", _GlSource()) if key == "local#sess-1" else None
+
+
+class _GlApp:
+    store = _GlStore()
+    activity = "busy"
+
+    def state_payload(self):
+        return {"sessions": [{"key": "local#sess-1", "title": "修复订单导出", "activity": self.activity, "cwd": "/work/shop-app", "agent": "claude-code", "updatedAt": 5}]}
+
+
+_gl_app = _GlApp()
+gl = _guest.GuestLinks(_gl_app)
+_share = gl.create("local#sess-1", 24)
+_url = _guest.url_of(_share, 8765)
+check("局域网网址：http://<局域网 IP>:<端口>/g/<22 位编号>", _url.startswith("http://") and _url.endswith(":8765/g/" + _share["id"]) and len(_share["id"]) == 22, _url)
+_st, _hd, _body = gl.serve("/g/" + _share["id"])
+check("页面：不要令牌、只连这台电脑、不让嵌入、不进搜索", _st == 200 and b"/g/api/" in _body and "connect-src 'self'" in _hd["Content-Security-Policy"]
+      and "frame-ancestors 'none'" in _hd["Content-Security-Policy"] and _hd.get("X-Robots-Tag") and b"tars.betac.cn" not in _body, (_st, _hd))
+_st, _hd, _body = gl.serve("/g/api/" + _share["id"])
+_snap = _lv_json.loads(_body or b"{}")
+_kinds = [r.get("r") for r in _snap.get("items", [])]
+check("内容：对话、步骤、图片张数；不含思考过程、关键信息、任务清单", _st == 200 and _kinds == ["u", "s", "i", "a"] and _snap["items"][1]["x"] == "Bash · npm test"
+      and _snap["items"][2]["n"] == 2 and "hunter2" not in _body.decode() and "思考" not in _body.decode(), _snap)
+check("内容带状态、项目名、agent、还有更早的", _snap.get("status") == "busy" and _snap.get("project") == "shop-app" and _snap.get("agent") == "Claude Code" and _snap.get("more") is True, _snap)
+_calls = len(_gl_calls)
+_st2, _hd2, _ = gl.serve("/g/api/" + _share["id"], _hd.get("ETag"))
+check("没变化：回 304、不再去取记录", _st2 == 304 and len(_gl_calls) == _calls, _st2)
+_gl_app.activity = "idle"
+_st3, _hd3, _body3 = gl.serve("/g/api/" + _share["id"], _hd.get("ETag"))
+check("会话有进展：ETag 变了、内容是新的", _st3 == 200 and _hd3["ETag"] != _hd["ETag"] and _lv_json.loads(_body3)["status"] == "idle")
+check("列出这个会话正在分享的网址", [x["id"] for x in gl.list("local#sess-1")] == [_share["id"]] and gl.list("local#other") == [])
+check("编错的编号拿不到内容", gl.serve("/g/api/AAAAAAAAAAAAAAAAAAAAAA")[0] == 404 and gl.serve("/g/x/y/z")[0] == 404)
+gl.stop(_share["id"])
+check("停止分享：网址马上失效", gl.serve("/g/api/" + _share["id"])[0] == 404 and gl.list() == [])
+check("有效期只能 1 / 24 / 168 小时", gl.create("local#sess-1", 5) is None)
+_old = gl.create("local#sess-1", 1)
+gl._shares[-1]["expires"] = _lv_time.time() - 1
+check("到期：网址失效", gl.serve("/g/api/" + _old["id"])[0] == 404)
+
+print("== 游客链接（局域网）：单独的游客端口只给 /g/，没分享就关")
+import socket as _gl_socket  # noqa: E402
+import urllib.error as _gl_uerr  # noqa: E402
+import urllib.request as _gl_ureq  # noqa: E402
+
+with _gl_socket.socket() as _probe:
+    _probe.bind(("127.0.0.1", 0))
+    _free = _probe.getsockname()[1]
+
+
+class _GlCfg:
+    mobile = {"port": _free - 2, "bindAddress": "127.0.0.1"}
+
+
+_gl_app2 = _GlApp()
+_gl_app2.cfg = _GlCfg()
+gl2 = _guest.GuestLinks(_gl_app2)
+gl2._shares = []
+gl2.sync_listener()
+check("没有分享：不开游客端口", gl2._listener is None)
+_s2 = gl2.create("local#sess-1", 1)
+
+
+def _gl_get(path):
+    try:
+        with _gl_ureq.urlopen("http://127.0.0.1:%d%s" % (_free, path), timeout=5) as r:
+            return r.status, r.read()
+    except _gl_uerr.HTTPError as e:
+        return e.code, b""
+    except OSError:
+        return 0, b""
+
+
+_code, _data = _gl_get("/g/api/" + _s2["id"])
+check("有分享：游客端口（手机端口 + 2）能取到内容", _code == 200 and b"\"title\"" in _data and _guest.payload_of(_s2, _guest.guest_port(_gl_app2))["url"].endswith(":%d/g/%s" % (_free, _s2["id"])), _code)
+check("游客端口不给别的接口", _gl_get("/api/state")[0] == 404 and _gl_get("/")[0] == 404)
+gl2.stop(_s2["id"])
+check("停止最后一个分享：游客端口关掉", gl2._listener is None and _gl_get("/g/api/" + _s2["id"])[0] == 0)
+
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

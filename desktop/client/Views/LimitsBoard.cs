@@ -200,6 +200,15 @@ public static class LimitsBoard
             bonus.Count == 0 ? null : Ui.Text(L("赠送 %@", string.Join(" · ", bonus.Select(b => b.Text))), compact ? 10.5 : 11.5, color: "Text2").Digits().Trim());
     }
 
+    /// 手动刷新后的提示：有电脑的读数已经旧了（那台电脑一阵子没回复，Claude、Codex 只在回复时带出额度）就说明一句，
+    /// 免得看到「4 小时前」没变以为没刷新（同 Mac 版）
+    public static string RefreshedNote(List<LimitDevice> devices)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var idle = devices.Any(d => d.Agents.Any(a => a.At > 0 && now - a.At > 10 * 60_000));
+        return idle ? L("已刷新；额度随每次回复更新，空闲的电脑保持上次读数") : L("额度已刷新");
+    }
+
     static string Relative(double? ms)
     {
         if (ms is not double t || t <= 0) return "";
@@ -215,14 +224,20 @@ public static class LimitsBoard
 /// 还没有额度读数时退回一行今天的花费
 public sealed class SidebarLimitsTile : Tap
 {
-    /// tokens：右上角今天各台电脑一共用了多少 token（空 = 不显示）
-    public SidebarLimitsTile(List<LimitDevice> devices, string tokens, string fallback, MainModel main) : base(null, () => main.Selection = MainModel.UsageId, 12)
+    /// tokens：右上角今天各台电脑一共用了多少 token（空 = 不显示）；busy / refresh：标题后面的刷新按钮（11-03）
+    public SidebarLimitsTile(List<LimitDevice> devices, string tokens, string fallback, MainModel main, bool busy, Action refresh)
+        : base(null, () => main.Selection = MainModel.UsageId, 12)
     {
         var selected = main.Selection == MainModel.UsageId;
         Padding = new Thickness(10);
         if (selected) { Keys("AccentFill16", "AccentFill16"); BorderThickness = new Thickness(1); this.Res(BorderBrushProperty, "AccentEdge40"); }
         else Keys("Fill05", "Fill08");
-        var head = Ui.H(6, new DuoIcon("chart.bar.fill", 28), Ui.Text(L("今日用量"), 13, FontWeight.SemiBold).Trim(), new Spacer(6),
+        // 刷新按钮放在卡片里：里面的 Tap 先接住按下，卡片本身不会跟着点开用量页
+        Control icon = busy ? new Spinner(11) : Ui.Sym("arrow.clockwise", 11, "Text2");
+        var reload = new Tap(icon.HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center), busy ? null : refresh, 11)
+            { Width = 22, Height = 22, Margin = new Thickness(-2, 0, 0, 0) };
+        ToolTip.SetTip(reload, L("刷新额度"));
+        var head = Ui.H(6, new DuoIcon("chart.bar.fill", 28), Ui.Text(L("今日用量"), 13, FontWeight.SemiBold).Trim(), reload, new Spacer(6),
                         tokens.Length == 0 ? null : Ui.Text(tokens, 13, FontWeight.SemiBold).Digits(),
                         Ui.Sym("chevron.right", 11, "Text3"));
         Child = Ui.VFill(10, head, devices.Count == 0 ? Ui.Text(fallback, 11, color: "Text2").Trim() : LimitsBoard.Make(devices));

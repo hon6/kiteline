@@ -14,8 +14,11 @@ static class Program
         Args = args;
         // 自测：离屏把主窗口画成图片（同 Mac 版的 --render）：--render <png> [--dark] [--size 宽x高] [--steps "select:@today;wait:2;shot:x.png"]
         if (args.Contains("--render")) { Headless = true; return SelfTest.Run(args); }
+        // 提示词链接（kiteline://new#…，系统按网址协议传进来）：已经开着一个就交给它，没开着就主窗口出来后弹「新任务」
+        var link = Model.PromptLinks.FromArgs(args);
         // 已经开着一个：叫它到前面来，这份退出
-        if (UI.SingleInstance.ActivateExisting()) return 0;
+        if (UI.SingleInstance.ActivateExisting(link)) return 0;
+        Model.PromptLinks.Pending = link;
         UI.SingleInstance.Listen();
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         return 0;

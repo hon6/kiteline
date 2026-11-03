@@ -21,6 +21,7 @@ struct ChatView: View {
     @State private var showInfo = false
     /// Agent 详情（点助手头像、标题栏的 agent 标志、会话菜单）
     @State private var showAgentInfo = false
+    @State private var showShare = false
     /// 会话菜单里点了「拉群协作」
     @State private var showGroup = false
     @State private var showTodos = false
@@ -400,6 +401,7 @@ struct ChatView: View {
         .sheetPanel(isPresented: $showAgents) { AgentMapSheet(key: key) }
         .sheetPanel(isPresented: $showInfo) { SessionReader(slot: slot) { session in if let session { SessionInfoView(session: session) } } }
         .sheetPanel(isPresented: $showAgentInfo) { AgentInfoSheet(key: key, agent: slot.agent) }
+        .sheetPanel(isPresented: $showShare) { GuestShareSheet(key: key).environment(model) }
         .sheetPanel(isPresented: $showGroup) { GroupPickerSheet(mode: .create([key])) { open(.group($0)) }.environment(model) }
         .sheetPanel(isPresented: $showSearch) { ChatSearchSheet(key: key) { jumpTarget = $0 } }
         .sheetPanel(isPresented: $showNewTask) {
@@ -597,6 +599,7 @@ struct ChatView: View {
         case .newTask: showNewTask = true
         case .info: showInfo = true
         case .agentInfo: showAgentInfo = true
+        case .share: showShare = true
         case .group: showGroup = true
         case .bottom: bottomRequest += 1
         case .close: confirmClose = true
@@ -686,6 +689,8 @@ struct ChatRowView: View {
                     PeerCard(key: key, item: item)
                 } else if item.t == "agent_image" {
                     AgentImageMessage(key: key, item: item)
+                } else if item.t == "agent_page" {
+                    AgentPageMessage(key: key, item: item)
                 } else if item.t == "agent_todo" {
                     AgentTodoMessage(key: key, item: item)
                 } else if item.t == "agent_key" {

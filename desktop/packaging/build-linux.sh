@@ -29,6 +29,7 @@ PKG="$WORK/Kiteline"
 mkdir -p "$PKG/desktop/packaging" "$PKG/watcher" "$OUT"
 cp -R "$DESKTOP/kiteline" "$PKG/desktop/"
 cp -R "$ROOT/Resources/world" "$PKG/desktop/world"   # 世界模式的网页（后台 /world/ 路由读它）
+cp -R "$ROOT/Resources/guest" "$PKG/desktop/guest"   # 游客链接看的页面（后台 /g/<编号> 给，见 kiteline/guest.py）
 cp "$DESKTOP/requirements.lock" "$DESKTOP/requirements.txt" "$DESKTOP/install-linux.sh" "$DESKTOP"/CHANGELOG*.md "$PKG/desktop/"
 cp "$HERE/kiteline.png" "$PKG/desktop/packaging/"
 [ -n "$CLIENT" ] && cp -R "$CLIENT" "$PKG/desktop/app"

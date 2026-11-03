@@ -416,7 +416,10 @@ final class AppModel {
         refreshRemote()
         #if !KITELINE_MAC
         // 锁屏推送：每次连上都对一下订阅（换了推送令牌、关了通知，Mac 那边跟着变）
-        if !embedded { PushSetup.shared.connected(self) }
+        if !embedded {
+            PushSetup.shared.connected(self)
+            LiveActivities.shared.connected(self)   // 实时活动的令牌也报一下
+        }
         #endif
         Task {
             await refreshInbox()

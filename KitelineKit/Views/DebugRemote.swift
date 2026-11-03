@@ -1,4 +1,5 @@
 #if (DEBUG || SNAPSHOT) && os(iOS)
+import ActivityKit
 import SwiftUI
 import UIKit
 
@@ -10,6 +11,9 @@ import UIKit
 /// 真机用 devicectl device copy from --domain-type appDataContainer 取回来）；
 /// cmd = 执行 Library/Caches/remote-cmd.txt 里的一行（真机用 devicectl device copy to 放进去）：
 ///   open <会话标题> / split <会话标题> / route today|usage|history|projects|inbox|todos|favorites|schedules|overview / back / home
+///   page <会话标题> = 打开这个会话里最近一张网页卡片（agent_page）
+///   link <网址> = 当作点了这条提示词链接（kiteline://new#p=… 或 https://tars.betac.cn/new#…，见 PromptLink）
+///   live <content-state JSON> | live end = 照电脑推来的内容在本机开 / 更新 / 结束实时活动（模拟器收不到实时活动推送，看排版用）
 ///   dragpane <从第几块> <到第几块> <center|leading|trailing|top|bottom> [停几秒] = 照手势拖分屏的标题条；panes = 分屏现在的样子写进 remote-panes.txt
 ///   list [hide] = 横着的 iPhone 拉出 / 收起浮着的会话列表；settings = 横着的 iPhone 在浮着的列表里打开设置；
 ///   hint topLeft|topRight|portrait = 当作手里的手机转到那个方向（看转屏提示，见 RotationHint）
@@ -18,9 +22,36 @@ import UIKit
 ///   inbound <路径> = 当作别的 App「用其他应用打开」发来这个文件（弹发送面板，见 InboundShare）；
 ///   inboundsend session|project <补充说明> = 在发送面板里填好说明、点「发送」（发给选中的会话 / 第一个项目新建会话）；
 ///   openfile / sharefile <会话 key> <路径> = 当作在消息里点了这个文件路径 / 长按「转发文件」（见 FileOpener；InboundShareHost 接）
-///   route <IP>... = 每个地址走哪张网卡、算不算直连 / 走隧道（记进 remote-notes.txt）；free on|off = 模拟免费版开 / 关
+///   route <IP>...（以数字开头或带冒号）= 每个地址走哪张网卡、算不算直连 / 走隧道（记进 remote-notes.txt）；free on|off = 模拟免费版开 / 关
 enum DebugRemote {
     static let actions = ["sidebar.hide", "sidebar.show", "rotate.landscape", "rotate.portrait", "dump", "cmd"]
+    /// live 命令：照电脑推来的内容在本机开 / 更新 / 结束实时活动（看锁屏卡片和灵动岛的排版）
+    private static func live(_ arg: String) async {
+        if arg == "end" {
+            for activity in Activity<KitelineLiveAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
+            return
+        }
+        let state: KitelineLiveAttributes.ContentState
+        do {
+            state = try JSONDecoder().decode(KitelineLiveAttributes.ContentState.self, from: Data(arg.utf8))
+        } catch {
+            note("live 内容解析不了：\(error)")
+            return
+        }
+        let content = ActivityContent(state: state, staleDate: nil)
+        if let current = Activity<KitelineLiveAttributes>.activities.first {
+            await current.update(content)
+            note("live 已更新 \(current.id)")
+        } else {
+            do {
+                let activity = try Activity.request(attributes: KitelineLiveAttributes(host: "Mac Studio"), content: content)
+                note("live 已开始 \(activity.id)，系统允许实时活动：\(ActivityAuthorizationInfo().areActivitiesEnabled)")
+            } catch {
+                note("live 开不了：\(error)，系统允许实时活动：\(ActivityAuthorizationInfo().areActivitiesEnabled)")
+            }
+        }
+    }
+
     /// 导航类的命令转给 MainView（object 是整行命令）
     static let command = Notification.Name("TARSDebugRemoteCommand")
     @MainActor private static var listening = false
@@ -108,7 +139,8 @@ enum DebugRemote {
                     return view.subviews.lazy.compactMap(field).first
                 }
                 field(window)?.becomeFirstResponder()
-            } else if parts.first == "route" {
+            } else if parts.first == "route", parts.count >= 2, parts[1].first?.isNumber == true || parts[1].contains(":") {
+                // route 后面跟地址才是这条；route usage 之类的页面名转给 MainView
                 // 每个地址走哪张网卡（免费版不经 VPN 隧道连局域网的判断，见 LocalRoute），写进 remote-notes.txt
                 note("route " + LocalRoute.explain(Array(parts.dropFirst())))
             } else if parts.first == "free", parts.count == 2 {
@@ -126,6 +158,13 @@ enum DebugRemote {
                 _ = terminal(window)?.becomeFirstResponder()
             } else if parts.first == "inbound", parts.count >= 2 {
                 InboundFiles.shared.receive(URL(fileURLWithPath: String(line.dropFirst("inbound ".count))))
+            } else if parts.first == "link", parts.count == 2, let url = URL(string: parts[1]) {
+                // 当作点了这条提示词链接（模拟器里 simctl openurl 会先弹「在 Kiteline 中打开？」，点不了）
+                PromptLinks.shared.receive(url)
+            } else if parts.first == "live", parts.count >= 2 {
+                // 实时活动排版：live <电脑生成的 content-state JSON> = 本地开一个或更新现有的；live end = 结束全部
+                // （模拟器收不到实时活动推送：App 没被允许通知时 simctl push 报 2003）
+                Task { await Self.live(String(line.dropFirst("live ".count))) }
             } else if parts.first == "worldjs" {
                 WorldBridge.current?.evaluate(String(line.dropFirst("worldjs".count)))
             } else if parts.first == "scroll", parts.count == 3, let index = Int(parts[1]), let delta = Double(parts[2]) {

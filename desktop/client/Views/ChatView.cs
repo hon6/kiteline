@@ -211,6 +211,7 @@ public sealed class ChatView : Grid
                 Control body = b.Item.Peer is not null ? PeerCard.Make(key, b.Item) : b.Item.T switch
                 {
                     "agent_image" => AgentImageMessage.Make(key, b.Item, b.First, openLink),
+                    "agent_page" => AgentPageMessage.Make(key, b.Item, b.First, openLink),
                     "agent_todo" => AgentTodoMessage.Make(key, b.Item, b.First),
                     "agent_key" => AgentKeyMessage.Make(key, b.Item, b.First),
                     "group_say" => GroupCards.Say(key, b.Item, b.First),
