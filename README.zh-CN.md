@@ -4,9 +4,9 @@
 
 # Kiteline
 
-### 人离开电脑，编程 Agent 照样往下干。
+### 电脑上已经在跑的编程 Agent，用手机来遥控。
 
-Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harness 会话同步到 iPhone、iPad 和 Apple Watch：看每个 Agent 在做什么，批准它的请求，回答它的提问，派下一件活。
+Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harness 会话（VS Code 里、终端里、Remote-SSH 远端的都算）放到 iPhone、iPad 和 Apple Watch 上。Agent 照你现在的用法用，人离开电脑时，在手机上看每一步、批准请求、回答提问、派下一件活。
 
 <br>
 
@@ -28,7 +28,40 @@ Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harn
 
 ![Kiteline：手机上说一句，Agent 写代码、跑测试、截图发回来](docs/images/hero-zh.jpg)
 
-> **官方网站：[tars.betac.cn](https://tars.betac.cn)**。Mac、Windows、Linux 正式版可在官网或 [GitHub Releases](https://github.com/hon6/kiteline/releases) 下载；iPhone、iPad、Apple Watch App 请到 [App Store](https://apps.apple.com/app/id6825244029) 下载。
+## 安装
+
+**电脑上**（Mac、Windows、Linux），一行命令：
+
+```bash
+# macOS、Linux
+curl -fsSL https://tars.betac.cn/install.sh | sh
+```
+
+```powershell
+# Windows（PowerShell）
+irm https://tars.betac.cn/install.ps1 | iex
+```
+
+没有图形界面的 Linux 服务器，加 `--service` 装成 systemd 用户服务：`curl -fsSL https://tars.betac.cn/install.sh | sh -s -- --service`。想用普通安装包，到[官网](https://tars.betac.cn)或 [GitHub Releases](https://github.com/hon6/kiteline/releases) 下载。脚本会按官网公布的 SHA-256 校验每个下载。
+
+**手机上**，到 [App Store](https://apps.apple.com/app/id6825244029) 下载 Kiteline（iPhone、iPad、Apple Watch），扫电脑上显示的配对码。不用注册账号。
+
+电脑上已有的 Agent 会话会马上出现在手机上。详见[安装说明](docs/user/install.zh-CN.md)。
+
+## 「要花钱吗？」
+
+- 电脑端开源（AGPL-3.0），免费，不限功能。
+- 手机和电脑连同一个 Wi-Fi 时，手机 App 全部功能免费。
+- 只有远程访问（在别的网络连回自己的电脑）需要订阅 Kiteline Pro，大约每月一杯奶茶的价格，用来付中继服务器的钱。
+- 不用注册账号，不要 API Key，不改 Agent 的配置。
+
+## 为什么用 Kiteline
+
+- **不用换工具**：会话照样在 VS Code、终端或 Remote-SSH 里，手机接管的就是同一个会话，不用搬到另一个界面里重新开。
+- **不碰你的 AI 账号**：不登录 Claude 或任何 AI 服务，不读 API Key 和登录凭证，不调用任何模型接口；只读 Agent 自己写下的会话记录，只通过 Agent 自己提供的接口操作。
+- **Agent 自己汇报**：自带技能让 Agent 发截图、用 Playwright 在真实浏览器里把网页功能走一遍并把报告发给你、把只有你能做的事记成待办、报告做到第几步。
+- **抬腕就能批**：命令、计划、提问推到锁屏和 Apple Watch；高风险命令一律二次确认。
+- **整个团队一屏看全**：世界模式和数据流大屏把每台电脑上的每个会话放在一块屏上。
 
 ## 演示
 
@@ -77,6 +110,38 @@ Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harn
 **为什么有的 Agent 只能查看？** Kiteline 不碰你的 AI 凭证，也不修改任何 Agent，只通过 Agent 自己提供的途径操作：它的本机服务或 IPC 接口、hooks 或编辑器 URI 这类扩展点，或者它所在的终端（tmux）。一个 Agent 如果这些都没有提供，Kiteline 仍能从磁盘读取并显示它的会话和完整对话，但不会为了操作它而模拟输入或改动 Agent 本身。App 会说明某个会话为什么只读、怎样才能操作（例如把命令行放进 tmux 里运行）。详见[插件开发指南](docs/plugin-development.zh-CN.md#为什么有的-agent-只能查看)。
 
 **开发插件**：新的 Agent 以插件形式接入，一个插件由一份清单加一个在会话监听里运行的 Python 小模块组成。[插件开发指南](docs/plugin-development.zh-CN.md)介绍了清单、接口和必须遵守的规则，用 `tools/plugin_check.py` 可以在本机测试插件。欢迎提交 Pull Request：我们审核、实测后签名，发布到官方插件索引，所有 Kiteline 用户无需更新 App 即可使用。
+
+## 常见问题
+
+**会不会导致 Claude、Codex 账号被封？**
+Kiteline 不登录任何 AI 服务，不用你订阅的 token，也不调用任何模型接口，不会改变 Agent 和服务商之间的通信方式。Agent 照旧在你的电脑上、用你自己的账号运行；Kiteline 读它们写下的会话记录，再像你自己打字一样往同一个会话里输入。
+
+**代码会经过你们的服务器吗？**
+同一个网络里不会：手机直连电脑，走 HTTPS，配对时锁定电脑自己签发的证书。在别的网络时先尝试点对点直连，打不通才经中继转发；全程端到端加密，中继看不到内容，也不存储。详见[远程访问](docs/user/remote-access.zh-CN.md)。
+
+**要改变工作习惯吗？**
+不用。会话照样在 VS Code 或终端里开，Kiteline 自己找到它们。终端里的会话要能从手机回复，需要跑在 tmux 里。
+
+**有安卓版或网页版吗？**
+目前还没有，手机端只有 iPhone、iPad 和 Apple Watch。
+
+**服务器上的 Agent 能用吗？**
+能。在服务器上用 `--service` 装 Kiteline；或者在电脑端把服务器加成 Remote-SSH 远端，Kiteline 通过 SSH 部署一个只读的监听脚本（只需要 Python 3.8+ 标准库）。
+
+**和 Claude Code 官方的 Remote Control 有什么不同？**
+Remote Control 是在 Claude App 里接着用一个 Claude Code 会话。Kiteline 把每台电脑上的每个 Agent 放进一个列表，还有锁屏和 Apple Watch 上的确认、Agent 发回的截图和测试报告、待办、目标、会话群、带 Git 的代码编辑器和终端。
+
+更多见[常见问题](docs/user/faq.zh-CN.md)。
+
+## 文档
+
+- [安装与首次使用](docs/user/install.zh-CN.md)
+- [支持的 Agent 和各自的接入方式](docs/user/agents.zh-CN.md)
+- [确认请求、计划审批和提问](docs/user/approvals.zh-CN.md)
+- [远程访问](docs/user/remote-access.zh-CN.md)
+- [隐私与安全](docs/user/privacy.zh-CN.md)
+- [常见问题](docs/user/faq.zh-CN.md)
+- 给别的 Agent 写插件：[插件开发指南](docs/plugin-development.md)
 
 ## 架构
 
@@ -177,10 +242,6 @@ flowchart LR
 </table>
 
 ## 关于开源与订阅
-
-Kiteline 的初衷是解放程序员，让编程 Agent 不再因为人不在电脑前而停滞。它最初是我们团队内部的日常工具，在真实的开发工作中不断打磨完善；如今开放出来，希望能帮助到更多开发者。
-
-市面上的远程控制工具种类繁多。Kiteline 的每一项功能都源自真实的开发需求：多 Agent 管理、待办识别、会话群协作、代码编辑、会话终端、世界模式等，覆盖用 Agent 远程编程的完整流程，力求全面而实用。
 
 **自行构建**：全部源码均在本仓库公开。如果您有时间、乐于动手，欢迎在遵守 AGPL-3.0 许可证的前提下自行构建、修改和二次开发，也欢迎通过 Issue 提出建议。
 

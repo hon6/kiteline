@@ -4,9 +4,9 @@
 
 # Kiteline
 
-### Your coding agents keep working while you're away from the keyboard.
+### A remote for the coding agents already running on your computers.
 
-Kiteline watches every Claude Code, Codex, OpenCode and DeepSeek Harness session on your computers and puts them on your iPhone, iPad and Apple Watch: you can see what each agent is doing, approve its requests, answer its questions and send it the next task.
+Kiteline puts every Claude Code, Codex, OpenCode and DeepSeek Harness session on your computers (in VS Code, the terminal or over Remote-SSH) on your iPhone, iPad and Apple Watch. Keep using your agents exactly as you do now. When you step away, follow every step, approve requests, answer questions and send the next task from your phone.
 
 <br>
 
@@ -28,7 +28,40 @@ Kiteline watches every Claude Code, Codex, OpenCode and DeepSeek Harness session
 
 ![Kiteline: speak a task on your phone, the agent codes, tests and sends back a screenshot](docs/images/hero-en.jpg)
 
-> **Official website: [tars.betac.cn](https://tars.betac.cn)**. Official installers for Mac, Windows and Linux are available there and on [GitHub Releases](https://github.com/hon6/kiteline/releases). The iPhone, iPad and Apple Watch app is on the [App Store](https://apps.apple.com/app/id6825244029).
+## Install
+
+**On your computer** (Mac, Windows or Linux), one command:
+
+```bash
+# macOS and Linux
+curl -fsSL https://tars.betac.cn/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://tars.betac.cn/install.ps1 | iex
+```
+
+On a Linux server without a desktop, add `--service` to run it as a systemd user service: `curl -fsSL https://tars.betac.cn/install.sh | sh -s -- --service`. Prefer a regular installer? Download it from [tars.betac.cn](https://tars.betac.cn/en/) or [GitHub Releases](https://github.com/hon6/kiteline/releases). The script verifies each download against its published SHA-256 checksum.
+
+**On your phone**, get Kiteline from the [App Store](https://apps.apple.com/app/id6825244029) (iPhone, iPad and Apple Watch) and scan the pairing code shown on your computer. No account to create.
+
+Your existing agent sessions show up on the phone right away. More in the [install guide](docs/user/install.md).
+
+## "So what's the catch?"
+
+- The desktop app is open source (AGPL-3.0) and free, with no limits.
+- The phone app is free, every feature included, whenever your phone is on the same Wi-Fi as your computer.
+- Only remote access, reaching your computer from another network, needs Kiteline Pro: about the price of a cup of bubble tea a month, which pays for the relay servers.
+- No account, no API keys, and no changes to your agents' configuration.
+
+## Why Kiteline
+
+- **Nothing new to move into.** Your sessions stay in VS Code, the terminal or Remote-SSH, exactly where they are. The phone picks up the very same session; there is no second interface to start your work in.
+- **Never touches your AI login.** Kiteline doesn't sign in to Claude or any other AI service, never reads API keys or tokens and never calls a model API. It reads the transcripts your agents already write and acts only through interfaces they offer.
+- **Agents report back.** Built-in skills let agents send screenshots, walk through web features in a real browser with Playwright and send you the report, track what only you can do as to-dos, and show which stage they are at.
+- **Approve from your wrist.** Commands, plans and questions reach the lock screen and Apple Watch; risky commands always ask twice.
+- **See the whole team at once.** World mode and the Flow Board show every session on every computer on one screen.
 
 ## See it in action
 
@@ -77,6 +110,38 @@ The per-platform matrix is in **[PLUGINS.md](PLUGINS.md)**. It is generated from
 **Why are some agents view-only?** Kiteline never touches your AI credentials and never modifies an agent. It only acts through interfaces the agent itself offers: its local server or IPC, extension points such as hooks or an editor URI, or the terminal (tmux) it runs in. When an agent offers none of these, Kiteline can still show its sessions and full transcripts from disk, but it won't simulate input or patch the agent to take control. The app tells you why a session is view-only and how to enable more, for example by starting the CLI in tmux. Details are in the [plugin guide](docs/plugin-development.md#why-some-agents-are-view-only).
 
 **Build a plugin.** New agents are added as plugins: a manifest plus a small Python module running in the watcher. The [plugin development guide](docs/plugin-development.md) covers the manifest, the interface and the rules, and `tools/plugin_check.py` lets you test a plugin on your own machine. Open a pull request: we review and test it, then sign it and publish it to the official plugin index, and every Kiteline user gets it without an app update.
+
+## FAQ
+
+**Can this get my Claude or Codex account banned?**
+Kiteline doesn't sign in to any AI service, doesn't use your subscription's tokens and never calls a model API, so it doesn't change how your agents talk to their providers. Your agents keep running on your computer under your own account, exactly as before. Kiteline reads the transcripts they write and types into the same session the way you would.
+
+**Does my code go through your servers?**
+On the same network, no: the phone talks to your computer directly over HTTPS, pinned to a certificate your computer issued at pairing. From another network Kiteline first tries a direct peer-to-peer connection and only falls back to the relay when that fails. Everything is end-to-end encrypted; the relay can't read it and doesn't store it. See [Remote access](docs/user/remote-access.md).
+
+**Do I have to change how I work?**
+No. Keep starting sessions in VS Code or the terminal. Kiteline finds them on its own. Terminal sessions that should accept replies from the phone need to run inside tmux.
+
+**Is there an Android or web app?**
+Not yet. The phone apps are iPhone, iPad and Apple Watch for now.
+
+**Can I use it with agents on a server?**
+Yes. Install Kiteline on the server with `--service`, or add the server as a Remote-SSH host in the desktop app and Kiteline deploys a small read-only watcher over SSH (Python 3.8+ standard library only).
+
+**How is this different from Claude Code's Remote Control?**
+Remote Control continues one Claude Code session in the Claude app. Kiteline shows every agent on every computer in one list, and adds lock-screen and Apple Watch approvals, screenshots and test reports from the agent, to-dos, goals, group chats between sessions, a code editor with Git and a terminal.
+
+More answers in the [FAQ](docs/user/faq.md).
+
+## Documentation
+
+- [Install and first run](docs/user/install.md)
+- [Supported agents and how each one connects](docs/user/agents.md)
+- [Approvals, plans and questions](docs/user/approvals.md)
+- [Remote access](docs/user/remote-access.md)
+- [Privacy and security](docs/user/privacy.md)
+- [FAQ](docs/user/faq.md)
+- Building a plugin for another agent: [plugin development guide](docs/plugin-development.md)
 
 ## Architecture
 
@@ -179,10 +244,6 @@ flowchart LR
 <sub>App Store screenshots shown in Chinese; the apps are fully localized in English.</sub>
 
 ## Open source and subscription
-
-Kiteline was built to free developers from waiting on their agents. It began as an internal tool our team relies on every day and has been refined through real development work. We are now opening it up so that more developers can benefit.
-
-There are many remote-control tools available. Every Kiteline feature comes from a real development need: managing multiple agents, picking up to-dos, group chats between sessions, code editing, in-session terminals, world mode and more. Together they cover the full workflow of coding remotely with agents, with the aim of being comprehensive and practical.
 
 **Build it yourself.** All the source code is public in this repository. If you have the time and enjoy building things, you're welcome to build, modify and extend it under the terms of the AGPL-3.0. Suggestions are always welcome through Issues.
 
