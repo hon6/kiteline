@@ -42,6 +42,8 @@ curl -fsSL https://tars.betac.cn/install.sh | sh
 irm https://tars.betac.cn/install.ps1 | iex
 ```
 
+Or with a package manager: `brew install --cask hon6/kiteline/kiteline` on the Mac, or `scoop bucket add kiteline https://github.com/hon6/scoop-kiteline` then `scoop install kiteline` on Windows.
+
 On a Linux server without a desktop, add `--service` to run it as a systemd user service: `curl -fsSL https://tars.betac.cn/install.sh | sh -s -- --service`. Prefer a regular installer? Download it from [tars.betac.cn](https://tars.betac.cn/en/) or [GitHub Releases](https://github.com/hon6/kiteline/releases). The script verifies each download against its published SHA-256 checksum.
 
 **On your phone**, get Kiteline from the [App Store](https://apps.apple.com/app/id6825244029) (iPhone, iPad and Apple Watch) and scan the pairing code shown on your computer. No account to create.

@@ -42,6 +42,8 @@ curl -fsSL https://tars.betac.cn/install.sh | sh
 irm https://tars.betac.cn/install.ps1 | iex
 ```
 
+也可以用包管理器：Mac 上 `brew install --cask hon6/kiteline/kiteline`；Windows 上先 `scoop bucket add kiteline https://github.com/hon6/scoop-kiteline`，再 `scoop install kiteline`。
+
 没有图形界面的 Linux 服务器，加 `--service` 装成 systemd 用户服务：`curl -fsSL https://tars.betac.cn/install.sh | sh -s -- --service`。想用普通安装包，到[官网](https://tars.betac.cn)或 [GitHub Releases](https://github.com/hon6/kiteline/releases) 下载。脚本会按官网公布的 SHA-256 校验每个下载。
 
 **手机上**，到 [App Store](https://apps.apple.com/app/id6825244029) 下载 Kiteline（iPhone、iPad、Apple Watch），扫电脑上显示的配对码。不用注册账号。
