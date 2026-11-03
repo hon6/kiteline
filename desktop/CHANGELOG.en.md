@@ -1,5 +1,13 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.24 (2026-11-03)
+
+### Bug Fixes
+
+- **Images in test reports no longer show as gray boxes** (Windows, Linux): On Windows, agents could not find the browser installed on the computer, so web test reports could not be rendered as images, the first overview image stayed a gray box in the conversation, and web page screenshots failed. Agents now use the installed Microsoft Edge or Google Chrome to render complete reports and screenshots. SVG images sent by agents are also converted to regular images before they are shown, and images sent earlier that showed as gray boxes now display normally too.
+- **Images retry automatically when they fail to load** (Windows, Linux): Images in conversations, to-dos, favorites, and Today that failed to load because of a network interruption or a busy computer used to stay gray. They now reload automatically after a moment, and if several attempts fail, the image shows "Tap to Retry" so you can reload it with one click.
+- **Flow board cards no longer flash black when a session joins** (Windows, Linux): When a new session joined and the session column was rearranged, session cards briefly showed as black bars with no text. They now show their content right after the rearrangement, and the board no longer flickers when it opens.
+
 ## 1.0.23 (2026-11-02)
 
 ### Improvements

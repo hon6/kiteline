@@ -379,10 +379,25 @@ public sealed class MessageImages : WrapPanel
             var index = i;
             var cell = new Border { Width = side, Height = side, CornerRadius = new CornerRadius(6), ClipToBounds = true, Margin = new Thickness(0, 0, 4, 4) };
             cell.Res(Border.BackgroundProperty, "Fill06");
-            ImageCache.Load(path, new Dictionary<string, string> { ["key"] = key, ["ref"] = images[i].Ref, ["thumb"] = "200" },
-                bitmap => cell.Child = new Image { Source = bitmap, Stretch = Stretch.UniformToFill, Width = side, Height = side });
+            var failed = false;
+            void Fill()
+            {
+                failed = false;
+                cell.Child = null;
+                // 自己再取几次都没取到：整格是「轻点重试」（同 Mac 版）
+                ImageCache.Load(path, new Dictionary<string, string> { ["key"] = key, ["ref"] = images[index].Ref, ["thumb"] = "200" },
+                    bitmap => cell.Child = new Image { Source = bitmap, Stretch = Stretch.UniformToFill, Width = side, Height = side },
+                    () =>
+                    {
+                        failed = true;
+                        cell.Child = Ui.Stack(Orientation.Vertical, 4, Align.Center, [Ui.Sym("arrow.clockwise", 13, "Text2"), Ui.Text(L("轻点重试"), 11, color: "Text2")])
+                            .HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center);
+                    });
+            }
+            Fill();
             cell.OnTap(() =>
             {
+                if (failed) { Fill(); return; }
                 var all = gallery ?? images;
                 var at = gallery is null ? index : Math.Max(0, gallery.ToList().FindIndex(g => g.Ref == images[index].Ref));
                 ImageViewer.Show(key, all, at, path);
@@ -418,9 +433,17 @@ public static class ImageCache
         catch (Exception) { return null; }
     }
 
-    public static async void Load(string path, IDictionary<string, string> query, Action<Bitmap> done)
+    /// 没取到（图推来时正好断线、电脑那边正忙、图还在转）就隔一会儿自己再取几次（同 Mac 版 RemoteImage），都不行回 failed。
+    /// 以前只取一次，失败了那一格就一直是灰块（2026-11-03 反馈测试报告的图「有时候会丢」）
+    public static async void Load(string path, IDictionary<string, string> query, Action<Bitmap> done, Action? failed = null)
     {
-        if (await Get(path, query) is Bitmap bitmap) done(bitmap);
+        foreach (var delay in new[] { 5, 10, 20, 40, 60, 0 })
+        {
+            if (await Get(path, query) is Bitmap bitmap) { done(bitmap); return; }
+            if (delay == 0) break;
+            await Task.Delay(TimeSpan.FromSeconds(delay));
+        }
+        failed?.Invoke();
     }
 }
 

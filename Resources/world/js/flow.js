@@ -228,6 +228,7 @@ class Flow {
     this.hot = this.makeHot();
     this.cards = new Map();
     this.makeCards();
+    for (const c of this.cards.values()) c.draw();   // 一打开就有字，不黑一下
     this.dash = new Dash(this.data);
     this.bindUi();
     this.resize();
@@ -394,6 +395,8 @@ class Flow {
     // 刚加入的会话：卡片亮两三秒
     for (const key of this.data.added || []) { const c = this.cards.get('s:' + key) || this.cards.get('s:@more'); if (c) c.heat = 3; }
     this.sesStep = step; this.compact = compact;
+    // 新卡片的画布是空的，当场画上；等 slow() 的话整列会黑一下（有新会话加入时最明显）
+    for (const c of this.cards.values()) if (c.kind === 'ses') c.draw();
     this.redrawLines();
   }
 

@@ -228,9 +228,27 @@ try:
     ev = wait_for(lambda e: e["event"] == "entries" and e["items"][0]["t"] == "agent_image" and e["items"][0]["text"] == "测试结果", timeout=10)
     check("shot --text 没浏览器时退回 SVG 并发出", ev is not None and ev["items"][0]["images"][0]["mime"] == "image/svg+xml", out.strip())
     if ev:
-        resp = call({"cmd": "media", "sessionId": SID, "ref": ev["items"][0]["images"][0]["ref"]})
-        svg = base64.b64decode(resp["data"]).decode() if resp and resp["ok"] else ""
+        stored = max(glob.glob(os.path.join(DATA, "outbox", "files", "*.svg")), key=os.path.getmtime)
+        with open(stored, encoding="utf-8") as handle:
+            svg = handle.read()
         check("SVG 里是去掉颜色码的文本，失败行标红", "<svg" in svg and "PASS login" in svg and "\x1b" not in svg and "#ff7b72" in svg)
+        # 客户端都显示不了 SVG：watcher 这边有浏览器时，取图时换成 PNG 给（以前发的 SVG 也一样）
+        resp = call({"cmd": "media", "sessionId": SID, "ref": ev["items"][0]["images"][0]["ref"]}, timeout=120)
+        data = base64.b64decode(resp["data"]) if resp and resp["ok"] else b""
+        if W.find_browser()[0]:
+            check("取 SVG 图时换成 PNG", resp["mime"] == "image/png" and data[:8] == b"\x89PNG\r\n\x1a\n" and os.path.exists(stored[:-4] + ".png"),
+                  str(resp)[:200])
+            # send-image 直接发 SVG：先转成 PNG 再存
+            chart = os.path.join(root, "图表.svg")
+            with open(chart, "w", encoding="utf-8") as handle:
+                handle.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#2a6"/></svg>')
+            out = subprocess.run([sys.executable, WATCHER, "send-image", chart, "--session", SID, "--caption", "SVG 图表"],
+                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120).stdout.decode()
+            ev = wait_for(lambda e: e["event"] == "entries" and e["items"][0]["t"] == "agent_image" and e["items"][0]["text"] == "SVG 图表", timeout=10)
+            image = ev["items"][0]["images"][0] if ev else {}
+            check("send-image 发 SVG 时先转成 PNG", image.get("mime") == "image/png" and image.get("name") == "图表.png", out.strip())
+        else:
+            check("没浏览器时取 SVG 图照旧给 SVG", resp["mime"] == "image/svg+xml" and b"<svg" in data, str(resp)[:200])
 
     print("== 今日动态（digest）")
     with open(transcript, "a") as handle:
@@ -247,7 +265,9 @@ try:
     check("改动文件取自 Edit，路径相对工作目录", item.get("files") == [{"path": "src/app.js", "edits": 1}], str(item.get("files")))
     check("在线会话标 live、带最后结论与时间范围", item.get("live") is True and item.get("conclusions")[-1]["text"] == "回复完成"
           and item.get("firstAt") == since and item.get("lastAt") == W.parse_ts(ts(502)))
-    check("统计 Claude 发来的截图并给出引用", item.get("images") == 2 and all(s["ref"].startswith("o") for s in item.get("shots", [])))
+    # send-image 一张 + shot 一张（有浏览器时还多发了一张 SVG 图表）
+    check("统计 Claude 发来的截图并给出引用", item.get("images") == (3 if W.find_browser()[0] else 2)
+          and all(s["ref"].startswith("o") for s in item.get("shots", [])), str(item.get("images")))
     check("输出 token 按消息去重累计", item.get("outputTokens") == 345 and item.get("requests") == 1, str(item.get("outputTokens")))
     resp = call({"cmd": "digest", "since": W.parse_ts(ts(150))})
     check("since 之前的行不算", resp["sessions"][0]["prompts"] == 71, str(resp["sessions"][0]["prompts"]))
@@ -729,13 +749,13 @@ try:
     check("等元素超时说在等哪个", W._report_reason("Error: locator.click: Timeout 30000ms exceeded.\nCall log:\n"
                                        "  - waiting for getByRole('button', { name: '登录' })", T)
           == "超时，一直没等到 getByRole('button', { name: '登录' })")
-    # 没浏览器：退回文字总览（SVG）+ 原始截图，照样发到会话里
+    # 浏览器不出图：文字总览（SVG）转不成 PNG 就不带（客户端都显示不了，结论和计数在文字里），只发原始截图
     out = subprocess.run([sys.executable, WATCHER, "report", pw_dir, "--session", SID, "--title", "登录流程"],
-                         env=shot_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60).stdout.decode()
+                         env=shot_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120).stdout.decode()
     ev = wait_for(lambda e: e["event"] == "entries" and e["items"][0]["t"] == "agent_image"
                   and (e["items"][0]["text"] or "").startswith("**登录流程"), timeout=10)
-    check("report 发到会话：总览 + 步骤截图", ev is not None and len(ev["items"][0]["images"]) == 5
-          and ev["items"][0]["images"][0]["mime"] == "image/svg+xml", out.strip())
+    check("report 发到会话：浏览器不出图时只发步骤截图、不带 SVG", ev is not None and len(ev["items"][0]["images"]) == 4
+          and all(i["mime"] == "image/png" for i in ev["items"][0]["images"]) and "（会话 %s）" % SID[:8] in out, out.strip())
     if ev:
         caption = ev["items"][0]["text"]
         check("文字摘要：结论、计数、没通过的原因", caption.startswith("**登录流程：1 个用例未通过**\n共 2 个用例 · 1 个通过 · 1 个未通过 · 用时 7.2 秒")

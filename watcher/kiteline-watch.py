@@ -2242,11 +2242,17 @@ def command_send_image(argv):
         if size > SEND_IMAGE_MAX:
             print("图片太大（%.1f MB，上限 15 MB）：%s" % (size / 1048576.0, path), file=sys.stderr)
             return 4
-        # 复制一份：原文件之后可能被覆盖（比如每次截图都写同一个名字）
         target = os.path.join(stored_dir, uuid.uuid4().hex + ext)
-        shutil.copyfile(path, target)
-        mime = "image/svg+xml" if ext == ".svg" else (mimetypes.guess_type(path)[0] or "image/png")
-        stored.append({"path": target, "mime": mime, "name": os.path.basename(path)})
+        filename = os.path.basename(path)
+        # SVG 手机和电脑客户端都显示不了：能转就转成 PNG 发，转不了照旧发 SVG
+        png = svg_to_png(path, os.path.splitext(target)[0] + ".png") if ext == ".svg" else None
+        if png:
+            target, filename = png, os.path.splitext(filename)[0] + ".png"
+        else:
+            # 复制一份：原文件之后可能被覆盖（比如每次截图都写同一个名字）
+            shutil.copyfile(path, target)
+        mime = "image/png" if png else "image/svg+xml" if ext == ".svg" else (mimetypes.guess_type(path)[0] or "image/png")
+        stored.append({"path": target, "mime": mime, "name": filename})
 
     os.makedirs(OUTBOX_DIR, exist_ok=True)
     entry = {"ts": int(time.time() * 1000), "caption": caption, "files": stored}
@@ -2265,7 +2271,9 @@ def command_send_image(argv):
 # ---------------------------------------------------------------------------
 
 def find_browser():
-    """返回 (可执行文件, 类型)；类型是 chrome / chrome-shell / firefox。找不到返回 (None, None)。"""
+    """返回 (可执行文件, 类型)；类型是 chrome / chrome-shell / firefox。找不到返回 (None, None)。
+    Windows 上 Chrome / Edge 不在 PATH 里，要按安装位置找（以前漏了：Windows 上截网页失败、测试报告只能退回 SVG 文字总览，
+    客户端显示不了，对话里那张图一直是灰块）"""
     import glob
     override = os.environ.get("CCPULSE_BROWSER")
     if override and os.path.exists(override):
@@ -2275,19 +2283,32 @@ def find_browser():
         path = shutil.which(name)
         if path:
             return path, "chrome"
-    for path in ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                 "/Applications/Chromium.app/Contents/MacOS/Chromium",
-                 "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-                 "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"):
+    local = os.environ.get("LOCALAPPDATA") or ""
+    programs = [os.environ.get(k) or "" for k in ("PROGRAMFILES", "PROGRAMFILES(X86)")]
+    for path in (["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                  "/opt/google/chrome/chrome", "/opt/microsoft/msedge/msedge"]
+                 + [os.path.join(p, "Google", "Chrome", "Application", "chrome.exe") for p in programs + [local] if p]
+                 + [os.path.join(p, "Microsoft", "Edge", "Application", "msedge.exe") for p in programs if p]):
         if os.path.exists(path):
             return path, "chrome"
-    for pattern, kind in ((os.path.join(HOME, ".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell"), "chrome-shell"),
-                          (os.path.join(HOME, ".cache/ms-playwright/chromium-*/chrome-linux*/chrome"), "chrome"),
-                          (os.path.join(HOME, "Library/Caches/ms-playwright/chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium"), "chrome"),
-                          (os.path.join(HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell"), "chrome-shell")):
-        found = sorted(glob.glob(pattern))
-        if found:
-            return found[-1], kind
+    # Playwright 下载的浏览器（新版 Chromium 换成了 Chrome for Testing，Mac 上的程序名跟着变了）
+    caches = [os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "", os.path.join(HOME, ".cache", "ms-playwright"),
+              os.path.join(HOME, "Library", "Caches", "ms-playwright"), os.path.join(local, "ms-playwright") if local else ""]
+    patterns = (("chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell", "chrome-shell"),
+                ("chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell.exe", "chrome-shell"),
+                ("chromium_headless_shell-*/chrome-win*/headless_shell.exe", "chrome-shell"),
+                ("chromium-*/chrome-linux*/chrome", "chrome"),
+                ("chromium-*/chrome-win*/chrome.exe", "chrome"),
+                ("chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing", "chrome"),
+                ("chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium", "chrome"))
+    for root in filter(None, caches):
+        for pattern, kind in patterns:
+            found = sorted(glob.glob(os.path.join(root, pattern)))
+            if found:
+                return found[-1], kind
     for path in (shutil.which("firefox"), "/Applications/Firefox.app/Contents/MacOS/firefox"):
         if path and os.path.exists(path):
             return path, "firefox"
@@ -2336,6 +2357,50 @@ def browser_screenshot(url, out, width, height, scale=2, wait_ms=2500):
         if os.path.exists(out) and os.path.getsize(out) > 100:
             return out
     raise RuntimeError("浏览器没有产出截图（%s）" % os.path.basename(path))
+
+
+def _svg_size(path):
+    """SVG 根标签上写的宽高（px）；只有 viewBox 的按它算，都没有（或写的百分比）给 800×600"""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(8192).decode("utf-8", "replace")
+    except OSError:
+        return 800, 600
+    match = re.search(r"<svg\b[^>]*>", head)
+    tag = match.group(0) if match else ""
+
+    def number(name):
+        found = re.search(r"""(?<![-\w])%s\s*=\s*["']\s*([0-9.]+)\s*(?:px)?\s*["']""" % name, tag)
+        try:
+            return float(found.group(1)) if found else None
+        except ValueError:
+            return None
+
+    width, height = number("width"), number("height")
+    box = re.search(r"""(?<![-\w])viewBox\s*=\s*["']\s*[-0-9.]+[\s,]+[-0-9.]+[\s,]+([0-9.]+)[\s,]+([0-9.]+)""", tag)
+    if box and not (width and height):
+        box_w, box_h = float(box.group(1)), float(box.group(2))
+        if width and box_w:
+            height = width * box_h / box_w
+        elif height and box_h:
+            width = height * box_w / box_h
+        else:
+            width, height = box_w, box_h
+    if not width or not height:
+        return 800, 600
+    return max(16, min(int(round(width)), 4000)), max(16, min(int(round(height)), 4000))
+
+
+def svg_to_png(path, out):
+    """SVG 换成 PNG 再发：iPhone 解不了 SVG，Mac 自带的解码画不对文字，Windows / Linux 客户端解不出（对话里一直是灰块）。
+    用无头浏览器按 SVG 自己的尺寸截 2 倍图；没有浏览器、或截不出来返回 None"""
+    if not find_browser()[0]:
+        return None
+    width, height = _svg_size(path)
+    try:
+        return browser_screenshot(file_url(path), out, width, height, scale=2 if max(width, height) <= 2000 else 1, wait_ms=500)
+    except Exception:
+        return None
 
 
 def browser_dump_dom(url, width, height, wait_ms=3000):
@@ -3046,6 +3111,9 @@ def _report_render(html_path, cards, out_dir):
             thread.start()
         for thread in threads:
             thread.join()
+    # 没截出来的（机器忙、浏览器偶尔起不来）一张一张再截一次：封面没出来，整份报告就只能退回文字总览
+    for index in [i for i, out in enumerate(outs) if not out]:
+        shoot(index)
     return outs
 
 
@@ -3061,7 +3129,12 @@ def _report_fallback(rep, T, ordered, out_dir):
     cover = os.path.join(out_dir, "summary.svg")
     with open(cover, "w", encoding="utf-8") as handle:
         handle.write(text_svg(text_lines("\n".join(lines)), rep["title"] or T["kind"]))
-    return [cover] + [s["image"]["path"] for t in ordered for s in t["steps"] if s["image"]][:REPORT_MAX_IMAGES - 1]
+    shots = [s["image"]["path"] for t in ordered for s in t["steps"] if s["image"]]
+    # 客户端都显示不了 SVG：文字总览转成 PNG；转不了又有步骤截图时就不带它（结论、计数在发图的文字里都有）
+    png = svg_to_png(cover, os.path.join(out_dir, "summary.png"))
+    if png:
+        return [png] + shots[:REPORT_MAX_IMAGES - 1]
+    return shots[:REPORT_MAX_IMAGES] or [cover]
 
 
 def _report_caption(rep, T, ordered, missing, extra):
@@ -12561,6 +12634,7 @@ class AgentPlugins:
 
 
 DEFERRED = object()   # handle() 返回它：这个请求在后台线程里回（见 Watcher.defer）
+_SVG_LOCK = threading.Lock()   # 旧 SVG 图现转 PNG（Watcher.media_svg）一次只转一张
 _IDE_JOBS = {}        # 任务号 -> 进度 / 结果（慢的 Git 操作，见 Watcher.defer）
 
 
@@ -13138,6 +13212,8 @@ class Watcher:
                 entry = parse_line(raw or b"")
                 files = (entry or {}).get("files") or []
                 info = files[int(index_text)]
+                if info.get("mime") == "image/svg+xml":
+                    return self.media_svg(request.get("id"), info["path"])
                 with open(info["path"], "rb") as handle:
                     data = handle.read()
                 return {"mime": info.get("mime") or "image/png", "data": base64.b64encode(data).decode("ascii")}
@@ -13320,6 +13396,29 @@ class Watcher:
                 pass
 
         threading.Thread(target=work, name="ide-%s" % cmd, daemon=True).start()
+        return DEFERRED
+
+    def media_svg(self, rid, path):
+        """以前发出去的 SVG 图（Windows 上找不到浏览器时，测试报告的文字总览就是 SVG）：客户端都显示不了，换成 PNG 给，
+        转好的放在旁边下次直接用；转不了照旧给 SVG。要起浏览器（几秒），放后台线程回，别卡住观察循环"""
+        def work():
+            response = {"event": "response", "id": rid, "ok": True}
+            try:
+                png = os.path.splitext(path)[0] + ".png"
+                with _SVG_LOCK:   # 缩略图和原图常同时来要，别两个浏览器往同一个文件里截
+                    if not (os.path.exists(png) and os.path.getsize(png) > 100):
+                        png = svg_to_png(path, png)
+                with open(png or path, "rb") as handle:
+                    data = handle.read()
+                response.update({"mime": "image/png" if png else "image/svg+xml", "data": base64.b64encode(data).decode("ascii")})
+            except Exception as exc:
+                response.update({"ok": False, "error": str(exc) or repr(exc)})
+            try:
+                emit(response)
+            except Exception:
+                pass
+
+        threading.Thread(target=work, name="media-svg", daemon=True).start()
         return DEFERRED
 
     def respond(self, raw):

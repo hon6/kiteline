@@ -1,5 +1,12 @@
 # Kiteline Release Notes
 
+## 3.49.19 (2026-11-03)
+
+### Bug Fixes
+
+- **SVG images from agents now display correctly** (Mac, iPhone, iPad): SVG images sent by agents (such as the test report overview created when no browser is available on the computer) could not be shown on iPhone and iPad, and appeared without their text on Mac. They are now converted to regular images before they are sent, and similar images sent earlier are converted automatically when you view them.
+- **Flow board cards no longer flash black when a session joins** (Mac, iPhone, iPad): When a new session joined and the session column was rearranged, session cards briefly showed as black bars with no text. They now show their content right after the rearrangement, and the board no longer flickers when it opens.
+
 ## 3.49.18 (2026-11-02)
 
 ### Improvements

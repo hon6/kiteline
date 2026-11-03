@@ -778,7 +778,8 @@ def r_media(s, request, *_):
         return Response.error("缺少参数", 400)
     cache_key = "%s|%s" % (key, ref)
     hit = s.app.media.load(cache_key)
-    if hit:
+    # 缓存里的 SVG 不用：客户端都显示不了，新版 watcher 会换成 PNG 给
+    if hit and hit[1] != "image/svg+xml":
         return thumb_reply(hit[0], hit[1], request, cache_key)
     target = s.app.store.resolve_any(key)
     if not target:

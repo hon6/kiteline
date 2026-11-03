@@ -1343,9 +1343,9 @@ final class MobileServer {
         guard let ref = request.query["ref"], let key = request.query["key"] else {
             respond(.error("缺少参数", status: 400)); return
         }
-        // 取过的图先看缓存：会话已结束、机器正在重连时也照样能看
+        // 取过的图先看缓存：会话已结束、机器正在重连时也照样能看。缓存里的 SVG 不用：客户端都显示不了，新版 watcher 会换成 PNG 给
         let cacheKey = "\(key)|\(ref)"
-        if let (data, mime) = MediaCache.load(cacheKey) {
+        if let (data, mime) = MediaCache.load(cacheKey), mime != "image/svg+xml" {
             respond(Thumbnail.reply(data, mime: mime, request: request, cacheKey: cacheKey)); return
         }
         guard let target = resolveAny(request) else {
