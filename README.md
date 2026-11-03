@@ -54,6 +54,7 @@ Kiteline watches every Claude Code, Codex, OpenCode and DeepSeek Harness session
 | **Reply your way** | Type, hold to talk (on-device speech recognition), attach photos and screenshots, or start a new task in any project. |
 | **See the work, not just the chat** | Live steps, commands, diffs, test output and images, plus a code editor with Git and a terminal that runs inside each session. |
 | **Task progress** | Each session shows its current stage (for example "2/4 Developing"), and agents can send screenshots and reports straight to your phone. |
+| **Goals** | Give a Claude Code or Codex session a goal (`/goal`) from your phone and the agent keeps working, round after round, until it is met. The session list shows which round it is on, the chat shows what the last check said is still missing, and you get a notification when the goal is met, can't be met or stops. |
 | **To-dos** | Anything the agent needs *you* to do is picked up from the conversation and tracked until it's done. |
 | **Group chats** | Sessions on different computers and projects coordinate with each other through Kiteline. |
 | **World mode** | A voxel office where every session is a worker at a desk, so you can see the whole team at a glance. |
