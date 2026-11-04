@@ -719,6 +719,8 @@ extension SelfTest {
         case "copyshown": KitelineKit.showCopyButtons()   // 代码块、命令、思考右上角的拷贝钮都画出来（放在打开会话之前）
         case "dividerhover": KitelineKit.showDividerHandles(arg != "off")   // 分屏的分隔线画成指针停在上面（看把手）；dividerhover:off 收起
         case "tabgeo": Log.write("[capture] 分屏位置：\n\(KitelineKit.tabGeometry)")
+        case "tabpeek": KitelineKit.peekTabs(Int(arg))   // 当前块第几个标签（从 0 数）画成指着展开的样子；tabpeek:off 收起
+        case "tabhover": KitelineKit.hoverTabs(Int(arg))   // 当成指针挪到当前块第几个标签上（走悬停计时、截短判断）；tabhover:off 移出标签栏
         case "esc":
             // 按一下 Esc（走 App 的事件队列，本地监听收得到）：拖标签拖到一半取消
             if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
@@ -809,6 +811,21 @@ extension SelfTest {
             } else {
                 Log.write("[capture] 没有开着的面板")
             }
+        case "keys":
+            // 按键（发进本 App 的事件队列；弹开的菜单也收得到）：keys:down,down,return（还有 up、esc、space、tab）
+            let codes: [String: UInt16] = ["down": 125, "up": 126, "return": 36, "esc": 53, "space": 49, "tab": 48]
+            for (i, name) in arg.split(separator: ",").map(String.init).enumerated() {
+                guard let code = codes[name] else { Log.write("[capture] 不认识的键：\(name)"); continue }
+                for (j, type) in [NSEvent.EventType.keyDown, .keyUp].enumerated() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25 * Double(i) + 0.05 * Double(j)) {
+                        let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                     windowNumber: next.windowNumber, context: nil, characters: name == "return" ? "\r" : "",
+                                                     charactersIgnoringModifiers: name == "return" ? "\r" : "", isARepeat: false, keyCode: code)
+                        if let event { NSApp.postEvent(event, atStart: false) }
+                    }
+                }
+            }
+            delay = 0.3 + 0.25 * Double(arg.split(separator: ",").count)
         case "panelbutton":
             // 点最上面那个面板的红黄绿钮：panelbutton:close / zoom
             let kind: NSWindow.ButtonType = arg == "zoom" ? .zoomButton : .closeButton

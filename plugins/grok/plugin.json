@@ -1,0 +1,56 @@
+{
+ "id": "grok",
+ "name": "Grok Build",
+ "version": "1.0.0",
+ "summary": "xAI 的终端编程 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复、确认、回答提问和中断",
+ "summaryEn": "xAI's terminal coding agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.grok"
+  ],
+  "commands": [
+   "grok"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "verified": false,
+    "note": "回复和确认需要 Grok Build 在 tmux 中运行"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": ["view"],
+    "verified": false,
+    "note": "Windows 上没有 tmux，只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "verified": true,
+    "note": "回复和确认需要 Grok Build 在 tmux 中运行"
+   }
+  }
+ },
+ "limitsNote": "Grok Build 不在本机记录 SuperGrok 订阅的额度，也没有提供查询接口，「今日用量」中不显示；用 xAI API Key 按量付费时请在 xAI 控制台查看余额。token 按 Grok Build 自己的记录统计",
+ "limitsNoteEn": "Grok Build doesn't record your SuperGrok plan quota on your computer and offers no way to query it, so it isn't shown under Today's usage; with pay-as-you-go xAI API keys, check your balance in the xAI console. Tokens are counted from Grok Build's own records",
+ "mark": [
+  {
+   "d": "M3.5 20.5L17.8 3.5h2.7L6.2 20.5zM9.6 9.4L3.5 3.5h3.4l4.4 4.3zM14.4 14.6l6.1 5.9h-3.4l-4.4-4.3z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "Grok",
+ "caps": [],
+ "notes": "新接入 Grok Build：查看会话和完整对话；在 tmux 中运行时可从手机回复、审批命令、回答提问、中断和关闭会话；用量统计计入 Grok Build 的 token。",
+ "notesEn": "New: Grok Build support. View sessions and full conversations; when it runs in tmux, reply, approve commands, answer questions, interrupt and close sessions from your phone. Usage stats include Grok Build's tokens."
+}

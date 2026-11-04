@@ -71,6 +71,10 @@ struct SessionSnapshot: Codable, Equatable {
     var sessionKind: String?
     /// 终端会话所在的 tmux pane（有的话可以远程精确投递）
     var tmuxPane: String?
+    /// 会话的 claude 进程加载了 Kiteline 的 mod：消息、确认、中断直接交给会话，不切前台（见 Delivery.viaBridge；老 watcher 不带）
+    var bridge: Bool?
+    /// 托管会话的编号：Kiteline 不开 VS Code、在那台电脑上后台跑的 claude（watcher 的 hosted_start）；发字、按键经 tmux_send 写进它的伪终端
+    var hosted: String?
     /// 用量（watcher 统计，与 VS Code 面板同样的算法）
     var usage: UsageInfo?
     var transcriptPath: String?
@@ -143,7 +147,7 @@ struct SessionSnapshot: Codable, Equatable {
     /// 能不能从手机 / Mac 回复：VS Code 里的、tmux 里的、本机终端里的 Claude Code；Codex、OpenCode、DeepSeek Harness 走协议，
     /// 在哪台机器上都行；Proma 这类只读的不行
     func canReply(local: Bool) -> Bool {
-        readOnly != true && (isVSCode || tmuxPane != nil || local || agentID != "claude-code")
+        readOnly != true && (isVSCode || tmuxPane != nil || hosted != nil || bridge == true || local || agentID != "claude-code")
     }
 
     /// 需要用户给出确认/选择时，用来描述「卡在哪」

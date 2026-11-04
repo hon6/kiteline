@@ -98,6 +98,65 @@ def _agent_request(payload, record, source, submitted):
     return Outcome(True, submitted, response.get("message") or "已送达")
 
 
+def via_bridge(record):
+    """会话的 claude 进程加载了 Kiteline 装的 mod（watcher 快照的 bridge）：消息、中断、确认、回答提问直接交给会话进程，
+    不切窗口、不粘贴、不按键，用户在电脑上做别的事不受打扰（见 watcher 的 bridge_send）。装 mod 之前就开着的会话走原来的路
+    （同 Mac 版 Delivery.viaBridge）"""
+    if via_agent(record.snap):
+        return False
+    current = (LOOKUP(record.key) if LOOKUP else None) or record
+    return current.snap.get("bridge") is True
+
+
+def _waiting_now(record):
+    current = (LOOKUP(record.key) if LOOKUP else None) or record
+    return current.snap.get("activity") == "waiting"
+
+
+def bridge_key(key, record):
+    """手机上的按键换成 mod 的指令：等确认时 1 / 回车 = 允许、2 = 允许且本会话不再询问、Esc / 3 = 拒绝（同在电脑上按 Esc）；
+    不在等确认时 Esc = 中断。别的键 mod 做不了，返回 None 照旧按键"""
+    if _waiting_now(record):
+        decision = {"1": "allow", "enter": "allow", "return": "allow", "2": "allow_session",
+                    "esc": "deny", "escape": "deny", "3": "deny"}.get(key)
+        if not decision:
+            return None
+        # 带上手机卡片对应的工具（Bash、AskUserQuestion……）：mod 按它找确认框，对不上就不答（手机看到的已经过时）
+        current = (LOOKUP(record.key) if LOOKUP else None) or record
+        tool = current.snap.get("pendingTool")
+        return dict({"op": "perm", "decision": decision}, **({"tool": tool} if tool else {}))
+    return {"op": "abort"} if key in ("esc", "escape") else None
+
+
+def bridge_answers(answers):
+    """手机答的 [{question, picked, other}] → {问题: 选了什么}（多选、自己写的用「, 」连起来）"""
+    out = {}
+    for item in answers or []:
+        if not isinstance(item, dict) or not isinstance(item.get("question"), str):
+            continue
+        labels = [str(p) for p in item.get("picked") or [] if p]
+        other = (item.get("other") or "").strip() if isinstance(item.get("other"), str) else ""
+        if other:
+            labels.append(other)
+        if labels:
+            out[item["question"]] = ", ".join(labels)
+    return out
+
+
+def _bridge(fields, record, source):
+    """交给 mod 做一件事。返回 mod 的结果：ok / idle（要中断时本来就空闲）/ none（没有在等的确认框）；
+    没接上（mod 没加载、会话卡住、远端还是老 watcher）返回 None，调用方照旧走前台"""
+    try:
+        response = source.request(dict(fields, cmd="bridge", sessionId=record.snap.get("sessionId")), timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        log.write("后台送达失败（%s）：%s，改走前台" % (record.snap.get("name"), exc))
+        return None
+    if response.get("bridged") is True:
+        return response.get("result") or "ok"
+    log.write("后台送达没接上（%s），改走前台" % record.snap.get("name"))
+    return None
+
+
 # 动作单里认得的程序（插件写的 app 名 → 给用户看的名字）；各平台怎么认窗口见 delivery_win / delivery_bridge 的 run_ui
 UI_APPS = {"cursor": "Cursor"}
 UI_UNSUPPORTED = "当前版本的 Kiteline 不支持这一步，请更新 Kiteline"
@@ -189,9 +248,10 @@ def waiting_midway(record, where="VS Code 输入框"):
 
 def send(text, attachments, record, source, submit, siblings, allow_waiting=False):
     """发文本（可带图）。siblings：同一来源、同一目录下的其他会话数（认「Claude Code」通用标签用）。
-    allow_waiting：回答提问时先按 Esc 关掉了提问框，watcher 还没来得及更新状态，不拦"""
+    allow_waiting：回答提问时先按 Esc 关掉了提问框，watcher 还没来得及更新状态，不拦。
+    走后台送达的会话等确认时也能发：不按回车，消息排在确认之后（后台没接上、改走前台时再拦）"""
     global last_delivered
-    if not allow_waiting:
+    if not allow_waiting and not (submit and via_bridge(record)):
         problem = waiting_problem(record)
         if problem:
             return Outcome(False, False, problem)
@@ -213,6 +273,14 @@ def send(text, attachments, record, source, submit, siblings, allow_waiting=Fals
         # ui：这台电脑会替插件按键（插件回动作单时执行，见 _agent_request；Cursor 编辑器空闲时发消息靠它）
         return _agent_request({"cmd": "agent_send", "text": compose(text, files, [{"file": True}] * len(files)), "images": images,
                                "ui": ["keys"]}, record, source, True)
+    # 只填不提交（submit = False）要把字留在 VS Code 输入框里，后台做不到，照旧走前台
+    if submit and via_bridge(record):
+        if _bridge({"op": "send", "text": prompt}, record, source) is not None:
+            log.write("后台送达 %s：%s" % (snap.get("name"), prompt[:60]))
+            return Outcome(True, True, "已提交")
+        problem = None if allow_waiting else waiting_problem(record)
+        if problem:
+            return Outcome(False, False, problem)
     entry = snap.get("entrypoint")
     if entry is None or entry == "claude-vscode":
         if record.kind == "local" and remote_editor(snap.get("pid")):
@@ -222,10 +290,11 @@ def send(text, attachments, record, source, submit, siblings, allow_waiting=Fals
             return Outcome(False, False, problem)
         with _FRONT:
             return _backend().send_vscode(prompt, record, submit, siblings, check_waiting=not allow_waiting)
-    if snap.get("tmuxPane") and snap.get("pid"):
+    if (snap.get("tmuxPane") or snap.get("hosted")) and snap.get("pid"):
+        # tmux 里的、Kiteline 后台托管的（watcher 写进它的伪终端）：都不碰前台
         try:
             source.request({"cmd": "tmux_send", "pid": snap["pid"], "text": prompt, "submit": submit}, timeout=20)
-            return Outcome(True, submit, "已通过 tmux 送达")
+            return Outcome(True, submit, "已送达" if snap.get("hosted") else "已通过 tmux 送达")
         except Exception as exc:  # noqa: BLE001
             return Outcome(False, False, str(exc))
     if record.kind == "local" and config.IS_WINDOWS and snap.get("pid"):
@@ -235,8 +304,8 @@ def send(text, attachments, record, source, submit, siblings, allow_waiting=Fals
     return Outcome(False, False, "终端中的 CLI 会话需在 tmux 中运行才能远程发送：在项目目录里用 %s 启动 Claude Code" % TMUX_COMMAND)
 
 
-def press(key, times, record, source, siblings):
-    """确认框选项 / 中断：enter / esc / 1 / 2 / 3 / shift+tab；times = 连按几次"""
+def press(key, times, record, source, siblings, in_front=False):
+    """确认框选项 / 中断：enter / esc / 1 / 2 / 3 / shift+tab；times = 连按几次。in_front：不走后台送达"""
     global last_delivered
     times = max(1, min(int(times or 1), 6))
     key = (key or "").lower()
@@ -250,6 +319,22 @@ def press(key, times, record, source, siblings):
     if via_agent(snap):
         # 1 允许 / 2 本会话都允许 / Esc 拒绝（不在等确认时 Esc = 中断）：watcher 换成 Codex、OpenCode 的说法
         return _agent_request({"cmd": "agent_key", "key": key}, record, source, False)
+    bridged = not in_front and times == 1 and via_bridge(record)
+    if bridged and key in ("1", "2", "3") and not _waiting_now(record):
+        # 手机上的确认卡片过期了（已在电脑上答过、Claude 接着在做）：数字键按下去会落进输入框
+        return Outcome(False, False, "该确认已在电脑上处理")
+    fields = bridge_key(key, record) if bridged else None
+    if fields:
+        result = _bridge(fields, record, source)
+        if result == "ok":
+            log.write("后台送达 %s：%s（%s）" % (snap.get("name"), fields["op"], key))
+            return Outcome(True, False, "已按下 %s" % key)
+        if result == "idle":
+            return Outcome(True, False, "当前没有进行中的回复")
+        if result == "none" and not _waiting_now(record):
+            # 确认框已经没了（在电脑上答过了）：别再去按键，按下去就落进输入框了
+            return Outcome(False, False, "该确认已在电脑上处理")
+        # 没接上，或等的不是工具确认（mod 管不到的框）：照旧切过去按键
     entry = snap.get("entrypoint")
     if entry is None or entry == "claude-vscode":
         if record.kind == "local" and remote_editor(snap.get("pid")):
@@ -259,7 +344,7 @@ def press(key, times, record, source, siblings):
             return Outcome(False, False, problem.replace("此消息未发送", "未按下按键"))
         with _FRONT:
             return _backend().press_vscode(key, times, record, siblings)
-    if snap.get("tmuxPane") and snap.get("pid"):
+    if (snap.get("tmuxPane") or snap.get("hosted")) and snap.get("pid"):
         try:
             source.request({"cmd": "tmux_send", "pid": snap["pid"], "keys": [key] * times}, timeout=20)
             return Outcome(True, False, "已按下 %s" % key)
@@ -319,7 +404,11 @@ def answer(text, record, source, siblings, answers=None):
         if outcome.ok:
             return outcome
         return send(text, [], record, source, True, siblings)
-    outcome = press("esc", 1, record, source, siblings)
+    # 后台送达：选项原样答给提问框（Claude 收到的是「问题 = 选了什么」，电脑上的提问框随之关掉），不用先 Esc 再发一句话
+    picked = bridge_answers(answers) if via_bridge(record) and not DRY_RUN else {}
+    if picked and _bridge({"op": "answer", "answers": picked}, record, source) == "ok":
+        return Outcome(True, True, "已回答")
+    outcome = press("esc", 1, record, source, siblings, in_front=bool(picked))
     if not outcome.ok:
         return outcome
     if not DRY_RUN:

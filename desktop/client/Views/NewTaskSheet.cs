@@ -247,9 +247,81 @@ public sealed class NewTaskSheet
             if (on) selectedRow = row;
             rows.Children.Add(row);
         }
-        listOverlay.Content = loading ? new Spinner(18)
-            : projects.Count == 0 ? Ui.Text(L("暂无使用过 Claude Code 的项目"), 13, color: "Text2")
-            : shownList.Count == 0 ? Ui.Text(L("没有匹配的项目"), 13, color: "Text2") : null;
+        listOverlay.Content = loading ? new Spinner(18) : null;
+        if (loading) return;
+        if (projects.Count == 0 || shownList.Count == 0)
+            rows.Children.Add(Ui.Text(projects.Count == 0 ? L("暂无使用过 Claude Code 的项目") : L("没有匹配的项目"), 13, color: "Text2").Pad(10, 8));
+        rows.Children.Add(OtherFolderRow());
+    }
+
+    /// 列表最后一行「打开其他文件夹…」：没在列表里的目录（还没用过 Claude Code、新建的项目）。
+    /// 筛着某台设备就在它上面选；没筛、在线的不止一台时先挑电脑
+    Control OtherFolderRow()
+    {
+        var online = AppModel.Shared.Sources.Where(s => s.Online).ToList();
+        var targets = online.Any(s => s.Id == sourceFilter) ? online.Where(s => s.Id == sourceFilter).ToList() : online;
+        var plus = new Border
+        {
+            Width = 28, Height = 28, CornerRadius = new CornerRadius(7), BorderThickness = new Thickness(1),
+            Child = Ui.Sym("plus", 13, "Accent").HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center),
+        }.Res(Border.BorderBrushProperty, "AccentEdge32");
+        var sub = targets.Count == 1 ? L("在「%@」上选择任意文件夹，在其中新建会话", Lang.Machine(targets[0].Name)) : L("选择任意电脑上的任意文件夹，在其中新建会话");
+        var line = Ui.H(10, plus, Ui.VFill(1, Ui.Text(L("打开其他文件夹…"), 13, FontWeight.SemiBold, "Accent").Trim(), Ui.Text(sub, 11, color: "Text2").Trim()).Shrink(), new Spacer());
+        Tap? row = null;
+        row = new Tap(line.Pad(8, 5), () =>
+        {
+            if (targets.Count == 1) Browse(targets[0]);
+            else if (targets.Count > 1)
+            {
+                var menu = new MenuFlyout { Placement = Avalonia.Controls.PlacementMode.BottomEdgeAlignedLeft };
+                foreach (var source in targets) menu.Items.Add(Ui.Item(Lang.Machine(source.Name), () => Browse(source)));
+                menu.ShowAt(row!);
+            }
+        }, 6) { BorderThickness = new Thickness(1) }.Keys("Transparent", "Fill05");
+        row.BorderBrush = Brushes.Transparent;
+        row.Cursor = Cursor.Default;
+        if (targets.Count == 0) row.Opacity = 0.45;
+        return row;
+    }
+
+    /// 本机：系统的选文件夹框；别的电脑：Kiteline 自己的浏览窗口。都从常用项目所在的文件夹开始
+    async void Browse(SourceInfo source)
+    {
+        var start = FolderPicker.UsualStart(projects.Where(p => p.SourceId == source.Id).Select(p => p.Cwd));
+        string? picked;
+        // 离屏自测没有系统的选文件夹框：本机也用自己的浏览窗口
+        if (source.Kind == "local" && !Program.Headless)
+        {
+            var from = start.Length > 0 ? await window.StorageProvider.TryGetFolderFromPathAsync(start) : null;
+            var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = L("选择要在其中新建会话的文件夹"), AllowMultiple = false, SuggestedStartLocation = from,
+            });
+            picked = folders.FirstOrDefault()?.TryGetLocalPath();
+        }
+        else picked = await FolderPicker.Pick(source.Id, Lang.Machine(source.Name), start);
+        if (picked is not { Length: > 0 }) return;
+        if (picked.Length > 3) picked = picked.TrimEnd('/', '\\');
+        Adopt(picked, source);
+    }
+
+    /// 选好的文件夹放进列表最前面并选中（已经在列表里的直接选中）；筛选和它对不上的放开，免得看不见
+    void Adopt(string path, SourceInfo source)
+    {
+        var id = $"{source.Id}\n{path}";
+        if (projects.All(p => p.Id != id))
+            projects.Insert(0, new Project(source.Id, Lang.Machine(source.Name), source.Kind ?? "local", path, System.IO.Path.GetFileName(path.TrimEnd('/', '\\')) is { Length: > 0 } name ? name : path,
+                null, 0, false, 0));
+        var project = projects.First(p => p.Id == id);
+        search.Text = "";
+        if (sourceFilter.Length > 0 && sourceFilter != project.SourceId) sourceFilter = "";
+        if (projectFilter.Length > 0 && projectFilter != project.Name) projectFilter = "";
+        selection = id;
+        ClearMessage();
+        DrawRows();
+        Update();
+        input.Focus();
+        if (selectedRow is { } row) Dispatcher.UIThread.Post(() => row.BringIntoView(), DispatcherPriority.Background);
     }
 
     static Control Tag(string text, string color, string fill) =>

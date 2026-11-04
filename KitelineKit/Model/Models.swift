@@ -58,6 +58,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     var stage: StageInfo?
     /// 目标（/goal，见 GoalViews.swift）：agent 围着它跨多轮一直做；没设目标、老版本电脑端没有
     var goal: GoalInfo?
+    /// 远端电脑上、在 VS Code 里跑的 Claude Code，能转到后台运行（会话页提示「支持后台托管」，见 HostedViews.swift）
+    var hostable: Bool
 
     var id: String { key }
     var isWaiting: Bool { activity == "waiting" }
@@ -76,7 +78,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case key, title, name, sourceId, sourceName, sourceKind, activity, activityText, blocking, reason, preview
         case pendingTool, canReply, cwd, updatedAt, startedAt, usage, error, effort, ultracode, permissionMode, cwdShort, subagents, terminals
-        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal
+        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable
     }
 
     init(from decoder: Decoder) throws {
@@ -115,6 +117,18 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         worktree = ((try? c.decodeIfPresent(String.self, forKey: .worktree)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         stage = ((try? c.decodeIfPresent(StageInfo.self, forKey: .stage)) ?? nil).flatMap { $0.valid ? $0 : nil }
         goal = ((try? c.decodeIfPresent(GoalInfo.self, forKey: .goal)) ?? nil).flatMap { $0.valid ? $0 : nil }
+        hostable = ((try? c.decodeIfPresent(Bool.self, forKey: .hostable)) ?? nil) ?? false
+    }
+}
+
+/// 电脑上后台运行 Claude Code 的提示设置：tipOff =「支持后台托管」的提示选了不再提示（开关按设备，在 SourceInfo.hosted）
+struct HostedSetting: Decodable, Hashable {
+    var tipOff = false
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.fields()
+        tipOff = c.one("tipOff") ?? false
     }
 }
 
@@ -132,6 +146,8 @@ struct SourceInfo: Decodable, Hashable {
     var kind: String?
     var online: Bool
     var status: String?
+    /// 这台能后台运行 Claude Code 时才有：on / off（按设备开，见 HostedViews.swift）；本机、Windows、老版本电脑端没有
+    var hosted: String?
 }
 
 struct Me: Decodable, Hashable {
@@ -165,6 +181,8 @@ struct StatePayload: Decodable {
     var faces: FacesPayload?
     /// 这版电脑端能做的：files = 收手机发来的文件（PDF、Excel……）、按路径取回文件；旧版不带
     var features: [String]?
+    /// 远端项目后台运行的设置（features 里有 hostedSetup 才带）
+    var hosted: HostedSetting?
 }
 
 /// 电脑报来的「要人处理」：kind = dialog（VS Code 的对话框，title 是哪个窗口）/ link（电脑到某台机器的连接，title 是机器名）

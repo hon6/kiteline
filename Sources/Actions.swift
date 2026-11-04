@@ -13,6 +13,11 @@ enum Actions {
     static func jumpToWorkspace(record: SessionRecord, config: AppConfig) {
         let cwd = record.snapshot.cwd
         let source = config.sources.first(where: { $0.id == record.sourceId })
+        // Kiteline 在后台运行的会话：转到 VS Code 里接着做（见 Hosted.handOver）
+        if record.snapshot.hosted != nil, let source {
+            Hosted.handOver(record: record, source: source)
+            return
+        }
         let editor = Delivery.Editor.running()
         let scheme = editor?.scheme ?? "vscode"
         // 优先聚焦已经打开的那个窗口（主机写法、工作区根目录都以 VS Code 自己记录的为准）

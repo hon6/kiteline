@@ -25,6 +25,8 @@ struct ChatView: View {
     /// 会话菜单里点了「拉群协作」
     @State private var showGroup = false
     @State private var showTodos = false
+    /// 点了「当前会话支持后台托管」的提示：后台运行的设置面板（见 HostedViews.swift）
+    @State private var showHosted = false
     @State private var confirmCompact = false
     @State private var confirmStop = false
     @State private var confirmClose = false
@@ -33,6 +35,8 @@ struct ChatView: View {
     @State private var showMode = false
     @State private var showModel = false
     @State private var showAgents = false
+    /// 右上角悬浮按钮打开的「执行过程」（agent → 轮次 → 步骤，见 TracePanel.swift）：宽时占右半边，窄时半屏升起
+    @State private var showTrace = false
     @State private var showNewTask = false
     /// 往上翻着看的时候来了新消息：底部冒一个「新消息 ↓」（同网页版、微信）
     @State private var newPill = false
@@ -245,6 +249,9 @@ struct ChatView: View {
             .overlay(alignment: .top) {
                 VStack(spacing: 6) {
                     NetStrip()
+                    SessionReader(slot: slot) { session in
+                        if let session { HostedTip(session: session) { showHosted = true } }
+                    }
                     if let since = chat.newSince, !catchupDismissed {
                         CatchupPill(chat: chat, since: since, speaker: slot.speaker, expire: {
                             withAnimation(.easeOut(duration: 0.3)) { catchupDismissed = true }
@@ -313,11 +320,14 @@ struct ChatView: View {
                 if let fold, !fold.horizontal { SessionReader(slot: slot) { foldable(session: $0, chat: chat) } }
             }
         }
+        // 右上角悬浮：打开 / 收起执行过程（在忙时按钮上一个呼吸的小点）
+        .overlay(alignment: .topTrailing) { if TraceFeature.enabled { TraceButton(isOn: $showTrace, running: activity == "busy") } }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chatHeight = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { homeBottom = $0 }
         .environment(\.homeBottom, homeBottom)
         .readFold($fold)
         .readSideBars($sideBars)
+        .modifier(TraceSplit(key: key, isOn: $showTrace && TraceFeature.enabled))
         #if os(iOS)
         .overlay { if voice.active { VoiceOverlay(voice: voice) } }
         #endif
@@ -413,6 +423,7 @@ struct ChatView: View {
                 }
             }
         }
+        .sheetPanel(isPresented: $showHosted) { HostedSetupSheet(sourceId: slot.info?.sourceId, key: key) }
         .sheetPanel(isPresented: $showTodos) {
             FitSheet(title: L("任务清单")) { TodoCard(todos: chat.todos).frame(maxWidth: .infinity) }
         }
@@ -462,6 +473,7 @@ struct ChatView: View {
             if Snapshot.sheet == "mode" { try? await Task.sleep(for: .seconds(2)); showMode = true }
             if Snapshot.sheet == "model" { try? await Task.sleep(for: .seconds(2)); showModel = true }
             if Snapshot.sheet == "agents" { try? await Task.sleep(for: .seconds(2)); showAgents = true }
+            if Snapshot.sheet == "tracesplit" { try? await Task.sleep(for: .seconds(2)); showTrace = true }
             if Snapshot.sheet == "goal" { try? await Task.sleep(for: .seconds(2)); model.chat(key).goalSheet = true }
             if let text = Snapshot.send {
                 try? await Task.sleep(for: .seconds(3))

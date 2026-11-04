@@ -153,7 +153,7 @@ class IdleClose:
 
     def _due(self, record, now):
         snap = record.snap
-        can_reply = not snap.get("readOnly") and (is_vscode(snap) or bool(snap.get("tmuxPane")) or record.kind == "local"
+        can_reply = not snap.get("readOnly") and (is_vscode(snap) or bool(snap.get("tmuxPane") or snap.get("hosted")) or record.kind == "local"
                                                   or delivery.via_agent(snap))
         if "close" not in caps_payload(snap) or not can_reply or record.activity == "busy":
             return False

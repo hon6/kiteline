@@ -36,13 +36,14 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.25"
+VERSION = "1.0.26"
 
 
 class App:
     def __init__(self):
         self.version = VERSION
         self.cfg = config.Config()
+        HOSTED_SETTING[0] = lambda source_id: any(s.get("id") == source_id and s.get("hostedOn") for s in self.cfg.sources)
         self.host = tls.host_name()
         self.devices = DeviceStore()
         self.pairing = Pairing()
@@ -180,6 +181,8 @@ class App:
                           "name": entry.get("name") or entry.get("sshHost") or "本机", "enabled": enabled,
                           "online": bool(source and source.live),
                           "status": (source.short_label() if source else "未连接") if enabled else "已停用"})
+            if source is not None and "hosted" in source.features and entry.get("kind") == "ssh":
+                items[-1]["hosted"] = "on" if entry.get("hostedOn") else "off"   # 能后台运行 Claude Code 才带（按设备开）
         added = {(entry.get("sshHost") or "").lower() for entry in self.cfg.sources}
         suggestions = [h for h in remotessh.recent_hosts() if h["host"].lower() not in added]
         return {"sources": items, "suggestions": suggestions}
@@ -450,6 +453,30 @@ class App:
         self.cfg.update(change)
         self.server.publish_state()
 
+    @staticmethod
+    def hosted_probe(sources):
+        return hosted_probe(sources)
+
+    @staticmethod
+    def move_to_background(record, source, siblings):
+        return move_to_background(record, source, siblings)
+
+    def set_hosted(self, source_id=None, on=None, tip_off=None):
+        """开 / 关某台的后台运行、「支持后台运行」的提示不再提示（同 Mac 版 Hosted.update）。只改开关，不重连这台"""
+        def change(data):
+            if source_id and on is not None:
+                for entry in data["sources"]:
+                    if entry.get("id") == source_id:
+                        entry["hostedOn"] = bool(on)
+            if tip_off is not None:
+                data["mobile"]["hostedTipOff"] = bool(tip_off)
+        self.cfg.update(change)
+        if source_id and on is not None:
+            log.write("%s：后台运行 Claude Code %s" % (source_id, "已开启（检测过出口、用户确认）" if on else "已关闭"))
+        if tip_off:
+            log.write("「支持后台运行 Claude Code」的提示：用户选了不再提示")
+        self.server.publish_state()
+
     def _sessions_lost(self, records):
         """会话从列表里消失（关掉、结束了）：一分钟后还没回来、它那台机器也还连着，就取消标记。
         等一会儿是怕 VS Code 重新加载窗口这类短暂消失又回来的，把标记弄丢"""
@@ -556,7 +583,9 @@ class App:
         payload["alerts"] = self.alerts.payload()        # 要人处理的状况（见 alerts.py）
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share"]
+        # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup"]
+        payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff"))}
         return payload
 
     def profile_payload(self):
@@ -925,7 +954,9 @@ class App:
         prompt = delivery.compose(body.get("text") or "", paths, attachments)
         submit = bool(prompt) and body.get("submit", self.cfg.mobile["submitOnSend"])
         log.write("手机恢复会话 %s:%s：%s" % (source.name, session_id, (body.get("text") or "")[:60]))
-        return Response.json(launch_session(cwd, prompt, submit, session_id, source.kind, source.name, source=source, notify=self._launch_failed))
+        # editor：客户端「在 VS Code 中恢复」按钮，远端项目也开 VS Code（不走后台托管）
+        return Response.json(launch_session(cwd, prompt, submit, session_id, source.kind, source.name, source=source, notify=self._launch_failed,
+                                            in_editor=body.get("editor") is True))
 
     def _launch_failed(self, message):
         """新任务 / 恢复会话先回了「将自动提交」，后来没提交成功：推一条提醒（同 Mac 版 launchReplies 的 finished）"""
@@ -937,6 +968,8 @@ class App:
         source = self.store.source(record.source_id) if record else None
         if not record or not source:
             return False, "会话不存在，或其所在机器离线"
+        if record.snap.get("hosted"):
+            return hand_over(record, source)
         return open_in_editor(record, source)
 
     # MARK: Bark
@@ -1146,10 +1179,166 @@ def _show_editor(folders):
             return
 
 
-def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="本机", started=None, source=None, notify=None, done=None):
+# 某台远端电脑开没开后台运行 Claude Code（来源的 hostedOn，按设备）：App 起来时接上（launch_session 是模块级的）
+HOSTED_SETTING = [lambda source_id: False]
+
+
+def hand_over(record, source):
+    """「在 VS Code 中打开」Kiteline 在后台运行的会话（同 Mac 版 Hosted.handOver）：同一段对话不能两个进程一起写，
+    Claude 空闲时先结束后台这份、再在 VS Code 里接着这段对话；正在工作、等确认时不打断。返回 (成功, 说明)"""
+    if record.activity in ("busy", "waiting"):
+        return False, "Claude 正在处理这个会话。为免打断，请在这一轮完成后再点击「在 VS Code 中打开」，届时会转到 VS Code 中继续。"
+    log.write("后台会话 %s 转到 VS Code：先结束后台运行的 claude" % record.snap.get("name"))
+    try:
+        # ifIdle：快照里的状态晚一两秒，watcher 再看一眼界面，Claude 刚开始干活的也不停
+        reply = source.request({"cmd": "hosted_stop", "sessionId": record.snap.get("sessionId"), "ifIdle": True}, timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    if reply.get("busy"):
+        return False, "Claude 正在处理这个会话。为免打断，请在这一轮完成后再点击「在 VS Code 中打开」，届时会转到 VS Code 中继续。"
+    if not reply.get("stopped"):
+        return False, "后台会话没有按时结束"
+    result = launch_session(record.snap.get("cwd") or "", "", False, record.snap.get("sessionId"), record.kind, record.source_name,
+                            source=source, in_editor=True)
+    return bool(result.get("ok")), result.get("message") or ""
+
+
+def hosted_probe(sources):
+    """出口检测（同 Mac 版 Hosted.probe）：每台远端电脑照后台运行时的那套网络设置访问查 IP 的公共网址（不连 Claude），
+    回 [{id, name, source, settings, egress, error}]；离线、不支持的也列上"""
+    env = remotessh.claude_environment()
+    results = [None] * len(sources)
+
+    def one(index, source):
+        item = {"id": source.id, "name": source.name}
+        if source.state != "live":
+            item["error"] = "该机器当前离线，未检测"
+        elif "hosted" not in source.features:
+            item["error"] = "这台电脑暂不支持在后台运行 Claude Code"
+        else:
+            try:
+                reply = source.request({"cmd": "hosted_probe", "netEnv": env}, timeout=90)
+                item.update({k: reply.get(k) for k in ("source", "settings", "egress")})
+            except Exception as exc:  # noqa: BLE001
+                item["error"] = str(exc).replace("HOSTED_NETWORK：", "").replace("HOSTED_UNSUPPORTED：", "")
+        results[index] = item
+
+    workers = [threading.Thread(target=one, args=(i, s), name="hosted-probe", daemon=True) for i, s in enumerate(sources)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(100)
+    out = [item for item in results if item]
+    log.write("出口检测：" + "，".join("%s=%s" % (i["name"], (i.get("egress") or {}).get("ip") or i.get("error") or "未查到") for i in out))
+    return out
+
+
+def move_to_background(record, source, siblings):
+    """把 VS Code 里正开着的会话转到后台运行（同 Mac 版 Hosted.moveToBackground）：先请 watcher 接手（照这个会话自己的网络设置、
+    等它退出），再关掉 VS Code 里的标签，watcher 等那边的 claude 退出后在后台接着这段对话。返回 (成功, 说明)"""
+    if record.activity in ("busy", "waiting"):
+        return False, "Claude 正在处理这个会话。为免打断，请在这一轮完成后再转到后台运行"
+    snap = record.snap
+    log.write("会话「%s」转到后台运行：先关掉 VS Code 中的标签，watcher 接着这段对话" % snap.get("name"))
+    box = {}
+
+    def start():
+        try:
+            box["reply"] = source.request({"cmd": "hosted_start", "cwd": snap.get("cwd") or "", "prompt": "", "submit": False,
+                                           "sessionId": snap.get("sessionId"), "takeOver": True,
+                                           "netEnv": remotessh.claude_environment()}, timeout=90)
+        except Exception as exc:  # noqa: BLE001
+            box["error"] = str(exc)
+    worker = threading.Thread(target=start, name="hosted-move", daemon=True)
+    worker.start()
+    time.sleep(1.5)   # 请求先到（watcher 先记下这个会话的网络设置），再关 VS Code 里的标签；没关掉的话 watcher 等 25 秒后报「没有关闭」
+    if os.environ.get("CCPULSE_TEST_NO_EDITOR") != "1":   # 测试实例不碰用户屏幕上的 VS Code：由测试脚本自己结束那边的会话
+        outcome = delivery.close(record, source, siblings)
+        if not outcome.ok:
+            log.write("转到后台运行：关闭 VS Code 中的标签未成功：%s" % outcome["message"])
+    worker.join(95)
+    if "reply" in box:
+        return True, "已转到后台运行"
+    error = str(box.get("error") or "超时").replace("HOSTED_NETWORK：", "")
+    log.write("转到后台运行未成功：%s" % error)
+    return False, "未能转到后台运行：%s" % error
+
+
+def launch_hosted(cwd, prompt, submit, session_id, source):
+    """远端项目不开 VS Code：请那台电脑上的 watcher 在后台起 claude（watcher/kiteline-watch.py 的 hosted_start，同 Mac 版 Hosted.start）。
+    返回 (结果, None) 或 (None, 起不来的原因)"""
+    payload = {"cmd": "hosted_start", "cwd": cwd, "prompt": prompt, "submit": bool(submit and prompt),
+               "netEnv": remotessh.claude_environment()}
+    if session_id:
+        payload["sessionId"] = session_id
+    log.write("新会话：在 %s 后台运行 Claude Code（%s）%s" % (getattr(source, "name", ""), cwd, "，恢复 %s" % session_id if session_id else ""))
+    try:
+        reply = source.request(payload, timeout=70)
+    except Exception as exc:  # noqa: BLE001
+        log.write("新会话：后台启动失败（%s），改在 VS Code 中打开" % exc)
+        return None, str(exc)
+    submitted = bool(reply.get("submitted"))
+    if not prompt:
+        message = "已在后台恢复对话" if session_id else "已在后台新建会话"
+    elif submitted:
+        message = "已在后台恢复对话并提交" if session_id else "已在后台新建会话并提交"
+    else:
+        message = "已在后台恢复对话，内容已填入输入框" if session_id else "已在后台新建会话，内容已填入输入框"
+    log.write("新会话：后台会话 %s 已就绪（%s）" % (reply.get("hosted"), reply.get("sessionId")))
+    return {"ok": True, "submitted": submitted, "openedWindow": False, "message": message, "error": "", "cwd": cwd,
+            "sessionId": reply.get("sessionId")}, None
+
+
+def hosted_note(reason):
+    """退回 VS Code 时要不要告诉用户为什么：不支持、没装 claude、旧 watcher 的不说（本来就该开 VS Code）"""
+    reason = str(reason or "")
+    # 网络检查没过（拿不到 VS Code 那边的网络设置、起来后核对不一致）：要告诉用户，出口不能悄悄换
+    if reason.startswith("HOSTED_NETWORK："):
+        return "%s，已改在 VS Code 中打开" % reason[len("HOSTED_NETWORK："):].split("\n")[0]
+    if reason.startswith("HOSTED_") or "未知请求" in reason or "离线" in reason or "未连接" in reason:
+        return None
+    return "后台启动未成功：%s，已改在 VS Code 中打开" % reason.split("\n")[0]
+
+
+def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="本机", started=None, source=None, notify=None, done=None,
+                   in_editor=False):
     """在项目的 VS Code 窗口里新开（或恢复）一个 Claude Code 会话，内容预填进输入框；submit 时再按回车。
     先回一个结果（新标签加载要十几秒，手机的请求等不了），提交在后台做；done(提交上了没有) 在后台做完时调（同 Mac 版 NewSession 的 completion）。
-    远端（Remote-SSH）项目用 vscode-remote 地址开窗口（VS Code 没开着也行），开之前先把 Remote-SSH 准备好（见 remotessh）"""
+    远端（Remote-SSH）项目用 vscode-remote 地址开窗口（VS Code 没开着也行），开之前先把 Remote-SSH 准备好（见 remotessh）。
+    远端项目默认先在那台电脑上后台运行 Claude Code、不开 VS Code（launch_hosted），起不来再开 VS Code；in_editor = 一定开 VS Code"""
+    if not in_editor and source_kind == "ssh" and source is not None and not delivery.DRY_RUN and HOSTED_SETTING[0](source.id):
+        box = {}
+        worker = threading.Thread(target=lambda: box.update(zip(("result", "reason"), launch_hosted(cwd, prompt, submit, session_id, source))),
+                                  name="hosted-start", daemon=True)
+        worker.start()
+        worker.join(8)   # 一般两三秒就起来；手机那边的请求只等 12 秒
+        if not worker.is_alive():
+            if box.get("result"):
+                if done:
+                    done(box["result"]["submitted"])
+                return box["result"]
+            if os.environ.get("CCPULSE_TEST_NO_EDITOR") == "1":   # 测试实例：不退回 VS Code（不然会在用户屏幕上开窗口）
+                message = "（测试）后台启动失败：%s" % box.get("reason")
+                return {"ok": False, "submitted": False, "openedWindow": False, "message": message, "error": message, "cwd": cwd}
+            result = launch_session(cwd, prompt, submit, session_id, source_kind, source_name, started, source, notify, done, in_editor=True)
+            note = hosted_note(box.get("reason"))
+            if note:
+                result["message"] = (result.get("message") or "") + "（%s）" % note
+            return result
+
+        def finish():
+            # 还没起来：先回了「将自动提交」，等结果；起不来就改开 VS Code（结果靠 notify / done 交代）
+            worker.join()
+            if box.get("result"):
+                if done:
+                    done(box["result"]["submitted"])
+                return
+            result = launch_session(cwd, prompt, submit, session_id, source_kind, source_name, started, source, notify, done, in_editor=True)
+            if not result.get("ok") and notify and submit and prompt:
+                notify(result.get("message") or "")
+        threading.Thread(target=finish, name="hosted-wait", daemon=True).start()
+        return {"ok": True, "submitted": bool(submit and prompt), "openedWindow": False, "error": "", "cwd": cwd,
+                "message": "正在后台启动 Claude Code，启动后将自动提交" if submit and prompt else "正在后台启动 Claude Code"}
     if delivery.DRY_RUN:
         what = "恢复会话 %s" % session_id if session_id else "新会话"
         log.write("[dry-run] %s %s:%s（submit=%s）：%s" % (what, source_name, cwd, "true" if submit else "false", prompt[:120]))

@@ -471,7 +471,7 @@ final class MobileServer {
 
     /// 只有内容（对话、文件、图片、差异……）、个头又大的接口：英文设备也原样回，不逐字段查表
     static let contentOnly: Set<String> = ["/api/history", "/api/media", "/api/file", "/api/files", "/api/git/diff", "/api/digest/media",
-                                           "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/tts", "/api/peers", "/api/download",
+                                           "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/trace", "/api/tts", "/api/peers", "/api/download",
                                            "/api/groups/messages", "/api/groups/media"]
 
     /// 每台设备的界面语言（锁屏推送按它发）：存起来，电脑重启后第一条推送也对
@@ -579,6 +579,9 @@ final class MobileServer {
                 self.history(request, respond: respond)
             case ("GET", "/api/agents"):
                 self.forwardAny(request, ["cmd": "agents"], respond: respond)
+            case ("GET", "/api/trace"):
+                // 执行过程面板：agent → 轮次 → 步骤（expand 是要带上步骤的轮次，「agent:轮次」逗号分隔）
+                self.forwardAny(request, ["cmd": "trace", "expand": request.query["expand"] ?? "", "rev": request.query["rev"] ?? ""], respond: respond)
             case ("GET", "/api/peers"):
                 // 会话之间的消息往来（默认最近一天）：刚连上、协作图用；之后的走实时事件 peers
                 let since = Double(request.query["since"] ?? "") ?? (Date().timeIntervalSince1970 * 1000 - 86_400_000)
@@ -594,6 +597,25 @@ final class MobileServer {
                 self.key(request, respond: respond)
             case ("POST", "/api/close"):
                 self.close(request, respond: respond)
+            case ("POST", "/api/hosted/probe"):
+                let sourceId = request.jsonBody?["sourceId"] as? String
+                DispatchQueue.main.async { Hosted.probe(sourceId: sourceId) { respond(.json(["ok": true, "machines": $0])) } }
+            case ("POST", "/api/hosted/settings"):
+                let body = request.jsonBody ?? [:]
+                DispatchQueue.main.async {
+                    Hosted.update(sourceId: body["sourceId"] as? String, on: body["on"] as? Bool, tipOff: body["tipOff"] as? Bool)
+                    respond(.json(["ok": true]))
+                }
+            case ("POST", "/api/hosted/move"):
+                if let (record, _) = self.resolve(request) {
+                    DispatchQueue.main.async {
+                        Hosted.moveToBackground(record: record) { outcome in
+                            respond(.json(["ok": outcome.ok, "message": outcome.message], status: outcome.ok ? 200 : 409))
+                        }
+                    }
+                } else {
+                    respond(.error("会话不存在或已结束", status: 404))
+                }
             case ("POST", "/api/answer"):
                 self.answer(request, respond: respond)
             case ("POST", "/api/voice"):
@@ -878,6 +900,8 @@ final class MobileServer {
                 self.capGuard(request, respond: respond) { self.resume(request, respond: respond) }
             case ("GET", "/api/projects"):
                 Projects.collect(detail: request.query["detail"] == "1") { respond(.json($0)) }
+            case ("GET", "/api/dirs"), ("POST", "/api/dirs"):
+                self.dirs(request, respond: respond)
             case ("POST", "/api/new-session"):
                 self.capGuard(request, respond: respond) { self.newSession(request, respond: respond) }
             case ("POST", "/api/quick-replies"):
@@ -1640,8 +1664,9 @@ final class MobileServer {
                 let submit = !prompt.isEmpty && (body["submit"] as? Bool ?? self.config.submitOnSend)
                 Log.write("手机恢复会话 \(sourceConfig.displayName):\(target.sessionId)：\(text.prefix(60))")
                 let reply = self.launchReplies(respond, cwd: cwd, branch: nil)
+                // editor：「在 VS Code 中恢复」按钮（Windows / Linux 客户端），远端项目也开 VS Code、不走后台托管
                 NewSession.start(source: sourceConfig, cwd: cwd, prompt: prompt, submit: submit, sessionId: target.sessionId,
-                                 accepted: reply.accepted, completion: reply.finished)
+                                 inEditor: body["editor"] as? Bool == true, accepted: reply.accepted, completion: reply.finished)
             }
         }
     }
@@ -1667,6 +1692,29 @@ final class MobileServer {
             self.notifyRoute(kind: "error", title: "新任务未能自动提交", body: outcome.message, route: "")
         }
         return (accepted, finished)
+    }
+
+    /// 新任务「打开其他文件夹」：列某台电脑上一个目录里的子文件夹（不限项目目录，空 = 主目录）；POST 带 mkdir = 先在里面新建再列
+    private func dirs(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        let body = request.jsonBody ?? [:]
+        let sourceId = request.query["sourceId"] ?? body["sourceId"] as? String ?? ""
+        guard let connection = AppState.shared.source(withId: sourceId), connection.state.isLive else {
+            respond(.error("该机器当前离线", status: 404)); return
+        }
+        var payload: [String: Any] = ["cmd": "dirs", "path": request.query["path"] ?? body["path"] as? String ?? "",
+                                      "hidden": request.query["hidden"] == "1" || body["hidden"] as? Bool == true]
+        if request.method == "POST", let name = body["mkdir"] as? String { payload["mkdir"] = name }
+        connection.request(payload, timeout: 20) { result in
+            switch result {
+            case .success(var response):
+                response.removeValue(forKey: "event")
+                response.removeValue(forKey: "id")
+                respond(.json(response))
+            case .failure(let error):
+                // 旧版 watcher 不认 dirs
+                respond(.error(error.description.contains("未知请求") ? "该电脑上的 Kiteline 组件版本较旧，请更新后重试" : error.description, status: 400))
+            }
+        }
     }
 
     /// 新任务：在某个来源的某个目录里开一个新的 Claude Code 会话

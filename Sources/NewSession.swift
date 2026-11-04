@@ -24,9 +24,33 @@ enum NewSession {
     /// 要自动提交时，得等新标签加载好、内容填进输入框才能按发送（最多等 45 秒）：给了 accepted 的，标签开出来就先回一次 accepted
     /// （手机那边的请求只等 12 秒），提交的结果再走 completion；没给的照旧只在最后回 completion
     /// returnFocus：做完把前台还给用户原来在用的程序（开窗口、开标签都会让 VS Code 跳到前台；新标签加载完它还会再抢一次，多守 8 秒）
+    /// inEditor：一定在 VS Code 里开（不走后台托管，见 Hosted）
     static func start(source: SourceConfig, cwd: String, prompt: String, submit: Bool, sessionId: String? = nil,
-                      returnFocus: Bool = true,
+                      returnFocus: Bool = true, inEditor: Bool = false,
                       accepted: ((Outcome) -> Void)? = nil, completion reply: @escaping (Outcome) -> Void) {
+        // 远端项目默认不开 VS Code：在那台电脑上后台运行 Claude Code；起不来再照旧开 VS Code
+        if !inEditor, Hosted.wanted(source) {
+            // 先回过手机的，退回 VS Code 时就别再回第二次
+            var early = accepted
+            let first: ((Outcome) -> Void)? = accepted == nil ? nil : { outcome in early?(outcome); early = nil }
+            Hosted.start(source: source, cwd: cwd, prompt: prompt, submit: submit, sessionId: sessionId, accepted: first) { result in
+                switch result {
+                case .success(let outcome):
+                    reply(outcome)
+                case .failure(let error) where ProcessInfo.processInfo.environment["CCPULSE_TEST_NO_EDITOR"] == "1":
+                    // 测试实例：不退回 VS Code（不然会在用户屏幕上开窗口、抢前台）
+                    reply(Outcome(ok: false, submitted: false, openedWindow: false, message: "（测试）后台启动失败：\(error.description)"))
+                case .failure(let error):
+                    start(source: source, cwd: cwd, prompt: prompt, submit: submit, sessionId: sessionId, returnFocus: returnFocus,
+                          inEditor: true, accepted: early) { outcome in
+                        var outcome = outcome
+                        if let note = Hosted.fallbackNote(error) { outcome.message += "（\(note)）" }
+                        reply(outcome)
+                    }
+                }
+            }
+            return
+        }
         // 远端项目还没在 VS Code 里开着：新开的窗口要靠 Remote-SSH 扩展连过去，先确认装好（没装就装上，VS Code 没开着也能装）
         let scheme = Delivery.Editor.running()?.scheme ?? "vscode"
         guard source.kind == .ssh, !Delivery.dryRun, let host = source.sshHost, !host.isEmpty,

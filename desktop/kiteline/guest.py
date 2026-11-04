@@ -83,7 +83,9 @@ def snapshot(share, session, items, more):
             if not name or name == "TodoWrite":
                 continue
             brief = (item.get("brief") or "").replace("\n", " ")
-            row = {"r": "s", "x": _clip("%s · %s" % (name, brief) if brief else name, 120)}
+            # 摘要多半已经以工具名开头（「Bash: npm test」），就不再重复写一遍名字
+            step = brief if brief.startswith((name + ":", name + " ")) else ("%s · %s" % (name, brief) if brief else name)
+            row = {"r": "s", "x": _clip(step, 120)}
         elif kind == "agent_page":
             row = {"r": "p", "x": _clip(item.get("title") or "", 80)}
         elif kind == "agent_image":

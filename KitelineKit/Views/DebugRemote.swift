@@ -23,10 +23,26 @@ import UIKit
 ///   inboundsend session|project <补充说明> = 在发送面板里填好说明、点「发送」（发给选中的会话 / 第一个项目新建会话）；
 ///   openfile / sharefile <会话 key> <路径> = 当作在消息里点了这个文件路径 / 长按「转发文件」（见 FileOpener；InboundShareHost 接）
 ///   route <IP>...（以数字开头或带冒号）= 每个地址走哪张网卡、算不算直连 / 走隧道（记进 remote-notes.txt）；free on|off = 模拟免费版开 / 关
+///   tap <按钮上的字> = 点一下这个按钮（同 VoiceOver 双击，走无障碍的「激活」；先找字完全一样的，没有再找以它开头的）；
+///   labels = 屏幕上能点的东西的字记进 remote-notes.txt（tap 找不到时看看叫什么）；type <文字> = 往第一个输入框里打字（筛选框、搜索框）
+private extension UIView {
+    func superview<T: UIView>(of type: T.Type) -> T? {
+        var view = superview
+        while let current = view {
+            if let match = current as? T { return match }
+            view = current.superview
+        }
+        return nil
+    }
+}
+
 enum DebugRemote {
     static let actions = ["sidebar.hide", "sidebar.show", "rotate.landscape", "rotate.portrait", "dump", "cmd"]
     /// live 命令：照电脑推来的内容在本机开 / 更新 / 结束实时活动（看锁屏卡片和灵动岛的排版）
     private static func live(_ arg: String) async {
+        #if targetEnvironment(macCatalyst)
+        note("截图版（Mac Catalyst）没有实时活动")   // ActivityKit 在 Mac Catalyst 上不可用
+        #else
         if arg == "end" {
             for activity in Activity<KitelineLiveAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
             return
@@ -50,6 +66,83 @@ enum DebugRemote {
                 note("live 开不了：\(error)，系统允许实时活动：\(ActivityAuthorizationInfo().areActivitiesEnabled)")
             }
         }
+        #endif
+    }
+
+    /// SwiftUI 只在开着辅助功能时才建无障碍节点：照 XCTest 的做法在本进程里打开（第一次要等一会儿节点才建好）
+    @MainActor private static var accessibilityOn = false
+    @MainActor private static func withAccessibility(_ body: @escaping @MainActor () -> Void) {
+        guard !accessibilityOn else { body(); return }
+        accessibilityOn = true
+        if let lib = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW) {
+            typealias Setter = @convention(c) (Int32) -> Void
+            for name in ["_AXSSetAutomationEnabled", "_AXSApplicationAccessibilitySetEnabled"] {
+                if let symbol = dlsym(lib, name) { unsafeBitCast(symbol, to: Setter.self)(1) }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { body() }
+    }
+
+    /// 各窗口里的无障碍元素（SwiftUI 的按钮、行、工具栏按钮都在里面），最上面的窗口在前
+    @MainActor private static func accessibilityNodes() -> [NSObject] {
+        var out: [NSObject] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ node: NSObject, _ depth: Int) {
+            guard depth < 300, seen.insert(ObjectIdentifier(node)).inserted else { return }
+            if node.accessibilityLabel?.isEmpty == false { out.append(node) }
+            var kids = (node.accessibilityElements as? [NSObject]) ?? []
+            if kids.isEmpty {
+                let count = node.accessibilityElementCount()
+                if count != NSNotFound, count > 0 { kids = (0..<count).compactMap { node.accessibilityElement(at: $0) as? NSObject } }
+            }
+            if let view = node as? UIView { kids += view.subviews.filter { !$0.isHidden && $0.alpha > 0.01 } }
+            for kid in kids { walk(kid, depth + 1) }
+        }
+        for root in roots() { walk(root, 0) }
+        return out
+    }
+
+    /// 从上往下找东西的起点：各窗口里弹出的页面（新任务这类 sheet，最上面那层在前），再是窗口本身
+    @MainActor private static func roots() -> [UIView] {
+        var out: [UIView] = []
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).filter { !$0.isHidden }
+        for window in windows.reversed() {
+            var top = window.rootViewController
+            var stack: [UIViewController] = []
+            while let next = top?.presentedViewController { stack.append(next); top = next }
+            out += stack.reversed().compactMap(\.view)
+            out.append(window)
+        }
+        return out
+    }
+
+    @MainActor private static func tap(_ label: String) {
+        let nodes = accessibilityNodes()
+        guard let hit = nodes.first(where: { $0.accessibilityLabel == label }) ?? nodes.first(where: { $0.accessibilityLabel?.hasPrefix(label) == true }) else {
+            note("tap \(label)：没找到")
+            return
+        }
+        var done = hit.accessibilityActivate()
+        if !done, let control = hit as? UIControl {
+            control.sendActions(for: .touchUpInside)
+            done = true
+        }
+        // 系统菜单（Menu）里的项是列表单元格：照系统选中那一格的路子交给列表的代理
+        var view = hit as? UIView
+        while !done, let current = view {
+            if let cell = current as? UICollectionViewCell, let list = cell.superview(of: UICollectionView.self), let index = list.indexPath(for: cell) {
+                if list.delegate?.collectionView?(list, shouldSelectItemAt: index) != false {
+                    list.selectItem(at: index, animated: false, scrollPosition: [])
+                    list.delegate?.collectionView?(list, didSelectItemAt: index)
+                    done = true
+                }
+            }
+            view = current.superview
+        }
+        var chain: [String] = []
+        var up = hit as? UIView
+        while let current = up, chain.count < 12 { chain.append(String(describing: type(of: current)) + (current.gestureRecognizers?.isEmpty == false ? "[手势 \(current.gestureRecognizers!.map { String(describing: type(of: $0)) }.joined(separator: ","))]" : "")); up = current.superview }
+        note("tap \(label)：\(done ? "已点" : "找到了但点不了")（\(type(of: hit))，\(hit.accessibilityLabel ?? "")）" + (done ? "" : " 上层：" + chain.joined(separator: " < ")))
     }
 
     /// 导航类的命令转给 MainView（object 是整行命令）
@@ -165,6 +258,25 @@ enum DebugRemote {
                 // 实时活动排版：live <电脑生成的 content-state JSON> = 本地开一个或更新现有的；live end = 结束全部
                 // （模拟器收不到实时活动推送：App 没被允许通知时 simctl push 报 2003）
                 Task { await Self.live(String(line.dropFirst("live ".count))) }
+            } else if parts.first == "tap", parts.count >= 2 {
+                withAccessibility { tap(String(line.dropFirst("tap ".count))) }
+            } else if parts.first == "type", parts.count >= 2 {
+                // 往第一个输入框里打字（筛选框、搜索框）：type 关键词
+                withAccessibility {
+                    func field(_ view: UIView) -> UITextField? {
+                        if let text = view as? UITextField, !text.isHidden { return text }
+                        return view.subviews.lazy.compactMap(field).first
+                    }
+                    guard let target = roots().lazy.compactMap(field).first else { note("type：没有输入框"); return }
+                    target.becomeFirstResponder()
+                    target.text = ""
+                    target.insertText(String(line.dropFirst("type ".count)))
+                    note("type 打进了 \(type(of: target))：\(target.text ?? "")")
+                }
+            } else if parts.first == "labels" {
+                withAccessibility {
+                    note("labels " + accessibilityNodes().compactMap(\.accessibilityLabel).map { $0.replacingOccurrences(of: "\n", with: " ") }.joined(separator: " | "))
+                }
             } else if parts.first == "worldjs" {
                 WorldBridge.current?.evaluate(String(line.dropFirst("worldjs".count)))
             } else if parts.first == "scroll", parts.count == 3, let index = Int(parts[1]), let delta = Double(parts[2]) {

@@ -21,7 +21,11 @@
 | **Proma** <br><sub>内置插件</sub> | 桌面版 | 只读 <sup>4</sup> | 只读 <sup>4</sup> | 只读 ✓ <sup>4</sup> |
 | **Cursor** <br><sub>[插件](plugins/cursor)</sub> | 编辑器 | 查看 · 回复 · 确认 · 中断 <sup>5</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>5</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>5</sup> |
 |  | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>6</sup> | 只读 <sup>7</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>6</sup> |
-| **Qwen Code** <br><sub>[插件](plugins/qwen-code)</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>8</sup> | 只读 <sup>9</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>8</sup> |
+| **Grok Build** <br><sub>[插件](plugins/grok)，即将上线</sub> | 命令行 | 全部 <sup>8</sup> | 只读 <sup>9</sup> | 全部 ✓ <sup>8</sup> |
+| **Hermes** <br><sub>[插件](plugins/hermes)，即将上线</sub> | 命令行 | 全部 <sup>10</sup> | 只读 <sup>9</sup> | 全部 ✓ <sup>10</sup> |
+| **Kimi Code** <br><sub>[插件](plugins/kimi-code)，即将上线</sub> | 命令行 | 全部 <sup>11</sup> | 只读 <sup>9</sup> | 全部 ✓ <sup>11</sup> |
+|  | 桌面版 | 只读 <sup>12</sup> | — | — |
+| **Qwen Code** <br><sub>[插件](plugins/qwen-code)</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>13</sup> | 只读 <sup>9</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>13</sup> |
 
 1. 命令行会话需要在 tmux 中运行
 2. Codex 桌面版没有 Linux 版
@@ -30,5 +34,9 @@
 5. 需在 Cursor 的编辑器窗口中使用（Agents 窗口不支持），装好插件后重启一次 Cursor；对话空闲时从手机发消息需要 Kiteline 3.49.15 / 电脑端 1.0.20 以上
 6. 回复和确认需要 Cursor 命令行在 tmux 中运行
 7. Windows 上没有 tmux，只能查看；Cursor 正在工作时发的消息会在这一轮结束后自动发出
-8. 回复和确认需要 Qwen Code 在 tmux 中运行
+8. 回复和确认需要 Grok Build 在 tmux 中运行
 9. Windows 上没有 tmux，只能查看
+10. 回复和确认需要 Hermes 在 tmux 中运行
+11. 回复和确认需要 Kimi Code 在 tmux 中运行
+12. 桌面版的会话只能查看
+13. 回复和确认需要 Qwen Code 在 tmux 中运行

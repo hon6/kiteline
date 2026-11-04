@@ -74,10 +74,11 @@ enum Delivery {
 
     // MARK: - 发文本（可带图片）
 
-    /// allowWhileWaiting：回答提问时先按 Esc 关掉了提问框，watcher 还没来得及更新状态，不拦
+    /// allowWhileWaiting：回答提问时先按 Esc 关掉了提问框，watcher 还没来得及更新状态，不拦。
+    /// 走后台送达的会话等确认时也能发：不按回车，消息排在确认之后（后台没接上、改走前台时再拦，见 deliver）
     static func send(text: String, attachments: [Attachment], to record: SessionRecord,
                      source: SourceConnection?, submit: Bool, allowWhileWaiting: Bool = false, completion: @escaping (Outcome) -> Void) {
-        if !allowWhileWaiting, let problem = waitingProblem(record) {
+        if !allowWhileWaiting, !(submit && viaBridge(record)), let problem = waitingProblem(record) {
             completion(Outcome(ok: false, submitted: false, message: problem)); return
         }
         stage(attachments, via: source) { result in
@@ -163,21 +164,37 @@ enum Delivery {
         return "\(lead)\n\n\(lines)"
     }
 
+    /// inFront：后台送达没接上，这次只走前台
     private static func deliver(prompt: String, to record: SessionRecord, source: SourceConnection?,
-                                submit: Bool, checkWaiting: Bool = true, completion: @escaping (Outcome) -> Void) {
+                                submit: Bool, checkWaiting: Bool = true, inFront: Bool = false, completion: @escaping (Outcome) -> Void) {
         if dryRun {
             lastDelivered = (record.key, prompt, submit)
             Log.write("[dry-run] 投递到 \(record.snapshot.name)（submit=\(submit)）：\(prompt.prefix(120))")
             completion(Outcome(ok: true, submitted: submit, message: "dry-run"))
             return
         }
+        // 只填不提交（submit = false）要把字留在 VS Code 输入框里，后台做不到，照旧走前台
+        if submit, !inFront, viaBridge(record) {
+            bridgeRequest(["op": "send", "text": prompt], record: record, source: source) { result in
+                if result != nil {
+                    Log.write("后台送达 \(record.snapshot.name)：\(prompt.prefix(60))")
+                    completion(Outcome(ok: true, submitted: true, message: "已提交"))
+                } else if checkWaiting, let problem = waitingProblem(record) {
+                    completion(Outcome(ok: false, submitted: false, message: problem))
+                } else {
+                    deliver(prompt: prompt, to: record, source: source, submit: submit, checkWaiting: checkWaiting, inFront: true, completion: completion)
+                }
+            }
+            return
+        }
         let snapshot = record.snapshot
         if snapshot.isVSCode {
             sendToVSCode(prompt: prompt, record: record, submit: submit, checkWaiting: checkWaiting, completion: completion)
-        } else if snapshot.tmuxPane != nil, let source = source, let pid = snapshot.pid {
+        } else if snapshot.tmuxPane != nil || snapshot.hosted != nil, let source = source, let pid = snapshot.pid {
+            // tmux 里的、Kiteline 后台托管的（watcher 写进它的伪终端）：都不碰前台
             source.request(["cmd": "tmux_send", "pid": pid, "text": prompt, "submit": submit], timeout: 20) { result in
                 switch result {
-                case .success: completion(Outcome(ok: true, submitted: submit, message: "已经 tmux 送达"))
+                case .success: completion(Outcome(ok: true, submitted: submit, message: snapshot.hosted != nil ? "已送达" : "已经 tmux 送达"))
                 case .failure(let error): completion(Outcome(ok: false, submitted: false, message: error.description))
                 }
             }
@@ -203,7 +220,28 @@ enum Delivery {
             }
             return
         }
-        press(key: "esc", record: record, source: source) { outcome in
+        // 后台送达：选项原样答给提问框（Claude 收到的是「问题 = 选了什么」，电脑上的提问框随之关掉），不用先 Esc 再发一句话
+        if !answers.isEmpty, viaBridge(record), !dryRun {
+            var picked: [String: String] = [:]
+            for answer in answers {
+                guard let question = answer["question"] as? String else { continue }
+                var labels = (answer["picked"] as? [String] ?? []).filter { !$0.isEmpty }
+                if let other = (answer["other"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !other.isEmpty { labels.append(other) }
+                if !labels.isEmpty { picked[question] = labels.joined(separator: ", ") }
+            }
+            if !picked.isEmpty {
+                bridgeRequest(["op": "answer", "answers": picked], record: record, source: source) { result in
+                    if result == "ok" { completion(Outcome(ok: true, submitted: true, message: "已回答")); return }
+                    answerInFront(text: text, record: record, source: source, completion: completion)
+                }
+                return
+            }
+        }
+        answerInFront(text: text, record: record, source: source, completion: completion)
+    }
+
+    private static func answerInFront(text: String, record: SessionRecord, source: SourceConnection?, completion: @escaping (Outcome) -> Void) {
+        press(key: "esc", record: record, source: source, inFront: true) { outcome in
             guard outcome.ok else { completion(outcome); return }
             DispatchQueue.main.asyncAfter(deadline: .now() + (dryRun ? 0 : 1.2)) {
                 send(text: text, attachments: [], to: record, source: source, submit: true, allowWhileWaiting: true, completion: completion)
@@ -213,8 +251,8 @@ enum Delivery {
 
     // MARK: - 按键（确认框选项 / 中断）
 
-    /// key: enter / esc / 1 / 2 / 3 / shift+tab；times = 连按几次（切权限模式要按到目标那一档）
-    static func press(key: String, times: Int = 1, record: SessionRecord, source: SourceConnection?,
+    /// key: enter / esc / 1 / 2 / 3 / shift+tab；times = 连按几次（切权限模式要按到目标那一档）。inFront：不走后台送达
+    static func press(key: String, times: Int = 1, record: SessionRecord, source: SourceConnection?, inFront: Bool = false,
                       completion: @escaping (Outcome) -> Void) {
         let times = max(1, min(times, 6))
         guard let (code, flags) = keyCode(key) else {
@@ -231,10 +269,33 @@ enum Delivery {
             agentRequest(["cmd": "agent_key", "key": key], record: record, source: source, submitted: false, completion: completion)
             return
         }
+        if !inFront, times == 1, viaBridge(record), ["1", "2", "3"].contains(key),
+           (AppState.shared.store.record(withKey: record.key) ?? record).snapshot.act != .waiting {
+            // 手机上的确认卡片过期了（已在电脑上答过、Claude 接着在做）：数字键按下去会落进输入框
+            completion(Outcome(ok: false, submitted: false, message: "该确认已在电脑上处理")); return
+        }
+        if !inFront, times == 1, viaBridge(record), let fields = bridgeKey(key, record: record) {
+            bridgeRequest(fields, record: record, source: source) { result in
+                switch result {
+                case "ok"?:
+                    Log.write("后台送达 \(record.snapshot.name)：\(fields["op"] ?? "")（\(key)）")
+                    completion(Outcome(ok: true, submitted: false, message: "已按下 \(key)"))
+                case "idle"?:
+                    completion(Outcome(ok: true, submitted: false, message: "当前没有进行中的回复"))
+                case "none"? where (AppState.shared.store.record(withKey: record.key) ?? record).snapshot.act != .waiting:
+                    // 确认框已经没了（在电脑上答过了）：别再去按键，按下去就落进输入框了
+                    completion(Outcome(ok: false, submitted: false, message: "该确认已在电脑上处理"))
+                default:
+                    // 没接上，或等的不是工具确认（mod 管不到的框）：照旧切过去按键
+                    press(key: key, times: times, record: record, source: source, inFront: true, completion: completion)
+                }
+            }
+            return
+        }
         let snapshot = record.snapshot
         if snapshot.isVSCode {
             pressInVSCode(code, flags: flags, times: times, record: record, done: "已按下 \(key)", skipped: "未指定按键", completion: completion)
-        } else if snapshot.tmuxPane != nil, let source = source, let pid = snapshot.pid {
+        } else if snapshot.tmuxPane != nil || snapshot.hosted != nil, let source = source, let pid = snapshot.pid {
             source.request(["cmd": "tmux_send", "pid": pid, "keys": Array(repeating: key, count: times)], timeout: 20) { result in
                 switch result {
                 case .success: completion(Outcome(ok: true, submitted: false, message: "已按下 \(key)"))
@@ -415,6 +476,55 @@ enum Delivery {
         let result = AXUIElementPerformAction(item, kAXPressAction as CFString)
         if result != .success { Log.write("关闭会话：点「关闭编辑器」失败（\(result.rawValue)）") }
         acted(result == .success ? nil : failed)
+    }
+
+    // MARK: - 后台送达（会话里的 kiteline mod）
+
+    /// 这个会话的 claude 进程加载了 Kiteline 装的 mod（watcher 快照的 bridge）：消息、中断、确认、回答提问直接交给会话进程，
+    /// 不切窗口、不粘贴、不按键，用户在电脑上做别的事不受打扰（见 watcher 的 bridge_send）。VS Code 里、终端里的都行；
+    /// 装 mod 之前就开着的会话没有它，走原来的路
+    static func viaBridge(_ record: SessionRecord) -> Bool {
+        !viaAgent(record) && (AppState.shared.store.record(withKey: record.key) ?? record).snapshot.bridge == true
+    }
+
+    /// 手机上的按键换成 mod 的指令：等确认时 1 / 回车 = 允许、2 = 允许且本会话不再询问、Esc / 3 = 拒绝（同在电脑上按 Esc，停下这一轮）；
+    /// 不在等确认时 Esc = 中断。别的键（切权限模式的 shift+tab……）mod 做不了，返回 nil 照旧按键
+    static func bridgeKey(_ key: String, record: SessionRecord) -> [String: Any]? {
+        let snapshot = (AppState.shared.store.record(withKey: record.key) ?? record).snapshot
+        // 带上手机卡片对应的工具（Bash、AskUserQuestion……）：mod 按它找确认框，对不上就不答（手机看到的已经过时）
+        var perm: [String: Any] = ["op": "perm"]
+        if let tool = snapshot.pendingTool, !tool.isEmpty { perm["tool"] = tool }
+        switch (key.lowercased(), snapshot.act == .waiting) {
+        case ("1", true), ("enter", true), ("return", true): perm["decision"] = "allow"; return perm
+        case ("2", true): perm["decision"] = "allow_session"; return perm
+        case ("esc", true), ("escape", true), ("3", true): perm["decision"] = "deny"; return perm
+        case ("esc", false), ("escape", false): return ["op": "abort"]
+        default: return nil
+        }
+    }
+
+    /// 交给 mod 做一件事。回调 nil = 没接上（mod 没加载、会话卡住、远端还是老 watcher），调用方照旧走前台；
+    /// 否则是 mod 的结果：ok / idle（要中断时本来就空闲）/ none（没有在等的确认框）
+    private static func bridgeRequest(_ fields: [String: Any], record: SessionRecord, source: SourceConnection?,
+                                      result: @escaping (String?) -> Void) {
+        guard let source else { result(nil); return }
+        var body = fields
+        body["cmd"] = "bridge"
+        body["sessionId"] = record.snapshot.sessionId
+        source.request(body, timeout: 10) { response in
+            DispatchQueue.main.async {
+                switch response {
+                case .success(let json) where json["bridged"] as? Bool == true:
+                    result(json["result"] as? String ?? "ok")
+                case .success:
+                    Log.write("后台送达没接上（\(record.snapshot.name)），改走前台")
+                    result(nil)
+                case .failure(let error):
+                    Log.write("后台送达失败（\(record.snapshot.name)）：\(error)，改走前台")
+                    result(nil)
+                }
+            }
+        }
     }
 
     // MARK: - Codex、OpenCode
@@ -832,10 +942,12 @@ enum Delivery {
         if let link = WindowLocator.folderLink(for: record, source: source, scheme: editor.scheme) {
             Log.write("聚焦会话所在窗口：\(link.absoluteString.removingPercentEncoding ?? link.absoluteString)")
             afterFocus = { WindowLocator.open(link, completion: $0) }
-        } else if AXIsProcessTrusted(), raiseWindow(of: editor.app, cwd: record.snapshot.cwd,
-                                                    remote: record.kind == .ssh) {
+        } else if AXIsProcessTrusted(), raiseWindow(of: editor.app, cwd: record.snapshot.cwd, remote: record.kind == .ssh,
+                                                    host: record.kind == .ssh ? source?.sshHost : nil, port: source?.sshPort) {
             afterFocus = { $0() }
-        } else if WindowLocator.windowCount(of: editor.app) <= 1 {
+        } else if record.kind != .ssh, WindowLocator.windowCount(of: editor.app) <= 1 {
+            // 只开着一个窗口就发给它：只对本机会话。远端会话按地址、按标题（连主机）都没认到，说明它的窗口没开，
+            // 剩下那个窗口是别的机器的，链接开过去扩展找不到会话，会新开一个空白会话（11-04 群消息连开了好几个）
             editor.app.activate(options: [.activateIgnoringOtherApps])
             afterFocus = { $0() }
         } else {
@@ -914,7 +1026,7 @@ enum Delivery {
     /// 按窗口标题找会话所在窗口。VS Code 默认标题形如「文件 — 根目录名」，
     /// Remote-SSH 窗口的根目录名后面带「[SSH: 主机]」。会话 cwd 可能是工作区根的子目录，
     /// 所以从最深的一级目录往上逐级匹配。
-    static func raiseWindow(of app: NSRunningApplication, cwd: String, remote: Bool) -> Bool {
+    static func raiseWindow(of app: NSRunningApplication, cwd: String, remote: Bool, host: String? = nil, port: Int? = nil) -> Bool {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
@@ -926,7 +1038,7 @@ enum Delivery {
         }
         let folders = cwd.split(separator: "/").map(String.init).reversed()
         for folder in folders where !folder.isEmpty {
-            for (window, title) in zip(windows, titles) where windowTitle(title, matches: folder, remote: remote) {
+            for (window, title) in zip(windows, titles) where windowTitle(title, matches: folder, remote: remote, host: host, port: port) {
                 AXUIElementPerformAction(window, kAXRaiseAction as CFString)
                 app.activate(options: [.activateIgnoringOtherApps])
                 Log.write("已置前窗口：\(title)")
@@ -936,12 +1048,21 @@ enum Delivery {
         return false
     }
 
-    /// 远端窗口标题里的主机名是 VS Code 里填的写法（可能是别名也可能是 IP），这里只认目录名
-    static func windowTitle(_ title: String, matches folder: String, remote: Bool) -> Bool {
+    /// 远端窗口标题里的主机名是 VS Code 里填的写法（可能是别名也可能是 IP）。
+    /// 给了 host（会话所在的主机）就连主机一起比（别名、IP 用 ssh -G 解析后再比）：几台机器上开着同名项目时，
+    /// 只比目录名会认到别的机器的窗口，扩展在那边找不到这个会话，新开一个空白会话，消息就成了那边的新会话
+    /// （11-04 实测：项目换了台机器、经软链接打开，按已开窗口没找到，按标题落到了另一台机器的同名「ccpulse」窗口）
+    static func windowTitle(_ title: String, matches folder: String, remote: Bool, host: String? = nil, port: Int? = nil) -> Bool {
         let segments = title.components(separatedBy: " — ").flatMap { $0.components(separatedBy: " - ") }
             .map { $0.trimmingCharacters(in: .whitespaces) }
         if remote {
-            return segments.contains { $0.hasPrefix("\(folder) [SSH: ") }
+            let prefix = "\(folder) [SSH: "
+            return segments.contains { segment in
+                guard segment.hasPrefix(prefix) else { return false }
+                guard let host, !host.isEmpty else { return true }
+                let shown = String(segment.dropFirst(prefix.count).prefix { $0 != "]" })
+                return WindowLocator.sameHost(shown, host, port: port)
+            }
         }
         return !title.contains("[SSH:") && segments.contains(folder)
     }

@@ -30,6 +30,8 @@ public sealed partial class AppModel : ObservableObject
     [ObservableProperty] FacesPayload faces = new();
     [ObservableProperty] IReadOnlySet<string> muted = new HashSet<string>();
     [ObservableProperty] bool quietActive;
+    /// 「支持后台运行 Claude Code」的提示选了不再提示（存在电脑上，各端一起；开关按设备，在 SourceInfo.Hosted）
+    [ObservableProperty] bool hostedTipOff;
     /// 各台机器的 CPU、内存（来源 id → 数据，sys 事件每 5 秒一条）
     public Dictionary<string, MachineStats> MachineStats { get; } = new();
     public event Action? MachineStatsChanged;
@@ -369,6 +371,7 @@ public sealed partial class AppModel : ObservableObject
         var muted = (state.Muted ?? []).ToHashSet();
         if (!muted.SetEquals(Muted)) Muted = muted;
         QuietActive = state.QuietActive ?? false;
+        if (state.HostedTipOff is bool tipOff) HostedTipOff = tipOff;
         // 第一次见到的会话不算未读，之后有新动静才亮红点
         var changed = false;
         foreach (var s in Sessions)
@@ -632,6 +635,20 @@ public sealed partial class AppModel : ObservableObject
             return true;
         }
         catch (Exception e) { Show(e); return false; }
+    }
+
+    /// 改电脑上的后台运行设置：某台开 / 关（按设备）、「支持后台运行」的提示不再提示（先在本机改，电脑没接住再改回来；同 iOS 版 setHosted）
+    public async Task SetHosted(string? sourceId = null, bool? on = null, bool? tipOff = null)
+    {
+        var before = (HostedTipOff, Sources);
+        if (tipOff is bool off) HostedTipOff = off;
+        if (sourceId is not null && on is bool turn) Sources = Sources.Select(s => s.Id == sourceId ? s with { Hosted = turn ? "on" : "off" } : s).ToList();
+        var body = new Dictionary<string, object>();
+        if (sourceId is not null) body["sourceId"] = sourceId;
+        if (on is bool value) body["on"] = value;
+        if (tipOff is bool hide) body["tipOff"] = hide;
+        try { await Api.Post("/api/hosted/settings", body); }
+        catch (Exception e) { (HostedTipOff, Sources) = before; Show(e); }
     }
 
     public async void SetPinned(string key, bool on)

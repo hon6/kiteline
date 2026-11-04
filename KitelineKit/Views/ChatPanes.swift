@@ -107,6 +107,21 @@ public final class ChatPanes {
     @ObservationIgnored private var tabDragCancelled = false
     #if os(macOS)
     @ObservationIgnored private var escMonitor: Any?
+
+    /// 指着展开的标签（Mac，11-04 起）：鼠标停在一个标题被截短的标签上，它按完整标题变宽——不超出这一块，
+    /// 这块的会话、分屏按钮先收进「更多」，别的标签缩窄；离开这块的标签栏收回。key 是空串 = 「选择会话」新标签
+    struct Peek: Hashable {
+        let pane: UUID
+        let key: String
+    }
+    var peek: Peek?
+    /// 各块平时（没展开时）哪些标签的标题被截短了、每个标签多宽：排版时记，展开时照着算。改了不用重画
+    @ObservationIgnored var truncated: [UUID: Set<String>] = [:]
+    @ObservationIgnored var tabWidths: [UUID: [CGFloat]] = [:]
+    /// 指针在哪几块的标签栏上、指着哪几个标签（挪到相邻的时「进」「出」谁先到都行，最后进的算数）
+    @ObservationIgnored private var hoveredStrips: Set<UUID> = []
+    @ObservationIgnored private var hoveredTabs: [Peek] = []
+    @ObservationIgnored private var peekWork: DispatchWorkItem?
     #endif
 
     public init() {
@@ -381,6 +396,9 @@ public final class ChatPanes {
         if tabDrag?.key != key {
             tabDrag = TabDragging(key: key, source: source, size: tabFrame(source, key)?.size ?? CGSize(width: 160, height: 31))
             #if os(macOS)
+            // 展开着的标签先收回：落点、插入竖线按平时的位置算
+            peekWork?.cancel()
+            if peek != nil { peek = nil }
             if escMonitor == nil {
                 escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     guard event.keyCode == 53, let self, self.tabDrag != nil else { return event }
@@ -441,6 +459,72 @@ public final class ChatPanes {
         escMonitor = nil
         #endif
     }
+
+    #if os(macOS)
+    // MARK: 指着展开的标签（Mac）
+
+    /// 指针进出某块的标签栏（整条，含空白和按钮）
+    func hoverStrip(_ pane: UUID, _ on: Bool) {
+        if on { hoveredStrips.insert(pane) } else { hoveredStrips.remove(pane) }
+        updatePeek()
+    }
+
+    /// 指针进出某个标签
+    func hoverTab(_ tab: Peek, _ on: Bool) {
+        hoveredTabs.removeAll { $0 == tab }
+        if on { hoveredTabs.append(tab) }
+        updatePeek()
+    }
+
+    /// 该展开哪个：指着的标签平时被截短了就是它（没截短的不用展开，展开着别的也收回）；
+    /// 指着这块标签栏的空白、「+」、「更多」时保持（展开时它们挪了位置，收回去会在指针底下跳）；离开标签栏收回
+    private var peekTarget: Peek? {
+        if let tab = hoveredTabs.last { return truncated[tab.pane]?.contains(tab.key) == true && alive(tab) ? tab : nil }
+        if let peek, hoveredStrips.contains(peek.pane), alive(peek) { return peek }
+        return nil
+    }
+
+    /// 这个标签还在（关掉了、挪走了就不算）
+    private func alive(_ tab: Peek) -> Bool {
+        guard let pane = pane(tab.pane) else { return false }
+        return tab.key.isEmpty ? pane.key == nil : pane.tabs.contains(tab.key)
+    }
+
+    /// 展开、收回的动画（11-04 改为流畅地展开）：标签宽度、按钮收起一起走，不回弹
+    static let peekAnimation = Animation.smooth(duration: 0.24)
+
+    /// 停 0.3 秒才展开（划过去不闪）；已经展开时换到别的标签、收回都是 0.15 秒
+    private func updatePeek() {
+        peekWork?.cancel()
+        guard peekTarget != peek else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.tabDrag == nil, !PaneDrag.state.active else { return }
+            let next = self.peekTarget
+            if next != self.peek { withAnimation(Self.peekAnimation) { self.peek = next } }
+        }
+        peekWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (peek == nil ? 0.3 : 0.15), execute: work)
+    }
+
+    /// 自测截图用：当前块第 index 个标签画成展开的样子（不等悬停、不管截没截短）；nil = 收起
+    func debugPeek(_ index: Int?) {
+        let next = index.flatMap { index in pane(focusID).flatMap { $0.tabs.indices.contains(index) ? Peek(pane: focusID, key: $0.tabs[index]) : nil } }
+        withAnimation(Self.peekAnimation) { peek = next }
+    }
+
+    /// 自测用：当成指针挪到当前块第 index 个标签上（走悬停的计时和截短判断，同真鼠标）；nil = 移出标签栏
+    func debugHover(_ index: Int?) {
+        let id = focusID
+        hoveredTabs.removeAll { $0.pane == id }
+        if let index, let tabs = pane(id)?.tabs, tabs.indices.contains(index) {
+            hoveredStrips.insert(id)
+            hoveredTabs.append(Peek(pane: id, key: tabs[index]))
+        } else {
+            hoveredStrips.remove(id)
+        }
+        updatePeek()
+    }
+    #endif
 
     /// 某块里某个会话的标签（iPad：标题条）在哪。iPad 两块换了会话、标题条位置没变时没重新记，用这块记下的那个
     private func tabFrame(_ pane: UUID, _ key: String) -> CGRect? {
@@ -1374,6 +1458,7 @@ private struct PaneHeader: View {
     @State private var width: CGFloat = 1000
     /// 窗口左上角的红绿灯：左边栏收起、标签栏铺到窗口左上角时让开
     @State private var lightsInset: CGFloat = 0
+    @State private var hoveringStrip = false
     #endif
 
     var body: some View {
@@ -1480,11 +1565,13 @@ private struct PaneHeader: View {
         // 按钮放几个：先保证每个标签至少 120 宽（标题看得清），放不下时会话的按钮先折进「更多」，再不够连分屏按钮也折进去
         let count = CGFloat(max(1, entries.count))
         let level = [2, 1].first { tabRoom($0) / count >= 120 } ?? 0
+        // 指着展开了一个标签：会话和分屏的按钮先收进「更多」、「+」也收起，地方让给它（标签按平时的档算宽度，展开的时候不跟着变）
+        let expand = panes.peek.flatMap { $0.pane == pane.id ? entries.firstIndex(of: $0.key.isEmpty ? nil : $0.key) : nil }
         return HStack(alignment: .bottom, spacing: 4) {
             // 标签占按钮剩下的地方（靠左）；按钮保持完整
-            tabs(several: several, level: level)
+            tabs(several: several, level: level, expand: expand)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            actions(several: several, level: level)
+            actions(several: several, level: expand == nil ? level : 0)
                 .frame(height: Self.tabRow)
                 .fixedSize()
         }
@@ -1494,6 +1581,12 @@ private struct PaneHeader: View {
         // 块被挤得比这一条还窄时：不往外撑，多出来的按钮裁掉（拖宽就回来）
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.stripFrames[pane.id] = $0 }
+        // 指着标签栏：标签展开着时在空白、按钮上也保持（见 ChatPanes.hoverStrip）
+        .onHover { on in
+            hoveringStrip = on
+            panes.hoverStrip(pane.id, on)
+        }
+        .onDisappear { if hoveringStrip { panes.hoverStrip(pane.id, false) } }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             width = frame.width
             // 红绿灯在窗口左上角 78 点以内：铺进工具栏那一带、又贴着窗口左边时让开
@@ -1532,20 +1625,23 @@ private struct PaneHeader: View {
     /// 按钮放到第 level 档时，标签一共能有多宽
     private func tabRoom(_ level: Int) -> CGFloat { max(0, width - 12 - lightsInset - actionsWidth(level) - 30) }
 
-    /// 一排标签 + 「+」。标签按标题的宽度来（最宽 240），放不下时一起变窄，窄到 96 还放不下就横着滚
+    /// 一排标签 + 「+」。标签按标题的宽度来（最宽 240），放不下时一起变窄，窄到 96 还放不下就横着滚。
+    /// expand：指着展开的是第几个（它按完整标题变宽，见 TabsLayout）
     @ViewBuilder
-    private func tabs(several: Bool, level: Int) -> some View {
+    private func tabs(several: Bool, level: Int, expand: Int?) -> some View {
         let entries = entries
         let room = tabRoom(level)
         let cap = min(Self.maxTab, max(Self.minTab, room / CGFloat(max(1, entries.count))))
-        let row = TabsLayout(minTab: Self.minTab, maxTab: Self.maxTab, trailing: pane.key != nil) {
+        let plus = pane.key != nil && expand == nil
+        let row = TabsLayout(minTab: Self.minTab, maxTab: Self.maxTab, trailing: plus,
+                             report: TabsReport(panes: panes, pane: pane.id, keys: entries.map { $0 ?? "" }), expand: expand) {
             ForEach(Array(entries.enumerated()), id: \.element) { index, key in
                 // 两个都没在显示的标签之间一道细竖线（同浏览器）
                 let divider = index > 0 && key != pane.key && entries[index - 1] != pane.key
                 PaneTab(key: key, pane: pane, panes: panes, focused: focused, several: several, cap: cap, divider: divider)
                     .zIndex(key == pane.key ? 1 : 0)
             }
-            if pane.key != nil {
+            if plus {
                 TarsPaneButton("plus", help: L("新标签页：选择要在此打开的会话")) { withAnimation(.snappy) { panes.newTab(pane.id) } }
                     .padding(.leading, 2).padding(.bottom, 5)
                     .foregroundStyle(.secondary)
@@ -1695,6 +1791,10 @@ private struct PaneTab: View {
                 .foregroundStyle(lit ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                // 标签变宽变窄（指着展开、收回）的动画里：标题直接换成排好的样子、裁在自己的框里跟着框展开，
+                // 不做新旧两份的淡入淡出（中途会叠出两份字、旧的「…」留在原处）
+                .contentTransition(.identity)
+                .clipped()
             // 窄的时候没在显示的标签不留 × 的位置，先让给标题（关它：右键，或点过去再关）
             if closable, active || cap >= 150 {
                 Button { panes.closeTab(pane.id, key) } label: {
@@ -1739,8 +1839,14 @@ private struct PaneTab: View {
         .onHover { on in
             hovering = on
             TabWindowLock.hold(on)
+            // 标题被截短的：停一会儿按完整标题变宽（ChatPanes.hoverTab）
+            panes.hoverTab(ChatPanes.Peek(pane: pane.id, key: key ?? ""), on)
         }
-        .onDisappear { if hovering { TabWindowLock.hold(false) } }
+        .onDisappear {
+            guard hovering else { return }
+            TabWindowLock.hold(false)
+            panes.hoverTab(ChatPanes.Peek(pane: pane.id, key: key ?? ""), false)
+        }
         .onTapGesture {
             if let key { panes.activate(pane.id, key) } else { panes.focus(pane.id) }
         }
@@ -1896,22 +2002,50 @@ private struct PaneTabShape: Shape {
 }
 
 /// 一排标签（最后一个子视图是「+」时 trailing = true，它按自己的宽度）：每个标签按标题要的宽度来（最宽 maxTab）；
-/// 总宽放不下时同浏览器，短的照旧、长的平分剩下的（不窄于 minTab，标题截短）。外面不给宽度（横着滚）时每个最宽 160
+/// 总宽放不下时同浏览器，短的照旧、长的平分剩下的（不窄于 minTab，标题截短）。外面不给宽度（横着滚）时每个最宽 160。
+/// expand：指着展开的第几个标签按完整标题变宽（最宽 peekMax）：先用按钮收起让出的地方，不够再缩右边的、再缩左边的（最窄到只剩状态点）。
+/// 别的标签从平时排出来的宽度开始缩；缩右边的时它左边不动、缩左边的时它右边不动，指针一直还在它上面（不会一展开就移出去、收回、又展开地来回跳）
 private struct TabsLayout: Layout {
     let minTab: CGFloat
     let maxTab: CGFloat
     let trailing: Bool
+    /// 平时（没展开时）排完记下哪些标签的标题被截短了、这一排多宽
+    var report: TabsReport?
+    var expand: Int?
+
+    private static let peekMax: CGFloat = 560
 
     private func widths(_ available: CGFloat?, _ subviews: Subviews) -> [CGFloat] {
         let ideals = subviews.map { $0.sizeThatFits(.unspecified).width }
         let count = subviews.count - (trailing ? 1 : 0)
         guard count > 0 else { return ideals }
+        let expand = self.expand.flatMap { $0 < count ? $0 : nil }
         guard let available, available.isFinite else {
-            return ideals.indices.map { $0 < count ? min(ideals[$0], 160) : ideals[$0] }
+            var result = ideals.indices.map { $0 < count ? min(ideals[$0], 160) : ideals[$0] }
+            // 横着滚：展开的那个按完整标题往右长
+            if let expand { result[expand] = max(result[expand], min(ideals[expand], Self.peekMax)) }
+            return result
         }
+        guard let expand, let report, let normal = report.panes.tabWidths[report.pane], normal.count == count else { return fit(available, ideals, count) }
+        // 先照平时的样子，再给展开的那个补宽
+        var result = normal + ideals[count...]
+        let want = min(ideals[expand], Self.peekMax) - result[expand]
+        guard want > 0 else { return result }
+        var gain = max(0, available - result.reduce(0, +))
+        for index in Array((expand + 1)..<count).reversed() + Array(0..<expand) where gain < want {
+            let least = subviews[index].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width
+            let cut = min(want - gain, max(0, result[index] - least))
+            result[index] -= cut
+            gain += cut
+        }
+        result[expand] += min(want, gain)
+        return result
+    }
+
+    /// 平时的分法：从要得少的开始分，每个拿「自己要的」和「剩下的平分」里小的那个
+    private func fit(_ available: CGFloat, _ ideals: [CGFloat], _ count: Int) -> [CGFloat] {
         var result = ideals
         var remaining = available - (trailing ? ideals[count] : 0)
-        // 从要得少的开始分：每个拿「自己要的」和「剩下的平分」里小的那个
         for (rank, index) in (0..<count).sorted(by: { ideals[$0] < ideals[$1] }).enumerated() {
             let share = remaining / CGFloat(count - rank)
             result[index] = min(ideals[index], maxTab, max(minTab, share))
@@ -1928,7 +2062,14 @@ private struct TabsLayout: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         // 和 sizeThatFits 用同一个宽度分（不用 bounds：取整后差零点几，分法会变）
-        let widths = widths(proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? bounds.width, subviews)
+        let available = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? bounds.width
+        let widths = widths(available, subviews)
+        if let report, expand == nil {
+            let count = subviews.count - (trailing ? 1 : 0)
+            let cut = (0..<max(0, count)).filter { widths[$0] < subviews[$0].sizeThatFits(.unspecified).width - 0.5 }
+            report.panes.truncated[report.pane] = Set(cut.compactMap { report.keys.indices.contains($0) ? report.keys[$0] : nil })
+            report.panes.tabWidths[report.pane] = Array(widths.prefix(max(0, count)))
+        }
         var x = bounds.minX
         for (index, subview) in subviews.enumerated() {
             let height = subview.sizeThatFits(.unspecified).height
@@ -1936,6 +2077,13 @@ private struct TabsLayout: Layout {
             x += widths[index]
         }
     }
+}
+
+/// 标签栏排完往分屏里记的：哪块、各标签的 key（「选择会话」是空串）
+private struct TabsReport {
+    let panes: ChatPanes
+    let pane: UUID
+    let keys: [String]
 }
 
 /// 鼠标在标签上时窗口拖不动：标签栏铺在标题栏那一带，按住拖动会先被系统当成拖窗口（窗口服务器那层，SwiftUI 的拖动收不到），
@@ -2613,6 +2761,12 @@ extension KitelineKit {
 
     /// 自测截图用：分隔线都画成指针停在上面（出现把手）
     public static func showDividerHandles(_ on: Bool) { panes.captureHandles = on }
+
+    /// 自测截图用：当前块第 index 个标签画成指着展开的样子（nil = 收起）
+    public static func peekTabs(_ index: Int?) { panes.debugPeek(index) }
+
+    /// 自测用：当成指针挪到当前块第 index 个标签上（走悬停的计时和截短判断，同真鼠标）；nil = 移出标签栏
+    public static func hoverTabs(_ index: Int?) { panes.debugHover(index) }
 
     /// 自测截图用：假装正拖着某个会话停在当前块的某一边（nil = 收起）
     public static func previewDrop(_ key: String?, zone: String) {

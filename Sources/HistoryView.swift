@@ -137,8 +137,9 @@ final class HistoryModel: ObservableObject {
     /// VS Code 在虚拟屏幕上时看不到它，留在 Kiteline 里接着聊
     func resume(_ item: PastItem) {
         guard let source = AppState.shared.config.sources.first(where: { $0.id == item.sourceId }) else { return }
+        // 按钮写明了「在 VS Code 中恢复」：远端项目也开 VS Code，不走后台托管（在输入框里发消息恢复的才走后台）
         NewSession.start(source: source, cwd: item.cwd, prompt: "", submit: false, sessionId: item.sessionId,
-                         returnFocus: VirtualScreen.shared.isOn) { outcome in
+                         returnFocus: VirtualScreen.shared.isOn, inEditor: true) { outcome in
             if !outcome.ok { KitelineModel.alert(L("恢复失败"), outcome.message) }
         }
     }

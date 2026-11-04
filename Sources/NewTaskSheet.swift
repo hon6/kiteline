@@ -16,6 +16,18 @@ struct NewTaskSheet: View {
         var lastActive: Double
         var id: String { "\(sourceId)\n\(cwd)" }
 
+        /// 「打开其他文件夹」选的：还没在这台电脑上用过 Claude Code
+        init(picked cwd: String, source: SourceConfig) {
+            sourceId = source.id
+            sourceName = ServerLang.machine(source.displayName)
+            kind = source.kind.rawValue
+            self.cwd = cwd
+            name = (cwd as NSString).lastPathComponent
+            live = 0
+            open = false
+            lastActive = 0
+        }
+
         init?(_ item: [String: Any]) {
             guard let sourceId = item["sourceId"] as? String, let cwd = item["cwd"] as? String,
                   item["exists"] as? Bool != false else { return nil }
@@ -55,6 +67,14 @@ struct NewTaskSheet: View {
     /// now / daily / weekdays / once
     @State private var timing = "now"
     @State private var when = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date().addingTimeInterval(86400)) ?? Date()
+    /// 「打开其他文件夹」：在远端电脑上一层层点（本机用系统的选文件夹框）
+    @State private var browsing: Browse?
+
+    struct Browse: Identifiable {
+        var source: SourceConfig
+        var start: String
+        var id: String { source.id }
+    }
 
     init(attach: [TarsTaskImage] = []) {
         _images = State(initialValue: attach)
@@ -106,8 +126,18 @@ struct NewTaskSheet: View {
             .panelDragBackground()   // 这一行的空白处按住能拖动面板
             scopeBars
             ScrollViewReader { proxy in
-                List(shown, selection: $selection) { project in
-                    row(project).tag(project.id)
+                List(selection: $selection) {
+                    ForEach(shown) { project in
+                        row(project).tag(project.id)
+                    }
+                    if !loading {
+                        if projects.isEmpty {
+                            Text("暂无使用过 Claude Code 的项目").foregroundStyle(.secondary).selectionDisabled()
+                        } else if shown.isEmpty {
+                            Text("没有匹配的项目").foregroundStyle(.secondary).selectionDisabled()
+                        }
+                        otherFolderRow.selectionDisabled()
+                    }
                 }
                 .onChange(of: reveal) { _, id in
                     guard let id else { return }
@@ -117,13 +147,7 @@ struct NewTaskSheet: View {
             }
             .listStyle(.bordered(alternatesRowBackgrounds: false))
             .frame(minHeight: 140, idealHeight: 220, maxHeight: .infinity)   // 面板拉高时多出来的给项目列表
-            .overlay {
-                if loading { ProgressView() } else if projects.isEmpty {
-                    Text("暂无使用过 Claude Code 的项目").foregroundStyle(.secondary)
-                } else if shown.isEmpty {
-                    Text("没有匹配的项目").foregroundStyle(.secondary)
-                }
-            }
+            .overlay { if loading { ProgressView() } }
             // 选中的被筛掉了就不选；筛得只剩一个时直接选上
             .onChange(of: shown.map(\.id)) { _, ids in
                 if let current = selection, !ids.contains(current) { selection = nil }
@@ -171,6 +195,11 @@ struct NewTaskSheet: View {
         .frame(minWidth: 520, idealWidth: 600, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(L("新任务"))   // 放进面板的标题栏
         .onAppear(perform: load)
+        .sheetPanel(item: $browsing) { target in
+            TarsFolderPicker(sourceId: target.source.id, machine: ServerLang.machine(target.source.displayName), start: target.start) { path in
+                adopt(path, source: target.source)
+            }
+        }
     }
 
     /// 选了项目、写了字或附了图（只附图时 Claude 收到「请查看我发来的图片」，同手机）
@@ -213,6 +242,76 @@ struct NewTaskSheet: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// 列表最后一行「打开其他文件夹…」：没在列表里的目录（还没用过 Claude Code、新建的项目）。
+    /// 筛着某台设备就在它上面选；没筛、在线的不止一台时先挑电脑
+    @ViewBuilder private var otherFolderRow: some View {
+        let live = AppState.shared.liveSources.map(\.config)
+        let targets = live.filter { $0.id == sourceFilter }.isEmpty ? live : live.filter { $0.id == sourceFilter }
+        let label = HStack(spacing: 10) {
+            Image(systemName: "plus").font(.app(size: 13, weight: .semibold)).foregroundStyle(Color.tarsBrand)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.tarsBrand.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("打开其他文件夹…").font(.app(size: 13, weight: .semibold)).foregroundStyle(Color.tarsBrand)
+                Text(targets.count == 1 ? L("在「%@」上选择任意文件夹，在其中新建会话", ServerLang.machine(targets[0].displayName))
+                     : L("选择任意电脑上的任意文件夹，在其中新建会话"))
+                    .font(.app(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        if targets.count > 1 {
+            Menu {
+                ForEach(targets, id: \.id) { source in
+                    Button(ServerLang.machine(source.displayName)) { browse(source) }
+                }
+            } label: { label }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+        } else {
+            Button { if let source = targets.first { browse(source) } } label: { label }
+                .buttonStyle(.plain)
+                .disabled(targets.isEmpty)
+        }
+    }
+
+    /// 本机：系统的选文件夹框（能新建文件夹）；远端：Kiteline 自己的浏览面板。都从常用项目所在的文件夹开始
+    private func browse(_ source: SourceConfig) {
+        let start = FolderStart.usual(projects.filter { $0.sourceId == source.id }.map(\.cwd))
+        // 测试实例：CCPULSE_TEST_BROWSE_LOCAL=1 本机也用自己的浏览面板（系统的选文件夹框会出现在用户屏幕上）
+        let inApp = AppConfig.isolated && ProcessInfo.processInfo.environment["CCPULSE_TEST_BROWSE_LOCAL"] == "1"
+        guard source.kind == .local, !inApp else {
+            browsing = Browse(source: source, start: start)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = L("打开")
+        panel.message = L("选择要在其中新建会话的文件夹")
+        if !start.isEmpty { panel.directoryURL = URL(fileURLWithPath: start, isDirectory: true) }
+        let done: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, let url = panel.url { adopt(url.path, source: source) }
+        }
+        if let window = NSApp.keyWindow { panel.beginSheetModal(for: window, completionHandler: done) } else { done(panel.runModal()) }
+    }
+
+    /// 选好的文件夹放进列表最前面并选中（已经在列表里的直接选中）；筛选和它对不上的放开，免得看不见
+    private func adopt(_ path: String, source: SourceConfig) {
+        let picked = Project(picked: path, source: source)
+        if !projects.contains(where: { $0.id == picked.id }) { projects.insert(picked, at: 0) }
+        let project = projects.first { $0.id == picked.id } ?? picked
+        query = ""
+        if !sourceFilter.isEmpty, sourceFilter != project.sourceId { sourceFilter = "" }
+        if !projectFilter.isEmpty, projectFilter != project.name { projectFilter = "" }
+        selection = project.id
+        reveal = project.id
     }
 
     private func tag(_ text: String, _ color: Color) -> some View {

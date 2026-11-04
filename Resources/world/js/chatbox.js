@@ -202,6 +202,16 @@ export class ChatBox {
     } else if (this.filter === 'dm') this.setFilter('all');
   }
 
+  /// 换了界面语言（主程序的 init 晚于构造到）：固定写进去的字重写一遍，提示文字由 render 现算
+  relabel() {
+    const names = { all: t('全部'), talk: t('交谈'), reply: t('回复'), action: t('动作') };
+    for (const b of this.node.querySelectorAll('.tabs button[data-filter]')) if (names[b.dataset.filter]) b.textContent = names[b.dataset.filter];
+    this.who.title = t('取消私聊');
+    this.mic.title = t('听写：点击开始说话，再点一次转成文字');
+    this.sendButton.textContent = t('发送');
+    this.render();
+  }
+
   render() {
     const s = this.target ? this.world.data.sessions.get(this.target) : null;
     const can = !!s && !s.readOnly;

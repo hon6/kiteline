@@ -28,6 +28,7 @@ final class RemoteSession: SourceConnection {
     private let queue = DispatchQueue(label: "ccpulse.transport")
     private let rpc = WatcherRPC()
     private(set) var hostHome: String?
+    private(set) var hostFeatures: Set<String> = []
 
     /// 远端 watcher 脚本的本地权威副本（随 App 打包）
     static var bundledWatcherURL: URL? {
@@ -343,6 +344,7 @@ final class RemoteSession: SourceConnection {
         if rpc.consume(event) { return }
         if event.kind == "hello" {
             if let home = event.raw["home"] as? String { hostHome = home }
+            hostFeatures = Set(event.raw["features"] as? [String] ?? [])
             rpc.release()   // 换进程期间排着的请求发给新进程
             update(state: .live(host: event.host, watcher: event.watcherVersion, sessionCount: 0))
             delegate?.source(self, didLog: "远端 \(event.host ?? "?") watcher v\(event.watcherVersion ?? "?")")

@@ -220,6 +220,23 @@ public struct TarsTodosView: View {
     }
 }
 
+/// 设置 → 来源里「后台运行 Claude Code」：按设备检测出口 IP、确认开启（和手机、会话页提示点开的同一个面板）；sourceId = 只看这一台
+public struct TarsHostedSetupView: View {
+    let sourceId: String?
+    public init(sourceId: String? = nil) { self.sourceId = sourceId }
+
+    public var body: some View {
+        if let model = KitelineKit.model {
+            HostedSetupSheet(sourceId: sourceId)
+                .font(.ui(.body))
+                .tint(Theme.claude)
+                .environment(model)
+        } else {
+            ProgressView().padding(40)
+        }
+    }
+}
+
 /// 左边栏「收藏」页：和手机同一个页面；点「原消息」= 左边栏选中那个会话、滚到那条消息
 public struct TarsFavoritesView: View {
     public init() {}

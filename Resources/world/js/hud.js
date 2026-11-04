@@ -92,26 +92,7 @@ export class Hud {
     root.appendChild(this.controls);
     // 操作提示：右下角常驻，点一下收成「?」，再点展开（记住）
     this.help = el('div', 'help glass');
-    const key = (k) => `<kbd>${k}</kbd>`;
-    // 触屏（iPhone、iPad）：手势说明
-    const rows = matchMedia('(pointer: coarse)').matches ? [
-      [t('单指拖动'), t('移动视角')],
-      [t('双指拖动'), t('转动视角')],
-      [t('双指捏合'), t('放大缩小')],
-      [t('轻点电脑屏幕'), t('查看会话')],
-      [t('轻点人物'), t('私聊')],
-      [`${t('双击')}${t('空地')}`, t('回到全景')],
-    ] : [
-      [`${key(t('左键'))}${t('拖动')}`, t('移动视角')],
-      [`${key(t('右键'))}${t('拖动')}`, t('转动视角')],
-      [`${key('⇧')}+${key(t('左键'))}${t('拖动')}`, t('转动视角')],
-      [`${key(t('滚轮'))} / ${t('双指滑动、捏合')}`, t('放大缩小')],
-      [`${key('+')}${key('−')}`, t('放大 / 缩小')],
-      [`${key('W')}${key('A')}${key('S')}${key('D')}`, t('前后左右移动')],
-      [`${key('Q')}${key('E')}`, t('向左 / 向右转')],
-      [`${t('双击')}${t('空地')}`, t('回到全景')],
-    ];
-    this.help.innerHTML = `<div class="rows">${rows.map(([a, b]) => `<div class="row"><span class="keys">${a}</span><span>${esc(b)}</span></div>`).join('')}</div><button class="fold" title="${esc(t('操作提示'))}">?</button>`;
+    this.help.innerHTML = this.helpHTML();
     let folded = false;
     try { folded = localStorage.getItem('world.helpFolded') === '1'; } catch { /* 无痕模式 */ }
     this.help.classList.toggle('folded', folded);
@@ -349,6 +330,42 @@ export class Hud {
   }
 
   // MARK: 左上角统计、左下角动态
+
+  /// 右下角操作提示的内容（触屏是手势，电脑是键鼠）
+  helpHTML() {
+    const key = (k) => `<kbd>${k}</kbd>`;
+    // 触屏（iPhone、iPad）：手势说明
+    const rows = matchMedia('(pointer: coarse)').matches ? [
+      [t('单指拖动'), t('移动视角')],
+      [t('双指拖动'), t('转动视角')],
+      [t('双指捏合'), t('放大缩小')],
+      [t('轻点电脑屏幕'), t('查看会话')],
+      [t('轻点人物'), t('私聊')],
+      [`${t('双击')}${t('空地')}`, t('回到全景')],
+    ] : [
+      [`${key(t('左键'))}${t('拖动')}`, t('移动视角')],
+      [`${key(t('右键'))}${t('拖动')}`, t('转动视角')],
+      [`${key('⇧')}+${key(t('左键'))}${t('拖动')}`, t('转动视角')],
+      [`${key(t('滚轮'))} / ${t('双指滑动、捏合')}`, t('放大缩小')],
+      [`${key('+')}${key('−')}`, t('放大 / 缩小')],
+      [`${key('W')}${key('A')}${key('S')}${key('D')}`, t('前后左右移动')],
+      [`${key('Q')}${key('E')}`, t('向左 / 向右转')],
+      [`${t('双击')}${t('空地')}`, t('回到全景')],
+    ];
+    return `<div class="rows">${rows.map(([a, b]) => `<div class="row"><span class="keys">${a}</span><span>${esc(b)}</span></div>`).join('')}</div><button class="fold" title="${esc(t('操作提示'))}">?</button>`;
+  }
+
+  /// 主程序的 init（带语言和译文）比网页搭界面晚到：固定写进去的字按当前语言重写一遍（同 flow.js 的 relabel）
+  relabel() {
+    const titles = { zoomin: t('放大（拉近）'), zoomout: t('缩小（拉远）'), overview: t('全景'), rooms: t('机房'), sky: t('卫星'),
+      follow: t('跟随最新消息'), voice: t('朗读 agent 之间的交谈（2 倍速）') };
+    for (const b of this.controls.querySelectorAll('button[data-view]')) {
+      const title = titles[b.dataset.view];
+      if (title) { b.title = title; b.setAttribute('aria-label', title); }
+    }
+    this.help.innerHTML = this.helpHTML();
+    this.chat.relabel();
+  }
 
   refreshStats() {
     const s = this.world.data.totals();

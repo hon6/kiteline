@@ -335,11 +335,14 @@ enum MacSheetLimit {
 
 extension View {
     /// 页面 / 面板里的搜索框。iPhone 用系统的（导航栏下面一条）；Mac 的面板里系统的搜索框会挤进标题栏、把标题挤到内容里去，
-    /// 改成放在内容顶上的一条（focus：一打开就能打字）
+    /// 改成放在内容顶上的一条（focus：一打开就能打字）。
+    /// active：iPhone 上搜索中系统会收起导航栏（连同工具栏按钮），要由页面自己退出搜索时传进来（如选文件夹点进下一级后）
     @ViewBuilder
-    func panelSearch(_ text: Binding<String>, prompt: String, alwaysShown: Bool = false, focus: Bool = false) -> some View {
+    func panelSearch(_ text: Binding<String>, prompt: String, alwaysShown: Bool = false, focus: Bool = false, active: Binding<Bool>? = nil) -> some View {
         #if os(iOS)
-        if alwaysShown {
+        if let active {
+            searchable(text: text, isPresented: active, prompt: prompt)
+        } else if alwaysShown {
             searchable(text: text, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
         } else {
             searchable(text: text, prompt: prompt)

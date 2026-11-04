@@ -1,0 +1,73 @@
+{
+ "id": "kimi-code",
+ "name": "Kimi Code",
+ "version": "1.0.0",
+ "summary": "月之暗面的编程 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复、确认、回答提问和中断",
+ "summaryEn": "Moonshot AI's coding agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux",
+  "secret.read"
+ ],
+ "detect": {
+  "paths": [
+   "~/.kimi-code"
+  ],
+  "commands": [
+   "kimi"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "verified": false,
+    "note": "回复和确认需要 Kimi Code 在 tmux 中运行"
+   },
+   "desktop": {
+    "abilities": ["view"],
+    "verified": false,
+    "note": "桌面版的会话只能查看"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": ["view"],
+    "verified": false,
+    "note": "Windows 上没有 tmux，只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "verified": true,
+    "note": "回复和确认需要 Kimi Code 在 tmux 中运行"
+   }
+  }
+ },
+ "options": [
+  {
+   "id": "usage",
+   "name": "显示订阅额度",
+   "nameEn": "Show plan quota",
+   "note": "在「今日用量」中显示 Kimi Code 会员的 5 小时、本周、本月额度和加油包余额",
+   "noteEn": "Show your Kimi Code membership's 5-hour, weekly and monthly quota and booster balance under Today's usage",
+   "optIn": "Kimi Code 不在本机记录额度。打开后，Kiteline 将读取 Kimi Code 登录后保存在本机的令牌（~/.kimi-code/credentials 中的文件），每 10 分钟向 Kimi 服务器查询一次额度，与 Kimi Code 中 /usage 显示的一致。令牌仅在本机使用，不会上传，也不会发送到手机。此查询方式并非月之暗面为第三方提供，Kimi Code 更新后可能失效；令牌存放在系统钥匙串时无法读取。",
+   "optInEn": "Kimi Code doesn't record its quota on your computer. When turned on, Kiteline reads the token Kimi Code saves after you sign in (files in ~/.kimi-code/credentials) and asks Kimi's servers for your quota every 10 minutes, the same figures /usage shows in Kimi Code. The token is used only on this computer; it is never uploaded or sent to your phone. This isn't an interface Moonshot AI offers to third parties and may stop working after a Kimi Code update; tokens kept in the system keychain can't be read."
+  }
+ ],
+ "limitsNote": "打开下方「显示订阅额度」后，在「今日用量」中显示 Kimi Code 的 5 小时、本周、本月额度和加油包余额；用自己的 API Key 接其他模型服务时没有额度",
+ "limitsNoteEn": "Turn on \"Show plan quota\" below to see Kimi Code's 5-hour, weekly and monthly quota and booster balance under Today's usage; there's no quota when you use your own API key with another model provider",
+ "mark": [
+  {
+   "d": "M5 3h3.6v7.4L15.3 3H20l-7.5 8.1L20.4 21h-4.5l-5.8-7.3-1.5 1.6V21H5z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "Kimi",
+ "caps": [],
+ "notes": "新接入 Kimi Code：查看会话和完整对话；在 tmux 中运行时可从手机回复、审批命令、回答提问、中断和关闭会话；用量统计计入 Kimi Code 的 token。",
+ "notesEn": "New: Kimi Code support. View sessions and full conversations; when it runs in tmux, reply, approve commands, answer questions, interrupt and close sessions from your phone. Usage stats include Kimi Code's tokens."
+}

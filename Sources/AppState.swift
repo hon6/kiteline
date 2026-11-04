@@ -382,12 +382,16 @@ final class AppState {
             if let value = snap.transcriptUpdatedAt ?? snap.statusUpdatedAt ?? snap.updatedAt { item["updatedAt"] = value }
             if let value = snap.startedAt { item["startedAt"] = value }
             if let usage = snap.usage { item["usage"] = usage.payload }
+            if Hosted.hostable(record) { item["hostable"] = true }   // 能转到后台运行（会话页提示「支持后台托管」）
             return item
         }
         let sourceList: [[String: Any]] = store.sourceConfigs.map { source in
             let linkState = store.sourceStates[source.id] ?? .stopped
-            return ["id": source.id, "name": source.displayName, "kind": source.kind.rawValue,
-                    "online": linkState.isLive, "status": linkState.shortLabel]
+            var item: [String: Any] = ["id": source.id, "name": source.displayName, "kind": source.kind.rawValue,
+                                       "online": linkState.isLive, "status": linkState.shortLabel]
+            // 这台能后台运行 Claude Code 时才带：on / off（按设备开，见 Hosted）
+            if source.kind == .ssh, Hosted.supported(source.id) { item["hosted"] = source.hostedOn ? "on" : "off" }
+            return item
         }
         return [
             "ok": true,
@@ -409,7 +413,9 @@ final class AppState {
             // 这版电脑端能做的（手机按它决定给不给入口）：files = 收手机发来的文件（PDF、Excel……）、按路径取回文件
             // groups = 会话群（拉群、群里发言、历史群恢复）；groupMedia = 群里能发图、文件；
             // hostUpdate = 手机上能看这台电脑的新版本、让它下载安装和重启（/api/host-update）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share"],
+            // hostedSetup = 远端电脑上后台运行 Claude Code：按设备检测出口、开关，把会话转到后台（/api/hosted/*）
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup"],
+            "hosted": ["tipOff": config.mobile.hostedTipOff],
         ]
     }
 

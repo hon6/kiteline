@@ -27,6 +27,9 @@ struct SourceConfig: Codable, Equatable, Identifiable {
     /// 只关心这些前缀的目录；空表示该来源全部监听
     var pathPrefixes: [String] = []
     var enabled: Bool = true
+    /// 这台远端电脑上的新任务、恢复会话不开 VS Code，在那台电脑上后台运行 Claude Code（见 Hosted.swift）。
+    /// 按设备开，默认关：用户检测过这台的出口、看过结果点确认才开
+    var hostedOn: Bool = false
 
     init(id: String, name: String, kind: SourceKind) {
         self.id = id
@@ -51,6 +54,7 @@ struct SourceConfig: Codable, Equatable, Identifiable {
             ?? "~/.ccpulse/ccpulse-watch.py"
         pathPrefixes = ((try? c.decodeIfPresent([String].self, forKey: .pathPrefixes)) ?? nil) ?? []
         enabled = ((try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? nil) ?? true
+        hostedOn = ((try? c.decodeIfPresent(Bool.self, forKey: .hostedOn)) ?? nil) ?? false
     }
 
     static func local() -> SourceConfig {
@@ -79,12 +83,12 @@ enum ConfigKey: String, CodingKey {
     case notifyOnNeedsAttention, notifyOnConclusion, playSound
     case conclusionCooldownSeconds, attentionCooldownSeconds, connectOnLaunch, jumpBackURI
     // 来源
-    case id, name, kind, enabled, pathPrefixes
+    case id, name, kind, enabled, pathPrefixes, hostedOn
     case sshHost, sshPort, sshIdentityFile, remotePython, remoteWatcherPath
     // 手机访问
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
-    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle
+    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff
     case quietStart, quietEnd, mutedSessions, pinnedSessions, markedSessions, myName, avatar, remoteEnabled, relayURL, watch, usageStats
     // 旧版扁平字段
     case watchedPathPrefixes
@@ -130,6 +134,9 @@ struct MobileConfig: Codable, Equatable {
     var remindWaiting: Bool = true
     /// 24 小时没在 Kiteline 里打开过详情的会话自动关闭、进历史会话（标记、置顶的也关；见 IdleClose.swift）
     var autoCloseIdle: Bool = true
+    /// 「支持后台运行 Claude Code」的提示（会话页、来源页）：勾了「不再提示」就不再显示（各端共用）。
+    /// 开关本身按设备，见 SourceConfig.hostedOn（先前那版是这里一个默认开的 hostedRemote，那时的值不算数）
+    var hostedTipOff: Bool = false
     /// 免打扰时段（"HH:mm"，可跨午夜）：这段时间「有结论了 / 发来图片 / 定时任务」不推到锁屏，「需要你确认」和花费提醒照推；空 = 不启用
     var quietStart: String = "23:00"
     var quietEnd: String = "08:00"
@@ -238,6 +245,7 @@ struct MobileConfig: Codable, Equatable {
         morningTime = text(.morningTime, "08:30")
         remindWaiting = flag(.remindWaiting, true)
         autoCloseIdle = flag(.autoCloseIdle, true)
+        hostedTipOff = flag(.hostedTipOff, false)
         quietStart = text(.quietStart, "23:00")
         quietEnd = text(.quietEnd, "08:00")
         mutedSessions = (try? c.decodeIfPresent([String].self, forKey: .mutedSessions)) ?? nil ?? []

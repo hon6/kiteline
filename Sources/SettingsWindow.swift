@@ -872,6 +872,9 @@ enum PhoneAccess {
 struct SourcesPane: View {
     @ObservedObject var model = KitelineModel.shared
     @State private var adding = false
+    /// 后台运行 Claude Code 的面板（检测出口 IP、按设备开启；和手机同一个，见 KitelineKit/Views/HostedViews.swift）
+    @State private var showHosted = false
+    @State private var tipOff = AppState.shared.config.mobile.hostedTipOff
     @State private var host = ""
     @State private var name = ""
     @State private var busy = false
@@ -882,6 +885,28 @@ struct SourcesPane: View {
             Text("Kiteline 监听以下机器上的 Claude Code：本机，以及你在 VS Code 中通过 Remote-SSH 连接的远端主机。首次连接远端时将自动部署观察器。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // 有能后台运行、还没开的远端设备：问一声要不要开（勾了「不再提示」就不问，各行的按钮照旧在）
+            let candidates = model.sources.filter { $0.hostedSupport && !$0.hostedOn && $0.online }
+            if !candidates.isEmpty, !tipOff {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "moon.stars").foregroundStyle(Color.accentColor).padding(.top, 1)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L("「%@」支持在后台运行 Claude Code：新建任务、恢复会话不再打开 VS Code，可减少 VS Code 的内存占用。是否开启？",
+                               candidates.map(\.name).joined(separator: "」「")))
+                            .font(.app(size: 12)).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 12) {
+                            Button("检测出口并开启…") { showHosted = true }.tarsButton(prominent: true)
+                            Button("不再提示") {
+                                tipOff = true
+                                Hosted.update(tipOff: true)
+                            }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .tarsCard(padding: 12)
+            }
             VStack(spacing: 0) {
                 ForEach(model.sources) { source in
                     SourceRow(source: source)
@@ -919,7 +944,8 @@ struct SourcesPane: View {
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: SettingsWindowController.width, height: 440, alignment: .top)
+        .frame(width: SettingsWindowController.width, height: 520, alignment: .top)
+        .sheetPanel(isPresented: $showHosted) { TarsHostedSetupView() }
     }
 
     private func add() {
@@ -943,6 +969,8 @@ struct SourceRow: View {
     @State private var hovering = false
     /// 设备详情（IP、系统、CPU、内存、装了哪些 agent）：和手机同一个面板
     @State private var showDetail = false
+    /// 这台的后台运行 Claude Code（检测出口、开关）
+    @State private var showHosted = false
     /// 改名：双击名字或菜单里「改名…」，回车保存，Esc 取消
     @State private var editing = false
     @State private var draft = ""
@@ -977,10 +1005,18 @@ struct SourceRow: View {
                 HStack(spacing: 5) {
                     Circle().fill(source.online ? Color.green : (source.enabled ? Color.red : Color.gray)).frame(width: 6, height: 6)
                     Text(source.enabled ? source.status : L("已停用")).lineLimit(1)
+                    if source.hostedOn { Text("· 后台运行 Claude Code").lineLimit(1) }
                 }
                 .font(.app(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
+            if source.hostedSupport || source.hostedOn {
+                Button(source.hostedOn ? "后台运行：已开启" : "后台运行…") { showHosted = true }
+                    .buttonStyle(.borderless)
+                    .font(.app(size: 11.5))
+                    .foregroundStyle(source.hostedOn ? Color.secondary : Color.accentColor)
+                    .help("在这台电脑上后台运行 Claude Code：检测出口 IP、开启或关闭")
+            }
             Button { showDetail = true } label: { Image(systemName: "info.circle") }
                 .buttonStyle(.borderless)
                 .opacity(hovering ? 1 : 0.6)
@@ -1009,6 +1045,7 @@ struct SourceRow: View {
         .padding(.vertical, 8)
         .onHover { hovering = $0 }
         .sheetPanel(isPresented: $showDetail) { TarsMachineInfoView(sourceId: source.id) }
+        .sheetPanel(isPresented: $showHosted) { TarsHostedSetupView(sourceId: source.id) }
     }
 
     private func startEditing() {

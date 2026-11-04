@@ -276,6 +276,21 @@ struct ProjectInfo: Decodable, Identifiable, Hashable {
     var id: String { "\(sourceId)\n\(cwd)" }
     var dirty: Bool { changed + untracked + ahead > 0 }
 
+    /// 新任务「打开其他文件夹」选的：还没在这台电脑上用过 Claude Code
+    init(picked cwd: String, source: SourceInfo) {
+        self.cwd = cwd
+        name = cwd.components(separatedBy: cwd.contains("\\") && !cwd.hasPrefix("/") ? "\\" : "/").last { !$0.isEmpty } ?? cwd
+        sourceId = source.id
+        sourceName = source.name
+        sessions = 0; today = 0; live = 0; waiting = 0; busy = 0
+        exists = true
+        changed = 0; untracked = 0; ahead = 0; behind = 0
+        hasGit = false
+        gitTimeout = false
+        open = false
+        kind = source.kind
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.fields()
         cwd = c.text("cwd") ?? ""

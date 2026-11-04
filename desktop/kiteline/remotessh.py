@@ -370,6 +370,19 @@ def claude_links_trusted():
     return bool(parsed and _lists_claude(parsed.get(TRUST_KEY))) or _confirmed_in_storage()
 
 
+def claude_environment():
+    """VS Code 设置里给 Claude Code 配的环境变量（claudeCode.environmentVariables，[{name, value}]）。Remote-SSH 时扩展在远端运行，
+    用的仍是本地的这项设置；后台运行 Claude Code 时交给 watcher，它只取网络相关的（同 Mac 版 EditorSettings.claudeEnvironment）"""
+    try:
+        with open(_settings_path(), encoding="utf-8-sig") as handle:
+            parsed = _parse_jsonc(handle.read()) or {}
+    except (OSError, ValueError):
+        return {}
+    items = parsed.get("claudeCode.environmentVariables") or parsed.get("claude-code.environmentVariables") or []
+    return {str(i["name"]): str(i["value"]) for i in items if isinstance(i, dict) and isinstance(i.get("name"), str)
+            and isinstance(i.get("value"), str)} if isinstance(items, list) else {}
+
+
 def workspace_trust_enabled():
     """VS Code 开着工作区信任（默认开）：没信任过的文件夹以受限模式打开（顶上挂横幅），信任之前 Claude Code 扩展不运行"""
     try:

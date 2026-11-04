@@ -7,7 +7,7 @@ import Foundation
 /// 回复、点允许 / 拒绝、回答提问、批准计划会接着演下去：Claude 回一句、会话状态跟着变、别的会话弹提醒
 enum Demo {
     static let host = "demo.tars.invalid"
-    static let mac = PairedMac(name: "演示电脑", addresses: [URL(string: "https://\(host)")!], token: "demo",
+    static let mac = PairedMac(name: D("演示电脑"), addresses: [URL(string: "https://\(host)")!], token: "demo",
                                caCertificate: nil, remote: nil)
 
     private static let lock = NSLock()
@@ -85,7 +85,7 @@ final class DemoServer: @unchecked Sendable {
 
     /// 匹配录下的回应时不看的参数：和 tests/record_demo.py 里的 VOLATILE 一致
     private static let volatile: Set<String> = ["since", "until", "limit", "v", "bytes", "before", "beforeTs", "reveal", "via", "thumb"]
-    private static let unavailable = "演示模式不支持此功能，连接你的电脑后即可使用。"
+    private static let unavailable = D("演示模式不支持此功能，连接你的电脑后即可使用。")
 
     private let lock = NSLock()
     private var recorded: [String: Reply] = [:]
@@ -109,7 +109,9 @@ final class DemoServer: @unchecked Sendable {
             recorded = [:]
             histories = [:]
             state = [:]
-            guard let url = Bundle.main.url(forResource: "demo-data", withExtension: "json"),
+            // 英文界面用英文版的示例会话（demo-data.en.json，DEMO_LANG=en bash tests/record_demo.sh 录的）；没有就用中文版
+            let english = Lang.shared.isEnglish ? Bundle.main.url(forResource: "demo-data.en", withExtension: "json") : nil
+            guard let url = english ?? Bundle.main.url(forResource: "demo-data", withExtension: "json"),
                   let data = try? Data(contentsOf: url),
                   let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let responses = root["responses"] as? [String: [String: Any]] else { return }
@@ -162,7 +164,7 @@ final class DemoServer: @unchecked Sendable {
             if ProcessInfo.processInfo.environment["TARS_DEMO_LONG"] == "1", var sessions = state["sessions"] as? [[String: Any]] {
                 for i in sessions.indices {
                     let title = sessions[i]["title"] as? String ?? ""
-                    sessions[i]["title"] = title + "，并补充完整的单元测试和集成测试，最后生成覆盖率报告发给我看看"
+                    sessions[i]["title"] = title + D("，并补充完整的单元测试和集成测试，最后生成覆盖率报告发给我看看")
                     if let cwd = sessions[i]["cwd"] as? String { sessions[i]["cwd"] = cwd + "-enterprise-admin-dashboard-frontend-v2" }
                 }
                 state["sessions"] = sessions
@@ -190,8 +192,8 @@ final class DemoServer: @unchecked Sendable {
         let source = (state["sources"] as? [[String: Any]])?.first { $0["id"] as? String == sourceId }
         let sessions = (state["sessions"] as? [[String: Any]] ?? []).filter { $0["sourceId"] as? String == sourceId }
         var out: [String: Any] = [
-            "ok": true, "id": sourceId, "name": source?["name"] as? String ?? "本机", "kind": source?["kind"] as? String ?? "local",
-            "online": true, "status": "demo-mac 在线 · \(sessions.count) 会话", "computer": state["host"] as? String ?? "演示 Mac",
+            "ok": true, "id": sourceId, "name": source?["name"] as? String ?? D("本机"), "kind": source?["kind"] as? String ?? "local",
+            "online": true, "status": Lang.shared.isEnglish ? "demo-mac online · \(sessions.count) sessions" : "demo-mac 在线 · \(sessions.count) 会话", "computer": state["host"] as? String ?? D("演示 Mac"),
             "sessions": sessions.count, "busy": sessions.filter { ["busy", "waiting"].contains($0["activity"] as? String ?? "") }.count,
             "info": [
                 "hostname": "demo-mac.local", "os": "macOS 26.1", "arch": "arm64", "cpuModel": "Apple M4 Pro", "cores": 12,
@@ -232,7 +234,7 @@ final class DemoServer: @unchecked Sendable {
     /// 演示里也能换头像、昵称（存在内存里，退出演示就没了；上传的图演示里不收）
     private func demoSaveFace(_ body: [String: Any]) -> Reply {
         let key = body["key"] as? String ?? "", agent = body["agent"] as? String ?? Agents.defaultID
-        if body["image"] != nil { return json(["ok": false, "error": "演示模式下无法上传图片，可选择预设头像。"], status: 400) }
+        if body["image"] != nil { return json(["ok": false, "error": D("演示模式下无法上传图片，可选择预设头像。")], status: 400) }
         var faces = state["faces"] as? [String: Any] ?? [:]
         var sessions = faces["sessions"] as? [String: Any] ?? [:], agents = faces["agents"] as? [String: Any] ?? [:]
         let name = String((body["name"] as? String ?? "").prefix(24)), avatar = body["avatar"] as? String ?? ""
@@ -259,19 +261,19 @@ final class DemoServer: @unchecked Sendable {
     private func seedPeers() {
         peerLinks = [:]
         peerCount = 0
-        guard let busy = demoKey("首页卡片间距"), let plan = demoKey("订单导出功能") else { return }
-        if let perm = demoKey("清理构建目录") {
-            exchange(from: perm, to: busy, summary: "构建目录已清理", ago: 9 * 60_000,
-                     text: "build 目录已清理并重新构建成功，可以重新跑测试了。")
+        guard let busy = demoKey(D("首页卡片间距")), let plan = demoKey(D("订单导出功能")) else { return }
+        if let perm = demoKey(D("清理构建目录")) {
+            exchange(from: perm, to: busy, summary: D("构建目录已清理"), ago: 9 * 60_000,
+                     text: D("build 目录已清理并重新构建成功，可以重新跑测试了。"))
         }
-        exchange(from: busy, to: plan, summary: "告知卡片间距的最终取值", ago: 6 * 60_000,
-                 text: "首页卡片间距已改为 16px，变量名 --card-gap，圆角 --card-radius: 12px。订单导出页复用卡片组件时直接用这两个变量。")
-        exchange(from: plan, to: busy, summary: "导出页已同步卡片样式", ago: 4 * 60_000,
-                 text: "收到。订单导出页的卡片已改用 --card-gap 和 --card-radius，等你那边测试通过后一起合并。")
+        exchange(from: busy, to: plan, summary: D("告知卡片间距的最终取值"), ago: 6 * 60_000,
+                 text: D("首页卡片间距已改为 16px，变量名 --card-gap，圆角 --card-radius: 12px。订单导出页复用卡片组件时直接用这两个变量。"))
+        exchange(from: plan, to: busy, summary: D("导出页已同步卡片样式"), ago: 4 * 60_000,
+                 text: D("收到。订单导出页的卡片已改用 --card-gap 和 --card-radius，等你那边测试通过后一起合并。"))
         #if SNAPSHOT
         // 截图版逐帧看纸鸢：TARS_DEMO_FLIGHT=0～1 时连上就飞一只、停在这个位置（见 PeerBoard.frozen），不再定时飞
         if ProcessInfo.processInfo.environment["TARS_DEMO_FLIGHT"] != nil {
-            later(0.8) { self.exchange(from: busy, to: plan, summary: "测试已全部通过", ago: 0, text: "单元测试 12 项全部通过，可以合并了。", history: false) }
+            later(0.8) { self.exchange(from: busy, to: plan, summary: D("测试已全部通过"), ago: 0, text: D("单元测试 12 项全部通过，可以合并了。"), history: false) }
             return
         }
         #endif
@@ -279,17 +281,17 @@ final class DemoServer: @unchecked Sendable {
     }
 
     private func demoKey(_ title: String) -> String? {
-        (state["sessions"] as? [[String: Any]])?.first { $0["title"] as? String == title }?["key"] as? String
+        (state["sessions"] as? [[String: Any]])?.first { $0["title"] as? String == title || $0["title"] as? String == D(title) }?["key"] as? String
     }
 
     /// 定时再飞一只：在几个演示会话之间轮着发
     private func demoFlight() {
-        let keys = ["首页卡片间距", "订单导出功能", "清理构建目录", "选择登录方案"].compactMap(demoKey)
+        let keys = [D("首页卡片间距"), D("订单导出功能"), D("清理构建目录"), D("选择登录方案")].compactMap(demoKey)
         guard keys.count >= 2 else { return }
         let from = keys[peerCount % keys.count], to = keys[(peerCount + 1 + peerCount / keys.count) % keys.count]
         if from != to {
-            let lines = [("同步进度", "我这边改完了，你那边可以继续。"), ("请帮忙确认接口字段", "导出接口的字段名按你的约定改好了，帮忙确认一下。"),
-                         ("测试已全部通过", "单元测试 12 项全部通过，可以合并了。")]
+            let lines = [(D("同步进度"), D("我这边改完了，你那边可以继续。")), (D("请帮忙确认接口字段"), D("导出接口的字段名按你的约定改好了，帮忙确认一下。")),
+                         (D("测试已全部通过"), D("单元测试 12 项全部通过，可以合并了。"))]
             let line = lines[peerCount % lines.count]
             exchange(from: from, to: to, summary: line.0, ago: 0, text: line.1, history: false)
         }
@@ -315,7 +317,7 @@ final class DemoServer: @unchecked Sendable {
                                                  "peer": ["dir": "out", "to": sid(to), "session": sid(to), "summary": summary, "text": text]])
             histories[from, default: []].append(["id": nextId(), "ts": sent + 100, "t": "result", "toolId": toolId, "msgId": id,
                                                  "text": "{\"success\":true,\"msg_id\":\"\(id)\"}"])
-            histories[to, default: []].append(["id": nextId(), "ts": sent + 400, "t": "event", "text": "来自其他会话的消息",
+            histories[to, default: []].append(["id": nextId(), "ts": sent + 400, "t": "event", "text": D("来自其他会话的消息"),
                                                "peer": ["dir": "in", "session": sid(from), "msgId": id, "body": text, "text": text]])
         }
         emit("peers", ["links": [link]])
@@ -337,7 +339,7 @@ final class DemoServer: @unchecked Sendable {
             guard let key = (state["sessions"] as? [[String: Any]])?.first(where: { $0["title"] as? String == title })?["key"] as? String,
                   let item = histories[key]?.last(where: { ["text", "user"].contains($0["t"] as? String) }),
                   let itemId = item["id"] as? String else { return nil }
-            var source: [String: Any] = ["key": key, "itemId": itemId, "title": title, "machine": "本机"]
+            var source: [String: Any] = ["key": key, "itemId": itemId, "title": title, "machine": D("本机")]
             if let ts = item["ts"] { source["ts"] = ts }
             return source
         }
@@ -347,17 +349,17 @@ final class DemoServer: @unchecked Sendable {
             if done { item["doneAt"] = now - ago * hour / 2 }
             todos.append(item)
         }
-        todo("在 iPhone 15 上确认首页卡片的间距和圆角", 0.5, source: source("首页卡片间距"))
-        todo("确认订单导出方案后，通知前端开始联调", 1, source: source("订单导出功能"))
-        todo("周五前确认短信服务商的报价", 3)
-        todo("合并首页样式改动到 main", 6, done: true)
+        todo(D("在 iPhone 15 上确认首页卡片的间距和圆角"), 0.5, source: source(D("首页卡片间距")))
+        todo(D("确认订单导出方案后，通知前端开始联调"), 1, source: source(D("订单导出功能")))
+        todo(D("周五前确认短信服务商的报价"), 3)
+        todo(D("合并首页样式改动到 main"), 6, done: true)
         #if SNAPSHOT
         // 宣传图「待办」流程的后两步：TARS_DEMO_TODOS=asked 时，Codex 会话那条回复里的事已经加入待办
         if ProcessInfo.processInfo.environment["TARS_DEMO_TODOS"] == "asked",
            let key = (state["sessions"] as? [[String: Any]])?.first(where: { $0["agent"] as? String == "codex" })?["key"] as? String,
            let item = histories[key]?.last(where: { ($0["asks"] as? [String])?.isEmpty == false }),
            let itemId = item["id"] as? String, let asks = item["asks"] as? [String] {
-            var from: [String: Any] = ["key": key, "itemId": itemId, "title": "订单接口限流", "machine": "本机"]
+            var from: [String: Any] = ["key": key, "itemId": itemId, "title": D("订单接口限流"), "machine": D("本机")]
             if let ts = item["ts"] { from["ts"] = ts }
             for text in asks.reversed() { todos.insert(["id": "demo-todo-ask-\(todos.count)", "text": text, "done": false,
                                                        "createdAt": now - 60_000, "images": [], "source": from], at: 0) }
@@ -372,8 +374,8 @@ final class DemoServer: @unchecked Sendable {
     private var demoSuggestions: [[String: Any]] {
         #if SNAPSHOT
         if ProcessInfo.processInfo.environment["TARS_DEMO_SUGGEST"] == "1" {
-            return [["key": "local#demo-suggest", "itemId": "demo-suggest", "title": "订单接口限流", "machine": "本机",
-                     "asks": ["在阿里云控制台开通短信签名", "把测试账号的密码发给前端"], "at": Date().timeIntervalSince1970 * 1000]]
+            return [["key": "local#demo-suggest", "itemId": "demo-suggest", "title": D("订单接口限流"), "machine": D("本机"),
+                     "asks": [D("在阿里云控制台开通短信签名"), D("把测试账号的密码发给前端")], "at": Date().timeIntervalSince1970 * 1000]]
         }
         #endif
         return []
@@ -386,7 +388,7 @@ final class DemoServer: @unchecked Sendable {
             for text in body["texts"] as? [String] ?? [] {
                 var item: [String: Any] = ["id": "demo-todo-\(UUID().uuidString)", "text": text, "done": false, "createdAt": now, "images": []]
                 if let key = body["key"] as? String, let itemId = body["itemId"] as? String {
-                    item["source"] = ["key": key, "itemId": itemId, "title": body["title"] as? String ?? "", "machine": "本机", "ts": body["ts"] ?? now] as [String: Any]
+                    item["source"] = ["key": key, "itemId": itemId, "title": body["title"] as? String ?? "", "machine": D("本机"), "ts": body["ts"] ?? now] as [String: Any]
                     todosHandled.append("\(key)|\(itemId)")
                 }
                 todos.append(item)
@@ -460,7 +462,7 @@ final class DemoServer: @unchecked Sendable {
     /// 英文界面：演示数据里「电脑生成」的字（等待原因、就绪检查、出错提示……）同真电脑一样换成英文（ServerText）；
     /// 对话、文件这类只有内容的接口原样给（同 Mac 的 MobileServer.contentOnly）
     private static let contentOnly: Set<String> = ["/api/history", "/api/media", "/api/file", "/api/files", "/api/git/diff", "/api/digest/media",
-                                                   "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/tts", "/api/peers",
+                                                   "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/trace", "/api/tts", "/api/peers",
                                                    "/api/groups/messages"]
 
     func respond(_ method: String, _ path: String, _ query: [String: String], _ body: [String: Any]) -> Reply {
@@ -480,7 +482,7 @@ final class DemoServer: @unchecked Sendable {
         #if SNAPSHOT
         // 截图版看出错的样子：TARS_DEMO_FAIL=/api/inbox,/api/digest 这些接口一律回错误
         if let fail = ProcessInfo.processInfo.environment["TARS_DEMO_FAIL"], fail.split(separator: ",").contains(where: { path.hasPrefix($0) }) {
-            return json(["ok": false, "error": "电脑读取数据时出错（截图版模拟的错误）"], status: 500)
+            return json(["ok": false, "error": D("电脑读取数据时出错（截图版模拟的错误）")], status: 500)
         }
         #endif
         return lock.withLock {
@@ -494,6 +496,14 @@ final class DemoServer: @unchecked Sendable {
                     return json(["ok": true, "hasMore": false, "items": []])
                 }
                 return json(["ok": true, "hasMore": false, "items": histories[key] ?? []])
+            case ("GET", "/api/trace"):
+                // 执行过程面板：演示数据里没录。截图版可用 TARS_DEMO_TRACE=<json 文件> 给一份（watcher 的 trace 回包）
+                #if SNAPSHOT
+                if let file = ProcessInfo.processInfo.environment["TARS_DEMO_TRACE"], let data = FileManager.default.contents(atPath: file) {
+                    return Reply(status: 200, type: "application/json; charset=utf-8", data: data)
+                }
+                #endif
+                return json(["ok": true, "agents": [], "steps": [:]])
             case ("GET", "/api/todos"):
                 return json(todoState)
             case ("GET", "/api/machine"):
@@ -513,7 +523,7 @@ final class DemoServer: @unchecked Sendable {
             case ("POST", "/api/send"), ("POST", "/api/resume"):
                 return send(key, body["text"] as? String ?? "")
             case ("POST", "/api/voice"):
-                let text = "首页按钮偏小，请适当放大，并截图给我确认"
+                let text = D("首页按钮偏小，请适当放大，并截图给我确认")
                 if body["mode"] as? String == "text" { return json(["ok": true, "text": text]) }
                 var reply = send(key, text)
                 reply.data = (try? JSONSerialization.data(withJSONObject: ["ok": true, "submitted": true, "text": text])) ?? reply.data
@@ -523,12 +533,12 @@ final class DemoServer: @unchecked Sendable {
             case ("POST", "/api/close"):
                 // 关闭会话：从列表里拿掉（演示里不会真的关电脑上的窗口）
                 guard var sessions = state["sessions"] as? [[String: Any]], sessions.contains(where: { $0["key"] as? String == key }) else {
-                    return json(["ok": false, "error": "会话不存在或已结束"], status: 404)
+                    return json(["ok": false, "error": D("会话不存在或已结束")], status: 404)
                 }
                 sessions.removeAll { $0["key"] as? String == key }
                 state["sessions"] = sessions
                 emit("state", state)
-                return json(["ok": true, "message": "已关闭会话"])
+                return json(["ok": true, "message": D("已关闭会话")])
             case ("POST", "/api/answer"):
                 return answer(key, body["answers"] as? [[String: Any]] ?? [], toolId: body["toolId"] as? String ?? "")
             case ("POST", "/api/pin"):
@@ -564,7 +574,7 @@ final class DemoServer: @unchecked Sendable {
         }
         let key = parts.string ?? path
         if let hit = recorded[key] { return hit }
-        return json(["ok": false, "error": "演示模式不提供此数据，连接你的电脑后即可查看。"], status: 404)
+        return json(["ok": false, "error": D("演示模式不提供此数据，连接你的电脑后即可查看。")], status: 404)
     }
 
     private static func encode(_ text: String) -> String {
@@ -607,10 +617,12 @@ final class DemoServer: @unchecked Sendable {
         guard ["busy", "waiting"].contains(session["activity"] as? String ?? "") else { return nil }
         let doing = (session["activityText"] as? String ?? "") + " " + (session["pendingTool"] as? String ?? "")
         let standard = ["调研了解", "开发中", "测试中", "汇报中"]
+        // 阶段名界面上按词表翻译；备注、分端名是演示内容，英文界面直接给英文
+        let english = Lang.shared.isEnglish
         let (steps, step, note): ([String], Int, String?) =
-            doing.contains("ExitPlanMode") ? (["调研了解", "方案设计", "开发中", "测试中", "发布中"], 2, "导出接口与分页方案")
+            doing.contains("ExitPlanMode") ? (["调研了解", "方案设计", "开发中", "测试中", "发布中"], 2, english ? "Export API and pagination design" : "导出接口与分页方案")
             : doing.contains("AskUserQuestion") ? (standard, 1, nil)
-            : doing.contains("test") ? (standard, 3, "跑相关的单元测试")
+            : doing.contains("test") ? (standard, 3, english ? "Run the related unit tests" : "跑相关的单元测试")
             : (standard, 2, nil)
         let now = Date().timeIntervalSince1970 * 1000
         let minutes = [6.0, 14.0, 5.0, 3.0, 2.0]
@@ -626,7 +638,7 @@ final class DemoServer: @unchecked Sendable {
         if doing.contains("pnpm") {
             stage["part"] = "Android"
             stage["parts"] = [["name": "iOS", "step": 4, "done": true], ["name": "Android", "step": step, "done": false],
-                              ["name": "网页", "step": 0, "done": false]]
+                              ["name": english ? "Web" : "网页", "step": 0, "done": false]]
             stage["auto"] = false
         }
         return stage
@@ -657,7 +669,7 @@ final class DemoServer: @unchecked Sendable {
             $0["reason"] = nil
             $0["preview"] = text
         }
-        let title = session(key)?["title"] as? String ?? "会话"
+        let title = session(key)?["title"] as? String ?? D("会话")
         emit("notify", ["kind": "conclusion", "title": title, "body": String(text.prefix(80)), "key": key, "at": now])
     }
 
@@ -672,23 +684,23 @@ final class DemoServer: @unchecked Sendable {
     }
 
     private func send(_ key: String, _ text: String) -> Reply {
-        guard session(key) != nil else { return json(["ok": false, "error": "会话不存在或已结束"], status: 404) }
+        guard session(key) != nil else { return json(["ok": false, "error": D("会话不存在或已结束")], status: 404) }
         add(key, ["t": "user", "text": text])
-        working(key, "思考中")
+        working(key, D("思考中"))
         later(1.2) {
-            self.add(key, ["t": "thinking", "text": "用户在演示模式里发来一句话，回一句说明真实使用时会发生什么。", "model": "claude-opus-5-5"])
+            self.add(key, ["t": "thinking", "text": D("用户在演示模式里发来一句话，回一句说明真实使用时会发生什么。"), "model": "claude-opus-5-5"])
         }
         later(3) {
-            self.finish(key, "（演示）收到：「\(text.prefix(40))」\n\n"
-                + "连接你的电脑后，这条消息会发送到电脑上正在运行的 Claude Code 会话，由 Claude 继续执行；"
-                + "任务完成或需要确认时，手机和手表都会提醒你。")
+            self.finish(key, (Lang.shared.isEnglish ? "(Demo) Got it: \"\(text.prefix(40))\"\n\n" : "（演示）收到：「\(text.prefix(40))」\n\n")
+                + D("连接你的电脑后，这条消息会发送到电脑上正在运行的 Claude Code 会话，由 Claude 继续执行；")
+                + D("任务完成或需要确认时，手机和手表都会提醒你。"))
         }
         return json(["ok": true, "submitted": true])
     }
 
     /// 等你确认时按的键：1 / 2 / enter 是同意，esc 是拒绝（计划卡片上是「继续规划」）
     private func press(_ key: String, _ button: String) -> Reply {
-        guard let current = session(key) else { return json(["ok": false, "error": "会话不存在或已结束"], status: 404) }
+        guard let current = session(key) else { return json(["ok": false, "error": D("会话不存在或已结束")], status: 404) }
         if button == "shift+tab" { return json(["ok": true]) }
         let open = (histories[key] ?? []).last { item in
             item["t"] as? String == "tool" && !(histories[key] ?? []).contains { $0["t"] as? String == "result" && $0["toolId"] as? String == item["toolId"] as? String }
@@ -701,11 +713,11 @@ final class DemoServer: @unchecked Sendable {
             if !waiting {
                 // 正在干活时按 Esc = 中断
                 update(key) { $0["activity"] = "idle"; $0["activityText"] = nil; $0["reason"] = nil }
-                add(key, ["t": "event", "text": "已中断", "level": "info"])
+                add(key, ["t": "event", "text": D("已中断"), "level": "info"])
                 return json(["ok": true])
             }
             add(key, ["t": "result", "toolId": toolId, "text": "The user doesn't want to proceed with this tool use.", "isError": true])
-            finish(key, name == "ExitPlanMode" ? "好的，方案暂不执行。请告诉我需要调整哪一步。" : "好的，此步骤暂不执行。如需更换方案，请告诉我。")
+            finish(key, name == "ExitPlanMode" ? D("好的，方案暂不执行。请告诉我需要调整哪一步。") : D("好的，此步骤暂不执行。如需更换方案，请告诉我。"))
             return json(["ok": true])
         }
         guard waiting else { return json(["ok": true]) }
@@ -714,15 +726,15 @@ final class DemoServer: @unchecked Sendable {
             add(key, ["t": "result", "toolId": toolId, "text": "User has approved your plan. You can now start coding."])
             working(key, "TodoWrite")
             let todos: [[String: Any]] = [
-                ["content": "后端新增导出接口", "status": "in_progress", "activeForm": "正在编写导出接口"],
-                ["content": "订单列表加「导出」按钮", "status": "pending", "activeForm": "添加导出按钮"],
-                ["content": "大数据量改为异步任务", "status": "pending", "activeForm": "改为异步任务"],
+                ["content": D("后端新增导出接口"), "status": "in_progress", "activeForm": D("正在编写导出接口")],
+                ["content": D("订单列表加「导出」按钮"), "status": "pending", "activeForm": D("添加导出按钮")],
+                ["content": D("大数据量改为异步任务"), "status": "pending", "activeForm": D("改为异步任务")],
             ]
             let todoId = "toolu_demo_\(serial)"
             add(key, ["t": "tool", "name": "TodoWrite", "toolId": todoId, "input": ["todos": todos], "brief": "TodoWrite", "model": "claude-opus-5-5"])
             add(key, ["t": "result", "toolId": todoId, "text": "Todos have been modified successfully"])
             later(3) {
-                self.finish(key, "方案已批准，开始实施：先编写后端导出接口，再添加前端按钮。\n\n（演示到此结束。实际使用时，Claude 会在你的电脑上逐步修改代码，任务清单进度可在手机上实时查看。）")
+                self.finish(key, D("方案已批准，开始实施：先编写后端导出接口，再添加前端按钮。\n\n（演示到此结束。实际使用时，Claude 会在你的电脑上逐步修改代码，任务清单进度可在手机上实时查看。）"))
             }
             return json(["ok": true])
         }
@@ -732,19 +744,19 @@ final class DemoServer: @unchecked Sendable {
         later(1.5) {
             let output = command?.contains("build") == true
                 ? "> shop-app@1.4.0 build\n> vite build\n\n✓ 142 modules transformed.\ndist/index.html          0.46 kB\ndist/assets/index.css   18.20 kB\ndist/assets/index.js   146.71 kB\n✓ built in 1.84s"
-                : "完成"
+                : D("完成")
             self.add(key, ["t": "result", "toolId": toolId, "text": output])
         }
         later(3.5) {
             self.finish(key, command?.contains("build") == true
-                ? "构建完成：`build` 目录已清空并重新生成，共 142 个模块，用时 1.8 秒，无报错。"
-                : "已执行完毕。")
+                ? D("构建完成：`build` 目录已清空并重新生成，共 142 个模块，用时 1.8 秒，无报错。")
+                : D("已执行完毕。"))
         }
         return json(["ok": true])
     }
 
     private func answer(_ key: String, _ answers: [[String: Any]], toolId: String) -> Reply {
-        guard session(key) != nil else { return json(["ok": false, "error": "会话不存在或已结束"], status: 404) }
+        guard session(key) != nil else { return json(["ok": false, "error": D("会话不存在或已结束")], status: 404) }
         var lines: [String] = []
         var first: String?
         for item in answers {
@@ -755,12 +767,14 @@ final class DemoServer: @unchecked Sendable {
             let question = item["question"] as? String ?? ""
             lines.append(question.isEmpty ? "• \(parts.joined(separator: "、"))" : "• \(question)\n  → \(parts.joined(separator: "、"))")
         }
-        guard !lines.isEmpty else { return json(["ok": false, "error": "未选择任何选项"], status: 400) }
-        add(key, ["t": "result", "toolId": toolId, "text": "用户已在手机上回答", "isError": true])
-        add(key, ["t": "user", "text": "（回答你刚才的提问）\n" + lines.joined(separator: "\n")])
-        working(key, "思考中")
+        guard !lines.isEmpty else { return json(["ok": false, "error": D("未选择任何选项")], status: 400) }
+        add(key, ["t": "result", "toolId": toolId, "text": D("用户已在手机上回答"), "isError": true])
+        add(key, ["t": "user", "text": D("（回答你刚才的提问）\n") + lines.joined(separator: "\n")])
+        working(key, D("思考中"))
         later(3) {
-            self.finish(key, "好的，按「\(first ?? "你选的方案")」执行。我先搭建登录页的结构，完成后截图给你确认。\n\n（演示到此结束。实际使用时，Claude 会根据你的回答在电脑上继续执行。）")
+            self.finish(key, Lang.shared.isEnglish
+                ? "OK, going with \"\(first ?? "your choice")\". I'll build the sign-in page structure first and send you a screenshot when it's done.\n\n(End of demo. In real use, Claude continues on your computer based on your answer.)"
+                : "好的，按「\(first ?? "你选的方案")」执行。我先搭建登录页的结构，完成后截图给你确认。\n\n（演示到此结束。实际使用时，Claude 会根据你的回答在电脑上继续执行。）")
         }
         return json(["ok": true, "submitted": true])
     }
@@ -834,11 +848,11 @@ extension DemoServer {
         } else {
             state["features"] = ["files", "groups"]
         }
-        guard let plan = demoKey("订单导出功能"), let home = demoKey("首页卡片间距") else { return }
+        guard let plan = demoKey(D("订单导出功能")), let home = demoKey(D("首页卡片间距")) else { return }
         let minute = 60_000.0
         let members: [[String: Any]] = [
-            ["key": plan, "title": "订单导出功能", "machine": "演示 Mac", "project": "admin", "joinedAt": now - 40 * minute],
-            ["key": home, "title": "首页卡片间距", "machine": "演示 Mac", "project": "shop-app", "joinedAt": now - 40 * minute],
+            ["key": plan, "title": D("订单导出功能"), "machine": D("演示 Mac"), "project": "admin", "joinedAt": now - 40 * minute],
+            ["key": home, "title": D("首页卡片间距"), "machine": D("演示 Mac"), "project": "shop-app", "joinedAt": now - 40 * minute],
         ]
         var serial = 0
         func message(_ from: String, _ title: String, _ text: String, _ ago: Double, event: String? = nil, args: [String] = []) -> [String: Any] {
@@ -849,16 +863,16 @@ extension DemoServer {
             return out
         }
         let messages = [
-            message("system", "", "建群：订单导出功能、首页卡片间距", 40, event: "created", args: ["订单导出功能", "首页卡片间距"]),
-            message("me", "用户", "订单导出接口改完后告诉首页那边，首页再接新字段。", 39.5),
-            message("system", "", "订单导出功能 给群起名「订单导出联调」", 31, event: "named", args: ["订单导出功能", "订单导出联调"]),
-            message(plan, "订单导出功能", "导出接口已经改好：新增 `exportedAt`、`operator` 两个字段，接口文档在 docs/export.md。首页那边可以开始接了。", 31),
-            message(home, "首页卡片间距", "收到，我这边改完卡片后发截图给你核对字段显示。", 28),
-            message(home, "首页卡片间距", "首页卡片已经接上新字段，截图发在我的会话里了，导出时间按本地时区显示。", 6),
+            message("system", "", D("建群：订单导出功能、首页卡片间距"), 40, event: "created", args: [D("订单导出功能"), D("首页卡片间距")]),
+            message("me", D("用户"), D("订单导出接口改完后告诉首页那边，首页再接新字段。"), 39.5),
+            message("system", "", D("订单导出功能 给群起名「订单导出联调」"), 31, event: "named", args: [D("订单导出功能"), D("订单导出联调")]),
+            message(plan, D("订单导出功能"), D("导出接口已经改好：新增 `exportedAt`、`operator` 两个字段，接口文档在 docs/export.md。首页那边可以开始接了。"), 31),
+            message(home, D("首页卡片间距"), D("收到，我这边改完卡片后发截图给你核对字段显示。"), 28),
+            message(home, D("首页卡片间距"), D("首页卡片已经接上新字段，截图发在我的会话里了，导出时间按本地时区显示。"), 6),
         ]
         // 截图用：TARS_DEMO_GROUP_FLAGS=marked,muted 让演示群带上标记、免打扰
         let flags = (ProcessInfo.processInfo.environment["TARS_DEMO_GROUP_FLAGS"] ?? "").split(separator: ",")
-        let group: [String: Any] = ["id": "demo-group-1", "name": "订单导出联调", "autoName": false, "createdAt": now - 40 * minute,
+        let group: [String: Any] = ["id": "demo-group-1", "name": D("订单导出联调"), "autoName": false, "createdAt": now - 40 * minute,
                                     "updatedAt": now - 6 * minute, "paused": false, "members": members, "count": 4, "last": messages.last!,
                                     "marked": flags.contains("marked"), "muted": flags.contains("muted")]
         demoGroups = [group]
@@ -878,14 +892,14 @@ extension DemoServer {
         case ("GET", "/api/groups"):
             return json(["ok": true, "items": demoGroups])
         case ("GET", "/api/groups/messages"):
-            guard index != nil else { return json(["ok": false, "error": "会话群不存在"], status: 404) }
+            guard index != nil else { return json(["ok": false, "error": D("会话群不存在")], status: 404) }
             return json(["ok": true, "id": id, "items": demoGroupMessages[id] ?? []])
         case ("POST", "/api/groups/send"):
             guard let index, let text = (body["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-                return json(["ok": false, "error": "内容为空"], status: 400)
+                return json(["ok": false, "error": D("内容为空")], status: 400)
             }
             let members = (demoGroups[index]["members"] as? [[String: Any]] ?? []).compactMap { $0["key"] as? String }
-            let message: [String: Any] = ["id": "demo-gm-\(Int(now))", "ts": now, "from": "me", "fromTitle": "用户", "text": text,
+            let message: [String: Any] = ["id": "demo-gm-\(Int(now))", "ts": now, "from": "me", "fromTitle": D("用户"), "text": text,
                                           "states": Dictionary(uniqueKeysWithValues: members.map { ($0, "sent") })]
             demoGroupMessages[id, default: []].append(message)
             demoGroups[index]["last"] = message
@@ -895,49 +909,49 @@ extension DemoServer {
             return json(["ok": true, "message": message])
         case ("POST", "/api/groups/create"):
             let keys = body["keys"] as? [String] ?? []
-            guard keys.count >= 2 else { return json(["ok": false, "error": "至少选两个会话"], status: 400) }
+            guard keys.count >= 2 else { return json(["ok": false, "error": D("至少选两个会话")], status: 400) }
             let sessions = state["sessions"] as? [[String: Any]] ?? []
             let members: [[String: Any]] = keys.map { key in
                 let session = sessions.first { $0["key"] as? String == key } ?? [:]
-                return ["key": key, "title": session["title"] ?? "会话", "machine": "演示 Mac",
+                return ["key": key, "title": session["title"] ?? D("会话"), "machine": D("演示 Mac"),
                         "project": ((session["cwd"] as? String) as NSString?)?.lastPathComponent ?? "", "joinedAt": now]
             }
             let newId = "demo-group-\(demoGroups.count + 1)"
             let titles = members.compactMap { $0["title"] as? String }
-            let created: [String: Any] = ["id": "demo-gm-c\(Int(now))", "ts": now, "from": "system", "fromTitle": "", "text": "建群：" + titles.joined(separator: "、"),
+            let created: [String: Any] = ["id": "demo-gm-c\(Int(now))", "ts": now, "from": "system", "fromTitle": "", "text": D("建群：") + titles.joined(separator: D("、")),
                                           "event": "created", "args": titles]
-            demoGroups.insert(["id": newId, "name": titles.prefix(3).joined(separator: "、"), "autoName": true, "createdAt": now, "updatedAt": now,
+            demoGroups.insert(["id": newId, "name": titles.prefix(3).joined(separator: D("、")), "autoName": true, "createdAt": now, "updatedAt": now,
                                "paused": false, "members": members, "count": 0, "last": created], at: 0)
             demoGroupMessages[newId] = [created]
             emit("groups", ["ok": true, "items": demoGroups])
             return json(["ok": true, "group": demoGroups[0]])
         case ("POST", "/api/groups/rename"):
-            guard let index, let name = body["name"] as? String, !name.isEmpty else { return json(["ok": false, "error": "群名不能为空"], status: 400) }
+            guard let index, let name = body["name"] as? String, !name.isEmpty else { return json(["ok": false, "error": D("群名不能为空")], status: 400) }
             demoGroups[index]["name"] = name
             demoGroups[index]["autoName"] = false
             return changed()
         case ("POST", "/api/groups/pause"):
-            guard let index else { return json(["ok": false, "error": "会话群不存在"], status: 404) }
+            guard let index else { return json(["ok": false, "error": D("会话群不存在")], status: 404) }
             demoGroups[index]["paused"] = body["paused"] as? Bool ?? true
             return changed()
         case ("POST", "/api/groups/mark"), ("POST", "/api/groups/mute"):
-            guard let index else { return json(["ok": false, "error": "会话群不存在"], status: 404) }
+            guard let index else { return json(["ok": false, "error": D("会话群不存在")], status: 404) }
             let field = path.hasSuffix("/mark") ? "marked" : "muted"
             demoGroups[index][field] = body[field] as? Bool ?? true
             return changed()
         case ("POST", "/api/groups/add"):
-            guard let index else { return json(["ok": false, "error": "会话群不存在"], status: 404) }
+            guard let index else { return json(["ok": false, "error": D("会话群不存在")], status: 404) }
             let sessions = state["sessions"] as? [[String: Any]] ?? []
             var members = demoGroups[index]["members"] as? [[String: Any]] ?? []
             for key in body["keys"] as? [String] ?? [] where !members.contains(where: { $0["key"] as? String == key }) {
                 let session = sessions.first { $0["key"] as? String == key } ?? [:]
-                members.append(["key": key, "title": session["title"] ?? "会话", "machine": "演示 Mac",
+                members.append(["key": key, "title": session["title"] ?? D("会话"), "machine": D("演示 Mac"),
                                 "project": ((session["cwd"] as? String) as NSString?)?.lastPathComponent ?? "", "joinedAt": now])
             }
             demoGroups[index]["members"] = members
             return changed()
         case ("POST", "/api/groups/remove"):
-            guard let index else { return json(["ok": false, "error": "会话群不存在"], status: 404) }
+            guard let index else { return json(["ok": false, "error": D("会话群不存在")], status: 404) }
             let key = body["key"] as? String
             demoGroups[index]["members"] = (demoGroups[index]["members"] as? [[String: Any]] ?? []).filter { $0["key"] as? String != key }
             return changed()
@@ -947,9 +961,92 @@ extension DemoServer {
             emit("groups", ["ok": true, "items": demoGroups])
             return json(["ok": true, "items": demoGroups])
         default:
-            return json(["ok": false, "error": "未知的会话群接口"], status: 404)
+            return json(["ok": false, "error": D("未知的会话群接口")], status: 404)
         }
     }
 }
 
 #endif
+
+
+// MARK: 英文界面的演示内容
+
+/// 演示内容（示例消息、待办、群聊、演示回复……）在英文界面里换成英文；中文界面原样。
+/// 示例会话本身的英文版在 demo-data.en.json（DEMO_LANG=en bash tests/record_demo.sh 录的），标题和这里的对照一致
+private func D(_ zh: String) -> String {
+    Lang.shared.isEnglish ? (demoEnglish[zh] ?? zh) : zh
+}
+
+private let demoEnglish: [String: String] = [
+    "演示电脑": "Demo Computer",
+    "演示模式不支持此功能，连接你的电脑后即可使用。": "This isn't available in demo mode. Connect your computer to use it.",
+    "，并补充完整的单元测试和集成测试，最后生成覆盖率报告发给我看看": ", and add complete unit and integration tests, then send me a coverage report",
+    "本机": "This Computer",
+    "演示 Mac": "Demo Mac",
+    "演示模式下无法上传图片，可选择预设头像。": "Photos can't be uploaded in demo mode. Choose a preset avatar instead.",
+    "首页卡片间距": "Home card spacing",
+    "订单导出功能": "Order export",
+    "清理构建目录": "Clean build directory",
+    "选择登录方案": "Pick a sign-in method",
+    "订单接口限流": "Order API rate limiting",
+    "构建目录已清理": "Build directory cleaned",
+    "build 目录已清理并重新构建成功，可以重新跑测试了。": "Cleaned the build directory and rebuilt successfully. You can rerun the tests.",
+    "告知卡片间距的最终取值": "Share the final card spacing values",
+    "首页卡片间距已改为 16px，变量名 --card-gap，圆角 --card-radius: 12px。订单导出页复用卡片组件时直接用这两个变量。": "Home card spacing is now 16px (variable --card-gap) and the corner radius is --card-radius: 12px. Use these two variables when the order export page reuses the card component.",
+    "导出页已同步卡片样式": "Export page now uses the card styles",
+    "收到。订单导出页的卡片已改用 --card-gap 和 --card-radius，等你那边测试通过后一起合并。": "Got it. The order export cards now use --card-gap and --card-radius. We'll merge once your tests pass.",
+    "测试已全部通过": "All tests passed",
+    "单元测试 12 项全部通过，可以合并了。": "All 12 unit tests pass. Ready to merge.",
+    "同步进度": "Progress update",
+    "我这边改完了，你那边可以继续。": "I'm done on my side. You can continue.",
+    "请帮忙确认接口字段": "Please confirm the API fields",
+    "导出接口的字段名按你的约定改好了，帮忙确认一下。": "Renamed the export API fields as agreed. Please take a look.",
+    "来自其他会话的消息": "Message from another session",
+    "在 iPhone 15 上确认首页卡片的间距和圆角": "Check the home card spacing and radius on iPhone 15",
+    "确认订单导出方案后，通知前端开始联调": "Once the export plan is approved, tell the frontend to start integration",
+    "周五前确认短信服务商的报价": "Confirm the SMS provider's quote by Friday",
+    "合并首页样式改动到 main": "Merge the home style changes into main",
+    "在阿里云控制台开通短信签名": "Set up the SMS sender name in the cloud console",
+    "把测试账号的密码发给前端": "Send the test account password to the frontend",
+    "电脑读取数据时出错（截图版模拟的错误）": "Error reading data on the computer (simulated in the snapshot build)",
+    "首页按钮偏小，请适当放大，并截图给我确认": "The home page buttons are a bit small. Make them larger and send me a screenshot.",
+    "会话不存在或已结束": "The session no longer exists or has ended",
+    "已关闭会话": "Session closed",
+    "演示模式不提供此数据，连接你的电脑后即可查看。": "This data isn't available in demo mode. Connect your computer to see it.",
+    "会话": "Session",
+    "思考中": "Thinking",
+    "用户在演示模式里发来一句话，回一句说明真实使用时会发生什么。": "The user sent a message in demo mode; reply with what would happen in real use.",
+    "连接你的电脑后，这条消息会发送到电脑上正在运行的 Claude Code 会话，由 Claude 继续执行；": "Once your computer is connected, this message goes to the Claude Code session running there and Claude carries on; ",
+    "任务完成或需要确认时，手机和手表都会提醒你。": "you'll get alerts on your phone and watch when the task finishes or needs you.",
+    "已中断": "Interrupted",
+    "好的，方案暂不执行。请告诉我需要调整哪一步。": "OK, I'll hold off on the plan. Tell me which step to change.",
+    "好的，此步骤暂不执行。如需更换方案，请告诉我。": "OK, I'll skip this step. Let me know if you want a different approach.",
+    "后端新增导出接口": "Add the export API on the backend",
+    "正在编写导出接口": "Writing the export API",
+    "订单列表加「导出」按钮": "Add an Export button to the order list",
+    "添加导出按钮": "Adding the Export button",
+    "大数据量改为异步任务": "Use a background job for large exports",
+    "改为异步任务": "Switching to a background job",
+    "方案已批准，开始实施：先编写后端导出接口，再添加前端按钮。\n\n（演示到此结束。实际使用时，Claude 会在你的电脑上逐步修改代码，任务清单进度可在手机上实时查看。）": "Plan approved. Starting with the backend export API, then the frontend button.\n\n(End of demo. In real use, Claude changes the code step by step on your computer, and you can follow the task list live on your phone.)",
+    "完成": "Done",
+    "构建完成：`build` 目录已清空并重新生成，共 142 个模块，用时 1.8 秒，无报错。": "Build finished: `build` was cleaned and regenerated, 142 modules in 1.8 s, no errors.",
+    "已执行完毕。": "Done.",
+    "未选择任何选项": "No option selected",
+    "用户已在手机上回答": "Answered on the phone",
+    "（回答你刚才的提问）\n": "(Answering your question)\n",
+    "建群：订单导出功能、首页卡片间距": "Group created: Order export, Home card spacing",
+    "用户": "You",
+    "订单导出接口改完后告诉首页那边，首页再接新字段。": "Once the export API is done, tell the home page session so it can pick up the new fields.",
+    "订单导出功能 给群起名「订单导出联调」": "Order export named the group \"Export integration\"",
+    "订单导出联调": "Export integration",
+    "导出接口已经改好：新增 `exportedAt`、`operator` 两个字段，接口文档在 docs/export.md。首页那边可以开始接了。": "The export API is ready: added `exportedAt` and `operator`; the API doc is at docs/export.md. The home page can start using them.",
+    "收到，我这边改完卡片后发截图给你核对字段显示。": "Got it. I'll send a screenshot after updating the cards so you can check the fields.",
+    "首页卡片已经接上新字段，截图发在我的会话里了，导出时间按本地时区显示。": "The home cards now show the new fields; the screenshot is in my session, and export time uses the local time zone.",
+    "会话群不存在": "Group not found",
+    "内容为空": "Message is empty",
+    "至少选两个会话": "Pick at least two sessions",
+    "建群：": "Group created: ",
+    "群名不能为空": "Group name is required",
+    "未知的会话群接口": "Unknown group endpoint",
+    "、": ", ",
+]

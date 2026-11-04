@@ -185,16 +185,22 @@ def plain(value):
 def merge(path):
     table = load(TABLE, {})
     done = load(path, {})
-    bad = []
+    bad, unknown, merged = [], [], 0
     for zh, en in done.items():
-        if zh not in table or not en:
+        if not en:
+            continue
+        if zh not in table:   # 只更新表里已有的：新句子先 extract 进表（不然会悄悄丢掉）
+            unknown.append(zh)
             continue
         if not placeholders_ok(zh, en):
             bad.append(zh)
             continue
         table[zh] = en
+        merged += 1
     save(TABLE, table)
-    print("并入 %d 条，占位符对不上跳过 %d 条%s" % (len(done) - len(bad), len(bad), ("：" + " | ".join(bad[:5])) if bad else ""))
+    print("并入 %d 条，占位符对不上跳过 %d 条%s" % (merged, len(bad), ("：" + " | ".join(bad[:5])) if bad else ""))
+    if unknown:
+        print("表里还没有、没并入的 %d 条（先 extract，或确认是代码里真用到的字）：%s" % (len(unknown), " | ".join(unknown[:5])))
 
 
 def escape_strings(text):

@@ -407,7 +407,14 @@ class Flow {
     const lab = { 'flow-auto-l': '自动运镜', 'flow-home-l': '全景', 'flow-door-l': '离开' };
     for (const [id, n] of Object.entries(lab)) { const el = $(id); if (el) el.textContent = t(n); }
     const dash = { 'fd-thought-t': t('思考流'), 'fd-lanes-t': t('工具通道'), 'fd-core-t': t('模型核心'), 'fd-matrix-t': t('检查矩阵') };
-    for (const [id, text] of Object.entries(dash)) { const el = $(id); if (el) el.textContent = text; }
+    for (const [id, text] of Object.entries(dash)) {
+      const el = $(id);
+      if (!el) continue;
+      el.textContent = text;
+      // 英文标题本身就含副标题（Thought stream / THOUGHT STREAM）时不再重复
+      const sub = el.nextElementSibling;
+      if (sub && sub.tagName === 'SPAN') sub.hidden = text.toLowerCase().includes(sub.textContent.toLowerCase());
+    }
   }
 
   // MARK: 一次调用 → 一串线

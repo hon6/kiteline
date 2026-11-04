@@ -166,9 +166,12 @@ export class Dash {
     const keep = new Set(LANES.map((_, i) => i).sort((a, b) => counts[b] - counts[a]).slice(0, fits));
     const shown = LANES.map((l, i) => [l, i]).filter(([, i]) => keep.has(i));
     const rowH = Math.min(15, (h - 46) / shown.length);
+    // 名字那一栏按最长的名字留宽（英文的 Messages、Command 比中文长），条从它右边开始
+    g.font = `10px ${SANS}`;
+    const bx = Math.max(48, 16 + Math.max(...shown.map(([[name]]) => g.measureText(t(name)).width)));
     shown.forEach(([[name, ks], i], row) => {
       const y = 8 + row * rowH, n = counts[i], age = now - this.laneHit[i], hot = age < 2500 ? 1 - age / 2500 : 0;
-      const col = KIND_COLOR[ks[0]], bw = lw - 84, segs = n ? Math.max(1, Math.round(n / mx * 24)) : 0;
+      const col = KIND_COLOR[ks[0]], bw = lw - 36 - bx, segs = n ? Math.max(1, Math.round(n / mx * 24)) : 0;
       // 刚被调用的那条通道整条亮起来再慢慢退，一道光从左往右扫过去
       if (hot) { g.fillStyle = rgba(col, hot * .18); g.fillRect(6, y, lw - 8, rowH - 1); }
       g.font = `10px ${SANS}`; g.fillStyle = hot ? '#ffffff' : '#7d8496'; g.textAlign = 'left'; g.fillText(t(name), 10, y + 9);
@@ -176,10 +179,10 @@ export class Dash {
         const on = k < segs, head = on && k >= segs - 2;
         g.fillStyle = on ? col : 'rgba(255,255,255,.05)';
         g.globalAlpha = on ? (head ? .7 + hot * .3 : .4 + hot * .45) : 1;
-        g.fillRect(48 + k * (bw / 24), y + 2, bw / 24 - 1.5, rowH - 6);
+        g.fillRect(bx + k * (bw / 24), y + 2, bw / 24 - 1.5, rowH - 6);
         if (hot && on) {
           const sweep = 1 - Math.min(1, Math.abs(k - (1 - hot) * 30) / 3);
-          if (sweep > 0) { g.globalAlpha = sweep * hot; g.fillStyle = '#fff'; g.fillRect(48 + k * (bw / 24), y + 2, bw / 24 - 1.5, rowH - 6); }
+          if (sweep > 0) { g.globalAlpha = sweep * hot; g.fillStyle = '#fff'; g.fillRect(bx + k * (bw / 24), y + 2, bw / 24 - 1.5, rowH - 6); }
         }
       }
       g.globalAlpha = 1; g.font = `${hot ? 600 : 400} 10px ${MONO}`; g.textAlign = 'right'; g.fillStyle = hot ? col : '#e6e8ef';

@@ -107,6 +107,9 @@ struct SourceItem: Identifiable, Equatable {
     var online: Bool
     var status: String
     var sessions: Int
+    /// 那台电脑能后台运行 Claude Code（远端、watcher 支持）；开没开（按设备，见 Hosted）
+    var hostedSupport = false
+    var hostedOn = false
 }
 
 /// 左边会话列表显示还是收起（世界模式里能收起，世界占满整个窗口；展开时浮在世界上面）。
@@ -239,7 +242,8 @@ final class KitelineModel: ObservableObject {
             // 名字、状态是服务端拼的中文（也发给手机，在出口按手机的语言换）：Mac 自己显示时按界面语言换
             return SourceItem(id: pair.config.id, name: ServerLang.machine(pair.config.displayName), kind: pair.config.kind,
                               host: pair.config.sshHost, enabled: pair.config.enabled, online: online,
-                              status: ServerLang.ui(pair.state.shortLabel), sessions: count)
+                              status: ServerLang.ui(pair.state.shortLabel), sessions: count,
+                              hostedSupport: pair.config.kind == .ssh && Hosted.supported(pair.config.id), hostedOn: pair.config.hostedOn)
         }
         if summaries != sources { sources = summaries }
         if phoneClients != state.mobile.clientCount { phoneClients = state.mobile.clientCount }

@@ -1,0 +1,56 @@
+{
+ "id": "hermes",
+ "name": "Hermes",
+ "version": "1.0.0",
+ "summary": "Nous Research 的开源 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复、确认、回答提问和中断",
+ "summaryEn": "Nous Research's open-source agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux",
+ "needs": [
+  "fs.read",
+  "db.read",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.hermes"
+  ],
+  "commands": [
+   "hermes"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "verified": false,
+    "note": "回复和确认需要 Hermes 在 tmux 中运行"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": ["view"],
+    "verified": false,
+    "note": "Windows 上没有 tmux，只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "verified": true,
+    "note": "回复和确认需要 Hermes 在 tmux 中运行"
+   }
+  }
+ },
+ "limitsNote": "Hermes 使用你自己配置的模型服务（Nous Portal、OpenRouter 等），额度和余额请在对应服务的控制台查看，「今日用量」中不显示；token 和花费按 Hermes 自己的记录统计",
+ "limitsNoteEn": "Hermes uses the model provider you configure (Nous Portal, OpenRouter and others), so check quota and balance in that provider's console; they aren't shown under Today's usage. Tokens and spend are counted from Hermes's own records",
+ "mark": [
+  {
+   "d": "M11 3.5a1 1 0 112 0V21h-2zM3 6.5c3.2-.6 6 .3 8 2.2v2.1C9.2 9 6.6 8 3.6 8.3zM21 6.5c-3.2-.6-6 .3-8 2.2v2.1c1.8-1.8 4.4-2.8 7.4-2.5zM8.5 12.5c1.6-1 3.5-1 3.5-1v1.8s-1.5 0-2.5.7-1 2-1 2-1.7-.5-1.7-1.9.7-1.6 1.7-1.6zM15.5 16c-1.6 1-3.5 1-3.5 1v-1.8s1.5 0 2.5-.7 1-2 1-2 1.7.5 1.7 1.9-.7 1.6-1.7 1.6z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "Hermes",
+ "caps": [],
+ "notes": "新接入 Hermes：查看会话和完整对话；在 tmux 中运行时可从手机回复、确认危险命令、回答提问、中断和关闭会话；用量统计计入 Hermes 的 token 和花费。",
+ "notesEn": "New: Hermes support. View sessions and full conversations; when it runs in tmux, reply, confirm dangerous commands, answer questions, interrupt and close sessions from your phone. Usage stats include Hermes's tokens and spend."
+}

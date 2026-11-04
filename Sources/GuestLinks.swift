@@ -191,7 +191,9 @@ final class GuestLinks {
                 let name = item["name"] as? String ?? ""
                 guard !name.isEmpty, name != "TodoWrite" else { continue }
                 let brief = (item["brief"] as? String ?? "").replacingOccurrences(of: "\n", with: " ")
-                row = ["r": "s", "x": clip(brief.isEmpty ? name : "\(name) · \(brief)", 120)]
+                // 摘要多半已经以工具名开头（「Bash: npm test」），就不再重复写一遍名字
+                let step = brief.isEmpty ? name : brief.hasPrefix(name + ":") || brief.hasPrefix(name + " ") ? brief : "\(name) · \(brief)"
+                row = ["r": "s", "x": clip(step, 120)]
             case "agent_page": row = ["r": "p", "x": clip(item["title"] as? String ?? "", 80)]
             case "agent_image": row = ["r": "i", "n": (item["images"] as? [Any])?.count ?? 1]
             default: continue

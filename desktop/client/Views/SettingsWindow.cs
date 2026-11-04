@@ -786,6 +786,18 @@ public sealed class SettingsWindow : Window
         void Reload() => Select("sources");
         var list = new StackPanel();
         var rows = reply.Arr("sources").Items().ToList();
+        // 有能后台运行、还没开的远端设备：问一声要不要开（选了「不再提示」就不问，各行的按钮照旧在；同 Mac 版 SourcesPane）
+        var candidates = rows.Where(r => r.Str("hosted") == "off" && r.Truthy("online")).Select(r => Lang.Machine(r.Str("name") ?? "")).ToList();
+        if (candidates.Count > 0 && !AppModel.Shared.HostedTipOff)
+        {
+            var hint = new StackPanel { Spacing = 8 };
+            hint.Children.Add(Ui.Text(L("「%@」支持在后台运行 Claude Code：新建任务、恢复会话不再打开 VS Code，可减少 VS Code 的内存占用。是否开启？",
+                string.Join("」「", candidates)), 12, lines: 0).Wrap());
+            var never = new Tap(Ui.Text(L("不再提示"), 12, color: "Text2").Pad(6, 3), null, 6).Keys("Transparent", "Fill08");
+            never.Click = async () => { await AppModel.Shared.SetHosted(tipOff: true); Reload(); };
+            hint.Children.Add(Ui.H(12, Form.Button(L("检测出口并开启…"), () => HostedSetup.Open(changed: Reload), prominent: true), never));
+            page.Children.Add(Card.Make(Ui.HTop(10, Ui.Sym("moon.stars", 14, "Accent"), hint.Grow()), 12, 12).Margin(0, 0, 0, 12));
+        }
         for (var i = 0; i < rows.Count; i++)
         {
             list.Children.Add(SourceRow(rows[i], Reload));
@@ -906,7 +918,15 @@ public sealed class SettingsWindow : Window
             .Res(Border.BackgroundProperty, "Fill06");
         // ⓘ：设备详情（IP、系统、处理器、内存、装了哪些 agent）
         var details = new Tap(Ui.Sym("info.circle", 15, "Text2").Pad(4), () => AgentDetails.OpenMachine(id, name), 6).Keys("Transparent", "Fill08").Tip(L("设备详情"));
-        return Ui.H(12, icon, Ui.VFill(2, nameHost, status).Grow(), details, more).Pad(8, 8);
+        // 能后台运行 Claude Code 的远端：开没开、点开检测出口和开关（按设备，见 HostedSetup）
+        Control? hosted = null;
+        if (source.Str("hosted") is { } state)
+        {
+            if (state == "on") status.Children.Add(Ui.Text(L("· 后台运行 Claude Code"), 11, color: "Text2").Trim().Shrink());
+            hosted = new Tap(Ui.Text(state == "on" ? L("后台运行：已开启") : L("后台运行…"), 11.5, color: state == "on" ? "Text2" : "Accent").Pad(6, 3),
+                             () => HostedSetup.Open(id, changed: reload), 6).Keys("Transparent", "Fill08").Tip(L("在这台电脑上后台运行 Claude Code：检测出口 IP、开启或关闭"));
+        }
+        return Ui.H(12, icon, Ui.VFill(2, nameHost, status).Grow(), hosted, details, more).Pad(8, 8);
     }
 
     // MARK: 权限（Windows / Linux：就绪检查）

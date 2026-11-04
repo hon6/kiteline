@@ -748,6 +748,8 @@ struct NewTaskView: View {
     @State private var projectFilter = ""
     @AppStorage("listSource") private var listSource = ""
     @AppStorage("listProject") private var listProject = ""
+    /// 「打开其他文件夹」：在哪台电脑上一层层点
+    @State private var browsing: SourceInfo?
 
     var body: some View {
         NavigationStack {
@@ -756,6 +758,12 @@ struct NewTaskView: View {
                     ComposeTask(project: picked, scheduleOnly: scheduleOnly, change: { self.picked = nil }) { dismiss() }
                 } else {
                     projectList
+                }
+            }
+            .navigationDestination(item: $browsing) { source in
+                FolderPicker(sourceId: source.id, machine: source.name,
+                             start: FolderStart.usual((projects ?? []).filter { $0.sourceId == source.id }.map(\.cwd))) { path in
+                    adopt(path, source: source)
                 }
             }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.panelToolbarButton() } }
@@ -865,6 +873,7 @@ struct NewTaskView: View {
                 if projects != nil, shown.isEmpty {
                     Text(projects?.isEmpty == true ? "暂无使用过 Claude Code 的项目" : "无匹配的项目").foregroundStyle(.secondary)
                 }
+                if projects != nil, model.hostFeatures.contains("dirs") { otherFolderRow }
             } footer: { Group {
                     Text("各机器上最近使用过 Claude Code 的目录、正在运行的会话，以及电脑上已打开的 VS Code 窗口。")
                 }
@@ -877,6 +886,46 @@ struct NewTaskView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+}
+
+extension NewTaskView {
+    /// 列表最后一行「打开其他文件夹…」：没在列表里的目录（还没用过 Claude Code、新建的项目）。
+    /// 筛着某台设备就在它上面选；没筛、在线的不止一台时先挑电脑
+    @ViewBuilder fileprivate var otherFolderRow: some View {
+        let online = model.sources.filter(\.online)
+        let targets = online.filter { $0.id == sourceFilter }.isEmpty ? online : online.filter { $0.id == sourceFilter }
+        let label = HStack(spacing: 10) {
+            Image(systemName: "plus").font(.ui(.body).weight(.semibold)).foregroundStyle(Theme.claude)
+                .frame(width: 38, height: 38)
+                .background(Circle().strokeBorder(Theme.claude.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("打开其他文件夹…").foregroundStyle(Theme.claude).lineLimit(1)
+                Text(targets.count == 1 ? L("在「%@」上选择任意文件夹，在其中新建会话", targets[0].name) : L("选择任意电脑上的任意文件夹，在其中新建会话"))
+                    .font(.ui(.caption)).foregroundStyle(Color.secondary).lineLimit(1)   // 做成菜单时标签整体染主题色：用定死的灰
+            }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        if targets.count > 1 {
+            Menu {
+                ForEach(targets, id: \.id) { source in
+                    Button(source.name) { browsing = source }
+                }
+            } label: { label }
+        } else {
+            Button { browsing = targets.first } label: { label }
+                .buttonStyle(RowButtonStyle())
+                .disabled(targets.isEmpty)
+        }
+    }
+
+    /// 选好的文件夹放进列表最前面（换项目时看得见），直接去写任务
+    fileprivate func adopt(_ path: String, source: SourceInfo) {
+        let project = projects?.first { $0.sourceId == source.id && $0.cwd == path } ?? ProjectInfo(picked: path, source: source)
+        if projects?.contains(where: { $0.id == project.id }) == false { projects?.insert(project, at: 0) }
+        browsing = nil
+        picked = project
     }
 }
 

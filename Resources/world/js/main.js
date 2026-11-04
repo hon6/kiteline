@@ -161,6 +161,7 @@ class World {
   init(opts) {
     setStrings(opts.lang, opts.strings);
     document.documentElement.lang = opts.lang === 'en' ? 'en' : 'zh-CN';
+    this.hud.relabel();   // 界面是在 init 之前按中文搭的：换成当前语言
     if (opts.brand) {
       this.brand = new THREE.Color(opts.brand).getHex(THREE.SRGBColorSpace);
       document.documentElement.style.setProperty('--brand', opts.brand);

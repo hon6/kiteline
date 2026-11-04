@@ -1048,7 +1048,8 @@ check("内容没变不重复发、同一轮不再开", _lv_take(0, 0.5) == [])
 lv.register("d1", {"enabled": True, "env": "development", "lang": "zh", "startToken": _T_START, "activities": [{"id": "act1", "token": _T_ACT}]})
 _posts = _lv_take(1)
 check("App 报了实时活动的令牌：马上补一份更新", len(_posts) == 1 and _posts[0].get("event") == "update" and _posts[0].get("token") == _T_ACT, _posts)
-_wait = dict(_busy, activity="waiting", blocking="Bash: npm install", updatedAt=4)
+# 等批命令：电脑给的说明是笼统的「请求权限确认」，锁屏上要写出是哪条命令
+_wait = dict(_busy, activity="waiting", blocking="请求权限确认", pendingTool="Bash", activityText="Bash: npm install", updatedAt=4)
 lv.update([_wait])
 _posts = _lv_take(1)
 _upd = _posts[0] if _posts else {}
@@ -1200,6 +1201,223 @@ check("有分享：游客端口（手机端口 + 2）能取到内容", _code == 
 check("游客端口不给别的接口", _gl_get("/api/state")[0] == 404 and _gl_get("/")[0] == 404)
 gl2.stop(_s2["id"])
 check("停止最后一个分享：游客端口关掉", gl2._listener is None and _gl_get("/g/api/" + _s2["id"])[0] == 0)
+
+print("== 后台送达：装了 kiteline mod 的会话不切前台（delivery.via_bridge）")
+
+
+class _BrSource:
+    def __init__(self, reply):
+        self.reply, self.calls = reply, []
+
+    def request(self, payload, timeout=30):
+        self.calls.append(payload)
+        return dict(self.reply) if payload.get("cmd") == "bridge" else {}
+
+
+class _BrBackend:
+    def __init__(self):
+        self.calls = []
+
+    def send_vscode(self, prompt, record, submit, siblings, check_waiting=True):
+        self.calls.append(("send", prompt))
+        return _delivery.Outcome(True, submit, "前台")
+
+    def press_vscode(self, key, times, record, siblings):
+        self.calls.append(("press", key))
+        return _delivery.Outcome(True, False, "前台")
+
+
+def _br_rec(activity="idle", bridge=True, sid="br-1", tool=None):
+    return _IcRecord("local", "本机", "local", {"sessionId": sid, "name": sid, "title": "送达测试", "activity": activity,
+                                              "entrypoint": "claude-vscode", "bridge": bridge, "pendingTool": tool})
+
+
+_br_saved = (_delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend)
+_br_front = _BrBackend()
+_delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend = False, None, (lambda: _br_front)
+try:
+    src = _BrSource({"bridged": True, "result": "ok"})
+    out = _delivery.send("你好", [], _br_rec(), src, True, 0)
+    check("发消息：交给 mod（op send），不碰前台", out.ok and out["submitted"] and src.calls[-1] == {"op": "send", "text": "你好", "cmd": "bridge", "sessionId": "br-1"}
+          and not _br_front.calls, (out, src.calls))
+    out = _delivery.send("等确认时也能发", [], _br_rec("waiting"), src, True, 0)
+    check("等确认时发：不按回车，排在确认之后（不再拒绝）", out.ok and src.calls[-1]["text"] == "等确认时也能发", out)
+    out = _delivery.send("只填不提交", [], _br_rec(), src, False, 0)
+    check("只填不提交：照旧走前台", out.ok and _br_front.calls == [("send", "只填不提交")], _br_front.calls)
+    keys = {}
+    for key, act in (("1", "waiting"), ("enter", "waiting"), ("2", "waiting"), ("esc", "waiting"), ("esc", "idle")):
+        _delivery.press(key, 1, _br_rec(act), src, 0)
+        keys[(key, act)] = {k: v for k, v in src.calls[-1].items() if k in ("op", "decision")}
+    check("按键换成 mod 指令：1 / 回车 允许、2 本会话不再询问、等确认时 Esc 拒绝、空闲时 Esc 中断", keys == {
+        ("1", "waiting"): {"op": "perm", "decision": "allow"}, ("enter", "waiting"): {"op": "perm", "decision": "allow"},
+        ("2", "waiting"): {"op": "perm", "decision": "allow_session"}, ("esc", "waiting"): {"op": "perm", "decision": "deny"},
+        ("esc", "idle"): {"op": "abort"}}, keys)
+    _delivery.press("1", 1, _br_rec("waiting", tool="Bash"), src, 0)
+    check("带上手机卡片对应的工具名，mod 按它找确认框", src.calls[-1].get("tool") == "Bash" and src.calls[-1]["decision"] == "allow", src.calls[-1])
+    _br_front.calls.clear()
+    out = _delivery.press("shift+tab", 1, _br_rec(), src, 0)
+    check("mod 做不了的键（切权限模式）照旧按", _br_front.calls == [("press", "shift+tab")], _br_front.calls)
+    out = _delivery.answer("A", _br_rec("waiting"), src, 0, [{"question": "用哪个？", "picked": ["A"], "other": "再加个日志"}, {"question": "空的", "picked": []}])
+    check("回答提问：选项原样答给提问框（多选 / 自己写的用逗号连起来），不先按 Esc", out.ok and src.calls[-1]["op"] == "answer"
+          and src.calls[-1]["answers"] == {"用哪个？": "A, 再加个日志"} and ("press", "esc") not in _br_front.calls, (out, src.calls[-1]))
+    none = _BrSource({"bridged": True, "result": "none"})
+    _br_front.calls.clear()
+    out = _delivery.press("1", 1, _br_rec("waiting"), none, 0)
+    check("mod 那边没有在等的确认框、会话还在等：是 mod 管不到的框，照旧按键", _br_front.calls == [("press", "1")], _br_front.calls)
+    _delivery.LOOKUP = lambda key: _br_rec("idle")
+    _br_front.calls.clear()
+    out = _delivery.press("1", 1, _br_rec("waiting"), none, 0)
+    check("确认框已在电脑上答过：不再按键（按下去会落进输入框）", not out.ok and "电脑上处理" in out["message"] and not _br_front.calls, out)
+    _br_front.calls.clear()
+    out = _delivery.press("2", 1, _br_rec("idle"), src, 0)
+    check("卡片过期（会话已不在等确认）按了 2：不问 mod、也不按键", not out.ok and not _br_front.calls, out)
+    _delivery.LOOKUP = None
+    off = _BrSource({"bridged": False})
+    _br_front.calls.clear()
+    out = _delivery.send("没接上", [], _br_rec(), off, True, 0)
+    check("mod 没接上：改走前台", out.ok and _br_front.calls == [("send", "没接上")], _br_front.calls)
+    _br_front.calls.clear()
+    out = _delivery.send("没接上又在等确认", [], _br_rec("waiting"), off, True, 0)
+    check("没接上、Claude 又在等确认：照旧拦下（前台回车会替你点允许）", not out.ok and "等你确认" in out["message"] and not _br_front.calls, out)
+    _br_front.calls.clear()
+    asked = len(src.calls)
+    out = _delivery.send("老会话", [], _br_rec(bridge=False), src, True, 0)
+    check("没加载 mod 的会话：直接走前台，不问 watcher", _br_front.calls == [("send", "老会话")] and len(src.calls) == asked, src.calls[asked:])
+finally:
+    _delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend = _br_saved
+
+print("== 后台托管会话（远端项目不开 VS Code）")
+from kiteline import app as _app  # noqa: E402
+from kiteline.store import Record as _Record  # noqa: E402
+
+
+class _HostSource:
+    """假的远端来源：hosted_start 按 reply 回（异常就抛），别的命令记下来回空"""
+    kind, name, config, id, state = "ssh", "服务器", {"sshHost": "srv"}, "srv", "live"
+
+    def __init__(self, reply, delay=0.0, features=("hosted",)):
+        self.reply, self.delay, self.calls, self.features = reply, delay, [], set(features)
+
+    def request(self, payload, timeout=30):
+        self.calls.append(payload)
+        if payload.get("cmd") == "hosted_start":
+            time.sleep(self.delay)
+            if isinstance(self.reply, Exception):
+                raise self.reply
+            return dict(self.reply)
+        if payload.get("cmd") == "hosted_stop":
+            return {"stopped": True}
+        if payload.get("cmd") == "hosted_probe":
+            return {"source": "vscode", "settings": {"HTTPS_PROXY": "http://***@127.0.0.1:7890"},
+                    "egress": {"ip": "1.2.3.4", "country": "US", "site": "ipinfo.io"}}
+        return {}
+
+
+_hs_saved = (_delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend, _app.launch_session, _app.HOSTED_SETTING[0])
+_hs_editor = []
+_hs_real = _app.launch_session
+
+
+def _hs_launch(*args, **kwargs):
+    if kwargs.get("in_editor"):
+        _hs_editor.append(args[:5])
+        return {"ok": True, "submitted": False, "openedWindow": True, "message": "已在 VS Code 中新建会话", "error": "", "cwd": args[0]}
+    return _hs_real(*args, **kwargs)
+
+
+_br_front.calls.clear()
+_delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend = False, None, (lambda: _br_front)
+_app.launch_session = _hs_launch
+_app.HOSTED_SETTING[0] = lambda source_id: source_id == "srv"
+try:
+    hosted_rec = _Record("srv", "服务器", "ssh", {"sessionId": "h-1", "name": "h-1", "activity": "idle", "entrypoint": "cli",
+                                                "pid": 4321, "hosted": "abc123", "cwd": "/srv/p"})
+    src = _HostSource({})
+    out = _delivery.send("你好", [], hosted_rec, src, True, 0)
+    check("发消息：交给 watcher 写进伪终端（tmux_send），不碰前台", out.ok and out["submitted"] and src.calls[-1] == {
+        "cmd": "tmux_send", "pid": 4321, "text": "你好", "submit": True} and not _br_front.calls, (out, src.calls))
+    out = _delivery.press("1", 1, hosted_rec, src, 0)
+    check("按键同样经 watcher", out.ok and src.calls[-1] == {"cmd": "tmux_send", "pid": 4321, "keys": ["1"]}, src.calls[-1])
+    src = _HostSource({"sessionId": "new-1", "hosted": "x1", "submitted": True})
+    started = time.time()
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
+    check("远端新任务：先在后台起，不开 VS Code", result["ok"] and result["submitted"] and "后台" in result["message"] and not _hs_editor
+          and {k: v for k, v in src.calls[0].items() if k != "netEnv"} == {"cmd": "hosted_start", "cwd": "/srv/p", "prompt": "做个功能", "submit": True}
+          and isinstance(src.calls[0].get("netEnv"), dict), (result, src.calls))
+    check("起得快就直接回结果", time.time() - started < 3, time.time() - started)
+    src = _HostSource({"sessionId": "old-1", "hosted": "x2", "submitted": False})
+    result = _app.launch_session("/srv/p", "", False, "old-1", "ssh", "服务器", source=src)
+    check("恢复：带上会话编号", result["ok"] and src.calls[0].get("sessionId") == "old-1" and result["message"] == "已在后台恢复对话", result)
+    src = _HostSource(RuntimeError("HOSTED_UNSUPPORTED：这台电脑暂不支持在后台运行 Claude Code"))
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
+    check("那台电脑不支持：悄悄改开 VS Code", _hs_editor and result["message"] == "已在 VS Code 中新建会话", (result, _hs_editor))
+    _hs_editor.clear()
+    src = _HostSource(RuntimeError("Claude Code 没有启动起来，停在了需要操作的画面上\nLogin method XYZ"))
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
+    check("后台起不来：改开 VS Code，并说明原因", _hs_editor and "后台启动未成功：Claude Code 没有启动起来" in result["message"]
+          and "XYZ" not in result["message"], result)   # 只带第一句，不带后面的画面
+    _hs_editor.clear()
+    notes = []
+    src = _HostSource(RuntimeError("Claude Code 没有启动起来"), delay=9.5)
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src, notify=notes.append)
+    check("起得慢：8 秒先回「将自动提交」", result["ok"] and result["submitted"] and "正在后台启动" in result["message"] and not _hs_editor, result)
+    time.sleep(2.5)
+    check("之后起不来再改开 VS Code", len(_hs_editor) == 1, _hs_editor)
+    _hs_editor.clear()
+    src = _HostSource({"sessionId": "x"})
+    result = _app.launch_session("/local/p", "做个功能", True, None, "local", "本机", source=src)
+    check("本机项目照旧开 VS Code（不走后台）", not src.calls, src.calls)
+    _app.HOSTED_SETTING[0] = lambda source_id: False
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
+    check("这台没开后台运行（默认）：远端也照旧开 VS Code", not src.calls, src.calls)
+    _app.HOSTED_SETTING[0] = lambda source_id: source_id == "srv"
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src, in_editor=True)
+    check("in_editor（「在 VS Code 中恢复」按钮）：不走后台", not src.calls and _hs_editor, src.calls)
+    _hs_editor.clear()
+    src = _HostSource({})
+    ok, message = _app.hand_over(_Record("srv", "服务器", "ssh", dict(hosted_rec.snap, activity="busy")), src)
+    check("转到 VS Code：Claude 在忙时不打断", not ok and "这一轮完成后" in message and not src.calls, (ok, message))
+    ok, message = _app.hand_over(hosted_rec, src)
+    check("转到 VS Code：空闲时先结束后台的，再在 VS Code 里恢复同一段对话", ok and src.calls == [{"cmd": "hosted_stop", "sessionId": "h-1", "ifIdle": True}]
+          and _hs_editor and _hs_editor[0][3] == "h-1", (src.calls, _hs_editor))
+    _hs_editor.clear()
+    src = _HostSource(RuntimeError("HOSTED_NETWORK：无法确认这台电脑上 Claude Code 使用的网络设置"))
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
+    check("网络检查没过：改开 VS Code，并告诉用户原因（出口不能悄悄换）", _hs_editor
+          and "无法确认这台电脑上 Claude Code 使用的网络设置，已改在 VS Code 中打开" in result["message"], result)
+    _hs_editor.clear()
+
+    # 出口检测、按设备开关、把 VS Code 里的会话转到后台
+    from kiteline import store as _store_mod  # noqa: E402
+    probe = _app.hosted_probe([_HostSource({}), _HostSource({}, features=()), type("Off", (_HostSource,), {"state": "connecting"})({})])
+    check("出口检测：能后台运行的那台回出口和网络设置", probe[0]["egress"]["ip"] == "1.2.3.4" and probe[0]["source"] == "vscode"
+          and "error" not in probe[0], probe[0])
+    check("出口检测：不支持的、离线的也列上并说明", "暂不支持" in probe[1]["error"] and "离线" in probe[2]["error"], probe[1:])
+    vs_rec = _Record("srv", "服务器", "ssh", {"sessionId": "v-1", "name": "v-1", "activity": "idle", "entrypoint": "claude-vscode",
+                                            "pid": 999, "cwd": "/srv/p"})
+    check("能转到后台的会话：远端、VS Code 里的 Claude Code、那台支持", _store_mod.hostable(vs_rec, _HostSource({}))
+          and not _store_mod.hostable(vs_rec, _HostSource({}, features=())) and not _store_mod.hostable(hosted_rec, _HostSource({}))
+          and not _store_mod.hostable(_Record("local", "本机", "local", dict(vs_rec.snap)), _HostSource({})), "hostable")
+    closed = []
+    _saved_close = _app.delivery.close
+    _app.delivery.close = lambda record, source, siblings: (closed.append(record.key), _delivery.Outcome(True, False, "已关闭会话"))[1]
+    try:
+        src = _HostSource({})
+        ok, message = _app.move_to_background(_Record("srv", "服务器", "ssh", dict(vs_rec.snap, activity="busy")), src, 1)
+        check("转到后台：Claude 在忙时不转", not ok and "这一轮完成后" in message and not src.calls and not closed, (ok, message))
+        src = _HostSource({"sessionId": "v-1", "hosted": "y1"})
+        ok, message = _app.move_to_background(vs_rec, src, 1)
+        call = src.calls[0] if src.calls else {}
+        check("转到后台：先请 watcher 接手（takeOver），再关掉 VS Code 里的标签", ok and message == "已转到后台运行" and closed == [vs_rec.key]
+              and call.get("cmd") == "hosted_start" and call.get("takeOver") is True and call.get("sessionId") == "v-1" and call.get("prompt") == "",
+              (ok, message, src.calls, closed))
+        src = _HostSource(RuntimeError("VS Code 中的这个会话没有关闭，未转到后台运行"))
+        ok, message = _app.move_to_background(vs_rec, src, 1)
+        check("转到后台：没成功如实说", not ok and "没有关闭" in message, message)
+    finally:
+        _app.delivery.close = _saved_close
+finally:
+    _delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend, _app.launch_session, _app.HOSTED_SETTING[0] = _hs_saved
 
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

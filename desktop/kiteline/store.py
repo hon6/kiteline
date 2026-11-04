@@ -22,6 +22,13 @@ def is_vscode(snap):
     return entry is None or entry == "claude-vscode"
 
 
+def hostable(record, source):
+    """能转到后台运行的会话：远端电脑上、在 VS Code 里跑的 Claude Code，那台电脑的 watcher 支持后台运行（同 Mac 版 Hosted.hostable）"""
+    snap = record.snap
+    return (record.kind == "ssh" and not snap.get("hosted") and (snap.get("agent") or "claude-code") == "claude-code"
+            and is_vscode(snap) and not snap.get("readOnly") and "hosted" in (getattr(source, "features", None) or ()))
+
+
 def display_title(snap):
     title = snap.get("title")
     return title if title else snap.get("name", "")
@@ -294,7 +301,7 @@ class Store:
                 "agent": snap.get("agent") or "claude-code",
                 # Codex、OpenCode、DeepSeek Harness 走协议，在哪台机器上都能回复；Proma 这类只读的不行
                 "canReply": not snap.get("readOnly") and (
-                    is_vscode(snap) or bool(snap.get("tmuxPane")) or record.kind == "local"
+                    is_vscode(snap) or bool(snap.get("tmuxPane") or snap.get("hosted")) or snap.get("bridge") is True or record.kind == "local"
                     or (snap.get("agent") or "claude-code") != "claude-code"),
             }
             for src, dst in (("reason", "reason"), ("activityText", "activityText"), ("message", "preview"),
@@ -323,6 +330,8 @@ class Store:
                     item["readOnlyReasonEn"] = snap["readOnlyReasonEn"]
             # 终端（term）开在会话所在的电脑上，哪家 agent 的会话都能开；只有这一版起的电脑端才有，手机见到才显示终端按钮（同 Mac）
             item["caps"] = caps_payload(snap) + ["term"]
+            if hostable(record, self.sources.get(record.source_id)):
+                item["hostable"] = True   # 能转到后台运行（会话页提示「支持后台托管」）
             if snap.get("terminals"):
                 item["terminals"] = snap["terminals"]
             if snap.get("pendingOptions") and record.activity == "waiting":
@@ -342,6 +351,10 @@ class Store:
             sessions.append(item)
         source_list = [{"id": s.id, "name": s.name, "kind": s.kind, "online": s.live, "status": s.short_label()}
                        for s in sources]
+        hosted_on = {e.get("id") for e in self.cfg.sources if e.get("hostedOn")}
+        for item, s in zip(source_list, sources):
+            if s.kind == "ssh" and "hosted" in s.features:
+                item["hosted"] = "on" if s.id in hosted_on else "off"   # 能后台运行 Claude Code 才带（按设备开）
         return {
             "ok": True, "host": host, "version": version, "submitOnSend": m["submitOnSend"],
             "quickReplies": m["quickReplies"], "watch": m["watch"], "me": me, "muted": m["mutedSessions"],

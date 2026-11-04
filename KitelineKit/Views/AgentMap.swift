@@ -42,11 +42,14 @@ struct AgentMapSheet: View {
             #endif
             .doneButton { dismiss() }
             .navigationDestination(for: AgentPage.self) { page in
-                switch page {
-                case .agent(let agent): AgentDetailView(key: key, agent: agent, all: reply?.agents ?? [])
-                case .task(let task): TaskDetailView(key: key, task: task)
-                case .transcript(let agent): SubagentTranscriptView(key: key, agent: agent)
+                Group {
+                    switch page {
+                    case .agent(let agent): AgentDetailView(key: key, agent: agent, all: reply?.agents ?? [])
+                    case .task(let task): TaskDetailView(key: key, task: task)
+                    case .transcript(let agent): SubagentTranscriptView(key: key, agent: agent)
+                    }
                 }
+                .agentSubpage(back: { if !path.isEmpty { path.removeLast() } }, done: { dismiss() })
             }
             .task {
                 // 开着时每 4 秒刷新一次：子 agent 做完、后台命令结束能马上看到
@@ -97,6 +100,28 @@ enum AgentPage: Hashable {
 
 extension EnvironmentValues {
     @Entry var openAgentPage: (AgentPage) -> Void = { _ in }
+}
+
+extension View {
+    /// Agent map 里推进去的页面。Mac 小窗的工具栏里系统不画返回键（11-04 用户点进子 agent 详情后退不出来），
+    /// 自己画「‹」（⌘[），「完成」每一层都有；iPhone 照旧用系统的返回、下滑关
+    @ViewBuilder
+    func agentSubpage(back: @escaping () -> Void, done: @escaping () -> Void) -> some View {
+        #if os(macOS)
+        navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button(action: back) { Image(systemName: "chevron.left") }
+                        .keyboardShortcut("[", modifiers: .command)
+                        .help(L("返回"))
+                        .panelToolbarItem()
+                }
+            }
+            .doneButton(done)
+        #else
+        self
+        #endif
+    }
 }
 
 /// 树里的一个节点（主 agent 或子 agent）

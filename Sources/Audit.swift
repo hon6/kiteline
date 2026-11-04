@@ -10,6 +10,7 @@ enum Audit {
     /// 各接口对应的动作名；不在表里的请求不记
     private static let actions: [String: String] = [
         "/api/send": "发送消息", "/api/key": "按键", "/api/answer": "回答提问", "/api/voice": "语音", "/api/close": "关闭会话",
+        "/api/hosted/settings": "后台运行设置", "/api/hosted/move": "转到后台运行",
         "/api/new-session": "新任务", "/api/resume": "恢复会话", "/api/quick-replies": "修改快捷短语",
         "/api/digest/push": "推送日报", "/api/push/subscribe": "开启推送", "/api/push/unsubscribe": "关闭推送",
         "/api/push/test": "测试推送", "/api/budget": "修改花费提醒 / 上限", "/pair": "配对",

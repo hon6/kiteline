@@ -357,6 +357,25 @@ try:
     resp = call({"cmd": "is_dir", "path": "relative/path"})
     check("目录检查：存在 / 不存在 / 相对路径", ok_dir and no_dir and resp["isDir"] is False)
 
+    # 新任务「打开其他文件夹」：列子文件夹（不限项目目录）、标出 Git 仓库、新建文件夹
+    browse = os.path.join(root, "browse")
+    os.makedirs(os.path.join(browse, "repo", ".git"))
+    os.makedirs(os.path.join(browse, ".hidden"))
+    open(os.path.join(browse, "file.txt"), "w").close()
+    resp = call({"cmd": "dirs", "path": browse})
+    check("列子文件夹：只有文件夹、不含隐藏的、Git 仓库标出、给上一级", resp and [(e["name"], e.get("git", False)) for e in resp["entries"]] == [("repo", True)]
+          and resp["parent"] == os.path.dirname(browse) and resp["path"] == browse, str(resp)[:300])
+    resp = call({"cmd": "dirs", "path": browse, "hidden": True})
+    check("显示隐藏文件夹", resp and [e["name"] for e in resp["entries"]] == [".hidden", "repo"], str(resp)[:200])
+    resp = call({"cmd": "dirs", "path": ""})
+    check("不给路径 = 主目录", resp and resp["ok"] and resp["path"] == os.path.expanduser("~") == resp["home"], str(resp)[:200])
+    resp = call({"cmd": "dirs", "path": browse, "mkdir": "新项目"})
+    check("新建文件夹后列新文件夹", resp and resp["ok"] and resp["path"] == os.path.join(browse, "新项目") and os.path.isdir(resp["path"]), str(resp)[:200])
+    bad = [call({"cmd": "dirs", "path": browse, "mkdir": "新项目"}), call({"cmd": "dirs", "path": browse, "mkdir": "../逃出去"}),
+           call({"cmd": "dirs", "path": "relative/path"}), call({"cmd": "dirs", "path": os.path.join(browse, "没有")})]
+    check("重名 / 非法名 / 相对路径 / 不存在都报错", all(r and not r["ok"] for r in bad) and not os.path.exists(os.path.join(root, "逃出去")),
+          str([r and r.get("error") for r in bad]))
+
     print("== 历史会话与搜索")
     OLD = "bbbbbbbb-1111-2222-3333-444444444444"
     with open(os.path.join(transcript_dir, OLD + ".jsonl"), "w") as handle:
@@ -1345,6 +1364,120 @@ try:
         '<codex_internal_context source="world">\n别的内部上下文\n</codex_internal_context>'))]
     check("Codex 记录：设定 / 每轮续做 / 暂停显示成一行提示，别的内部上下文不当成你说的话", [[(it["t"], it["text"]) for it in row] for row in got] == [
         [("event", "已设定目标")], [("event", "继续推进目标")], [("event", "已暂停目标")], []] and got[0][0]["detail"] == "把测试跑通", str(got))
+
+    print("== 后台送达（kiteline mod 收件箱）")
+    br_root = os.path.join(root, "bridge-mod")
+    os.makedirs(br_root)
+    check("装上后台送达插件（plugin.json、hooks.json、register.ts），内容一样不再写", W.sync_bridge_mod(br_root)
+          and all(os.path.exists(os.path.join(br_root, "skills", "kiteline", *rel.split("/"))) for rel in W.BRIDGE_MOD_FILES)
+          and W.sync_bridge_mod(br_root))
+    check("register.ts 带标记、插件名就是 kiteline（VS Code 里标「Prompt from the kiteline plugin」）",
+          W.BRIDGE_MOD_FILES["hooks/register.ts"].startswith("// kiteline v1：")
+          and json.loads(W.BRIDGE_MOD_FILES[".claude-plugin/plugin.json"])["name"] == "kiteline")
+    check("不带参数：测试 watcher（没有 CCPULSE_SKILLS）不往真实的 ~/.claude 里装、也不抛", "CCPULSE_SKILLS" in os.environ or W.sync_bridge_mod() is False)
+    mod_ts = W.BRIDGE_MOD_FILES["hooks/register.ts"]
+    check("mod：斜杠命令走 $.command.run，以「/」开头的普通话垫零宽空格（源码里是转义写法）",
+          "$.command.run(" in mod_ts and "`\\u200b${item.text}`" in mod_ts and "\u200b" not in mod_ts)
+    check("读记录时去掉垫的零宽空格：手机上显示、核对送达都照原话", W.user_string_item("\u200b/Users/x 看看", {"id": "1"})["text"] == "/Users/x 看看")
+    check("手机经 mod 发来、排队进来的话算你说的；别的插件的不算",
+          W.normalize_line(0, {"type": "attachment", "timestamp": ts(1), "attachment": {
+              "type": "queued_command", "prompt": "手机上说的", "origin": {"kind": "plugin", "name": "kiteline", "asUser": True}}})[0].get("t") == "user"
+          and W.normalize_line(0, {"type": "attachment", "timestamp": ts(1), "attachment": {
+              "type": "queued_command", "prompt": "别的插件", "origin": {"kind": "plugin", "name": "other"}}}) == [])
+    check("mod：Claude 忙时发的话留着，下一批工具跑完插进这一轮（session.append），没赶上的这一轮完了再提交",
+          "classic.PostToolBatch" in mod_ts and "$.session.append(" in mod_ts and "result = 'later'" in mod_ts
+          and "later.splice(0)" in mod_ts.split("on('turn.complete'")[1].split("on('classic.PostToolBatch'")[0])
+    meta_row = {"type": "user", "isMeta": True, "timestamp": ts(1), "uuid": "m1",
+                "message": {"role": "user", "content": [{"type": "text", "text": "顺便看看 README"}]}}
+    got_said = W.normalize_line(0, dict(meta_row, origin={"kind": "plugin", "name": "kiteline"}))
+    check("插进这一轮的那行（isMeta、来源 kiteline）照你说的显示；别的 isMeta 行照旧不显示",
+          [(it["t"], it["text"]) for it in got_said] == [("user", "顺便看看 README")]
+          and W.normalize_line(0, meta_row) == [] and W.normalize_line(0, dict(meta_row, origin={"kind": "plugin", "name": "other"})) == [], str(got_said))
+    said_path = os.path.join(root, "bridge-said.jsonl")
+    with open(said_path, "w") as handle:
+        handle.write(json.dumps({"type": "user", "timestamp": ts(1), "uuid": "p1", "origin": {"kind": "peer", "from": "x"}, "isMeta": True,
+                                 "message": {"role": "user", "content": "<cross-session-message from=\"x\">来信</cross-session-message>"}}, ensure_ascii=False) + "\n")
+        handle.write(json.dumps(dict(meta_row, origin={"kind": "plugin", "name": "kiteline"}), ensure_ascii=False) + "\n")
+    check("别的会话来信开始的一轮，中途插进你的话：这一轮算你的（答完照常推送）", W.scan_transcript(said_path).get("turnFrom") == "user",
+          str(W.scan_transcript(said_path).get("turnFrom")))
+
+    saved_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(root, "claude")   # 本进程里的 bridge_* 也指到临时目录
+    try:
+        inbox = W.bridge_dir()
+        os.makedirs(inbox, exist_ok=True)
+        br_proc = subprocess.Popen(["sleep", "60"])
+        BR_SID = "bbbbbbbb-5555-6666-7777-888888888888"
+        started = int(time.time() * 1000)
+        open(os.path.join(transcript_dir, BR_SID + ".jsonl"), "w").close()
+        with open(os.path.join(SESS, "%d.json" % br_proc.pid), "w") as handle:
+            json.dump({"pid": br_proc.pid, "sessionId": BR_SID, "cwd": CWD, "status": "idle", "name": "送达会话",
+                       "entrypoint": "claude-vscode", "kind": "interactive", "startedAt": started}, handle, ensure_ascii=False)
+        alive = os.path.join(inbox, BR_SID + ".alive")
+        with open(alive, "w") as handle:
+            json.dump({"at": started - 5000}, handle)
+        check("alive 早于这个进程启动（上一个进程留下的）：不算", not W.bridge_alive(BR_SID, started))
+        with open(alive, "w") as handle:
+            json.dump({"at": started + 300}, handle)
+        os.utime(alive, (time.time() + 1, time.time() + 1))
+        check("这个进程启动后 mod 写的 alive：算", W.bridge_alive(BR_SID, started) and not W.bridge_alive("没有这个会话", started))
+        snap = wait_for(lambda e: e["event"] == "snapshots" and any(x["sessionId"] == BR_SID and x.get("bridge") for x in e["sessions"]), timeout=12)
+        check("快照带 bridge = true（电脑端据此不切前台）", snap is not None)
+
+        # 假的 mod：照收件箱的条目写回执，记下收到了什么
+        got, stop = [], threading.Event()
+
+        def fake_mod():
+            seen = set()
+            path = os.path.join(inbox, BR_SID + ".json")
+            while not stop.is_set():
+                for item in W._bridge_items(path):
+                    if item["id"] in seen or item.get("expires", 0) < time.time() * 1000:
+                        continue
+                    seen.add(item["id"])
+                    got.append(item)
+                    with open(os.path.join(inbox, "%s.ack-%s.json" % (BR_SID, item["id"])), "w") as handle:
+                        json.dump({"result": "none" if item["op"] == "perm" else "ok"}, handle)
+                time.sleep(0.1)
+
+        def ask(payload, timeout=15):
+            # 文件前面的 call 名字被别处占了：同样经 stdin 发请求、等回应
+            counter[0] += 1
+            payload["id"] = "br%d" % counter[0]
+            proc.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode())
+            proc.stdin.flush()
+            return wait_for(lambda e: e.get("event") == "response" and e.get("id") == payload["id"], timeout)
+
+        mod_thread = threading.Thread(target=fake_mod, daemon=True)
+        mod_thread.start()
+        resp = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "send", "text": "手机上发的第一句"})
+        check("经 watcher 送进会话：收件箱里是这句话，回 bridged + ok", resp and resp.get("bridged") is True and resp.get("result") == "ok"
+              and got and got[-1]["op"] == "send" and got[-1]["text"] == "手机上发的第一句", str(resp))
+        resp = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "perm", "decision": "allow"})
+        check("确认框已经没了（电脑上答过）：回 result none，电脑端不再补按键", resp and resp.get("bridged") and resp.get("result") == "none", str(resp))
+        check("送完收件箱清空、回执删掉", not os.path.exists(os.path.join(inbox, BR_SID + ".json"))
+              and not glob.glob(os.path.join(inbox, BR_SID + ".ack-*")))
+        resp = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "keys", "text": "x"})
+        check("不认识的指令不送", resp and resp.get("bridged") is False, str(resp))
+        stop.set()
+        mod_thread.join()
+        began = time.time()
+        resp = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "abort"})
+        check("mod 没接（会话卡住）：约 3 秒后回 bridged false，指令已撤下（之后不会再被执行）", resp and resp.get("bridged") is False
+              and 2.5 <= time.time() - began < 6 and not os.path.exists(os.path.join(inbox, BR_SID + ".json")), str(resp))
+        resp = ask({"cmd": "bridge", "sessionId": SID, "op": "send", "text": "x"})
+        check("没加载 mod 的会话：马上回 bridged false", resp and resp.get("bridged") is False, str(resp))
+        old = os.path.join(inbox, "old.ack-1.json")
+        open(old, "w").close()
+        os.utime(old, (time.time() - 7200, time.time() - 7200))
+        W.bridge_tidy(inbox)
+        check("陈年回执清掉，alive 留着", not os.path.exists(old) and os.path.exists(alive))
+        br_proc.kill()
+    finally:
+        if saved_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved_cfg
 
     print("== 本机性能")
     stats = wait_for(lambda e: e["event"] == "sys", timeout=12)

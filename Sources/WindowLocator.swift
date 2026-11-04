@@ -125,7 +125,7 @@ enum WindowLocator {
             return
         }
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first
-        if let running, !target.newWindow, raise(folder: target.folder, remote: target.remote, in: running) {
+        if let running, !target.newWindow, raise(folder: target.folder, remote: target.remote, host: target.host, in: running) {
             finish()
             return
         }
@@ -159,6 +159,8 @@ enum WindowLocator {
         var newWindow: Bool
         /// 工作区根目录名（窗口标题里显示的项目名）
         var folder: String
+        /// 远端窗口的主机（链接里 ssh-remote+ 后面那段）；按标题认窗口时连主机一起比
+        var host: String? = nil
     }
 
     /// 链接换成 VS Code 启动参数：--folder-uri 地址，链接带 windowId=_blank 的加 --new-window
@@ -173,12 +175,14 @@ enum WindowLocator {
         }
         let newWindow = components.queryItems?.contains { $0.name == "windowId" && $0.value == "_blank" } ?? false
         let folder = (components.path as NSString).lastPathComponent
+        let authority = components.host == "vscode-remote" ? components.path.split(separator: "/").first.map(String.init) : nil
+        let host = authority.flatMap { $0.hasPrefix("ssh-remote+") ? decodeAuthority(String($0.dropFirst("ssh-remote+".count))).host : nil }
         return LaunchTarget(arguments: (newWindow ? ["--new-window"] : []) + ["--folder-uri", uri],
-                            remote: components.host == "vscode-remote", newWindow: newWindow, folder: folder)
+                            remote: components.host == "vscode-remote", newWindow: newWindow, folder: folder, host: host)
     }
 
     /// 有辅助功能权限、标题对得上的窗口正好一个：把它切到前台（同名项目开了几个窗口时认不准，交给启动参数）
-    private static func raise(folder: String, remote: Bool, in app: NSRunningApplication) -> Bool {
+    private static func raise(folder: String, remote: Bool, host: String? = nil, in app: NSRunningApplication) -> Bool {
         guard AXIsProcessTrusted(), !folder.isEmpty, folder != "/" else { return false }
         let ax = AXUIElementCreateApplication(app.processIdentifier)
         var value: CFTypeRef?
@@ -187,7 +191,7 @@ enum WindowLocator {
         let matching = windows.filter { window in
             var title: CFTypeRef?
             AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &title)
-            return Delivery.windowTitle(title as? String ?? "", matches: folder, remote: remote)
+            return Delivery.windowTitle(title as? String ?? "", matches: folder, remote: remote, host: host)
         }
         guard matching.count == 1, let window = matching.first else { return false }
         AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)

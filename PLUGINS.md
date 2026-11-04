@@ -21,7 +21,11 @@ Why are some agents view-only? See the [plugin development guide](docs/plugin-de
 | **Proma** <br><sub>built-in plugin</sub> | Desktop app | View only <sup>4</sup> | View only <sup>4</sup> | View only ✓ <sup>4</sup> |
 | **Cursor** <br><sub>[plugin](plugins/cursor)</sub> | Editor | View · Reply · Approve · Interrupt <sup>5</sup> | View · Reply · Approve · Interrupt ✓ <sup>5</sup> | View · Reply · Approve · Interrupt ✓ <sup>5</sup> |
 |  | CLI | View · Reply · Approve · Interrupt <sup>6</sup> | View only <sup>7</sup> | View · Reply · Approve · Interrupt ✓ <sup>6</sup> |
-| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>8</sup> | View only <sup>9</sup> | View · Reply · Approve · Interrupt ✓ <sup>8</sup> |
+| **Grok Build** <br><sub>[plugin](plugins/grok), coming soon</sub> | CLI | Full <sup>8</sup> | View only <sup>9</sup> | Full ✓ <sup>8</sup> |
+| **Hermes** <br><sub>[plugin](plugins/hermes), coming soon</sub> | CLI | Full <sup>10</sup> | View only <sup>9</sup> | Full ✓ <sup>10</sup> |
+| **Kimi Code** <br><sub>[plugin](plugins/kimi-code), coming soon</sub> | CLI | Full <sup>11</sup> | View only <sup>9</sup> | Full ✓ <sup>11</sup> |
+|  | Desktop app | View only <sup>12</sup> | — | — |
+| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>13</sup> | View only <sup>9</sup> | View · Reply · Approve · Interrupt ✓ <sup>13</sup> |
 
 1. CLI sessions need to run in tmux
 2. Codex has no desktop app for Linux
@@ -30,5 +34,9 @@ Why are some agents view-only? See the [plugin development guide](docs/plugin-de
 5. Use Cursor's editor window (the Agents window isn't supported) and restart Cursor once after the plugin is installed; sending to an idle chat from your phone needs Kiteline 3.49.15 / desktop 1.0.20 or later
 6. Replying and approving need the Cursor CLI to run in tmux
 7. Windows has no tmux, so it's view-only; messages sent while Cursor is working go out when the current turn ends
-8. Replying and approving need Qwen Code to run in tmux
+8. 回复和确认需要 Grok Build 在 tmux 中运行
 9. Windows has no tmux, so it's view-only
+10. 回复和确认需要 Hermes 在 tmux 中运行
+11. 回复和确认需要 Kimi Code 在 tmux 中运行
+12. 桌面版的会话只能查看
+13. Replying and approving need Qwen Code to run in tmux

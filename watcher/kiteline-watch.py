@@ -29,7 +29,13 @@ ccpulse-watch — Claude Code 会话观察器 + 会话内容通道
   peers     {since}                          某个时间（毫秒）以来会话之间的消息往来（翻对话记录补齐，给协作图用）
   media     {sessionId, ref}                 取一张图片（base64）
   put_file  {name, data}                     把手机发来的图片落到本机，返回路径
-  tmux_send {pid, text?, keys?, submit?}     终端里的 CLI 会话：经 tmux 投递
+  tmux_send {pid, text?, keys?, submit?}     终端里的 CLI 会话：经 tmux 投递（托管会话写进它的伪终端）
+  hosted_start {cwd, prompt?, submit?, sessionId?, takeOver?, netEnv?}  不开 VS Code，后台起一个 claude（sessionId = 恢复这段对话；
+                                             takeOver = 它正在 VS Code 里开着，等那边关掉再接着），网络设置和 VS Code 里的 Claude Code 一致
+                                             （netEnv：Kiteline 读的 VS Code 设置里给 Claude Code 配的网络变量），
+                                             等它起来、第一句发出去再回 {sessionId, hosted, pid, submitted, network}
+  hosted_stop {sessionId, ifIdle?}           结束托管会话（转到 VS Code 接着做之前）
+  hosted_probe {netEnv?}                     出口检测：照后台运行时的网络设置查出口 IP → {source, settings, egress {ip, country, region, city, org, site}}
   machine_info                               设备详情：主机名、系统、CPU 型号、内存、IP、开机时长、磁盘
   term      {op, sessionId, cwd?, term?, …}  会话里的终端：open {cols, rows} / list / read（最近的输出，接上画面）/
                                              input {data, base64?} / resize {cols, rows} / close
@@ -71,6 +77,10 @@ ccpulse-watch — Claude Code 会话观察器 + 会话内容通道
       --remember 记成这个项目的默认流程（--steps default 用它）。没规划的按工具调用推断成默认四步（只进不退）：
       调研了解 / 开发中 / 测试中 / 汇报中（发布中）；问问题、查资料就答完的不显示。
   以上发图、待办、关键信息、阶段都自动认出所在的会话（Claude Code、Codex、OpenCode……），认不出时用 --session 指定。
+  ccpulse-watch.py attach [序号 | 会话 id 开头 | 目录或标题里的字]
+      给用户用：在这台电脑的终端里（比如 VS Code 连过来的终端）接上 Kiteline 在后台运行的 Claude Code，实时看、直接操作，
+      和手机、电脑上 Kiteline 会话终端里的「claude」同时可见。不带参数时接当前目录的那个，有几个就列出来选。
+      Ctrl+] 断开，Claude 继续在后台运行。
 
 输出保证：每次打印一行完整的 UTF-8 JSON 并以换行结束。
 """
@@ -108,7 +118,7 @@ from urllib.request import pathname2url
 
 PROTOCOL = 2
 WATCHER_VERSION = "2.34.0"
-FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal"]
+FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 MESSAGE_MAX_CHARS = 600
@@ -736,7 +746,7 @@ def scan_transcript(path):
             # 忙时排队进来的话并进当前这一轮：别的会话的来信不改发起方，你插的话要等你看（改成 user）
             attachment = entry.get("attachment") if isinstance(entry.get("attachment"), dict) else {}
             origin = attachment.get("origin") if isinstance(attachment.get("origin"), dict) else {}
-            if attachment.get("type") == "queued_command" and origin.get("kind") in (None, "human"):
+            if attachment.get("type") == "queued_command" and user_origin(origin):
                 turn_from = "user"
             continue
         if etype == "ai-title" and isinstance(entry.get("aiTitle"), str):
@@ -789,7 +799,7 @@ def scan_transcript(path):
                     tool_id = block.get("tool_use_id")
                     if isinstance(tool_id, str):
                         resolved.add(tool_id)
-                elif isinstance(block, dict) and block.get("type") == "text" and not entry.get("isMeta"):
+                elif isinstance(block, dict) and block.get("type") == "text" and (not entry.get("isMeta") or bridge_said(entry)):
                     last_error = None   # 你又说话了（比如「继续」），之前的错误就过去了
                     turn_from = turn_from_prompt((block.get("text") or "").strip())
 
@@ -1270,6 +1280,8 @@ def snapshot_session(payload):
         "usage": _USAGE[session_id].summary() if session_id in _USAGE else None,
         "transcriptPath": transcript,
         "transcriptUpdatedAt": int(updated * 1000) if updated else None,
+        # 这个 claude 进程加载了后台送达 mod：发消息、中断、确认、回答提问不用切到 VS Code（见 bridge_send）
+        "bridge": bridge_alive(session_id, payload.get("startedAt")),
     }
 
 
@@ -1284,6 +1296,7 @@ def signature(snap):
         (snap.get("stage") or {}).get("total"), (snap.get("stage") or {}).get("note"),
         (snap.get("goal") or {}).get("text"), (snap.get("goal") or {}).get("state"), (snap.get("goal") or {}).get("checks"),
         (snap.get("goal") or {}).get("note"), (snap.get("goal") or {}).get("tokens"),
+        snap.get("bridge"),
     ))
 
 
@@ -1418,8 +1431,9 @@ def split_attachments(text):
 
 
 def user_string_item(text, base):
-    """content 是字符串的 user 行：可能是真人输入，也可能是斜杠命令、后台任务通知等。"""
-    raw = text.strip()
+    """content 是字符串的 user 行：可能是真人输入，也可能是斜杠命令、后台任务通知等。
+    开头的零宽空格是手机经后台送达 mod 发来、以「/」开头的话垫的（见 BRIDGE_MOD_FILES），去掉"""
+    raw = text.strip().lstrip("\u200b")
     if raw.startswith("<command-name>") or "<command-name>" in raw[:200]:
         name = between(raw, "command-name") or ""
         args = between(raw, "command-args") or ""
@@ -1589,6 +1603,19 @@ def peer_origin(entry):
         attachment = entry.get("attachment") if isinstance(entry.get("attachment"), dict) else {}
         origin = attachment.get("origin")
     return origin if isinstance(origin, dict) and origin.get("kind") == "peer" else None
+
+
+def user_origin(origin):
+    """排队进来的话是不是用户说的：自己打的（没有来源 / human），或手机经后台送达 mod 发来的（kiteline 插件，见 bridge_send）"""
+    kind = (origin or {}).get("kind")
+    return kind in (None, "human") or (kind == "plugin" and origin.get("name") == BRIDGE_MOD_NAME)
+
+
+def bridge_said(entry):
+    """Claude 忙时手机发的话，后台送达 mod 在两次工具调用之间插进了这一轮：记录里是 isMeta 的 user 行、origin 是 kiteline 插件，
+    照你说的话显示（VS Code 不显示 isMeta 行）"""
+    origin = entry.get("origin")
+    return isinstance(origin, dict) and origin.get("kind") == "plugin" and origin.get("name") == BRIDGE_MOD_NAME
 
 
 def peer_body(origin, raw):
@@ -1815,7 +1842,7 @@ def normalize_line(offset, entry):
             items.append(peer_in_item(base(), origin, attachment.get("prompt")))
             return items
         origin = attachment.get("origin") if isinstance(attachment.get("origin"), dict) else {}
-        if origin.get("kind") not in (None, "human"):
+        if not user_origin(origin):
             return []
         prompt = attachment.get("prompt")
         if isinstance(prompt, str):
@@ -1847,7 +1874,7 @@ def normalize_line(offset, entry):
             if summary:
                 item["detail"] = summary
             return [item]
-        if entry.get("isMeta"):
+        if entry.get("isMeta") and not bridge_said(entry):
             origin = peer_origin(entry)
             if origin is not None:
                 items.append(peer_in_item(base(), origin, content))
@@ -4123,6 +4150,311 @@ def _sync_mod(root, name, marker, files, label):
     if changed:
         log("已安装%s：%s" % (label, folder))
     return True
+
+
+# ---------------------------------------------------------------------------
+# 后台送达（不打扰用户用电脑）：手机上发消息、中断、确认、回答提问，原来要切到 VS Code 粘贴、按键，占着前台和键盘。
+# Claude Code 的 mod 接口能在会话进程里以用户身份提交消息（$.prompt.submit asUser）、中断（$.turn.abort）、
+# 应答确认请求（PermissionRequest 钩子：电脑上照常弹框，手机先答 CLI 自己撤掉框）。watcher 装这个 mod（名字就叫 kiteline，
+# VS Code 里这类消息上方标「Prompt from the kiteline plugin」），把指令写进 <Claude 配置目录>/kiteline/inbox/<会话>.json，
+# mod 照做后写 <会话>.ack-<id>.json。Claude 正忙时发的话（$.prompt.submit 要等这一轮做完）由 mod 在下一批工具跑完后
+# 插进这一轮（$.session.append，回执 later），跟在 VS Code 里趁它忙时打字一样；见 bridge_said。
+# mod 只在会话启动时加载：装之前开着的会话快照里 bridge 为假，电脑端照旧走前台
+# ---------------------------------------------------------------------------
+
+BRIDGE_MOD_NAME = "kiteline"
+BRIDGE_MOD_MARKER = "kiteline v1"
+BRIDGE_MOD_FILES = {
+    ".claude-plugin/plugin.json": json.dumps({
+        "name": BRIDGE_MOD_NAME, "version": "1.0.0",
+        "description": "Kiteline: delivers what you send from your phone (messages, interrupts, approvals, answers) "
+                       "straight into this session, without taking over your screen or keyboard.",
+    }, ensure_ascii=False, indent=2) + "\n",
+    "hooks/hooks.json": '{ "modules": ["./register.ts"] }\n',
+    "hooks/register.ts": """// %s：Kiteline 装的，别改（会被覆盖）。
+import type { Register } from 'claude-code'
+
+// 手机上发的消息、中断、确认、回答提问直接交给会话，不切窗口、不模拟按键：用户在电脑上做别的事不受打扰。
+// Kiteline 把指令写进 <Claude 配置目录>/kiteline/inbox/<会话>.json（{items: [{id, op, …, expires}]}），这里每 0.4 秒看一眼，
+// 照做后写 <会话>.ack-<id>.json；<会话>.alive 记下这个进程什么时候装上的，Kiteline 据此知道这个会话能走这条路
+type Item = { id: string; op: string; text?: string; decision?: string; answers?: Record<string, string>; tool?: string; expires?: number }
+type Waiter = { agent: string; tool: string; key: string; wake: (item: Item | null) => void }
+
+let dir = ''
+let sid = ''
+let turn: string | undefined
+let ticking = false
+let windows = false
+const done = new Set<string>()
+const waiters: Waiter[] = []
+const later: string[] = []
+
+// 同一次工具调用在 tool.call 和确认请求里的参数对得上：键排好序再比
+const canon = (value: unknown): string => JSON.stringify(value, (_, x) =>
+  x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a < b ? -1 : 1)) : x)
+
+export const register: Register = on => {
+  on('turn.start', ($, e, next) => {
+    if (e.agentId === undefined) turn = e.turnId
+    return next(e)
+  })
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (e.turnId === turn) {
+      turn = undefined
+      // 这一轮后面没再调用工具（在写最后的回复，或被中断了）：没赶上的话作为下一句提交
+      for (const text of later.splice(0)) void $.prompt.submit({ text: text.startsWith('/') ? `\\u200b${text}` : text, asUser: true })
+    }
+    return result
+  })
+
+  // Claude 正忙时发来的话：跟在 VS Code 里趁它忙时打字一样，这一批工具跑完、下一次请求模型之前交给它，不用等这一轮做完。
+  // 插进去的是一行你说的话（记录里 isMeta、origin 是 kiteline 插件，watcher 照你发的显示；VS Code 里不显示这一行）
+  on('classic.PostToolBatch', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agent_id !== undefined) return result
+    for (const text of later.splice(0)) {
+      const added = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(() => undefined)
+      if (!added || added.deny !== undefined) later.push(text)
+    }
+    return result
+  })
+
+  // 确认框电脑上已经答了（工具跑完或被拒）：别再等手机
+  on('tool.call', async ($, e, next) => {
+    try {
+      return await next(e)
+    } finally {
+      const { tool, tool_use_id: _id, agentId, requestMeta: _meta, ...args } = e as typeof e & { requestMeta?: unknown }
+      const key = canon(args)
+      for (const w of waiters.filter(w => w.agent === (agentId ?? '') && w.tool === tool && w.key === key)) w.wake(null)
+    }
+  })
+
+  // Claude 要确认（命令、改文件、提问、计划）时，VS Code 照常弹框，同时等手机的回答；哪边先答算哪边。
+  // 钩子自己的时间上限 10 秒，子进程在跑时不计：挂一个休眠的子进程等着，答了就收掉
+  on('classic.PermissionRequest', async ($, e, next) => {
+    if (!dir) return next(e)
+    let wake: (item: Item | null) => void = () => {}
+    const answered = new Promise<Item | null>(resolve => { wake = resolve })
+    const waiter: Waiter = { agent: e.agent_id ?? '', tool: e.tool_name, key: canon(e.tool_input), wake: item => wake(item) }
+    waiters.push(waiter)
+    const sleeper = $.process.spawn({ argv: windows ? ['powershell', '-NoProfile', '-Command', 'Start-Sleep 86400'] : ['sleep', '86400'] })
+    const child = sleeper[Symbol.asyncIterator]()
+    let item: Item | null = null
+    try {
+      item = await Promise.race([answered, child.next().then(() => null, () => null)])
+    } finally {
+      waiters.splice(waiters.indexOf(waiter), 1)
+      void child.return?.(undefined)
+    }
+    if (!item) return next(e)
+    if (item.op === 'answer') {
+      const input = e.tool_input as Record<string, unknown>
+      return { decision: { behavior: 'allow', updatedInput: { ...input, answers: item.answers ?? {} } } }
+    }
+    if (item.decision === 'allow') return { decision: { behavior: 'allow' } }
+    if (item.decision === 'allow_session') {
+      // 手机上的按钮是「本会话不再询问」：Claude 建议的规则只记在这次会话里，不写进项目设置
+      const rules = (e.permission_suggestions ?? []).map(rule => ({ ...rule, destination: 'session' as const }))
+      return { decision: { behavior: 'allow', updatedPermissions: rules } }
+    }
+    return { decision: { behavior: 'deny', message: 'The user declined this from Kiteline on their phone.', interrupt: true } }
+  }).catch(($, e, next) => next(e))
+
+  on('session.start', async ($, e, next) => {
+    const started = await next(e)
+    const root = (await $.env.get('CLAUDE_CONFIG_DIR'))
+      ?? `${(await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))}/.claude`
+    windows = (await $.env.get('OS')) === 'Windows_NT'
+    dir = `${root}/kiteline/inbox`
+    sid = await $.session.id()
+    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: await $.clock.now(), v: 1 }))
+    if (ticking) return started
+    ticking = true
+    let busy = false
+    $.clock.every(400, async () => {
+      if (busy || !sid) return
+      busy = true
+      try {
+        const path = `${dir}/${sid}.json`
+        if (!(await $.fs.exists(path))) return
+        const now = await $.clock.now()
+        const items: Item[] = JSON.parse(await $.fs.read(path)).items ?? []
+        for (const item of items) {
+          if (!item || typeof item.id !== 'string' || done.has(item.id)) continue
+          if (typeof item.expires === 'number' && item.expires < now) continue
+          done.add(item.id)
+          let result = 'ok'
+          if (item.op === 'send' && typeof item.text === 'string') {
+            // 斜杠命令（手机上的压缩上下文、切换模型、思考强度……）照在输入框里打的那样执行；别的作为你说的话提交，Claude 正忙就留到它下一步
+            const slash = /^\\/([\\w:.-]+)(?:\\s+([\\s\\S]*))?$/.exec(item.text.trim())
+            if (slash && (await $.command.list()).some(c => c.name === slash[1])) {
+              void $.command.run({ command: slash[1], args: slash[2] ?? '' })
+            } else if (turn) {
+              later.push(item.text)
+              result = 'later'
+            } else {
+              // 以「/」开头却不是命令（比如开头是个路径）：引擎不让插件这样提交，前面垫一个零宽空格，模型看到的内容不变
+              void $.prompt.submit({ text: item.text.startsWith('/') ? `\\u200b${item.text}` : item.text, asUser: true })
+            }
+          } else if (item.op === 'abort') {
+            if (turn) await $.turn.abort({ turnId: turn })
+            else result = 'idle'
+          } else if (item.op === 'perm' || item.op === 'answer') {
+            // 交给手机上那张卡片对应的确认框：回答只给提问框；带了工具名的按名字对，对不上说明手机看到的已经过时了
+            const tool = item.op === 'answer' ? 'AskUserQuestion' : item.tool
+            const fits = waiters.filter(w => !tool || w.tool === tool)
+            const waiter = fits.find(w => w.agent === '') ?? fits[0]
+            if (waiter) waiter.wake(item)
+            else result = 'none'
+          } else {
+            result = 'unknown'
+          }
+          await $.fs.write(`${dir}/${sid}.ack-${item.id}.json`, JSON.stringify({ result, at: await $.clock.now() }))
+        }
+      } catch {
+        // 文件写到一半、格式不对：下一轮再看
+      } finally {
+        busy = false
+      }
+    })
+    return started
+  })
+}
+""" % BRIDGE_MOD_MARKER,
+}
+BRIDGE_OPS = ("send", "abort", "perm", "answer")
+BRIDGE_WAIT = 2.5     # 等 mod 回执的秒数（它 0.4 秒看一次收件箱）；过了就撤下，电脑端改走前台
+BRIDGE_GRACE = 0.8    # 撤下后再等一会儿：正好在撤之前被 mod 拿走的也认回执，免得电脑端再从前台发一遍
+BRIDGE_TIDY_SECONDS = 3600
+_BRIDGE_LOCK = threading.Lock()
+_BRIDGE_ALIVE = {}    # 会话 → (alive 文件 mtime, mod 写入的时刻)
+_BRIDGE_TIDIED = [0.0]
+
+
+def sync_bridge_mod(root=None):
+    """装上 / 更新后台送达 mod。不带参数随时可以重复调（托管会话起 claude 之前也调），内容一样不动文件，出错只记日志、不抛。
+    规矩同 sync_limits_mod：不传 root 时只在电脑端带了技能配置（CCPULSE_SKILLS，正式运行）时装。返回 True = 装好了"""
+    try:
+        if root is None and skills_enabled() is None:
+            return False
+        ok = _sync_mod(root or claude_config_dir(), BRIDGE_MOD_NAME, BRIDGE_MOD_MARKER, BRIDGE_MOD_FILES, "后台送达插件")
+        if time.time() - _BRIDGE_TIDIED[0] > BRIDGE_TIDY_SECONDS:
+            _BRIDGE_TIDIED[0] = time.time()
+            bridge_tidy(os.path.join(root, "kiteline", "inbox") if root else None)
+        return ok
+    except Exception as exc:  # noqa
+        log("装后台送达插件出错：%r" % exc)
+        return False
+
+
+def bridge_dir():
+    return os.path.join(claude_config_dir(), "kiteline", "inbox")
+
+
+def bridge_tidy(folder=None, now=None):
+    """收件箱里的陈年文件：回执、没人取的指令过一小时删，alive 过 30 天删（会话早结束了）"""
+    folder = folder or bridge_dir()
+    now = now or time.time()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(folder, name)
+        keep = 30 * 86400 if name.endswith(".alive") else 3600
+        try:
+            if now - os.path.getmtime(path) > keep:
+                os.remove(path)
+        except OSError:
+            pass
+
+
+def bridge_alive(session_id, started_at):
+    """这个会话现在的 claude 进程加载了 mod 没有：mod 在会话开始时写 <会话>.alive（毫秒时刻），不早于进程启动就算。
+    恢复会话（新进程、同一会话 id）时旧进程留下的 alive 早于新进程启动，不算"""
+    if not session_id:
+        return False
+    path = os.path.join(bridge_dir(), "%s.alive" % session_id)
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return False
+    cached = _BRIDGE_ALIVE.get(session_id)
+    if cached is None or cached[0] != mtime:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                at = int(json.load(handle).get("at") or 0)
+        except (OSError, ValueError, TypeError, AttributeError):
+            at = 0
+        cached = _BRIDGE_ALIVE[session_id] = (mtime, at)
+    started = started_at if isinstance(started_at, (int, float)) and not isinstance(started_at, bool) else 0
+    return cached[1] > 0 and cached[1] >= started
+
+
+def _bridge_items(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            items = json.load(handle).get("items")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
+def _bridge_store(path, items):
+    """整份换掉（mod 读的时候不会读到半截）；空了就删，mod 那边看一眼文件不在就过去了"""
+    if not items:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump({"items": items}, handle, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def bridge_send(session_id, op, wait=BRIDGE_WAIT, **fields):
+    """把一条指令交给会话里的 mod，等它回执。op：send（text）/ abort / perm（decision：allow、allow_session、deny）/
+    answer（answers：{问题: 答案}）。回 {"bridged": True, "result": ok | idle（中断时本来就空闲）| none（没有待确认的框）}；
+    mod 没接（没加载、会话卡住）回 {"bridged": False}，电脑端照旧走前台"""
+    folder = bridge_dir()
+    path = os.path.join(folder, "%s.json" % session_id)
+    item_id = uuid.uuid4().hex[:12]
+    now = int(time.time() * 1000)
+    item = dict(fields, id=item_id, op=op, expires=now + int(wait * 1000))
+    os.makedirs(folder, exist_ok=True)
+    with _BRIDGE_LOCK:
+        _bridge_store(path, [x for x in _bridge_items(path) if (x.get("expires") or 0) > now] + [item])
+    ack = os.path.join(folder, "%s.ack-%s.json" % (session_id, item_id))
+    deadline = time.time() + wait
+    result = None
+    withdrawn = False
+    while True:
+        if os.path.exists(ack):
+            try:
+                with open(ack, encoding="utf-8") as handle:
+                    result = json.load(handle).get("result") or "ok"
+            except (OSError, ValueError, AttributeError):
+                result = "ok"
+            break
+        if time.time() >= deadline + BRIDGE_GRACE:
+            break
+        if time.time() >= deadline and not withdrawn:
+            # 过期了：撤下（mod 也不接过期的），再等一小会儿看是不是正好被拿走了
+            withdrawn = True
+            with _BRIDGE_LOCK:
+                _bridge_store(path, [x for x in _bridge_items(path) if x.get("id") != item_id])
+        time.sleep(0.05)
+    with _BRIDGE_LOCK:
+        _bridge_store(path, [x for x in _bridge_items(path) if x.get("id") != item_id])
+    try:
+        os.remove(ack)
+    except OSError:
+        pass
+    return {"bridged": False} if result is None else {"bridged": True, "result": result}
 
 
 def _iso_ms(value):
@@ -6787,6 +7119,58 @@ def list_dir(root, rel):
     return {"path": "" if rel == "." else rel, "entries": entries, "truncated": len(entries) >= 2000}
 
 
+def list_dirs(path, hidden=False, mkdir=None):
+    """新任务「打开其他文件夹」：列一个目录下的子文件夹（不限项目目录；空 = 用户主目录）。
+    mkdir：先在这个目录里新建一个文件夹，再列新文件夹（给新项目用）"""
+    home = os.path.expanduser("~")
+    target = os.path.expanduser(path.strip()) if isinstance(path, str) and path.strip() else home
+    if not is_abs_path(target):
+        raise RuntimeError("路径无效")
+    target = os.path.abspath(target)
+    if not os.path.isdir(target):
+        raise RuntimeError("目录不存在：%s" % target)
+    if mkdir:
+        name = _check_name(mkdir)
+        made = os.path.join(target, name)
+        if os.path.lexists(made):
+            raise RuntimeError("已存在同名的文件或文件夹")
+        try:
+            os.makedirs(made)
+        except PermissionError:
+            raise RuntimeError("没有权限在这里新建文件夹")
+        except OSError as error:
+            raise RuntimeError("无法新建文件夹：%s" % (error.strerror or error))
+        target = made
+    try:
+        names = os.listdir(target)
+    except PermissionError:
+        raise RuntimeError("没有权限读取该目录")
+    except OSError as error:
+        raise RuntimeError("无法读取该目录：%s" % (error.strerror or error))
+    entries = []
+    # Mac 上主目录下的「文稿」「桌面」「下载」、/Volumes 下的盘：往里看一眼有没有 .git 就会弹文件夹授权框，不探（点进去再说）
+    probe = not (sys.platform == "darwin" and target in (os.path.realpath(home), home, "/Volumes"))
+    for name in names:
+        if not hidden and (name.startswith(".") or (IS_WINDOWS and (name.startswith("$") or name == "System Volume Information"))):
+            continue
+        full = os.path.join(target, name)
+        if not os.path.isdir(full):
+            continue
+        item = {"name": name, "path": full}
+        if probe and os.path.exists(os.path.join(full, ".git")):
+            item["git"] = True
+        entries.append(item)
+        if len(entries) >= 2000:
+            break
+    entries.sort(key=lambda e: e["name"].lower())
+    parent = os.path.dirname(target)
+    out = {"path": target, "parent": parent if parent != target else None, "home": home, "sep": os.sep,
+           "entries": entries, "truncated": len(entries) >= 2000, "git": os.path.exists(os.path.join(target, ".git"))}
+    if IS_WINDOWS:
+        out["roots"] = [drive for drive in ("%s:\\" % letter for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ") if os.path.isdir(drive)]
+    return out
+
+
 def read_file(root, rel, reveal=False, edit=False):
     real_root, target = safe_path(root, rel)
     if not os.path.isfile(target):
@@ -8290,11 +8674,456 @@ def task_output_tail(path, limit=24 * 1024):
     return {"text": data.decode("utf-8", "replace"), "size": size, "truncated": size > limit, "mtime": int(mtime * 1000)}
 
 
+# ---------------------------------------------------------------------------
+# 执行过程（trace）：对话页右上角的「执行过程」面板
+# 一个会话 = 主 agent + 它派出的子 agent（subagents/ 下每个文件一个）；每个 agent 分成若干轮
+# （一条用户 / 上级 agent 的话开始），每轮是一串步骤：模型调用（带思考、输出、token）、
+# 工具调用（配上结果、是否出错）、出错提示、中途插话、其他事件。
+# 每个文件一个 TraceFile，记着读到哪：第一次全读，之后只读新增的行。面板开着时客户端每几秒拉一次。
+# ---------------------------------------------------------------------------
+
+TRACE_TEXT_MAX = 600          # 步骤里带的文字（思考、输出、工具结果）只留开头，全文在对话里
+TRACE_STEPS_MAX = 400         # 一轮最多回多少步（多了只回最后这些）
+TRACE_TURNS_MAX = 300         # 一个 agent 最多回多少轮
+TRACE_FILES_MAX = 80          # 内存里最多记多少个文件的解析结果
+TRACE_SEGS_MAX = 48           # 一轮的时间条最多分几段着色
+TRACE_STALE_S = 300           # 记录这么久没动、轮次又没收尾：当它停了（被关掉、断了），不再显示「进行中」
+TRACE_DONE_STOPS = ("end_turn", "stop_sequence", "max_tokens", "refusal")
+TRACE_SPAWN_TOOLS = ("Agent", "Task")
+TRACE_SKIP_PREFIXES = (b'{"type":"api-request-blob"', b'{"type":"api-request-shape"', b'{"type":"file-history-snapshot"',
+                       b'{"type":"atis-latch"', b'{"type":"last-prompt"', b'{"type":"tools-used"', b'{"type":"ai-title"',
+                       b'{"type":"queue-operation"')
+_TRACE_LOCK = threading.Lock()
+_TRACE_FILES = {}             # 路径 -> TraceFile
+
+
+def _trace_clip(text, limit=TRACE_TEXT_MAX):
+    text = (text or "").strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _trace_title(text, limit=80):
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line:
+            return line[:limit]
+    return ""
+
+
+class TraceFile:
+    """一个对话记录文件（主对话或一个子 agent）的轮次和步骤，增量解析"""
+
+    def __init__(self, path, normalize):
+        self.path = path
+        self.normalize = normalize
+        self.used = time.time()
+        self.reset()
+
+    def reset(self):
+        self.offset = 0
+        self.mtime = 0
+        self.turns = []
+        self.call = None          # 正在拼的那次模型调用（一个步骤）
+        self.call_key = None      # 它的 message.id（没有 id 的 agent：连着的助手内容算一次）
+        self.req_ts = None        # 最近一条 api-request 的时间 = 下一次模型调用的开始
+        self.last_ts = None
+        self.tools = {}           # toolId -> 工具步骤（等结果）
+        self.activity = {}        # 分钟（毫秒）-> [模型调用, 工具调用, 出错]
+        self.counts = {"llm": 0, "tools": 0, "errors": 0}
+
+    # --- 读文件 ---
+
+    def refresh(self):
+        try:
+            stat = os.stat(self.path)
+        except OSError:
+            return
+        self.mtime = stat.st_mtime
+        if stat.st_size < self.offset:
+            self.reset()      # 记录被重写了（压缩、改名）：从头来
+            self.mtime = stat.st_mtime
+        if stat.st_size == self.offset:
+            return
+        try:
+            handle = open(self.path, "rb")
+        except OSError:
+            return
+        with handle:
+            handle.seek(self.offset)
+            while True:
+                raw = handle.readline()
+                if not raw or not raw.endswith(b"\n"):
+                    break         # 最后一行还没写完：下次再读
+                offset = self.offset
+                self.offset += len(raw)
+                if raw.startswith(TRACE_SKIP_PREFIXES):
+                    continue
+                if raw.startswith(b'{"type":"api-request"'):
+                    stamp = re.search(rb'"timestamp":"([^"]+)"', raw[:600])
+                    self.req_ts = parse_ts(stamp.group(1).decode()) if stamp else self.req_ts
+                    continue
+                entry = parse_line(raw)
+                if entry is not None:
+                    try:
+                        self.feed(offset, entry)
+                    except Exception:     # 一行认不出不能拖垮整个面板
+                        pass
+
+    # --- 拼轮次和步骤 ---
+
+    def _minute(self, ts, slot):
+        if not ts:
+            return
+        bucket = self.activity.setdefault(int(ts // 60000) * 60000, [0, 0, 0])
+        bucket[slot] += 1
+
+    def _turn(self, ts, title=None, kind="user"):
+        turn = {"i": len(self.turns) + 1, "title": title or "", "kind": kind, "start": ts, "end": ts,
+                "steps": [], "llm": 0, "tools": 0, "errors": 0, "done": False, "firstError": None}
+        if self.turns:
+            self.turns[-1]["done"] = True
+        self.turns.append(turn)
+        self.call = None
+        self.call_key = None
+        return turn
+
+    def _step(self, turn, step):
+        step["n"] = len(turn["steps"])
+        turn["steps"].append(step)
+        stamp = step.get("end") or step.get("start")
+        if stamp and (not turn["end"] or stamp > turn["end"]):
+            turn["end"] = stamp
+        if not turn["start"]:
+            turn["start"] = step.get("start")
+        return step
+
+    def _error(self, turn, step, ts):
+        turn["errors"] += 1
+        self.counts["errors"] += 1
+        if turn["firstError"] is None:
+            turn["firstError"] = step["n"]
+        self._minute(ts, 2)
+
+    def feed(self, offset, entry):
+        etype = entry.get("type")
+        message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+        items = self.normalize(offset, entry)
+        msg_id = message.get("id") if etype == "assistant" else None
+        for item in items:
+            self.item(item, msg_id, message if etype == "assistant" else None)
+        if etype == "assistant" and self.turns and items and message.get("stop_reason") in TRACE_DONE_STOPS:
+            if not self.tools:
+                self.turns[-1]["done"] = True
+
+    def item(self, item, msg_id, message):
+        kind = item.get("t")
+        prev = self.last_ts
+        ts = item.get("ts") or prev
+        if ts:
+            self.last_ts = ts
+        if kind == "user":
+            text = item.get("text") or ""
+            if item.get("queued") and self.turns and not self.turns[-1]["done"]:
+                # 忙的时候插进来的话：算这一轮里的一步
+                self._step(self.turns[-1], {"k": "user", "start": ts, "end": ts, "text": _trace_clip(text)})
+                return
+            self._turn(ts, _trace_title(text), kind="image" if (not text.strip() and item.get("images")) else "user")
+            return
+        if kind == "event" and item.get("peer"):
+            peer = item["peer"]
+            self._turn(ts, _trace_title(peer.get("text") or peer.get("body") or item.get("text")) or item.get("text"), kind="peer")
+            return
+        if kind in ("text", "thinking", "tool"):
+            if not self.turns:
+                self._turn(ts, "", kind="resume")
+            turn = self.turns[-1]
+            if turn["done"]:
+                # 收尾以后助手又说话（后台任务通知、续做目标……）：接着记在这一轮里，重新算进行中
+                turn["done"] = False
+            key = msg_id or self.call_key or ("seq", offset_key(item))
+            if self.call is None or key != self.call_key:
+                usage = (message or {}).get("usage") or {}
+                self.call = self._step(turn, {
+                    "k": "llm", "start": self.req_ts or prev or ts, "end": ts, "model": (message or {}).get("model") or item.get("model"),
+                    "text": "", "think": "", "thought": False, "tools": 0,
+                    "in": sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")),
+                    "out": int(usage.get("output_tokens") or 0)})
+                self.call_key = key
+                self.req_ts = None
+                turn["llm"] += 1
+                self.counts["llm"] += 1
+                self._minute(self.call["start"], 0)
+            call = self.call
+            if ts and (not call["end"] or ts > call["end"]):
+                call["end"] = ts
+            if message and (message.get("usage") or {}).get("output_tokens"):
+                call["out"] = int(message["usage"]["output_tokens"])
+            if kind == "text":
+                call["text"] = _trace_clip((call["text"] + "\n\n" + (item.get("text") or "")).strip())
+            elif kind == "thinking":
+                call["thought"] = True
+                if item.get("text"):
+                    call["think"] = _trace_clip((call["think"] + "\n\n" + item["text"]).strip())
+            else:
+                call["tools"] += 1
+                name = item.get("name") or "tool"
+                step = self._step(turn, {"k": "tool", "id": item.get("toolId"), "name": name,
+                                         "brief": _trace_clip(item.get("brief") or name, 200), "start": ts, "end": None,
+                                         "error": False, "result": ""})
+                if name == "Bash" and isinstance(item.get("input"), dict) and item["input"].get("command"):
+                    step["detail"] = _trace_clip(str(item["input"]["command"]), 1200)
+                if item.get("toolId"):
+                    self.tools[item["toolId"]] = (turn, step)
+                turn["tools"] += 1
+                self.counts["tools"] += 1
+                self._minute(ts, 1)
+            if turn["end"] is None or (ts and ts > turn["end"]):
+                turn["end"] = ts
+            return
+        if kind == "result":
+            pending = self.tools.pop(item.get("toolId"), None)
+            self.call = None
+            self.call_key = None
+            if pending is None:
+                return
+            owner, step = pending
+            step["end"] = ts or step["start"]
+            step["result"] = _trace_clip(item.get("text") or "", 400)
+            if ts and (not owner["end"] or ts > owner["end"]):
+                owner["end"] = ts
+            if item.get("isError"):
+                step["error"] = True
+                self._error(owner, step, ts)
+            return
+        if kind == "event":
+            if not self.turns:
+                return
+            turn = self.turns[-1]
+            text = item.get("text") or ""
+            if item.get("level") == "error":
+                step = self._step(turn, {"k": "error", "start": ts, "end": ts, "text": _trace_clip(text)})
+                self._error(turn, step, ts)
+            elif text == "已中断":
+                self._step(turn, {"k": "event", "start": ts, "end": ts, "text": text})
+                turn["done"] = True
+                for _, pending in self.tools.values():
+                    pending["end"] = pending["end"] or ts
+                self.tools = {}
+            elif text:
+                self._step(turn, {"k": "event", "start": ts, "end": ts, "text": _trace_clip(text, 200)})
+            self.call = None
+            self.call_key = None
+
+    # --- 给客户端的样子 ---
+
+    def running(self, now):
+        if not self.turns or self.turns[-1]["done"]:
+            return False
+        return now - self.mtime < TRACE_STALE_S
+
+    def turn_brief(self, turn, live, now_ms=None):
+        start, end = turn["start"], turn["end"]
+        out = {k: turn[k] for k in ("i", "title", "kind", "llm", "tools", "errors", "firstError")}
+        out.update({"start": start, "end": end, "steps": len(turn["steps"]), "running": live})
+        out.update(trace_turn_shape(turn, now_ms if live else None))
+        return out
+
+    def steps_of(self, turn, spawned):
+        steps = turn["steps"]
+        omitted = max(0, len(steps) - TRACE_STEPS_MAX)
+        out = []
+        for step in steps[omitted:]:
+            step = {k: v for k, v in step.items() if v not in (None, "", False) or k in ("end", "n")}
+            if step.get("k") == "tool" and step.get("id") in spawned:
+                step["agent"] = spawned[step["id"]]
+            out.append(step)
+        return out, omitted
+
+
+def trace_turn_shape(turn, now_ms=None):
+    """一轮的形状（时间条分段着色、回放用，不用拉步骤）：
+    segs [[距本轮开始毫秒, 时长毫秒, 种类 0 模型 1 工具 2 出错], ...]（同种相邻的并起来，最多 TRACE_SEGS_MAX 段）；
+    errAt 出错的时刻（最多 20 个）；llmMs / toolMs / failMs / waitMs 用时拆分（等待 = 本轮用时减去前三项）"""
+    start = turn["start"]
+    if not start:
+        return {"segs": [], "errAt": [], "llmMs": 0, "toolMs": 0, "failMs": 0, "waitMs": 0}
+    stop = now_ms or turn["end"] or start
+    raw = []
+    llm_ms = tool_ms = fail_ms = 0
+    err_at = []
+    for step in turn["steps"]:
+        kind = step.get("k")
+        s0 = step.get("start")
+        if not s0:
+            continue
+        if kind == "error":
+            err_at.append(s0)
+            continue
+        if kind not in ("llm", "tool"):
+            continue
+        s1 = step.get("end") or (now_ms if now_ms else s0)
+        dur = max(0, s1 - s0)
+        if kind == "llm":
+            llm_ms += dur
+            raw.append([s0 - start, dur, 0])
+        elif step.get("error"):
+            fail_ms += dur
+            err_at.append(s1)
+            raw.append([s0 - start, dur, 2])
+        else:
+            tool_ms += dur
+            raw.append([s0 - start, dur, 1])
+    total = max(1, stop - start)
+    # 太多段时把挨得近的同种段并起来：间隔阈值从 1 秒起，翻倍直到段数够少
+    gap = 1000
+    segs = raw
+    while True:
+        merged = []
+        for seg in segs:
+            if merged and merged[-1][2] == seg[2] and seg[0] - (merged[-1][0] + merged[-1][1]) <= gap:
+                merged[-1][1] = max(merged[-1][1], seg[0] + seg[1] - merged[-1][0])
+            else:
+                merged.append(list(seg))
+        if len(merged) <= TRACE_SEGS_MAX or gap > total:
+            break
+        segs, gap = merged, gap * 2
+    return {"segs": [[int(a), int(b), c] for a, b, c in merged[:TRACE_SEGS_MAX]], "errAt": err_at[:20],
+            "llmMs": int(llm_ms), "toolMs": int(tool_ms), "failMs": int(fail_ms),
+            "waitMs": int(max(0, total - llm_ms - tool_ms - fail_ms))}
+
+
+def offset_key(item):
+    """没有 message.id 时的分组键：同一行拆出来的几项（id 是「行偏移.序号」）算一次调用"""
+    return str(item.get("id") or "").split(".", 1)[0]
+
+
+def _trace_file(path, normalize):
+    tracer = _TRACE_FILES.get(path)
+    if tracer is None or tracer.normalize is not normalize:
+        tracer = TraceFile(path, normalize)
+        _TRACE_FILES[path] = tracer
+        if len(_TRACE_FILES) > TRACE_FILES_MAX:
+            for old in sorted(_TRACE_FILES, key=lambda p: _TRACE_FILES[p].used)[:len(_TRACE_FILES) - TRACE_FILES_MAX]:
+                _TRACE_FILES.pop(old, None)
+    tracer.used = time.time()
+    tracer.refresh()
+    return tracer
+
+
+def session_trace(path, normalize, title=None, busy=None, expand=None, subagents=True, rev=None):
+    """一个会话的执行过程：统计、按分钟的活动、agent → 轮次（摘要），expand 里点名的轮次带上步骤。
+    expand: ["main:12", "<agentId>:1", ...]；busy: 主 agent 现在是不是在忙（电脑端知道得更准，没有就按记录猜）"""
+    with _TRACE_LOCK:
+        now = time.time()
+        files = [("main", _trace_file(path, normalize), {})]
+        if subagents:
+            folder = subagent_dir(path)
+            try:
+                names = sorted(n for n in os.listdir(folder) if n.endswith(".jsonl"))
+            except OSError:
+                names = []
+            for name in names:
+                agent_id = name[6:-6] if name.startswith("agent-") else name[:-6]
+                meta = {}
+                try:
+                    with open(os.path.join(folder, name[:-6] + ".meta.json"), encoding="utf-8") as handle:
+                        meta = json.load(handle) or {}
+                except (OSError, ValueError):
+                    pass
+                files.append((agent_id, _trace_file(os.path.join(folder, name), normalize_subagent_line), meta))
+
+        # 版本号：各文件读到哪 + 忙不忙 + 要哪几轮的步骤；客户端带着上次的来、没变就只回一句（面板开着时每几秒拉一次，大会话一次一两百 KB）
+        version = hashlib.sha1(json.dumps([[a, t.offset] for a, t, _ in files] + [busy, sorted(str(x) for x in (expand or []))]).encode()).hexdigest()[:16]
+        has_live = bool(busy) or any(t.running(now) for _, t, _ in files)    # 有在跑的：用时每秒在变，照常回全量
+        if rev and rev == version and not has_live:
+            return {"same": True, "rev": version}
+        # 谁派的：工具调用 id -> (派它的 agent, 第几轮)
+        spawn_at = {}
+        for agent_id, tracer, _ in files:
+            for turn in tracer.turns:
+                for step in turn["steps"]:
+                    if step.get("k") == "tool" and step.get("name") in TRACE_SPAWN_TOOLS and step.get("id"):
+                        spawn_at[step["id"]] = (agent_id, turn["i"])
+        spawned = {}     # 工具调用 id -> 子 agent id
+        agents = []
+        activity = {}
+        first_error = None
+        totals = {"llm": 0, "tools": 0, "errors": 0, "turns": 0}
+        durations = []
+        wanted = set(str(x) for x in (expand or []))
+        steps = {}
+        start_all, end_all = None, None
+        for agent_id, tracer, meta in files:
+            live_file = tracer.running(now)
+            if agent_id == "main" and busy is not None:
+                live_file = bool(busy) and bool(tracer.turns)
+            elif agent_id != "main" and meta.get("finished") is not None:
+                live_file = live_file and not meta.get("finished")
+            turns = tracer.turns[-TRACE_TURNS_MAX:]
+            briefs = []
+            for turn in turns:
+                live = live_file and turn is tracer.turns[-1]
+                briefs.append(tracer.turn_brief(turn, live, int(now * 1000)))
+                if turn["start"] and turn["end"] and not live:
+                    durations.append(turn["end"] - turn["start"])
+                if turn["firstError"] is not None:
+                    stamp = turn["steps"][turn["firstError"]].get("start")
+                    if stamp and (first_error is None or stamp < first_error["ts"]):
+                        first_error = {"agent": agent_id, "turn": turn["i"], "step": turn["firstError"], "ts": stamp}
+            for minute, counts in tracer.activity.items():
+                bucket = activity.setdefault(minute, [0, 0, 0])
+                for i in range(3):
+                    bucket[i] += counts[i]
+            for key in ("llm", "tools", "errors"):
+                totals[key] += tracer.counts[key]
+            totals["turns"] += len(tracer.turns)
+            first = next((t["start"] for t in tracer.turns if t["start"]), None)
+            last = max((t["end"] or t["start"] or 0 for t in tracer.turns), default=0) or None
+            if first:
+                start_all = min(start_all or first, first)
+            if last:
+                end_all = max(end_all or last, last)
+            info = {"id": agent_id, "running": live_file, "start": first, "end": last,
+                    "llm": tracer.counts["llm"], "tools": tracer.counts["tools"], "errors": tracer.counts["errors"],
+                    "turns": briefs, "turnsOmitted": max(0, len(tracer.turns) - TRACE_TURNS_MAX)}
+            if agent_id == "main":
+                info.update({"title": title or "", "parent": None})
+            else:
+                origin = spawn_at.get(meta.get("toolUseId"))
+                if meta.get("toolUseId"):
+                    spawned[meta["toolUseId"]] = agent_id
+                first_turn = tracer.turns[0]["title"] if tracer.turns else ""
+                info.update({"title": meta.get("description") or first_turn or "", "agentType": meta.get("agentType"),
+                             "parent": origin[0] if origin else "main", "fromTurn": origin[1] if origin else None})
+            agents.append(info)
+        for agent_id, tracer, _ in files:
+            for turn in tracer.turns:
+                if "%s:%d" % (agent_id, turn["i"]) in wanted:
+                    items, omitted = tracer.steps_of(turn, spawned)
+                    steps["%s:%d" % (agent_id, turn["i"])] = {"items": items, "omitted": omitted}
+        # 子 agent 排在主 agent 后面，按开始时间
+        agents[1:] = sorted(agents[1:], key=lambda a: a.get("start") or 0)
+        durations.sort()
+        busy_minutes = sum(1 for counts in activity.values() if any(counts))
+        return {
+            "start": start_all, "end": end_all, "now": int(now * 1000),
+            "stats": {"agents": len(agents), "subagents": len(agents) - 1, "turns": totals["turns"],
+                      "medianTurn": durations[len(durations) // 2] if durations else None,
+                      "llm": totals["llm"], "tools": totals["tools"], "errors": totals["errors"],
+                      "busyMs": busy_minutes * 60000},
+            "activity": [[minute] + counts for minute, counts in sorted(activity.items())],
+            "firstError": first_error, "agents": agents, "steps": steps, "rev": version,
+        }
+
+
 TMUX_KEYS = {"enter": "Enter", "esc": "Escape", "escape": "Escape", "up": "Up", "down": "Down",
              "tab": "Tab", "shift+tab": "BTab", "1": "1", "2": "2", "3": "3", "4": "4", "y": "y", "n": "n"}
 
 
 def tmux_send(pid, text, keys, submit):
+    hosted = HOSTED.by_pid(pid)
+    if hosted:   # 托管会话：写进守护进程拿着的伪终端（见 HostedSessions）
+        return HOSTED.send(hosted, text, keys, submit)
     pane = _TMUX_PANES.get(pid) or find_tmux_pane(pid)
     if not pane:
         raise RuntimeError("这个 CLI 会话不在 tmux 里，无法远程投递（在 tmux 中启动 claude 即可）")
@@ -13151,6 +13980,1147 @@ class Terminals:
 TERMS = Terminals()
 
 
+# ---------------------------------------------------------------------------
+# 托管会话：不开 VS Code，在这台电脑上后台跑交互式 claude（Remote-SSH 的项目新任务、恢复会话默认走这条）。
+# watcher 起一个脱离自己的守护进程（本脚本的 hold 子命令），它在伪终端里跑 claude 并一直拿着：watcher 退出、SSH 断开、
+# 电脑端休眠都不影响，claude 退出它才退出。守护进程在 HOSTED_DIR 放 <id>.json（登记：守护进程和 claude 的 pid、会话 id、
+# 目录、就绪没有）和 <id>.sock（Unix 套接字，一次连接一个 JSON 请求，见 HostedHolder.handle）；退出时留 <id>.end（退出码和最后的画面）。
+# 跑的是用户自己装的 claude（没装命令行版就用 VS Code 扩展自带的那份），交互式、用用户自己的登录，等于用户在终端里敲 claude：
+# 不用 -p / SDK 这类程序化调用，不碰凭证。发消息、按键：电脑端先走会话里的 mod 收件箱（bridge），不行再走 tmux_send →
+# 往这个伪终端里粘贴 + 回车。会话终端里多一个「claude」终端（HostedTerm），接的就是这个伪终端，Claude 原来的界面能看能操作。
+# 只做 Unix；Windows 上 hosted_start 报 HOSTED_UNSUPPORTED，电脑端照旧开 VS Code
+# ---------------------------------------------------------------------------
+
+HOSTED_DIR = os.path.join(DATA_DIR, "hosted")
+HOSTED_BUFFER = 256 * 1024
+# claude 起来（出现在会话登记里）最多等这么久：慢机器、刚装好要初始化时十几秒（CCPULSE_HOSTED_READY 给测试缩短）
+HOSTED_READY_SECONDS = float(os.environ.get("CCPULSE_HOSTED_READY") or 45)
+HOSTED_KEYS = {"enter": b"\r", "esc": b"\x1b", "escape": b"\x1b", "up": b"\x1b[A", "down": b"\x1b[B", "tab": b"\t",
+               "shift+tab": b"\x1b[Z", "1": b"1", "2": b"2", "3": b"3", "4": b"4", "y": b"y", "n": b"n"}
+HOSTED_ENV_DROP = {"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT",
+                   "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_EXECPATH",
+                   "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_EMIT_STARTUP_TIMING",
+                   "CLAUDE_CODE_STARTUP_FAILURE_RESULTS", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT",
+                   "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TMUX", "TMUX_PANE", "GIT_ASKPASS"}
+if not IS_WINDOWS:
+    FEATURES.append("hosted")
+
+_SCREEN_CODES = re.compile(rb"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def screen_text(data):
+    """伪终端输出 → 去掉控制序列和空白的小写字，认启动时停在哪个画面用（Ink 靠挪光标排版，空格多半是光标移动，所以连空白一起去掉）"""
+    return re.sub(r"\s+", "", _SCREEN_CODES.sub(b"", data).decode("utf-8", "replace")).lower()
+
+
+def screen_excerpt(data, limit=400):
+    """给用户看的最后一屏文字（报「没启动起来」时带上）：光标右移当空格、挪到别的行当换行，其余控制序列去掉"""
+    data = re.sub(rb"\x1b\[\d*C", b" ", data)
+    data = re.sub(rb"\x1b\[[\d;]*[ABEFHJKf]", b"\n", data).replace(b"\r", b"\n")
+    lines = []
+    for line in _SCREEN_CODES.sub(b"", data).decode("utf-8", "replace").split("\n"):
+        line = " ".join(line.split())
+        if line.strip(" ─━╌-·*✻✶✢✽❯") and (not lines or lines[-1] != line):
+            lines.append(line)
+    return "\n".join(lines)[-limit:]
+
+
+def claude_command():
+    """后台跑 claude 用哪个可执行文件：登录 shell 里的 claude（同用户自己开终端）、原生安装、npm 全局的位置；
+    都没有就用 VS Code 扩展自带的那份（只在 Remote-SSH 里用过 Claude Code 的服务器也能跑）。找不到返回 None"""
+    override = os.environ.get("CCPULSE_CLAUDE")   # 测试用：指定一个假的 claude
+    if override:
+        return override if os.path.isfile(override) else None
+    found = shutil.which("claude")
+    if not found and not IS_WINDOWS:
+        try:
+            out = subprocess.run(login_shell_command(["sh", "-c", "command -v claude"]), stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=15)
+            for line in reversed(out.stdout.decode("utf-8", "replace").splitlines()):
+                if line.startswith("/") and os.access(line.strip(), os.X_OK):
+                    found = line.strip()
+                    break
+        except Exception:
+            pass
+    if found:
+        return found
+    for path in (os.path.join(HOME, ".local", "bin", "claude"), os.path.join(HOME, ".claude", "local", "claude"),
+                 os.path.join(HOME, ".npm-global", "bin", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    best = None
+    for root in VSCODE_EXTENSION_ROOTS:
+        for folder in globlib.glob(os.path.join(root, "anthropic.claude-code-*")):
+            path = os.path.join(folder, "resources", "native-binary", "claude")
+            version = os.path.basename(folder)[len("anthropic.claude-code") + 1:].split("-")[0]
+            if os.path.isfile(path) and os.access(path, os.X_OK) and (best is None or version_tuple(version) > version_tuple(best[0])):
+                best = (version, path)
+    return best[1] if best else None
+
+
+def login_shell_command(argv, prelude=""):
+    """经登录 shell 跑（读 .profile / .zprofile：PATH、nvm、conda 和自己开终端时一样；watcher 是 ssh 非交互起的，环境不全）。
+    fish 这类 -c 写法不一样的换成 bash。prelude：登录脚本跑完、exec 之前先执行的一段（套网络设置用，见 net_prelude）"""
+    shell = os.environ.get("SHELL") or ""
+    if not shell or not os.path.exists(shell):
+        try:
+            import pwd
+            shell = pwd.getpwuid(os.getuid()).pw_shell
+        except (ImportError, KeyError):
+            shell = "/bin/sh"
+    if os.path.basename(shell) not in ("bash", "zsh", "sh", "dash", "ksh"):
+        shell = "/bin/bash" if os.path.exists("/bin/bash") else "/bin/sh"
+    return [shell, "-l", "-c", prelude + 'exec "$0" "$@"'] + list(argv)
+
+
+# 网络相关的环境变量（代理、证书、接口地址、走哪家云）：后台运行的 claude 和 VS Code 里的 Claude Code 用同一套，出口才一样，
+# 「出口检测」比的也是这几个。登录凭证（API Key、令牌）不在里面：不读、不传
+HOSTED_NET_ENV = ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy",
+                  "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_USE_ENV_PROXY", "CLAUDE_CODE_CERT_STORE",
+                  "CLAUDE_CODE_PROXY_RESOLVES_HOSTS", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
+# 查出口 IP 的公共网址：中性的，不碰 Anthropic、claude.ai 的域名；前一个不通换下一个（CCPULSE_IP_SITES 给测试换成本机的）
+HOSTED_IP_SITES = tuple((os.environ.get("CCPULSE_IP_SITES") or "").split()) or (
+    "https://ipinfo.io/json", "https://api.ip.sb/geoip", "https://ipapi.co/json/")
+# 在套好网络设置的环境里跑：curl 访问查 IP 的网址（代理写法它都认），没有 curl 用 urllib；打印第一个查到的结果
+_PROBE_SCRIPT = r'''
+import json, subprocess, sys, urllib.request
+curl = True
+for url in sys.argv[1:]:
+    data = b""
+    if curl:
+        try:
+            data = subprocess.run(["curl", "-sS", "-m", "8", "-A", "curl/8", "-H", "Accept: application/json", url],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=12).stdout
+        except FileNotFoundError:
+            curl = False
+        except Exception:
+            pass
+    if not curl:
+        try:
+            request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "curl/8"})
+            data = urllib.request.urlopen(request, timeout=8).read()
+        except Exception:
+            pass
+    try:
+        found = json.loads(data.decode("utf-8", "replace"))
+    except ValueError:
+        continue
+    if isinstance(found, dict) and (found.get("ip") or found.get("query")):
+        found["site"] = url
+        sys.stdout.write("\n\x1eKLPROBE" + json.dumps(found))
+        break
+'''
+
+
+def process_environ(pid):
+    """同一用户的进程启动时的环境变量，读不到返回 None。Linux 读 /proc；macOS 用 sysctl KERN_PROCARGS2（ps -E 用的也是它）"""
+    raw = None
+    try:
+        with open("/proc/%d/environ" % pid, "rb") as handle:
+            raw = handle.read().split(b"\0")
+    except OSError:
+        pass
+    if raw is None and sys.platform == "darwin":
+        try:
+            import ctypes
+            import ctypes.util
+            libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+            mib = (ctypes.c_int * 3)(1, 49, pid)   # CTL_KERN, KERN_PROCARGS2
+            size = ctypes.c_size_t(0)
+            if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or not size.value:
+                return None
+            buf = ctypes.create_string_buffer(size.value)
+            if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+                return None
+            data = buf.raw[:size.value]
+            argc = struct.unpack("i", data[:4])[0]
+            parts = data[4:].split(b"\0")
+            index = 1                                # 可执行文件路径后面是补齐用的空字节，再是参数、环境变量
+            while index < len(parts) and not parts[index]:
+                index += 1
+            raw = parts[index + argc:]
+        except (OSError, ValueError, AttributeError, struct.error):
+            return None
+    if raw is None:
+        return None
+    env = {}
+    for item in raw:
+        if not item:
+            if env:
+                break                                # macOS 环境变量后面还跟着系统自己的几项，空字节隔开
+            continue
+        key, sep, value = item.partition(b"=")
+        if sep:
+            env[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+    # 一个变量都没有 = 没读到（macOS 对系统自带的程序不给看），不能当成「没设代理」
+    return env or None
+
+
+def _editor_extension_host(pid):
+    """是不是编辑器的扩展宿主进程（VS Code / Cursor 本机的 Helper (Plugin)，Remote-SSH 服务端的 --type=extensionHost）"""
+    if not pid:
+        return False
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            command = handle.read().replace(b"\0", b" ").decode("utf-8", "replace")
+    except OSError:
+        try:
+            command = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL, timeout=5).stdout.decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return "extensionHost" in command or "Helper (Plugin)" in command
+
+
+def vscode_claude_environ():
+    """这台电脑上 VS Code 里正在运行的 Claude Code 的环境（最近启动的那个）：扩展给它的，含 VS Code 设置里的
+    claudeCode.environmentVariables。只认父进程是扩展宿主的（测试脚本仿扩展起的 claude 带着假模型地址，不能当成用户的设置）"""
+    hosted = {e.get("pid") for e in HOSTED.entries()}
+    best = None
+    for path in globlib.glob(os.path.join(SESSIONS_DIR, "*.json")):
+        entry = read_json_file(path)
+        pid = entry.get("pid") if entry else None
+        if (not isinstance(pid, int) or pid in hosted or entry.get("entrypoint") != "claude-vscode"
+                or (best and (entry.get("startedAt") or 0) <= best[0]) or not pid_alive(pid)
+                or not _editor_extension_host(parent_pid(pid))):
+            continue
+        env = process_environ(pid)
+        if env is not None:
+            best = (entry.get("startedAt") or 0, env)
+    return best[1] if best else None
+
+
+def interactive_shell_environ():
+    """用户自己开终端时的环境：交互式登录 shell（读 .bashrc / .zshrc 里 export 的代理）。同 VS Code 解析 shell 环境的做法，
+    带上 VSCODE_RESOLVING_ENVIRONMENT，启动脚本可以跳过只给人看的部分。拿不到返回 None"""
+    argv = login_shell_command([sys.executable, "-c",
+                                "import json,os,sys;sys.stdout.write('\\n\\x1eKLENV'+json.dumps(dict(os.environ)))"])
+    argv.insert(1, "-i")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CCPULSE_")}
+    env["VSCODE_RESOLVING_ENVIRONMENT"] = "1"
+    try:
+        out = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
+                             timeout=15, start_new_session=True).stdout
+        found = json.loads(out[out.rindex(b"\x1eKLENV") + 6:].decode("utf-8", "replace"))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if not isinstance(found, dict):
+        return None
+    found.pop("VSCODE_RESOLVING_ENVIRONMENT", None)
+    return found
+
+
+def net_only(env):
+    """只留网络相关的那几个（os.environ 不是 dict，也认）"""
+    env = dict(env) if hasattr(env, "items") else {}
+    return {k: str(env[k]) for k in HOSTED_NET_ENV if env.get(k) not in (None, "")}
+
+
+def registered_session(session_id):
+    """这个会话正在运行的 claude（会话登记里 pid 还活着的），没有返回 None"""
+    for path in globlib.glob(os.path.join(SESSIONS_DIR, "*.json")):
+        entry = read_json_file(path)
+        if entry and entry.get("sessionId") == session_id and isinstance(entry.get("pid"), int) and pid_alive(entry["pid"]):
+            return entry
+    return None
+
+
+def hosted_network(request, pid=None):
+    """后台运行的 claude 该用的网络设置 → (来源, {名: 值})。来源：
+    vscode：照这台电脑上 VS Code 里正在运行的 Claude Code（pid：把 VS Code 里的这个会话转到后台时，照它自己的）；
+    shell：VS Code 里没有在运行的，照用户开终端时的环境，再叠上 Kiteline 传来的 VS Code 设置（claudeCode.environmentVariables，
+    request.netEnv；Remote-SSH 时扩展用的是本地电脑上的这项设置）。
+    都拿不到抛 HOSTED_NETWORK：不在后台运行，改开 VS Code"""
+    if os.environ.get("CCPULSE_HOSTED_NET") == "inherit":    # 测试：照 watcher 自己的环境（假模型地址）
+        return "inherit", net_only(os.environ)
+    env = process_environ(pid) if pid else None              # 转到后台的那个会话自己的
+    if env is None:
+        env = vscode_claude_environ()
+    if env is not None:
+        return "vscode", net_only(env)
+    env = interactive_shell_environ()
+    if env is None:
+        raise RuntimeError("HOSTED_NETWORK：无法确认这台电脑上 Claude Code 使用的网络设置")
+    found = net_only(env)
+    found.update(net_only(request.get("netEnv")))
+    return "shell", found
+
+
+def net_prelude(network):
+    """套网络设置的那段 shell：登录脚本跑完、exec 之前，有的设上、没有的去掉（登录脚本里 export 的也以它为准）。
+    值放在 _KLN_<名> 变量里带过去，不进命令行（ps 看得见）、不落文件"""
+    parts = []
+    for name in HOSTED_NET_ENV:
+        parts.append('export %s="$_KLN_%s"; unset _KLN_%s' % (name, name, name) if name in network else "unset " + name)
+    return "; ".join(parts) + "; "
+
+
+def hosted_env(network):
+    """托管 claude（和出口检测）的环境：watcher 的环境去掉 Claude Code / VS Code / Kiteline 自己的标记
+    （watcher 若是从 Claude Code / VS Code 里起的，留着的话新 claude 当自己是子会话，不写对话记录、不登记），网络设置另外带上"""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("CCPULSE_", "VSCODE_", "_KLN_")) and k not in HOSTED_ENV_DROP}
+    env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor"})
+    if "UTF-8" not in (env.get("LC_ALL") or env.get("LC_CTYPE") or env.get("LANG") or "").upper().replace("UTF8", "UTF-8"):
+        env["LANG"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    env.update({"_KLN_" + k: v for k, v in network.items()})
+    return env
+
+
+def mask_url(value):
+    """代理地址里的账号密码遮掉（给人看的时候）"""
+    return re.sub(r"(://)[^/\s]*@", r"\1***@", str(value))
+
+
+def hosted_probe(request):
+    """出口检测（设置里的「检测出口 IP」）：用后台运行 claude 时的那套环境（同一个登录 shell、同样套上网络设置）访问查 IP 的公共网址，
+    回出口 IP、地区，网络设置从哪来、是什么（代理地址里的账号密码遮掉）。不连 Claude"""
+    if IS_WINDOWS:
+        raise RuntimeError("HOSTED_UNSUPPORTED：这台电脑暂不支持在后台运行 Claude Code")
+    source, network = hosted_network(request)
+    reply = {"source": source, "settings": {k: mask_url(v) for k, v in network.items()}, "egress": None}
+    argv = login_shell_command([sys.executable, "-c", _PROBE_SCRIPT] + list(HOSTED_IP_SITES), net_prelude(network))
+    try:
+        out = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             env=hosted_env(network), cwd=HOME, timeout=60, start_new_session=True).stdout
+        found = json.loads(out[out.rindex(b"\x1eKLPROBE") + 8:].decode("utf-8", "replace"))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return reply
+    country = found.get("country_code") or found.get("countryCode") or found.get("country")
+    reply["egress"] = {"ip": found.get("ip") or found.get("query"),
+                       "country": country if isinstance(country, str) and len(country) == 2 else None,
+                       "region": found.get("region") or found.get("regionName"), "city": found.get("city"),
+                       "org": found.get("org") or found.get("organization") or found.get("isp"),
+                       "site": re.sub(r"^https?://([^/]+).*$", r"\1", found.get("site") or "")}
+    return reply
+
+
+def hosted_sock_path(hid):
+    """Unix 套接字路径有长度上限（macOS 104 字节）：数据目录太深时放到临时目录里自己的文件夹"""
+    path = os.path.join(HOSTED_DIR, hid + ".sock")
+    if len(path.encode("utf-8")) < 100:
+        return path
+    folder = os.path.join(tempfile.gettempdir(), "kl-hosted-%d" % os.getuid())
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    return os.path.join(folder, hid + ".sock")
+
+
+def hosted_call(entry, request, timeout=10):
+    """给托管会话的守护进程发一个请求，等它回一行"""
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(timeout)
+    try:
+        conn.connect(entry["sock"])
+        conn.sendall(json.dumps(request).encode("utf-8") + b"\n")
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    except OSError as exc:
+        raise RuntimeError("后台会话没有响应（%s）" % exc)
+    finally:
+        conn.close()
+    reply = json.loads(data.decode("utf-8") or "{}")
+    if reply.get("error"):
+        raise RuntimeError(reply["error"])
+    return reply
+
+
+def _hosted_write(path, value):
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+class HostedHolder:
+    """守护进程里那一半：拿着伪终端跑 claude，开套接字等 watcher 来发字、看输出"""
+
+    def __init__(self, spec):
+        self.id, self.session_id, self.cwd = spec["id"], spec["sessionId"], spec["cwd"]
+        self.argv = spec["argv"]
+        self.prompt, self.submit = spec.get("prompt") or "", bool(spec.get("submit"))
+        self.cols, self.rows = int(spec.get("cols") or 120), int(spec.get("rows") or 40)
+        self.sessions_dir = spec.get("sessionsDir") or SESSIONS_DIR
+        self.base = os.path.join(spec.get("dir") or HOSTED_DIR, self.id)
+        self.sock_path = spec.get("sock") or hosted_sock_path(self.id)
+        self.buffer, self.end = bytearray(), 0
+        self.lock = threading.Lock()
+        self.write_lock = threading.Lock()
+        self.subscribers = []
+        self.proc, self.fd, self.server = None, None, None
+        self.started = time.time()
+        self.last_output = time.time()   # 最后一次有输出：Claude 在干活时转圈的字一直在刷，空闲时界面不动
+        self.state = {"ready": False, "prompted": False, "claudePid": None, "stuck": None}
+
+    # --- 登记 ---
+
+    def info(self):
+        return {"id": self.id, "holder": os.getpid(), "pid": self.state["claudePid"] or (self.proc.pid if self.proc else None),
+                "child": self.proc.pid if self.proc else None, "sessionId": self.session_id, "cwd": self.cwd,
+                "sock": self.sock_path, "startedAt": int(self.started * 1000), "cols": self.cols, "rows": self.rows,
+                "ready": self.state["ready"], "prompted": self.state["prompted"], "stuck": self.state["stuck"], "end": self.end,
+                "quietFor": round(time.time() - self.last_output, 2)}
+
+    def register(self):
+        _hosted_write(self.base + ".json", self.info())
+
+    # --- 运行 ---
+
+    def run(self):
+        import fcntl
+        import pty
+        import termios
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", self.rows, self.cols, 0, 0))
+
+        def child():
+            os.setsid()
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            for sig in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTSTP, signal.SIGTTIN, signal.SIGTTOU, signal.SIGPIPE, signal.SIGTERM):
+                signal.signal(sig, signal.SIG_DFL)
+
+        # 网络设置（hosted_network 定的，watcher 经环境变量交过来，不落文件）：登录脚本跑完后套上，和 VS Code 里的 Claude Code 一致
+        network = json.loads(os.environ.pop("CCPULSE_HOSTED_NETENV", "null") or "null")
+        self.proc = subprocess.Popen(login_shell_command(self.argv, net_prelude(network) if isinstance(network, dict) else ""),
+                                     stdin=slave, stdout=slave, stderr=slave, cwd=self.cwd,
+                                     env=hosted_env(network if isinstance(network, dict) else {}), preexec_fn=child, close_fds=True)
+        os.close(slave)
+        self.fd = master
+        signal.signal(signal.SIGTERM, lambda *_: self.stop())
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        try:
+            os.unlink(self.sock_path)
+        except OSError:
+            pass
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        old_mask = os.umask(0o177)
+        try:
+            self.server.bind(self.sock_path)
+        finally:
+            os.umask(old_mask)
+        self.server.listen(16)
+        self.register()
+        log("托管会话 %s：claude 已启动（pid %d，%s）" % (self.id, self.proc.pid, self.cwd))
+        threading.Thread(target=self._serve, name="hosted-serve", daemon=True).start()
+        threading.Thread(target=self._startup, name="hosted-startup", daemon=True).start()
+        self._pump()
+        try:
+            code = self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            code = None
+        log("托管会话 %s：claude 退出了（%s）" % (self.id, code))
+        with self.lock:
+            tail = bytes(self.buffer[-8192:])
+        try:
+            _hosted_write(self.base + ".end", {"id": self.id, "sessionId": self.session_id, "code": code, "ready": self.state["ready"],
+                                             "stuck": self.state["stuck"], "screen": screen_excerpt(tail), "endedAt": int(time.time() * 1000)})
+        except OSError:
+            pass
+        self._broadcast({"exit": code})
+        for path in (self.base + ".json", self.sock_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        return 0
+
+    def _pump(self):
+        while True:
+            try:
+                chunk = os.read(self.fd, 65536)
+            except OSError:   # EIO：claude 退出、从端全关了
+                chunk = b""
+            if not chunk:
+                break
+            with self.lock:
+                seq = self.end
+                self.buffer += chunk
+                if len(self.buffer) > HOSTED_BUFFER:
+                    del self.buffer[:len(self.buffer) - HOSTED_BUFFER]
+                self.end += len(chunk)
+                self.last_output = time.time()
+            self._broadcast({"seq": seq, "data": base64.b64encode(chunk).decode("ascii")})
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+
+    def _broadcast(self, message):
+        line = json.dumps(message).encode("utf-8") + b"\n"
+        for conn in list(self.subscribers):
+            try:
+                conn.sendall(line)
+            except OSError:   # 看的那边断了或卡住：不等它
+                self._unsubscribe(conn)
+
+    def _unsubscribe(self, conn):
+        if conn in self.subscribers:
+            self.subscribers.remove(conn)
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+    # --- 启动时的画面 ---
+
+    def _registered(self):
+        """claude 起好了：会话登记（~/.claude/sessions/<pid>.json）里有这个会话 id。返回 claude 的 pid"""
+        for path in globlib.glob(os.path.join(self.sessions_dir, "*.json")):
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except (OSError, ValueError):
+                continue
+            pid = payload.get("pid") if isinstance(payload, dict) else None
+            if not isinstance(pid, int) or payload.get("sessionId") != self.session_id or not pid_alive(pid):
+                continue
+            # 还得是自己起的这个 claude（或它的子进程）：同一段对话别处若还开着，别认成它
+            if pid == self.proc.pid or self.proc.pid in ancestors(pid):
+                return pid
+        return None
+
+    def _since(self, offset):
+        with self.lock:
+            start = self.end - len(self.buffer)
+            return bytes(self.buffer[max(0, offset - start):])
+
+    def _startup(self):
+        """等 claude 起来：途中停在这几个画面上就替用户答（用户在 Kiteline 里选了这个项目、要开始任务，相当于已经同意）——
+        信任这个文件夹（默认选中的是「No, exit」，先挪到「Yes」再回车）、首次运行选配色（回车用默认的）、「Press Enter to continue」。
+        要登录、要不要用环境变量里的 API Key 这类不替用户答：记下停在哪（stuck），hosted_start 带着画面报给用户"""
+        deadline = time.time() + HOSTED_READY_SECONDS
+        mark, acted, tries = 0, 0.0, 0
+        pid = None
+        while time.time() < deadline and self.proc.poll() is None:
+            time.sleep(0.25)
+            pid = self._registered()
+            if pid:
+                break
+            # 只看上次答完之后新画出来的：前一个画面的字还留在输出里，别对着下一个画面再按一次
+            fresh = self._since(mark)
+            if not fresh or time.time() - acted < 0.8:
+                continue
+            screen = screen_text(fresh[-8000:])
+            keys = None
+            if "trustthisfolder" in screen or "trustthefilesinthisfolder" in screen:
+                chosen = screen[screen.rfind("❯") + 1:][:8] if "❯" in screen else ""
+                keys = b"\r" if chosen.startswith(("yes", "1.yes")) else b"\x1b[B"
+            elif "choosethetextstyle" in screen:
+                keys = b"\r"
+            elif "pressentertocontinue" in screen[-200:]:
+                keys = b"\r"
+            if keys is None or tries >= 8:
+                continue
+            tries += 1
+            mark, acted = self.end, time.time()
+            log("托管会话 %s：启动画面替用户答 %r" % (self.id, keys))
+            self.write(keys)
+        if not pid:
+            if self.proc.poll() is None:
+                self.state["stuck"] = screen_excerpt(self._since(max(0, self.end - 8192)))
+                self.register()
+            return
+        # 输入框刚出来时还在画：等输出停一下再粘贴，免得字落到半截画面里
+        quiet_since, last_end, limit = time.time(), self.end, time.time() + 4
+        while time.time() < limit:
+            time.sleep(0.15)
+            if self.end != last_end:
+                quiet_since, last_end = time.time(), self.end
+            elif time.time() - quiet_since > 0.6:
+                break
+        self.state.update(ready=True, claudePid=pid)
+        self.register()
+        if self.prompt:
+            try:
+                self.send(self.prompt, [], self.submit)
+            except Exception as exc:  # noqa
+                log("托管会话 %s：发第一句失败：%r" % (self.id, exc))
+        self.state["prompted"] = True
+        self.register()
+
+    # --- 操作 ---
+
+    def write(self, data):
+        with self.write_lock:
+            while data:
+                data = data[os.write(self.fd, data):]
+
+    def send(self, text, keys, submit):
+        if text:
+            # 括号粘贴：多行内容不会逐行提交（同 tmux paste-buffer -p）；去掉 ESC，免得内容里的「粘贴结束」提前收尾、后面变成按键
+            body = text.replace("\r\n", "\n").replace("\x1b", "")
+            self.write(b"\x1b[200~" + body.encode("utf-8") + b"\x1b[201~")
+        for key in keys or []:
+            seq = HOSTED_KEYS.get(str(key).lower())
+            if not seq:
+                raise RuntimeError("不支持的按键：%s" % key)
+            self.write(seq)
+            time.sleep(0.08)
+        if submit:
+            time.sleep(0.3 + min(len(text or "") / 40000.0, 1.5) if text else 0.15)
+            self.write(b"\r")
+
+    def resize(self, cols, rows):
+        import fcntl
+        import termios
+        self.cols, self.rows = cols, rows
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        try:
+            os.killpg(self.proc.pid, signal.SIGWINCH)
+        except OSError:
+            pass
+        self.register()
+
+    def stop(self):
+        def finish():
+            for sig, wait in ((signal.SIGTERM, 4), (signal.SIGKILL, 2)):
+                try:
+                    os.killpg(self.proc.pid, sig)
+                except OSError:
+                    return
+                try:
+                    self.proc.wait(timeout=wait)
+                    return
+                except subprocess.TimeoutExpired:
+                    continue
+        threading.Thread(target=finish, name="hosted-stop", daemon=True).start()
+
+    # --- 套接字 ---
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._client, args=(conn,), name="hosted-client", daemon=True).start()
+
+    def _client(self, conn):
+        try:
+            conn.settimeout(10)
+            raw = b""
+            while not raw.endswith(b"\n") and len(raw) < (8 << 20):
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                raw += chunk
+            request = json.loads(raw.decode("utf-8") or "{}")
+            if request.get("op") == "subscribe":
+                self._subscribe(conn)
+                return
+            reply = self.handle(request)
+        except Exception as exc:  # noqa
+            reply = {"error": str(exc) or repr(exc)}
+        try:
+            conn.sendall(json.dumps(reply).encode("utf-8") + b"\n")
+        except OSError:
+            pass
+        conn.close()
+
+    def _subscribe(self, conn):
+        """持续收输出：先给最近留着的一段，之后有输出就推 {seq, data}，claude 退出推 {exit}。对面关了连接就不推了"""
+        with self.lock:
+            start, data = self.end - len(self.buffer), bytes(self.buffer)
+            conn.settimeout(3)
+            conn.sendall(json.dumps({"seq": start, "data": base64.b64encode(data).decode("ascii"), "info": self.info()}).encode("utf-8") + b"\n")
+            self.subscribers.append(conn)
+        try:
+            conn.settimeout(None)
+            while conn.recv(1024):
+                pass
+        except OSError:
+            pass
+        with self.lock:
+            self._unsubscribe(conn)
+
+    def handle(self, request):
+        op = request.get("op")
+        if op == "status":
+            return self.info()
+        if op == "send":
+            self.send(request.get("text") or "", request.get("keys") or [], bool(request.get("submit")))
+            return {}
+        if op == "input":
+            self.write(base64.b64decode(request.get("data") or ""))
+            return {}
+        if op == "resize":
+            self.resize(max(20, min(int(request.get("cols") or 80), 500)), max(5, min(int(request.get("rows") or 24), 300)))
+            return {}
+        if op == "tail":
+            with self.lock:
+                start, data = self.end - len(self.buffer), bytes(self.buffer)
+            return {"seq": start, "data": base64.b64encode(data).decode("ascii"), "info": self.info()}
+        if op == "stop":
+            self.stop()
+            return {}
+        raise RuntimeError("未知操作：%s" % op)
+
+
+def command_hold(argv):
+    """hold <说明文件>：托管会话的守护进程（hosted_start 起的，别手动跑）。说明文件读完就删（里面有第一句话）"""
+    if not argv:
+        return 2
+    with open(argv[0], "r", encoding="utf-8") as handle:
+        spec = json.load(handle)
+    os.unlink(argv[0])
+    return HostedHolder(spec).run()
+
+
+class HostedTerm:
+    """会话终端里的「claude」：接的是托管会话的伪终端，接口同 Term，输出从守护进程订阅来。
+    关掉只是不看了，claude 照常在后台跑；下次列终端时又会出现"""
+
+    def __init__(self, entry):
+        self.entry = entry
+        self.id = "h-" + entry["id"]
+        self.session_id, self.cwd = entry["sessionId"], entry["cwd"]
+        self.cols, self.rows = entry.get("cols") or 120, entry.get("rows") or 40
+        self.created = (entry.get("startedAt") or time.time() * 1000) / 1000.0
+        self.end = entry.get("end") or 0
+        self.exit_code = None
+        self.shell = "claude"
+        self.conn = None
+
+    def info(self):
+        return {"term": self.id, "sessionId": self.session_id, "cwd": self.cwd, "shell": self.shell, "hosted": True,
+                "cols": self.cols, "rows": self.rows, "createdAt": int(self.created * 1000), "end": self.end}
+
+    def start(self):
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(10)
+        conn.connect(self.entry["sock"])
+        conn.sendall(b'{"op": "subscribe"}\n')
+        self.conn = conn
+        threading.Thread(target=self._pump, name="hosted-term-%s" % self.id, daemon=True).start()
+
+    def _pump(self):
+        reader = self.conn.makefile("rb")
+        first = True
+        try:
+            self.conn.settimeout(None)
+            for raw in reader:
+                message = json.loads(raw.decode("utf-8"))
+                if "exit" in message:
+                    self.exit_code = message["exit"]
+                    break
+                data = base64.b64decode(message.get("data") or "")
+                self.end = message.get("seq", 0) + len(data)
+                if first:   # 先来的是留着的那段：客户端打开时 read 自己会要，这里不重复推
+                    first = False
+                    continue
+                emit({"event": "term", "term": self.id, "sessionId": self.session_id, "seq": message.get("seq", 0),
+                      "data": message.get("data") or ""})
+        except Exception:
+            pass
+        try:
+            self.conn.close()
+        except OSError:
+            pass
+        TERMS.gone(self)
+
+    def tail(self):
+        reply = hosted_call(self.entry, {"op": "tail"})
+        return reply.get("seq", 0), base64.b64decode(reply.get("data") or "")
+
+    def write(self, data):
+        hosted_call(self.entry, {"op": "input", "data": base64.b64encode(data).decode("ascii")})
+
+    def resize(self, cols, rows):
+        self.cols, self.rows = cols, rows
+        hosted_call(self.entry, {"op": "resize", "cols": cols, "rows": rows})
+
+    def close(self):
+        try:
+            self.conn.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
+class HostedSessions:
+    """watcher 这边：认出哪些会话是托管的、起新的、转发操作"""
+
+    def entries(self):
+        """守护进程还活着的托管会话（登记文件就几个，每轮读一遍）；守护进程没了的把留下的文件清掉"""
+        out = []
+        for path in globlib.glob(os.path.join(HOSTED_DIR, "*.json")):
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    entry = json.load(handle)
+            except (OSError, ValueError):
+                continue
+            if pid_alive(entry.get("holder")):
+                out.append(entry)
+                continue
+            for stale in (path, entry.get("sock") or ""):
+                try:
+                    os.unlink(stale)
+                except OSError:
+                    pass
+        for path in globlib.glob(os.path.join(HOSTED_DIR, "*.end")) + globlib.glob(os.path.join(HOSTED_DIR, "*.log")):
+            try:
+                if time.time() - os.path.getmtime(path) > 86400 and not os.path.exists(path[:-4] + ".json"):
+                    os.unlink(path)
+            except OSError:
+                pass
+        return out
+
+    def by_pid(self, pid):
+        return next((e for e in self.entries() if e.get("ready") and e.get("pid") == pid), None)
+
+    def annotate(self, snapshots):
+        """快照带上 hosted（托管会话的编号）；没在看它的终端时角标也算上「claude」这一个"""
+        entries = {e.get("pid"): e for e in self.entries() if e.get("ready")}
+        if not entries:
+            return
+        for snap in snapshots:
+            entry = entries.get(snap.get("pid"))
+            if entry and entry.get("sessionId") == snap.get("sessionId"):
+                snap["hosted"] = entry["id"]
+                if ("h-" + entry["id"]) not in TERMS.terms:
+                    snap["terminals"] = (snap.get("terminals") or 0) + 1
+
+    def attach_terms(self, session_id):
+        """列终端前把这个会话的「claude」终端接上（watcher 重启过、关掉过的也重新接）"""
+        for entry in self.entries():
+            if not entry.get("ready") or entry.get("sessionId") != session_id or ("h-" + entry["id"]) in TERMS.terms:
+                continue
+            term = HostedTerm(entry)
+            try:
+                term.start()
+            except OSError as exc:
+                log("接不上托管会话 %s 的终端：%s" % (entry["id"], exc))
+                continue
+            with TERMS.lock:
+                TERMS.terms[term.id] = term
+
+    def start(self, request):
+        """新开（sessionId 为空）或恢复一个托管会话，等 claude 起来、第一句发出去再回"""
+        if IS_WINDOWS:
+            raise RuntimeError("HOSTED_UNSUPPORTED：这台电脑暂不支持在后台运行 Claude Code")
+        cwd = request.get("cwd")
+        if not is_abs_path(cwd) or not os.path.isdir(cwd):
+            raise RuntimeError("目录不存在：%s" % cwd)
+        claude = claude_command()
+        if not claude:
+            raise RuntimeError("HOSTED_NO_CLAUDE：这台电脑上找不到 Claude Code，请先安装 Claude Code（或在 VS Code 中安装 Claude Code 扩展）")
+        resume = request.get("sessionId") or None
+        running = None
+        if resume:
+            if not re.match(r"^[0-9a-fA-F-]{8,64}$", str(resume)):
+                raise RuntimeError("会话编号无效")
+            if any(e.get("sessionId") == resume for e in self.entries()):
+                raise RuntimeError("此会话已在后台运行")
+            running = registered_session(resume)
+            if running and not request.get("takeOver"):
+                raise RuntimeError("HOSTED_OPEN：此会话正在 VS Code 中运行")
+        # 网络设置先定下来（转到后台时照的是 VS Code 里这个会话自己的，它马上要关了）
+        source, network = hosted_network(request, running.get("pid") if running and running.get("entrypoint") == "claude-vscode" else None)
+        if running:
+            # 把 VS Code 里正开着的会话转到后台：Kiteline 发完这个请求去关 VS Code 里的标签，等那边的 claude 退出再接着这段对话
+            deadline = time.time() + 25
+            while pid_alive(running["pid"]) and time.time() < deadline:
+                time.sleep(0.3)
+            if pid_alive(running["pid"]):
+                raise RuntimeError("VS Code 中的这个会话没有关闭，未转到后台运行")
+        session_id = resume or str(uuid.uuid4())
+        hid = uuid.uuid4().hex[:10]
+        os.makedirs(HOSTED_DIR, mode=0o700, exist_ok=True)
+        os.chmod(HOSTED_DIR, 0o700)
+        try:
+            sync_bridge_mod()   # 起 claude 前装好 mod：电脑端发消息、批权限优先走它（见上面的说明）
+        except Exception as exc:  # noqa
+            log("装 bridge mod 出错：%r" % exc)
+        # 恢复的会话还没有对话记录（VS Code 里刚开、一句没发的标签转到后台）：--resume 会报找不到，用同一个编号新开
+        flag = "--resume" if resume and find_transcript(resume) else "--session-id"
+        spec = {"id": hid, "sessionId": session_id, "cwd": cwd, "argv": [claude, flag, session_id],
+                "prompt": request.get("prompt") or "", "submit": bool(request.get("submit")), "sessionsDir": SESSIONS_DIR,
+                "dir": HOSTED_DIR, "sock": hosted_sock_path(hid), "cols": request.get("cols") or 120, "rows": request.get("rows") or 40}
+        spec_path = os.path.join(HOSTED_DIR, hid + ".spec")
+        _hosted_write(spec_path, spec)
+        holder_env = dict(os.environ, CCPULSE_HOSTED_NETENV=json.dumps(network))
+        with open(os.path.join(HOSTED_DIR, hid + ".log"), "ab") as errors:
+            # 新会话（setsid）：和 watcher、SSH 断开没关系；标准输入输出不连着 watcher 的通道
+            holder = subprocess.Popen([sys.executable, os.path.abspath(__file__), "hold", spec_path], stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.DEVNULL, stderr=errors, cwd=cwd, env=holder_env, close_fds=True,
+                                      start_new_session=True)
+        # 它是 watcher 的子进程：退出后得有人收尸，不然成了僵尸进程，pid_alive 一直当它活着
+        threading.Thread(target=holder.wait, name="hosted-reap", daemon=True).start()
+        log("托管会话 %s：%s %s（%s）" % (hid, "恢复" if resume else "新开", session_id, cwd))
+        base = os.path.join(HOSTED_DIR, hid)
+        deadline = time.time() + HOSTED_READY_SECONDS + 10
+        entry = None
+        while time.time() < deadline:
+            time.sleep(0.25)
+            entry = read_json_file(base + ".json")
+            if entry and entry.get("prompted"):
+                # 核对：起来的 claude 实际用的网络设置和定下的一样（读它的进程环境）；对不上就停掉，不在后台运行
+                actual = process_environ(entry["pid"]) if isinstance(entry.get("pid"), int) else None
+                if actual is not None and net_only(actual) != network:
+                    differ = sorted(k for k in set(network) | set(net_only(actual)) if network.get(k) != net_only(actual).get(k))
+                    hosted_call(entry, {"op": "stop"})
+                    raise RuntimeError("HOSTED_NETWORK：后台运行的 Claude Code 网络设置与 VS Code 中的不一致（%s）" % "、".join(differ))
+                return {"sessionId": session_id, "hosted": hid, "pid": entry.get("pid"), "resumed": bool(resume),
+                        "submitted": bool(spec["prompt"]) and spec["submit"], "claude": claude, "network": source}
+            if entry and entry.get("stuck"):
+                break
+            ended = read_json_file(base + ".end")
+            if ended:
+                raise RuntimeError("Claude Code 启动后退出了（退出码 %s）%s" % (ended.get("code"), self._screen_note(ended.get("screen"))))
+        if entry:
+            try:
+                screen = entry.get("stuck") or screen_excerpt(base64.b64decode(hosted_call(entry, {"op": "tail"}).get("data") or "")[-8192:])
+                hosted_call(entry, {"op": "stop"})
+            except Exception:
+                screen = entry.get("stuck")
+            raise RuntimeError("Claude Code 没有启动起来，停在了需要操作的画面上，请在这台电脑的终端里运行一次 claude 处理后再试%s"
+                               % self._screen_note(screen))
+        raise RuntimeError("Claude Code 没有启动起来")
+
+    @staticmethod
+    def _screen_note(screen):
+        screen = (screen or "").strip()
+        return "：\n" + screen[-300:] if screen else ""
+
+    def stop(self, request):
+        """结束托管会话（转到 VS Code 接着做之前）：等 claude 退出再回。
+        ifIdle：Claude 在干活就不停、回 {busy}。快照里的状态会晚一两秒（刚发的消息 mod 还没取走、Claude 刚开始转圈时还是空闲），
+        所以再看界面：先等 1.2 秒（mod 0.4 秒取一次收件箱），最近 2 秒界面有输出就算在干活"""
+        session_id = request.get("sessionId")
+        entry = next((e for e in self.entries() if e.get("sessionId") == session_id), None)
+        if not entry:
+            return {"stopped": False}
+        if request.get("ifIdle"):
+            time.sleep(1.2)
+            if hosted_call(entry, {"op": "status"}).get("quietFor", 99) < 2.0:
+                return {"stopped": False, "busy": True}
+        hosted_call(entry, {"op": "stop"})
+        registry = os.path.join(HOSTED_DIR, entry["id"] + ".json")
+        deadline = time.time() + 10
+        while time.time() < deadline and os.path.exists(registry) and pid_alive(entry.get("holder")):
+            time.sleep(0.2)
+        return {"stopped": not os.path.exists(registry) or not pid_alive(entry.get("holder"))}
+
+    def send(self, entry, text, keys, submit):
+        hosted_call(entry, {"op": "send", "text": text, "keys": keys, "submit": submit}, timeout=20)
+        return "hosted:" + entry["id"]
+
+
+def read_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            value = json.load(handle)
+        return value if isinstance(value, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+HOSTED = HostedSessions()
+
+# attach 断开键 Ctrl+]（同 telnet）：Ctrl+C、Esc 都要留给 Claude（中断、清输入、连按两下退出）
+ATTACH_DETACH = b"\x1d"
+_PRIVATE_MODES = re.compile(rb"\x1b\[\?([\d;]+)([hl])")
+
+
+def hosted_label(entry):
+    """列表里给人认的名字：会话标题，还没有就第一句话"""
+    path = transcript_path(entry.get("sessionId"), entry.get("cwd"))
+    try:
+        title = tail_title(path, os.path.getsize(path)) or first_prompt(path)
+    except (OSError, TypeError):
+        title = None
+    return " ".join((title or "").split())[:60]
+
+
+def _near(here, cwd):
+    """终端开在项目目录、它的子目录里，或者在它上一级"""
+    return here == cwd or here.startswith(cwd.rstrip(os.sep) + os.sep) or cwd.startswith(here.rstrip(os.sep) + os.sep)
+
+
+def command_attach(argv):
+    """attach（见文件开头的用法）：在终端里接上后台运行的 Claude Code，和 Kiteline 会话终端里的「claude」是同一个伪终端"""
+    zh = system_lang() == "zh"
+
+    def say(cn, en):
+        sys.stdout.write((cn if zh else en) + "\n")
+        sys.stdout.flush()
+
+    if IS_WINDOWS:
+        say("这台电脑不支持在后台运行 Claude Code。", "Running Claude Code in the background is not supported on this computer.")
+        return 1
+    entries = sorted(HOSTED.entries(), key=lambda e: e.get("startedAt") or 0)
+    if not entries:
+        say("这台电脑上没有在后台运行的 Claude Code。", "No Claude Code session is running in the background on this computer.")
+        return 1
+    labels = {e["id"]: hosted_label(e) for e in entries}
+    wanted = " ".join(argv).strip()
+    if wanted.isdigit() and 0 < int(wanted) <= len(entries):
+        picks = [entries[int(wanted) - 1]]
+    elif wanted:
+        low = wanted.lower()
+        picks = [e for e in entries if e["id"] == wanted or (e.get("sessionId") or "").startswith(wanted)
+                 or low in (e.get("cwd") or "").lower() or low in labels[e["id"]].lower()]
+    else:
+        here = os.path.realpath(os.getcwd())
+        picks = [e for e in entries if _near(here, os.path.realpath(e.get("cwd") or "/"))]
+    if len(picks) != 1:
+        if wanted and not picks:
+            say("没有找到「%s」。" % wanted, "Nothing matches \"%s\"." % wanted)
+        say("在后台运行的 Claude Code：", "Claude Code sessions running in the background:")
+        for entry in picks or entries:
+            cwd = entry.get("cwd") or ""
+            if cwd == HOME or cwd.startswith(HOME + os.sep):
+                cwd = "~" + cwd[len(HOME):]
+            since = time.strftime("%H:%M", time.localtime((entry.get("startedAt") or 0) / 1000))
+            title = labels[entry["id"]] or ("（还没有标题）" if zh else "(untitled)")
+            say("  %d. %s  %s（%s 开始）" % (entries.index(entry) + 1, title, cwd, since),
+                "  %d. %s  %s (since %s)" % (entries.index(entry) + 1, title, cwd, since))
+        if not sys.stdin.isatty():
+            say("用 attach <序号> 接上。", "Run attach <number> to connect.")
+            return 1
+        try:
+            choice = input("接上第几个（直接回车取消）：" if zh else "Number to connect (Enter to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.stdout.write("\n")
+            return 1
+        if not choice.isdigit() or not 0 < int(choice) <= len(entries):
+            return 1
+        picks = [entries[int(choice) - 1]]
+    return hosted_attach(picks[0], labels[picks[0]["id"]], say)
+
+
+def hosted_attach(entry, label, say):
+    """接上托管会话的伪终端：输出原样写到这个终端，按键原样转过去，窗口大小跟着这个终端（断开时还回去）。
+    Kiteline 的会话终端开着也没关系，两边一起看、一起能敲；窗口大小以最后调的为准"""
+    import select
+    import termios
+    import tty
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        say("请在终端里运行。", "Run this in a terminal.")
+        return 1
+    in_fd, out_fd = sys.stdin.fileno(), sys.stdout.fileno()
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    pending = b""
+    try:
+        conn.settimeout(10)
+        conn.connect(entry["sock"])
+        conn.sendall(b'{"op": "subscribe"}\n')
+        while b"\n" not in pending:
+            chunk = conn.recv(65536)
+            if not chunk:
+                raise OSError("closed")
+            pending += chunk
+    except OSError as exc:
+        conn.close()
+        say("接不上这个后台会话（%s）。" % exc, "Could not connect to this session (%s)." % exc)
+        return 1
+    line, pending = pending.split(b"\n", 1)
+    first = json.loads(line.decode("utf-8"))
+    info = first.get("info") or {}
+    before = (info.get("cols"), info.get("rows"))
+    say("已接上后台运行的 Claude Code%s。按 Ctrl+] 断开，Claude 继续在后台运行。" % ("「%s」" % label if label else ""),
+        "Connected to Claude Code running in the background%s. Press Ctrl+] to detach; Claude keeps running." % (" (%s)" % label if label else ""))
+    modes = {}
+
+    def show(data):
+        for params, flag in _PRIVATE_MODES.findall(data):
+            for mode in params.split(b";"):
+                modes[mode] = flag == b"h"
+        view = memoryview(data)
+        while view:
+            view = view[os.write(out_fd, view):]
+
+    changed = [True]
+
+    def hangup(*_):
+        raise SystemExit(0)
+    old_winch = signal.signal(signal.SIGWINCH, lambda *_: changed.__setitem__(0, True))
+    old_hup = signal.signal(signal.SIGHUP, hangup)
+    saved = termios.tcgetattr(in_fd)
+    ours, reason = None, None
+    try:
+        tty.setraw(in_fd)
+        os.write(out_fd, b"\x1b[?2004h")   # Claude 一直开着括号粘贴：留着的那段输出里不一定有这句，不开的话贴多行字每行都当回车提交
+        show(base64.b64decode(first.get("data") or ""))
+        conn.settimeout(None)
+        while reason is None:
+            if changed[0]:
+                changed[0] = False
+                size = os.get_terminal_size(out_fd)
+                ours = (max(20, min(size.columns, 500)), max(5, min(size.lines, 300)))
+                hosted_call(entry, {"op": "resize", "cols": ours[0], "rows": ours[1]})
+            ready, _, _ = select.select([conn, in_fd], [], [], 0.5)
+            if in_fd in ready:
+                data = os.read(in_fd, 65536)
+                cut = data.find(ATTACH_DETACH)
+                if cut >= 0 or not data:
+                    data, reason = data[:max(cut, 0)], "detach"
+                if data:
+                    hosted_call(entry, {"op": "input", "data": base64.b64encode(data).decode("ascii")})
+            if conn in ready:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    reason = "gone"
+                pending += chunk
+                while b"\n" in pending:
+                    line, pending = pending.split(b"\n", 1)
+                    message = json.loads(line.decode("utf-8"))
+                    if "exit" in message:
+                        reason = "exit"
+                        break
+                    show(base64.b64decode(message.get("data") or ""))
+    except (OSError, RuntimeError, ValueError) as exc:
+        reason = reason or str(exc)
+    finally:
+        # 关掉 Claude 开过的终端模式（括号粘贴、焦点上报、鼠标、备用屏幕），光标显示出来、挪到最底下再换行（提示别压在 Claude 的界面上）
+        reset = b"\x1b[?2004l\x1b[?25h\x1b[0m" + b"".join(b"\x1b[?%sl" % m for m, on in modes.items() if on and m not in (b"25", b"2004"))
+        try:
+            os.write(out_fd, reset + b"\x1b[999B\r\n")
+            termios.tcsetattr(in_fd, termios.TCSADRAIN, saved)
+        except OSError:
+            pass
+        signal.signal(signal.SIGWINCH, old_winch)
+        signal.signal(signal.SIGHUP, old_hup)
+        conn.close()
+        # 窗口大小还回去（这期间别处又调过的就不动）
+        if ours and before[0] and ours != before and reason != "exit":
+            try:
+                now = hosted_call(entry, {"op": "status"})
+                if (now.get("cols"), now.get("rows")) == ours:
+                    hosted_call(entry, {"op": "resize", "cols": before[0], "rows": before[1]})
+            except (OSError, RuntimeError):
+                pass
+    if reason == "exit":
+        say("Claude Code 已退出，这个后台会话结束了。", "Claude Code exited; this background session has ended.")
+    elif reason == "gone":
+        say("后台会话已结束。", "The background session has ended.")
+    elif reason == "detach":
+        say("已断开，Claude 继续在后台运行。再次接上：python3 ~/.ccpulse/ccpulse-watch.py attach",
+            "Detached; Claude keeps running. Reconnect with: python3 ~/.ccpulse/ccpulse-watch.py attach")
+    else:
+        say("连接中断（%s）。" % reason, "Connection lost (%s)." % reason)
+    return 0
+
+
+def respond_later(request, work):
+    """慢请求放到后台线程做、做完再回（同 Watcher.defer）：hosted_start 要等 claude 起来，最长近一分钟，不能卡住观察循环"""
+    def run():
+        response = {"event": "response", "id": request.get("id"), "ok": True}
+        try:
+            response.update(work())
+        except Exception as exc:  # noqa
+            response.update({"ok": False, "error": str(exc) or repr(exc)})
+        try:
+            emit(response)
+        except Exception:
+            pass
+
+    threading.Thread(target=run, name="slow-%s" % request.get("cmd"), daemon=True).start()
+    return DEFERRED
+
+
 class Watcher:
     def __init__(self, plugins=None):
         self.sessions = {}     # sessionId -> 最近一次快照（含已退出的，便于历史请求）
@@ -13280,6 +15250,21 @@ class Watcher:
             return machine_info()
         if cmd == "limits":
             return read_limits(list(self.sessions.values()), self.plugins)
+        if cmd == "trace":
+            # 执行过程面板：agent → 轮次 → 步骤。对话记录落文件的都能看（Claude 带子 agent；Codex 等插件只有主 agent）
+            sid = request.get("sessionId")
+            plugin = self.plugins.get(agent) if agent != "claude-code" else None
+            if plugin is not None and plugin.normalize is None:
+                return {"unsupported": True, "agents": [], "steps": {}}
+            path = self.path_for(sid)
+            snap = self.sessions.get(sid) or {}
+            busy = (snap.get("activity") in ("busy", "waiting")) if snap else None
+            expand = request.get("expand")
+            if isinstance(expand, str):
+                expand = [x for x in expand.split(",") if x]
+            return session_trace(path, self.normalizer(sid), title=snap.get("title"), busy=busy,
+                                 expand=expand if isinstance(expand, list) else None, subagents=agent == "claude-code",
+                                 rev=request.get("rev") or None)
         if agent != "claude-code":
             # 子 agent 图、后台任务、测试记录都是从 Claude 的对话记录里认的，别家没有
             if cmd == "agents":
@@ -13409,6 +15394,8 @@ class Watcher:
             # 会话里的终端：目录用在跑的会话的工作目录，会话结束了用电脑端查到的
             snap = self.sessions.get(request.get("sessionId")) or {}
             cwd = snap.get("cwd") if request.get("sessionId") in self.live else None
+            if request.get("op") == "list" and snap.get("hosted"):
+                HOSTED.attach_terms(request.get("sessionId"))   # 托管会话的「claude」终端
             return TERMS.handle(request, cwd or request.get("cwd"))
         if cmd == "repo_info":
             return repo_info(request.get("cwd"))
@@ -13416,6 +15403,8 @@ class Watcher:
             return worktree_add(request.get("cwd"))
         if cmd == "ls":
             return call_with_timeout(15, list_dir, request.get("root"), request.get("path"))
+        if cmd == "dirs":
+            return call_with_timeout(15, list_dirs, request.get("path"), bool(request.get("hidden")), request.get("mkdir"))
         if cmd == "read_file":
             return call_with_timeout(15, read_file, request.get("root"), request.get("path"), bool(request.get("reveal")),
                                      bool(request.get("edit")))
@@ -13457,12 +15446,46 @@ class Watcher:
             return {"sessions": digest_all(since, live, until)}
         if cmd == "tests":
             return {"runs": find_test_runs(self.path_for(request.get("sessionId")), int(request.get("limit") or 40))}
+        if cmd == "bridge":
+            return self.bridge(request)
+        if cmd == "hosted_start":
+            return respond_later(request, lambda: HOSTED.start(request))
+        if cmd == "hosted_stop":
+            return respond_later(request, lambda: HOSTED.stop(request))
+        if cmd == "hosted_probe":
+            return respond_later(request, lambda: hosted_probe(request))
         if cmd == "tmux_send":
             pid = int(request.get("pid") or 0)
             pane = tmux_send(pid, request.get("text") or "", request.get("keys") or [],
                              bool(request.get("submit")))
             return {"pane": pane}
         raise RuntimeError("未知请求：%s" % cmd)
+
+    def bridge(self, request):
+        """后台送达（见 bridge_send）：会话的 claude 进程加载了 mod 才送，等回执要一两秒，放后台线程回、别卡住观察循环。
+        回 bridged False 时电脑端照旧走前台"""
+        sid = str(request.get("sessionId") or "")
+        op = request.get("op")
+        snap = self.sessions.get(sid) or {}
+        if op not in BRIDGE_OPS or sid not in self.live or not bridge_alive(sid, snap.get("startedAt")):
+            return {"bridged": False}
+        fields = {key: request[key] for key in ("text", "decision", "answers", "tool") if request.get(key) is not None}
+        rid = request.get("id")
+
+        def work():
+            response = {"event": "response", "id": rid, "ok": True}
+            try:
+                response.update(bridge_send(sid, op, **fields))
+            except Exception as exc:  # noqa
+                log("后台送达失败：%r" % exc)
+                response.update({"bridged": False})
+            try:
+                emit(response)
+            except Exception:
+                pass
+
+        threading.Thread(target=work, name="bridge", daemon=True).start()
+        return DEFERRED
 
     def search_agent(self, plugin, session_id, query):
         """插件的会话里搜：在规整好的对话项里找（结果格式同 search_sessions 的 hits）"""
@@ -14058,6 +16081,7 @@ def main():
         sync_skills()
         sync_limits_mod()
         sync_stage_mod()
+        sync_bridge_mod()
     except Exception as exc:
         log("装技能出错：%r" % exc)
     last_skills = time.time()
@@ -14077,6 +16101,7 @@ def main():
             snapshots = list({snap["sessionId"]: snap for snap in snapshots}.values())
             annotate_branches(snapshots)
             TERMS.annotate(snapshots)
+            HOSTED.annotate(snapshots)
             STAGES.annotate(snapshots)
             watcher.track(snapshots)
             GOALS.annotate(snapshots)
@@ -14087,6 +16112,7 @@ def main():
                     sync_skills()
                     sync_limits_mod()
                     sync_stage_mod()
+                    sync_bridge_mod()
                 except Exception as exc:
                     log("装技能出错：%r" % exc)
 
@@ -14738,6 +16764,10 @@ _STAGE_TEXT_MODEL = (
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "hold":
+        sys.exit(command_hold(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "attach":
+        sys.exit(command_attach(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "send-image":
         sys.exit(command_send_image(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "send-page":

@@ -73,12 +73,19 @@ struct GuestShareSheet: View {
         }
     }
 
-    private func load() async {
+    private func load(attempt: Int = 0) async {
         error = nil
         do {
             let reply = try await model.api.get("/api/share", ["key": key])
             shares = Self.parse(reply["shares"])
         } catch {
+            // 打开面板时正赶上重连：任务被取消就等连上后的那次再读；请求被掐断（已取消）就稍后再读，都不算出错
+            if Task.isCancelled { return }
+            if (error as? URLError)?.code == .cancelled, attempt < 3 {
+                try? await Task.sleep(for: .seconds(1))
+                if !Task.isCancelled { await load(attempt: attempt + 1) }
+                return
+            }
             self.error = L("无法读取分享状态：%@", error.localizedDescription)
         }
         loaded = true

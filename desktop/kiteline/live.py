@@ -237,7 +237,10 @@ class LiveActivities:
         busy = sorted((s for s in self._sessions if s.get("activity") == "busy"), key=updated, reverse=True)
         items = []
         for session in waiting:
-            detail = session.get("blocking") or session.get("pendingTool")
+            # 在等哪条命令：「Bash: npx prisma migrate deploy」比笼统的「请求权限确认」有用；只有工具名的（提问、批计划）用电脑给的说明
+            pending = session.get("pendingTool")
+            command = session.get("activityText")
+            detail = (command if command and command != pending else None) or session.get("blocking") or pending
             items.append(self._item(session, "waiting", "Needs approval" if english else "待确认", text(detail) if detail else None))
         for session in busy:
             detail = text(session["activityText"]) if session.get("activityText") else None

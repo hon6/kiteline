@@ -30,6 +30,9 @@ public sealed class ChatView : Grid
     /// 输入框上方的任务进展条（见 StageStrip）、它上面的目标条（见 GoalStrip）
     readonly StageStrip stageStrip = new();
     readonly GoalStrip goalStrip = new();
+    /// 顶上浮着的提示「当前会话支持后台托管 Claude」（见 HostedSetup.Tip）
+    readonly Border hostedTip = new() { VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(14, 8, 14, 0) };
+    string? hostedSignature;
     readonly Dictionary<string, (ChatRow Row, Control View)> views = new();
     readonly List<Control> order = [];
     Control? promptCard;
@@ -69,6 +72,7 @@ public sealed class ChatView : Grid
             CornerRadius = new CornerRadius(16), BoxShadow = BoxShadows.Parse("0 2 8 0 #1A000000"),
         };
         area.Children.Add(newPill);
+        area.Children.Add(hostedTip);
         SetRow(area, 0);
         Children.Add(area);
         composer = new Composer(key)
@@ -123,6 +127,17 @@ public sealed class ChatView : Grid
     void ModelChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(AppModel.Sessions) or nameof(AppModel.Connected) or nameof(AppModel.QuickReplies)) { Schedule(); UpdateSession(); }
+        if (e.PropertyName is nameof(AppModel.Sources) or nameof(AppModel.HostedTipOff)) UpdateHostedTip();
+    }
+
+    /// 「当前会话支持后台托管」的提示：会话、所在设备的开关、不再提示变了才重画
+    void UpdateHostedTip()
+    {
+        var session = Session;
+        var signature = session is null ? "" : $"{session.Hostable}|{model.Sources.FirstOrDefault(s => s.Id == session.SourceId)?.Hosted}|{model.HostedTipOff}|{model.Connected}";
+        if (signature == hostedSignature) return;
+        hostedSignature = signature;
+        hostedTip.Child = session is not null && model.Connected ? HostedSetup.Tip(session) : null;
     }
 
     void Schedule()
@@ -245,6 +260,7 @@ public sealed class ChatView : Grid
         composer.Update(session);
         goalStrip.Update(Key, model.Connected ? session?.Goal : null);
         stageStrip.Update(model.Connected ? session?.LiveStage : null, Bounds.Height);
+        UpdateHostedTip();
         var signature = session is null ? null : PromptCard.Current(Key, chat) + "|" + session.IsWaiting + session.CanReply + chat.AnsweredPrompt + session.Activity;
         if (signature == promptSignature && promptCard is not null == (session?.IsWaiting ?? false)) { UpdateWorking(session); return; }
         promptSignature = signature;

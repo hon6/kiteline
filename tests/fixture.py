@@ -6,6 +6,7 @@
 用法：python3 tests/fixture.py <ROOT> [一张 png]
 环境变量 FIXTURE_DEMO=1：给 iOS 演示模式录数据用（tests/record_demo.sh）——不造「用量到上限」那个出错的会话，
 再补几个过去一周里已经结束的会话，让用量图、历史会话看起来像真的在用。集成测试不带它，数据和以前一样。
+FIXTURE_LANG=en：会话内容换成英文（录英文演示数据 demo-data.en.json 用，中英对照在 tests/demo_en.py）。
 """
 import base64
 import json
@@ -17,6 +18,11 @@ import uuid
 
 ROOT = sys.argv[1]
 DEMO = os.environ.get("FIXTURE_DEMO") == "1"
+LANG = os.environ.get("FIXTURE_LANG", "zh")
+if LANG == "en":
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import demo_en
+T = demo_en.text if LANG == "en" else (lambda s: s)   # 不进记录文件的几处（git 作者、提交说明）直接换
 PNG = sys.argv[2] if len(sys.argv) > 2 else None
 SESS = os.path.join(ROOT, "sessions")
 PROJ = os.path.join(ROOT, "projects")
@@ -35,8 +41,8 @@ os.makedirs(os.path.join(REPO, "src", "styles"), exist_ok=True)
 
 def git(*args):
     subprocess.run(["git", "-C", REPO] + list(args), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                   env=dict(os.environ, GIT_AUTHOR_NAME="演示用户", GIT_AUTHOR_EMAIL="demo@example.com",
-                            GIT_COMMITTER_NAME="演示用户", GIT_COMMITTER_EMAIL="demo@example.com"))
+                   env=dict(os.environ, GIT_AUTHOR_NAME=T("演示用户"), GIT_AUTHOR_EMAIL="demo@example.com",
+                            GIT_COMMITTER_NAME=T("演示用户"), GIT_COMMITTER_EMAIL="demo@example.com"))
 
 
 git("init", "-q", "-b", "main")
@@ -44,10 +50,10 @@ with open(os.path.join(REPO, "src", "styles", "home.css"), "w") as handle:
     handle.write(".home {\n  --card-gap: 4px;\n  --card-radius: 8px;\n}\n")
 with open(os.path.join(REPO, "README.md"), "w") as handle:
     handle.write("# shop-app\n")
-git("add", "-A"); git("commit", "-q", "-m", "首页初版")
+git("add", "-A"); git("commit", "-q", "-m", T("首页初版"))
 with open(os.path.join(REPO, "src", "app.js"), "w") as handle:
     handle.write("export const version = 1;\n")
-git("add", "-A"); git("commit", "-q", "-m", "加上版本号")
+git("add", "-A"); git("commit", "-q", "-m", T("加上版本号"))
 with open(os.path.join(REPO, "src", "styles", "home.css"), "w") as handle:
     handle.write(".home {\n  --card-gap: 16px;\n  --card-radius: 12px;\n  --card-shadow: 0 1px 3px rgba(0,0,0,.1);\n}\n")
 with open(os.path.join(REPO, "src", "card.js"), "w") as handle:
@@ -255,5 +261,25 @@ with open(os.path.join(ROOT, "claude", "kiteline", "limits.json"), "w") as handl
     json.dump({"at": int(now * 1000) - 60000, "sessionId": "fixture", "limits": [
         {"kind": "five_hour", "percentUsed": 42, "resetsAt": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now + 7200))},
         {"kind": "seven_day", "percentUsed": 68, "resetsAt": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now + 4 * 86400))}]}, handle)
+
+if LANG == "en":
+    # 记录文件里的中文换成英文（标题、对话、计划、发图说明……）；保留修改时间（历史会话按它排先后）
+    for folder, _, files in os.walk(ROOT):
+        if not folder.startswith((PROJ, SESS, DATA)):
+            continue
+        for name in files:
+            path = os.path.join(folder, name)
+            if not name.endswith((".jsonl", ".json")):
+                continue
+            st = os.stat(path)
+            with open(path, encoding="utf-8") as handle:
+                raw = handle.read()
+            if name.endswith(".jsonl"):
+                out = "".join(json.dumps(demo_en.translate(json.loads(line)), ensure_ascii=False) + "\n" for line in raw.splitlines() if line.strip())
+            else:
+                out = json.dumps(demo_en.translate(json.loads(raw)), ensure_ascii=False)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(out)
+            os.utime(path, (st.st_atime, st.st_mtime))
 
 print("fixture ready in", ROOT)

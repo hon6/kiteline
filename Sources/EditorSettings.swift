@@ -88,6 +88,18 @@ enum EditorSettings {
         settings(scheme: scheme)?["security.workspace.trust.enabled"] as? Bool != false
     }
 
+    /// VS Code 设置里给 Claude Code 配的环境变量（claudeCode.environmentVariables，[{name, value}]）。
+    /// Remote-SSH 时扩展在远端运行，用的仍是本地的这项设置；后台运行 Claude Code 时只取其中网络相关的（watcher 再筛一遍）
+    static func claudeEnvironment(scheme: String) -> [String: String] {
+        guard let settings = settings(scheme: scheme) else { return [:] }
+        let list = settings["claudeCode.environmentVariables"] ?? settings["claude-code.environmentVariables"]
+        var out: [String: String] = [:]
+        for item in list as? [[String: Any]] ?? [] {
+            if let name = item["name"] as? String, let value = item["value"] as? String { out[name] = value }
+        }
+        return out
+    }
+
     private static func settings(scheme: String) -> [String: Any]? {
         let file = userDirectory(scheme: scheme).appendingPathComponent("settings.json")
         guard let data = FileManager.default.contents(atPath: file.path), let text = String(data: data, encoding: .utf8) else { return nil }

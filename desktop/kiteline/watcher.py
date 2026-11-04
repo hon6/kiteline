@@ -89,6 +89,7 @@ class LocalSource:
         self.state_detail = ""
         self.host = None
         self.platform = None            # watcher 报来的系统（sys.platform：linux / darwin / win32）
+        self.features = set()           # watcher 能做的（hello 的 features）：hosted = 能在后台运行 Claude Code
         self.watcher_version = None
         self.session_count = 0
         self.home = os.path.expanduser("~")
@@ -310,6 +311,7 @@ class LocalSource:
                 self.home = event.get("home") or self.home
                 self.host = event.get("host") or "本机"
                 self.platform = event.get("platform") or self.platform
+                self.features = set(event.get("features") or [])
                 self.watcher_version = event.get("watcher")
                 self._handover_until = 0.0
                 self._ready.set()

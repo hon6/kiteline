@@ -60,6 +60,8 @@ public sealed record SessionInfo
     public StageInfo? Stage { get; init; }
     /// 目标（/goal，见 GoalInfo）：agent 围着它跨多轮一直做；没设目标、老版本后台没有
     public GoalInfo? Goal { get; init; }
+    /// 远端电脑上、在 VS Code 里跑的 Claude Code，能转到后台运行（对话页提示「支持后台托管」，见 Views/HostedSetup.cs）
+    public bool Hostable { get; init; }
     /// 列表里显示的目标：还在做的一直显示；结束了的（达成、做不到）一小时内还显示
     public GoalInfo? ListGoal => Goal is { } g && (g.Running || g.At is double at && Format.NowMs - at < 3_600_000) ? g : null;
 
@@ -120,6 +122,7 @@ public sealed record SessionInfo
             Worktree = n.Str("worktree") is { Length: > 0 } tree ? tree : null,
             Stage = StageInfo.Parse(n.Get("stage")),
             Goal = GoalInfo.Parse(n.Get("goal")),
+            Hostable = n.Bool("hostable") ?? false,
         };
     }
 }
@@ -234,10 +237,11 @@ public sealed record PendingOption(string Key, string Label, string Style)
     }
 }
 
-public sealed record SourceInfo(string Id, string Name, string? Kind, bool Online, string? Status)
+/// Hosted：这台能后台运行 Claude Code 时才有，on / off（按设备开，见 Views/HostedSetup.cs）；本机、Windows、老版本后台没有
+public sealed record SourceInfo(string Id, string Name, string? Kind, bool Online, string? Status, string? Hosted = null)
 {
     public static SourceInfo? Parse(JsonNode? n) =>
-        n.Str("id") is string id ? new SourceInfo(id, Lang.Machine(n.Str("name") ?? id), n.Str("kind"), n.Bool("online") ?? false, n.Str("status")) : null;
+        n.Str("id") is string id ? new SourceInfo(id, Lang.Machine(n.Str("name") ?? id), n.Str("kind"), n.Bool("online") ?? false, n.Str("status"), n.Str("hosted")) : null;
 }
 
 public sealed record Me(string? Name, string? Avatar)
@@ -318,6 +322,8 @@ public sealed class StatePayload
     public List<string>? QuickReplies, Muted, Pinned, Marked;
     /// 后台能做的（同 iOS 版 hostFeatures）：groupMedia = 群里能发图、文件
     public List<string>? Features;
+    /// 「支持后台运行 Claude Code」的提示选了不再提示（state 的 hosted.tipOff）
+    public bool? HostedTipOff;
     public Me? Me;
     public bool? SubmitOnSend, QuietActive;
     public Dictionary<string, MachineStats>? Sys;
@@ -339,6 +345,7 @@ public sealed class StatePayload
         if (n.Arr("sources") is JsonArray sources) state.Sources = sources.Items().Select(SourceInfo.Parse).OfType<SourceInfo>().ToList();
         if (n.Get("quickReplies") is JsonArray) state.QuickReplies = n.Strings("quickReplies");
         if (n.Get("features") is JsonArray) state.Features = n.Strings("features");
+        if (n.Obj("hosted") is JsonObject hosted) state.HostedTipOff = hosted.Bool("tipOff") ?? false;
         if (n.Get("muted") is JsonArray) state.Muted = n.Strings("muted");
         if (n.Get("pinned") is JsonArray) state.Pinned = n.Strings("pinned");
         if (n.Get("marked") is JsonArray) state.Marked = n.Strings("marked");

@@ -104,6 +104,8 @@ protocol SourceConnection: AnyObject {
     var delegate: SourceConnectionDelegate? { get set }
     /// watcher 所在机器的家目录（hello 事件带来），用于拼路径
     var hostHome: String? { get }
+    /// 那台电脑上的 watcher 能做的（hello 事件的 features）：hosted = 能在后台运行 Claude Code
+    var hostFeatures: Set<String> { get }
 
     func start()
     func stop()

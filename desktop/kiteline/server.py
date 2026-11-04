@@ -19,6 +19,7 @@ import uuid
 
 from . import aggregate, bark, config, delivery, faces, guest, i18n, log, netinfo, setup_tools, tls, tts
 from .httpd import Response, StreamReply
+from .store import hostable as store_hostable
 
 AUDIO_TYPES = ("audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
                "audio/webm", "audio/ogg", "audio/mpeg")
@@ -766,6 +767,11 @@ def r_agents(s, request, *_):
     return s.forward_any(request, {"cmd": "agents"})
 
 
+def r_trace(s, request, *_):
+    """执行过程面板：agent → 轮次 → 步骤（expand 是要带上步骤的轮次，「agent:轮次」逗号分隔）"""
+    return s.forward_any(request, {"cmd": "trace", "expand": request.query.get("expand", ""), "rev": request.query.get("rev", "")})
+
+
 def r_peers(s, request, *_):
     """会话之间的消息往来（默认最近一天）：手机刚连上、协作图用；之后的走实时事件 peers"""
     try:
@@ -858,6 +864,34 @@ def r_key(s, request, *_):
     log.write("手机在「%s」按键 %s%s" % (record.snap.get("name"), key, " ×%d" % times if times > 1 else ""))
     outcome = delivery.press(key, times, record, source, s.siblings(record))
     return Response.json({"ok": outcome.ok, "message": outcome["message"]}, 200 if outcome.ok else 409)
+
+
+def r_hosted_probe(s, request, *_):
+    """出口检测：每台远端电脑照后台运行时的网络设置查出口 IP（见 app.hosted_probe）"""
+    wanted = (request.json or {}).get("sourceId")
+    with s.app.store.lock:
+        sources = [src for src in s.app.store.sources.values() if getattr(src, "kind", "") == "ssh" and wanted in (None, "", src.id)]
+    return Response.json({"ok": True, "machines": s.app.hosted_probe(sources)})
+
+
+def r_hosted_settings(s, request, *_):
+    """后台运行的设置：{sourceId, on}（按设备开关）/ {tipOff}"""
+    body = request.json or {}
+    on, tip_off = body.get("on"), body.get("tipOff")
+    s.app.set_hosted(source_id=body.get("sourceId") or None, on=on if isinstance(on, bool) else None,
+                     tip_off=tip_off if isinstance(tip_off, bool) else None)
+    return Response.json({"ok": True})
+
+
+def r_hosted_move(s, request, *_):
+    """把 VS Code 里正开着的会话转到后台运行：?key="""
+    record, source = s.resolve(request)
+    if not record or not source:
+        return Response.error("会话不存在或已结束", 404)
+    if not store_hostable(record, source):
+        return Response.json({"ok": False, "message": "此会话无法转到后台运行"}, 409)
+    ok, message = s.app.move_to_background(record, source, s.siblings(record))
+    return Response.json({"ok": ok, "message": message}, 200 if ok else 409)
 
 
 def r_close(s, request, *_):
@@ -1140,6 +1174,26 @@ def r_search(s, request, *_):
 
 def r_projects(s, request, *_):
     return Response.json(aggregate.projects(s.app.store, request.query.get("detail") == "1"))
+
+
+def r_dirs(s, request, *_):
+    """新任务「打开其他文件夹」：列某台电脑上一个目录里的子文件夹（不限项目目录，空 = 主目录）；POST 带 mkdir = 先在里面新建再列（同 Mac 版 MobileServer.dirs）"""
+    body = request.json or {}
+    source = s.app.store.source(request.query.get("sourceId") or body.get("sourceId") or "")
+    if not source or not source.live:
+        return Response.error("该机器当前离线", 404)
+    payload = {"cmd": "dirs", "path": request.query.get("path") or body.get("path") or "",
+               "hidden": request.query.get("hidden") == "1" or body.get("hidden") is True}
+    if request.method == "POST" and isinstance(body.get("mkdir"), str):
+        payload["mkdir"] = body["mkdir"]
+    try:
+        response = source.request(payload, timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        # 旧版 watcher 不认 dirs
+        return Response.error("该电脑上的 Kiteline 组件版本较旧，请更新后重试" if "未知请求" in str(exc) else str(exc), 400)
+    response.pop("event", None)
+    response.pop("id", None)
+    return Response.json(response)
 
 
 def r_repo_info(s, request, *_):
@@ -1723,14 +1777,16 @@ def r_schedules_tick(s, request, *_):
 
 ROUTES = {
     ("GET", "/api/state"): r_state, ("GET", "/api/events"): r_events, ("GET", "/api/history"): r_history,
-    ("GET", "/api/agents"): r_agents, ("GET", "/api/peers"): r_peers, ("GET", "/api/task-output"): r_task_output, ("GET", "/api/media"): r_media,
+    ("GET", "/api/agents"): r_agents, ("GET", "/api/trace"): r_trace, ("GET", "/api/peers"): r_peers, ("GET", "/api/task-output"): r_task_output, ("GET", "/api/media"): r_media,
     ("GET", "/api/digest/media"): r_digest_media, ("POST", "/api/send"): r_send, ("POST", "/api/key"): r_key, ("POST", "/api/close"): r_close,
+    ("POST", "/api/hosted/probe"): r_hosted_probe, ("POST", "/api/hosted/settings"): r_hosted_settings,
+    ("POST", "/api/hosted/move"): r_hosted_move,
     ("POST", "/api/answer"): r_answer, ("POST", "/api/voice"): r_voice, ("GET", "/api/voices"): r_voices,
     ("GET", "/api/voice-audio"): r_voice_audio, ("GET", "/api/git"): r_git, ("GET", "/api/git/diff"): r_git_diff,
     ("GET", "/api/repo"): r_repo_get, ("POST", "/api/repo"): r_repo_post, ("POST", "/api/fs"): r_fs, ("POST", "/api/term"): r_term,
     ("GET", "/api/files"): r_files, ("GET", "/api/file"): r_file, ("GET", "/api/files/find"): r_files_find, ("GET", "/api/download"): r_download,
     ("GET", "/api/tests"): r_tests, ("GET", "/api/session-meta"): r_session_meta, ("GET", "/api/sessions"): r_sessions,
-    ("GET", "/api/search"): r_search, ("GET", "/api/projects"): r_projects, ("GET", "/api/repo-info"): r_repo_info,
+    ("GET", "/api/search"): r_search, ("GET", "/api/projects"): r_projects, ("GET", "/api/dirs"): r_dirs, ("POST", "/api/dirs"): r_dirs, ("GET", "/api/repo-info"): r_repo_info,
     ("GET", "/api/digest"): r_digest, ("POST", "/api/digest/push"): r_digest_push, ("POST", "/api/morning/push"): r_morning_push,
     ("GET", "/api/usage"): r_usage, ("GET", "/api/limits"): r_limits, ("GET", "/api/budget"): r_budget, ("POST", "/api/budget"): r_budget_set,
     ("POST", "/api/budget/check"): r_budget_check, ("GET", "/api/ping"): r_ping, ("GET", "/api/info"): r_info,

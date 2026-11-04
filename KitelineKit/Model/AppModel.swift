@@ -56,6 +56,8 @@ final class AppModel {
     var toast: String?
     /// 连着的电脑端能做的（见 StatePayload.features）
     private(set) var hostFeatures: Set<String> = []
+    /// 电脑上「远端项目在后台运行 Claude Code」的设置（见 HostedViews.swift）
+    private(set) var hosted = HostedSetting()
     /// 超过每日花费上限、问一句「仍然发送吗」
     var capPrompt: (key: String, id: String, message: String)?
 
@@ -661,12 +663,16 @@ final class AppModel {
         version = state.version ?? version
         HostPlatform.current = state.platform ?? ""
         if let features = state.features { hostFeatures = Set(features) }
+        if let value = state.hosted, value != hosted { hosted = value }
         // 先登记，下面换会话列表时新 agent 的标志就画得出来；插件信息变了而会话没变（先显示的是上次的缓存）也要重画一遍
         let agentsChanged = state.agents.map { $0 != agentProfiles } ?? false
         if agentsChanged, let agents = state.agents { Agents.register(agents); agentProfiles = agents }
         let incoming = state.sessions ?? []
         // 和上次一模一样就不换：换了的话所有读 sessions 的页面都要重算
         if incoming != sessions || agentsChanged { sessions = incoming }
+        #if !KITELINE_MAC
+        if !embedded { LiveActivities.shared.sessionsChanged(incoming, host: host) }   // 前台时有会话在干活：本机开实时活动
+        #endif
         latestSessions = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         for (key, slot) in sessionSlots { slot.set(latestSessions[key]) }
         if let incoming = state.faces { setFaces(incoming) } else { for (key, slot) in sessionSlots { slot.setFace(faces.face(key: key, agent: slot.agent)) } }
@@ -960,6 +966,23 @@ final class AppModel {
             let reply = try await api.post("/api/alerts/reconnect", body: ["id": id])
             flash(reply["message"] as? String ?? L("正在重新连接…"))
         } catch {
+            show(error)
+        }
+    }
+
+    /// 改电脑上的后台运行设置：某台开 / 关、提示不再提示（先在本机改，电脑没接住再改回来）
+    func setHosted(sourceId: String? = nil, on: Bool? = nil, tipOff: Bool? = nil) async {
+        let before = (hosted, sources)
+        if let tipOff { hosted.tipOff = tipOff }
+        if let sourceId, let on, let index = sources.firstIndex(where: { $0.id == sourceId }) { sources[index].hosted = on ? "on" : "off" }
+        var body: [String: Any] = [:]
+        if let sourceId { body["sourceId"] = sourceId }
+        if let on { body["on"] = on }
+        if let tipOff { body["tipOff"] = tipOff }
+        do {
+            try await api.post("/api/hosted/settings", body: body)
+        } catch {
+            (hosted, sources) = before
             show(error)
         }
     }

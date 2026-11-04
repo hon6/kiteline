@@ -213,7 +213,10 @@ final class LiveActivities {
         let busy = sessions.filter { $0["activity"] as? String == "busy" }.sorted { updated($0) > updated($1) }
         var items: [[String: Any]] = []
         for session in waiting {
-            let detail = (session["blocking"] as? String) ?? (session["pendingTool"] as? String)
+            // 在等哪条命令：「Bash: npx prisma migrate deploy」比笼统的「请求权限确认」有用；只有工具名的（提问、批计划）用电脑给的说明
+            let pending = session["pendingTool"] as? String
+            let command = (session["activityText"] as? String).flatMap { !$0.isEmpty && $0 != pending ? $0 : nil }
+            let detail = command ?? (session["blocking"] as? String) ?? pending
             items.append(item(session, status: "waiting", label: english ? "Needs approval" : "待确认", detail: detail.map(text)))
         }
         for session in busy {

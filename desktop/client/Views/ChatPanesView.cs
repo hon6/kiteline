@@ -510,7 +510,8 @@ public sealed class PaneHeader : Panel
     {
         try
         {
-            var reply = await AppModel.Shared.Api.Post("/api/resume", new Dictionary<string, object> { ["text"] = "" }, new Dictionary<string, string> { ["key"] = past.Key });
+            // editor：按钮写明了「在 VS Code 中恢复」，远端项目也开 VS Code、不在后台运行（旧版电脑端不认这项，照旧）
+            var reply = await AppModel.Shared.Api.Post("/api/resume", new Dictionary<string, object> { ["text"] = "", ["editor"] = true }, new Dictionary<string, string> { ["key"] = past.Key });
             AppModel.Shared.Flash(reply.Str("message") ?? L("已在 VS Code 中恢复"));
         }
         catch (Exception e) { AppModel.Shared.Flash(e.Message); }

@@ -168,7 +168,8 @@ final class KiteOverlay {
         let sink = Self.sink + max(0, 18 - headroom)
         let sidebar = sidebarWidth > 0 ? sidebarWidth : 0
         flight.isHidden = sidebar < 220
-        let homeX = min(width - 70, max(170, sidebar - 78))
+        // 别压住侧栏顶上那排按钮（新建、世界、数据流，最右边在 x≈214；纸鸢左翅展开约 45 点）：至少放在 262（11-04 截图）
+        let homeX = min(width - 70, max(262, sidebar - 40))
         // 线从结往下垂，在搜索框上渐渐隐去
         let spec = KiteFlightSpec(home: CGPoint(x: homeX, y: headroom + sink),
                                   anchor: CGPoint(x: homeX + 24, y: headroom + 74),

@@ -26,6 +26,7 @@ final class LocalSource: SourceConnection {
     private let queue = DispatchQueue(label: "ccpulse.local")
     private let rpc = WatcherRPC()
     private(set) var hostHome: String? = NSHomeDirectory()
+    let hostFeatures: Set<String> = []   // 后台运行只给远端项目用
 
     init(config: SourceConfig) {
         self.config = config

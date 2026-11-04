@@ -1441,6 +1441,164 @@ check("Qwen：对话记录规整成统一格式（user / thinking / text / tool�
       == [("user", None), ("thinking", None), ("text", None), ("tool", "Bash")] and qitems[-1]["input"].get("command") == "npm test", str(qitems)[:300])
 del os.environ["QWEN_HOME"]
 
+print("\n== Kimi Code 插件（plugins/kimi-code：wire.jsonl 事件流 + tmux；单独下发）")
+KHOME = os.path.join(ROOT, "kimi")
+KDIR = os.path.join(KHOME, "sessions", "wd_proj_0123456789ab", "session_k-1")
+KWIRE = os.path.join(KDIR, "agents", "main", "wire.jsonl")
+os.makedirs(os.path.dirname(KWIRE))
+os.makedirs(os.path.join(KHOME, "locks", "sessions"))
+with open(os.path.join(KHOME, "session_index.jsonl"), "w") as handle:
+    handle.write(json.dumps({"sessionId": "session_k-1", "sessionDir": KDIR, "workDir": "/tmp/kimi-proj"}) + "\n")
+with open(os.path.join(KDIR, "state.json"), "w") as handle:
+    json.dump({"id": "session_k-1", "cwd": "/tmp/kimi-proj", "title": "跑测试", "createdAt": 1, "updatedAt": 2}, handle)
+with open(os.path.join(KHOME, "locks", "sessions", "session_k-1.lock"), "w") as handle:   # 一轮进行中才有的锁文件
+    json.dump({"pid": os.getpid(), "startedAt": 1, "clientIdentity": "kimi_code_cli"}, handle)
+
+
+def kwire(*entries):
+    with open(KWIRE, "a") as handle:
+        for entry in entries:
+            handle.write(json.dumps(dict({"agentId": "main", "time": 1793806576000}, **entry), ensure_ascii=False) + "\n")
+
+
+def kloop(event):
+    return {"type": "context.append_loop_event", "event": event}
+
+
+kwire({"type": "turn.prompt", "input": [{"type": "text", "text": "跑一下测试"}], "origin": {"kind": "user"}},
+      {"type": "llm.request", "model": "kimi-k3"},
+      {"type": "usage.record", "model": "k3", "usage": {"inputOther": 100, "output": 20, "inputCacheRead": 50, "inputCacheCreation": 5}},
+      kloop({"type": "content.part", "uuid": "u1", "part": {"type": "think", "think": "想一想"}}),
+      kloop({"type": "content.part", "uuid": "u2", "part": {"type": "text", "text": "好的，先跑测试。"}}),
+      {"type": "interaction.request", "id": "approval_1", "kind": "approval", "toolCallId": "kc1",
+       "request": {"toolName": "Bash", "display": {"kind": "command", "command": "npm test"}}})
+os.environ["KIMI_CODE_HOME"] = KHOME
+kimi = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "kimi-code")
+ksnap = W.AgentPlugins([], external=[kimi], off=()).sessions()
+check("Kimi：锁文件认出开着的会话、等审批（interaction.request）、标题取 state.json", len(ksnap) == 1 and ksnap[0]["sessionId"] == "session_k-1"
+      and ksnap[0]["activity"] == "waiting" and ksnap[0]["pendingTool"] == "Bash" and ksnap[0]["pendingId"] == "kc1"
+      and ksnap[0]["title"] == "跑测试" and ksnap[0]["agent"] == "kimi-code", str(ksnap)[:300])
+check("Kimi：不在 tmux 里只读；在 tmux 里给 拒绝 3 / 允许 1 / 本会话 2",
+      (ksnap[0]["readOnly"] and "tmux" in (ksnap[0].get("readOnlyReason") or ""))
+      or [o["key"] for o in ksnap[0].get("pendingOptions") or []] == ["3", "1", "2"], str(ksnap)[:400])
+kwire({"type": "interaction.resolved", "id": "approval_1", "response": {"decision": "approved"}},
+      kloop({"type": "tool.call", "toolCallId": "kc1", "name": "Bash", "args": {"command": "npm test"}}),
+      kloop({"type": "tool.result", "toolCallId": "kc1", "result": {"output": "ok\n"}}),
+      kloop({"type": "tool.call", "toolCallId": "kc2", "name": "Edit", "args": {"path": "/tmp/kimi-proj/a.py", "old_string": "a", "new_string": "b"}}),
+      kloop({"type": "tool.result", "toolCallId": "kc2", "result": {"output": "", "isError": True}}),
+      {"type": "turn.ended", "reason": "completed"},
+      {"type": "turn.prompt", "input": [{"type": "text", "text": "再来"}], "origin": {"kind": "user"}},
+      {"type": "turn.ended", "reason": "cancelled"})
+knorm = kimi.normalizer_for(KWIRE)
+kitems = [i for line, entry in enumerate(open(KWIRE)) for i in knorm(line, json.loads(entry))]
+check("Kimi：记录规整（审批时出工具项、批准后的 tool.call 不重复；path → file_path；中断出提示）",
+      [(i["t"], i.get("name")) for i in kitems] == [("user", None), ("thinking", None), ("text", None), ("tool", "Bash"), ("result", None),
+                                                    ("tool", "Edit"), ("result", None), ("user", None), ("event", None)]
+      and kitems[5]["input"].get("file_path") == "/tmp/kimi-proj/a.py" and kitems[6]["isError"] and kitems[-1]["text"] == "已中断", str(kitems)[:500])
+ksnap = W.AgentPlugins([], external=[kimi], off=()).sessions()
+check("Kimi：答完、这一轮被中断后是空闲", ksnap and ksnap[0]["activity"] == "idle" and not ksnap[0]["pendingTool"], str(ksnap)[:300])
+kuse = kimi.usage(0)
+check("Kimi：token 用量取 usage.record（模型名取 llm.request 的，不记花费）", len(kuse) == 1 and kuse[0]["model"] == "kimi-k3"
+      and (kuse[0]["input"], kuse[0]["output"], kuse[0]["cacheRead"], kuse[0]["cacheWrite"]) == (100, 20, 50, 5) and kuse[0]["cost"] is None, kuse)
+klim = kimi.parse_limits({"usages": {"limit_5h": {"used_ratio": 0.42, "reset_time": "2026-11-04T20:00:00Z"}, "limit_7d": {"used_ratio": "0.61"}},
+                          "boosterWallet": {"balance": {"type": "BOOSTER", "amount": 5000000000, "amountLeft": 1852000000},
+                                            "monthlyUsed": {"priceInCents": 1, "currency": "CNY"}}})
+check("Kimi：额度接口 /usages 换成 5 小时、本周和加油包余额", [(w["kind"], w["percent"]) for w in klim["windows"]] == [("five_hour", 42.0), ("seven_day", 61.0)]
+      and klim["balances"] == [{"currency": "CNY", "amount": "18.52", "kind": "main"}], klim)
+check("Kimi：额度默认不查（单项开关没开）", kimi.limits() is None)
+del os.environ["KIMI_CODE_HOME"]
+
+print("\n== Hermes 插件（plugins/hermes：state.db + tmux；单独下发）")
+HHOME = os.path.join(ROOT, "hermes")
+os.makedirs(HHOME)
+hdb = sqlite3.connect(os.path.join(HHOME, "state.db"))
+hdb.executescript("""
+create table sessions (id text primary key, source text, cwd text, model text, title text, started_at real, ended_at real);
+create table messages (id integer primary key autoincrement, session_id text, role text, content text, tool_call_id text,
+  tool_calls text, tool_name text, timestamp real, reasoning text, reasoning_content text, active integer default 1);
+create table session_model_usage (session_id text, model text, billing_provider text default '', billing_base_url text default '',
+  billing_mode text default '', task text default '', api_call_count integer, input_tokens integer, output_tokens integer,
+  cache_read_tokens integer, cache_write_tokens integer, estimated_cost_usd real, actual_cost_usd real, cost_status text, last_seen real);
+""")
+hdb.execute("insert into sessions values ('h-1', 'cli', '/tmp/h-proj', 'hermes-4', '测试会话', 1793800000, null)")
+
+
+def hcall(cid, name, args):
+    return json.dumps([{"id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}])
+
+
+for row in (("user", "跑一下测试", None, None, None), ("assistant", "", None, hcall("hc1", "terminal", {"command": "npm test"}), None),
+            ("tool", '{"output": "ok", "exit_code": 0, "error": null}', "hc1", None, "terminal"),
+            ("assistant", "", None, hcall("hc2", "clarify", {"question": "选哪个", "choices": ["甲", "乙"]}), None),
+            ("tool", '{"question": "选哪个", "user_response": "乙"}', None, None, "clarify"),   # clarify 的结果不带 tool_call_id
+            ("assistant", "改好了", None, None, None)):
+    hdb.execute("insert into messages (session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp) values ('h-1', ?, ?, ?, ?, ?, 1793800001)", row)
+hdb.execute("insert into session_model_usage (session_id, model, api_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, "
+            "estimated_cost_usd, actual_cost_usd, cost_status, last_seen) values ('h-1', 'hermes-4', 3, 300, 60, 10, 0, 0.02, 0, 'estimated', 1793800002)")
+hdb.commit()
+os.environ["HERMES_HOME"] = HHOME
+hermes = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "hermes")
+hitems, hmore = hermes.history("h-1", None, 100)
+check("Hermes：记录规整（terminal → Bash、clarify → 提问卡片、结果按顺序配上没 id 的 clarify）",
+      [(i["t"], i.get("name")) for i in hitems] == [("user", None), ("tool", "Bash"), ("result", None), ("tool", "AskUserQuestion"),
+                                                    ("result", None), ("text", None)]
+      and hitems[4]["toolId"] == "hc2" and hitems[3]["input"]["questions"][0]["options"][1]["label"] == "乙" and not hmore, str(hitems)[:500])
+older, more = hermes.history("h-1", hitems[3]["id"].split(".")[0], 4)
+check("Hermes：往上翻历史（before 是消息 id）", [i["t"] for i in older] == ["tool", "result"] and more, str(older)[:300])
+huse = hermes.usage(0)
+check("Hermes：用量按累计值记账（花费取 Hermes 自己估的）", len(huse) == 1 and huse[0]["input"] == 300 and huse[0]["requests"] == 3
+      and abs(huse[0]["cost"] - 0.02) < 1e-9, huse)
+hdb.execute("update session_model_usage set input_tokens = 500, output_tokens = 90, api_call_count = 5, estimated_cost_usd = 0.03, last_seen = 1793803600")
+hdb.commit()
+huse = hermes.usage(0)
+check("Hermes：累计值涨了只记增长的部分", len(huse) == 2 and (huse[1]["input"], huse[1]["output"], huse[1]["requests"]) == (200, 30, 2)
+      and abs(huse[1]["cost"] - 0.01) < 1e-9, huse)
+check("Hermes：没有 hermes 进程就没有开着的会话", hermes.sessions() == [])
+hdb.close()
+del os.environ["HERMES_HOME"]
+
+print("\n== Grok Build 插件（plugins/grok：updates.jsonl + events.jsonl + tmux；单独下发）")
+GHOME = os.path.join(ROOT, "grok")
+GDIR = os.path.join(GHOME, "sessions", "%2Ftmp%2Fgrok-proj", "01a1a753-0000-7000-8000-000000000001")
+os.makedirs(GDIR)
+with open(os.path.join(GDIR, "summary.json"), "w") as handle:
+    json.dump({"info": {"cwd": "/tmp/grok-proj"}, "generated_title": "跑测试", "current_model_id": "grok-4.5"}, handle)
+
+
+def gupdate(kind, ms=1793808600000, **fields):
+    return {"timestamp": ms // 1000, "method": "session/update",
+            "params": {"sessionId": "g-1", "update": dict(fields, sessionUpdate=kind), "_meta": {"agentTimestampMs": ms}}}
+
+
+GUPD = [gupdate("user_message_chunk", content={"type": "text", "text": "跑一下测试"}),
+        gupdate("agent_thought_chunk", content={"type": "text", "text": "想一想"}),
+        gupdate("agent_message_chunk", content={"type": "text", "text": "好的"}),
+        gupdate("tool_call", toolCallId="g1", title="run_terminal_command", rawInput={"command": "npm test"},
+                _meta={"x.ai/tool": {"name": "run_terminal_command"}}),
+        gupdate("tool_call_update", toolCallId="g1", status="completed", content=[{"type": "content", "content": {"type": "text", "text": "ok"}}]),
+        gupdate("tool_call", toolCallId="g2", title="read_file", rawInput={"target_file": "/tmp/grok-proj/a.py"}),
+        gupdate("tool_call_update", toolCallId="g2", status="failed", content=[{"type": "content", "content": {"type": "text", "text": "没有这个文件"}}]),
+        gupdate("plan", entries=[{"content": "改文件", "status": "in_progress"}]),
+        {"timestamp": 1793808601, "method": "_x.ai/session/update", "params": {"update": {"sessionUpdate": "turn_completed", "stop_reason": "end_turn",
+         "usage": {"modelUsage": {"grok-4.5": {"inputTokens": 100, "outputTokens": 20, "cachedReadTokens": 30, "cacheCreationTokens": 0, "modelCalls": 2}}}}}},
+        {"timestamp": 1793808602, "method": "_x.ai/session/update", "params": {"update": {"sessionUpdate": "turn_completed", "stop_reason": "cancelled"}}}]
+with open(os.path.join(GDIR, "updates.jsonl"), "w") as handle:
+    for entry in GUPD:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+os.environ["GROK_HOME"] = GHOME
+grok = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "grok")
+gitems = [i for line, entry in enumerate(GUPD) for i in grok.normalize(line, entry)]
+check("Grok：记录规整（工具名、target_file → file_path、失败的结果、计划 → 任务清单、被拒 / 中断出提示）",
+      [(i["t"], i.get("name")) for i in gitems] == [("user", None), ("thinking", None), ("text", None), ("tool", "Bash"), ("result", None),
+                                                    ("tool", "Read"), ("result", None), ("tool", "TodoWrite"), ("result", None), ("event", None)]
+      and gitems[5]["input"].get("file_path") == "/tmp/grok-proj/a.py" and gitems[6]["isError"]
+      and gitems[7]["input"]["todos"][0]["content"] == "改文件", str(gitems)[:500])
+guse = grok.usage(0)
+check("Grok：token 用量按 turn_completed 的 modelUsage，输入减掉读缓存（Grok 的 inputTokens 含缓存）", len(guse) == 1
+      and (guse[0]["model"], guse[0]["input"], guse[0]["output"], guse[0]["cacheRead"], guse[0]["requests"]) == ("grok-4.5", 70, 20, 30, 2), guse)
+check("Grok：没有 grok 进程就没有开着的会话", grok.sessions() == [])
+del os.environ["GROK_HOME"]
+
 print("\n== Cursor 插件（plugins/cursor：hooks 记录 + 配套扩展 + tmux；单独下发）")
 CHOME = os.path.join(ROOT, "cursor-home")
 CSTATE = os.path.join(os.environ["CCPULSE_DATA_DIR"], "cursor")

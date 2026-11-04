@@ -25,6 +25,7 @@ static class SelfTest
         var steps = Arg("--steps") ?? $"wait:3;shot:{png}";
 
         AppBuilder.Configure<App>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
+        Window.WindowOpenedEvent.AddClassHandler<Window>((w, _) => { if (!opened.Contains(w)) opened.Add(w); });
         var app = Application.Current!;
         app.RequestedThemeVariant = args.Contains("--dark") ? ThemeVariant.Dark : ThemeVariant.Light;
         Palette.Install(app);
@@ -250,6 +251,18 @@ static class SelfTest
                     hoverRow?.Hover(true);
                     Console.WriteLine($"[capture] 悬停卡片「{arg}」：{(hoverRow is null ? "没找到" : "已悬停")}");
                     break;
+                case "tap":
+                    // 点一下写着这段字的按钮（最上面的窗口先找）：tap:打开其他文件夹…
+                    var tapped = Windows().Reverse().SelectMany(w => w.GetVisualDescendants().OfType<Tap>())
+                        .FirstOrDefault(t => t.IsEffectivelyVisible && t.GetVisualDescendants().OfType<TextBlock>().Any(b => b.Text == arg));
+                    Console.WriteLine(tapped is null ? $"[capture] 没找到按钮「{arg}」" : $"[capture] 点了「{arg}」");
+                    tapped?.Click?.Invoke();
+                    break;
+                case "titleshot":
+                    // 按标题截某个窗口：titleshot:新任务=路径.png
+                    var pair = arg.Split('=', 2);
+                    if (Windows().LastOrDefault(w => w.Title == pair[0]) is Window titled) Shot(titled, pair[1]); else Console.Error.WriteLine($"没有标题为「{pair[0]}」的窗口");
+                    break;
                 case "text":
                     // 单独画一行字（核对字体回退的宽度）：text:字号|文字|路径
                     var bits = arg.Split('|');
@@ -287,6 +300,10 @@ static class SelfTest
     }
 
     /// 排查用：列出界面层级（类型、位置、大小）；arg = 只列类型名里含这个的子树
+    /// 离屏时没有应用生命周期管窗口：开过的窗口自己记（tap、titleshot 用）
+    static readonly List<Window> opened = [];
+    static IEnumerable<Window> Windows() => opened.Where(w => w.IsVisible);
+
     static void Tree(Visual root, string filter)
     {
         void Walk(Visual v, int depth, bool on)
