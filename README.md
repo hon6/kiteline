@@ -62,7 +62,7 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 - **Nothing new to move into.** Your sessions stay in VS Code, the terminal or Remote-SSH, exactly where they are. The phone picks up the very same session; there is no second interface to start your work in.
 - **Never touches your AI login.** Kiteline doesn't sign in to Claude or any other AI service, never reads API keys or tokens and never calls a model API. It reads the transcripts your agents already write and acts only through interfaces they offer.
 - **Agents report back.** Built-in skills let agents send screenshots, walk through web features in a real browser with Playwright and send you the report, track what only you can do as to-dos, and show which stage they are at.
-- **Approve from your wrist.** Commands, plans and questions reach the lock screen and Apple Watch; risky commands always ask twice.
+- **Approve from your wrist.** Commands, plans and questions reach the lock screen and Apple Watch; a Live Activity shows who is waiting and what step each session is on; risky commands always ask twice.
 - **See the whole team at once.** World mode and the Flow Board show every session on every computer on one screen.
 
 ## See it in action
@@ -94,6 +94,9 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 | **Group chats** | Sessions on different computers and projects coordinate with each other through Kiteline. |
 | **World mode** | A voxel office where every session is a worker at a desk, so you can see the whole team at a glance. |
 | **Flow Board** | Every session on one screen: what each one reads, what it does and where the output goes. Each tool call is a line, and a trail of light runs along it the moment the call happens. |
+| **Live Activities** | While agents work or wait for you, the iPhone Lock Screen and Dynamic Island show every session’s status: waiting ones first, running ones with their current step, and All done when everything stops. Tap to jump into the session; your computer updates it through push, so the app does not need to be open. |
+| **Web replies** | When a result is best shown as a chart, comparison table or flow diagram, the agent sends it as a web page; on the phone it opens in the app — zoom, interact, share — and cannot read any app data. |
+| **Links** | Prompt links turn a task into a link: your teammate opens a New Task with the prompt and project filled in, and nothing runs until they confirm. Read-only sharing creates a local network address so anyone on the same Wi-Fi can follow the conversation and steps in a browser, served straight from your computer. |
 
 ## Supported agents
 
@@ -186,6 +189,8 @@ flowchart LR
 - **Remote access** (closed-source component). Built with Rust and [iroh](https://github.com/n0-computer/iroh): QUIC connections addressed by device public keys, NAT hole punching with relay fallback, and path migration between Wi-Fi and cellular without dropping the session. Only paired devices can connect.
 - **Signed plugins.** Agents beyond the built-ins are distributed through an Ed25519-signed index. Each manifest declares capabilities (view, reply, approve, answer, interrupt, …) and the permissions it needs, and every client renders exactly what an agent supports.
 - **On-device speech.** Hold-to-talk transcription runs locally with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and the Fun-ASR-Nano model, so audio never leaves your own devices.
+- **Live Activities.** The iPhone reports its ActivityKit push-to-start token and each activity’s update token to the computer. The computer starts one per round of work, coalesces updates (a new waiting session goes out at once, everything else at most every 8 seconds) and ends it after 90 idle seconds, sending through the push gateway to APNs’ `liveactivity` channel. Apple requires this content to be plaintext, so it carries only session titles and status.
+- **Read-only sharing.** While something is shared, the computer opens a separate local-network HTTP port that serves only `/g/` (closed when nothing is shared). The page polls a snapshot every 8 seconds with an ETag; snapshots are built from the session record on demand, leave out reasoning, images and key info, and never pass through a server.
 - **World mode.** A [three.js](https://threejs.org) scene shared by every platform and rendered from the same state stream.
 - **Flow Board.** Also three.js, on the same host protocol. Cards are thin slabs with canvas textures; each line kind is one `LineSegments` buffer written as a ring, so the line count stays bounded. Base lines use normal blending so hundreds of them stay a faint grey, while only the lit lines (up to 320) and the particles (one shader-driven `Points`, up to 1,500) are additive. An automatic camera pans and zooms to the busiest card — straight on, in 2D — and lists the calls that just passed through it.
 
