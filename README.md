@@ -211,44 +211,44 @@ flowchart LR
 
 <table>
 <tr>
-<td><img src="docs/images/iphone/01-agents.jpg" alt="All agents"></td>
-<td><img src="docs/images/iphone/03-approve.jpg" alt="Approve"></td>
-<td><img src="docs/images/iphone/06-plan.jpg" alt="Plan approval"></td>
-<td><img src="docs/images/iphone/07-live.jpg" alt="Live steps"></td>
-<td><img src="docs/images/iphone/02-world.jpg" alt="World mode"></td>
+<td><img src="docs/images/iphone-en/01-agents.jpg" alt="All agents"></td>
+<td><img src="docs/images/iphone-en/03-approve.jpg" alt="Approve"></td>
+<td><img src="docs/images/iphone-en/06-plan.jpg" alt="Plan approval"></td>
+<td><img src="docs/images/iphone-en/07-live.jpg" alt="Live steps"></td>
+<td><img src="docs/images/iphone-en/02-world.jpg" alt="World mode"></td>
 </tr>
 <tr>
-<td><img src="docs/images/iphone/04-codex.jpg" alt="Codex"></td>
-<td><img src="docs/images/iphone/05-voice.jpg" alt="Voice"></td>
-<td><img src="docs/images/iphone/08-overview.jpg" alt="Overview"></td>
-<td><img src="docs/images/iphone/09-watch.jpg" alt="Apple Watch"></td>
-<td><img src="docs/images/iphone/10-remote.jpg" alt="Remote access"></td>
+<td><img src="docs/images/iphone-en/04-codex.jpg" alt="Codex"></td>
+<td><img src="docs/images/iphone-en/05-voice.jpg" alt="Voice"></td>
+<td><img src="docs/images/iphone-en/08-overview.jpg" alt="Overview"></td>
+<td><img src="docs/images/iphone-en/09-watch.jpg" alt="Apple Watch"></td>
+<td><img src="docs/images/iphone-en/10-remote.jpg" alt="Remote access"></td>
 </tr>
 </table>
 
 <table>
 <tr>
-<td width="25%"><img src="docs/images/watch/1-now.jpg" alt="Watch: approve"></td>
-<td width="25%"><img src="docs/images/watch/3-question.jpg" alt="Watch: answer"></td>
-<td width="25%"><img src="docs/images/watch/4-plan.jpg" alt="Watch: plan"></td>
-<td width="25%"><img src="docs/images/watch/5-usage.jpg" alt="Watch: usage"></td>
+<td width="25%"><img src="docs/images/watch-en/1-now.jpg" alt="Watch: approve"></td>
+<td width="25%"><img src="docs/images/watch-en/3-question.jpg" alt="Watch: answer"></td>
+<td width="25%"><img src="docs/images/watch-en/4-plan.jpg" alt="Watch: plan"></td>
+<td width="25%"><img src="docs/images/watch-en/5-usage.jpg" alt="Watch: usage"></td>
 </tr>
 </table>
 
-![Mac app: sessions side by side, a plan waiting for approval and two sessions messaging each other](docs/images/mac-main.jpg)
+![Mac app: sessions side by side, a plan waiting for approval and two sessions messaging each other](docs/images/mac-main-en.jpg)
 
-![World mode on the Mac](docs/images/mac-world.jpg)
+![World mode on the Mac](docs/images/mac-world-en.jpg)
 
-![Flow Board: every session on one screen, each tool call a line, light running along it as the call happens](docs/images/flow-board.jpg)
+![Flow Board: every session on one screen, each tool call a line, light running along it as the call happens](docs/images/flow-board-en.jpg)
 
 <table>
 <tr>
-<td width="62%"><img src="docs/images/ipad-split.jpg" alt="iPad split view"></td>
-<td width="38%"><img src="docs/images/mac-g-pick-panel.jpg" alt="Start a group chat"></td>
+<td width="62%"><img src="docs/images/ipad-split-en.jpg" alt="iPad split view"></td>
+<td width="38%"><img src="docs/images/mac-g-pick-panel-en.jpg" alt="Start a group chat"></td>
 </tr>
 </table>
 
-<sub>App Store screenshots shown in Chinese; the apps are fully localized in English.</sub>
+<sub>Every app is available in English and Simplified Chinese, and follows your system language by default.</sub>
 
 ## Open source and subscription
 
