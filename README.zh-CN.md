@@ -84,7 +84,7 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 | | |
 |---|---|
-| **所有 Agent 一个列表** | Claude Code（VS Code 与终端）、Codex、OpenCode、DeepSeek Harness、Qwen Code 等；新的 Agent 以签名插件下发，无需等待 App 更新。 |
+| **所有 Agent 一个列表** | Claude Code（VS Code 与终端）、Codex、OpenCode、DeepSeek Harness、Qwen Code、Kimi Code、CodeBuddy、ZCode、Antigravity、Grok Build 等；新的 Agent 以签名插件下发，无需等待 App 更新。 |
 | **随时随地确认** | 权限请求、计划审批、选择题都以卡片形式出现在锁屏、手机和手表上。 |
 | **多种回复方式** | 打字、按住说话（本机离线识别）、附照片或截图，也能在任一项目中新建任务。 |
 | **看到工作本身** | 实时步骤、命令、代码改动、测试输出与图片；内置带 Git 的代码编辑器，以及跑在会话里的终端。 |
@@ -109,6 +109,12 @@ irm https://tars.betac.cn/install.ps1 | iex
 | **Qwen Code** | 在 tmux 中运行时可回复、确认；其他情况只读 |
 | **DeepSeek Harness** | 完整操作（需手动开启） |
 | **Proma** | 只读 |
+| **Kimi Code** · **Hermes** · **Grok Build** | 命令行在 tmux 中运行时可回复、确认、回答提问、中断、关闭；其他情况只读 |
+| **CodeBuddy Code** · **WorkBuddy** | CodeBuddy Code 在 tmux 中可完整操作；WorkBuddy 桌面版只读 |
+| **ZCode** | 从手机发消息，这一轮要确认的命令、要回答的提问出现在手机上，也可以中断 |
+| **Antigravity** | 命令行在 tmux 中可回复、确认、回答、中断、关闭；桌面版和 IDE 只读 |
+| **Muse Code** | 在 tmux 中可回复、中断、关闭（命令在电脑上确认） |
+| **trae-agent** | 查看任务和完整记录；在 tmux 中运行时可从手机派任务 |
 
 各平台、各形态的详细情况见 **[插件清单](PLUGINS.zh-CN.md)**，它按各插件声明的能力自动生成，随每次发版更新。
 
@@ -163,7 +169,7 @@ flowchart LR
     subgraph Servers["Remote-SSH 服务器"]
         WR["经 SSH 运行的会话监听"]
     end
-    AG[("Claude Code · Codex · OpenCode<br/>Qwen Code · DeepSeek Harness · …")]
+    AG[("Claude Code · Codex · OpenCode<br/>Qwen Code · Kimi Code · CodeBuddy · ZCode · …")]
     PUSH["推送网关 → APNs"]
 
     APP <-- "HTTPS + SSE · 局域网 · 本机根证书" --> HOST

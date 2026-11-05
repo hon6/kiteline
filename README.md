@@ -84,7 +84,7 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 
 | | |
 |---|---|
-| **One list for every agent** | Claude Code (VS Code and terminal), Codex, OpenCode, DeepSeek Harness, Qwen Code and more. New agents ship as signed plugins, so supporting one doesn't need an app update. |
+| **One list for every agent** | Claude Code (VS Code and terminal), Codex, OpenCode, DeepSeek Harness, Qwen Code, Kimi Code, CodeBuddy, ZCode, Antigravity, Grok Build and more. New agents ship as signed plugins, so supporting one doesn't need an app update. |
 | **Approve anywhere** | Permission requests, plan approvals and multiple-choice questions become cards on the lock screen, the phone and the watch. |
 | **Reply your way** | Type, hold to talk (on-device speech recognition), attach photos and screenshots, or start a new task in any project. |
 | **See the work, not just the chat** | Live steps, commands, diffs, test output and images, plus a code editor with Git and a terminal that runs inside each session. |
@@ -109,6 +109,12 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 | **Qwen Code** | Reply and approve when it runs in tmux; view-only otherwise |
 | **DeepSeek Harness** | Full control (opt-in) |
 | **Proma** | View only |
+| **Kimi Code** · **Hermes** · **Grok Build** | Reply, approve, answer, interrupt and close when the CLI runs in tmux; view-only otherwise |
+| **CodeBuddy Code** · **WorkBuddy** | CodeBuddy Code: full control in tmux. WorkBuddy desktop app: view only |
+| **ZCode** | Send messages from your phone; that turn's approvals and questions come to your phone, and you can interrupt it |
+| **Antigravity** | CLI in tmux: reply, approve, answer, interrupt, close. Desktop app and IDE: view only |
+| **Muse Code** | In tmux: reply, interrupt, close (commands are confirmed on the computer) |
+| **trae-agent** | View tasks and full records; send tasks when it runs in tmux |
 
 The per-platform matrix is in **[PLUGINS.md](PLUGINS.md)**. It is generated from the capabilities each plugin declares and updated with every release.
 
@@ -163,7 +169,7 @@ flowchart LR
     subgraph Servers["Remote-SSH hosts"]
         WR["Watcher over SSH"]
     end
-    AG[("Claude Code · Codex · OpenCode<br/>Qwen Code · DeepSeek Harness · …")]
+    AG[("Claude Code · Codex · OpenCode<br/>Qwen Code · Kimi Code · CodeBuddy · ZCode · …")]
     PUSH["Push gateway → APNs"]
 
     APP <-- "HTTPS + SSE · LAN · local CA" --> HOST
