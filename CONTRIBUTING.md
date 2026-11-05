@@ -14,7 +14,7 @@ Please don't include conversation contents, code or logs you consider private. S
 
 ## Plugins for new agents
 
-Plugins are the easiest way to contribute. Follow the [plugin development guide](docs/plugin-development.md), test your plugin with `python3 tools/plugin_check.py plugins/<id>` and on the platforms you mark as verified, and add a short `plugins/<id>/README.md` describing what you tested. Accepted plugins are signed and published to the official plugin index, so every Kiteline user gets them without an app update, and they're listed in [PLUGINS.md](PLUGINS.md).
+Plugins are the easiest way to contribute. Follow the [plugin development guide](guide/plugin-development.md), test your plugin with `python3 tools/plugin_check.py plugins/<id>` and on the platforms you mark as verified, and add a short `plugins/<id>/README.md` describing what you tested. Accepted plugins are signed and published to the official plugin index, so every Kiteline user gets them without an app update, and they're listed in [PLUGINS.md](PLUGINS.md).
 
 ## Pull requests
 
@@ -43,7 +43,7 @@ You keep the copyright to your contribution. If you can't agree to this, please 
 
 ### 为新的 Agent 开发插件
 
-插件是最容易上手的贡献方式。按[插件开发指南](docs/plugin-development.zh-CN.md)开发，用 `python3 tools/plugin_check.py plugins/<id>` 检查，并在你标为已实测的平台上亲自跑通，再加一份简短的 `plugins/<id>/README.md` 写明测了什么。通过审核的插件由我们签名、发布到官方插件索引，所有 Kiteline 用户无需更新 App 即可使用，并列入[插件清单](PLUGINS.zh-CN.md)。
+插件是最容易上手的贡献方式。按[插件开发指南](guide/plugin-development.zh-CN.md)开发，用 `python3 tools/plugin_check.py plugins/<id>` 检查，并在你标为已实测的平台上亲自跑通，再加一份简短的 `plugins/<id>/README.md` 写明测了什么。通过审核的插件由我们签名、发布到官方插件索引，所有 Kiteline 用户无需更新 App 即可使用，并列入[插件清单](PLUGINS.zh-CN.md)。
 
 ### Pull Request
 

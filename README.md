@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/icon.png" width="112" alt="Kiteline">
+<img src="assets/images/icon.png" width="112" alt="Kiteline">
 
 # Kiteline
 
@@ -26,7 +26,7 @@ Kiteline puts every Claude Code, Codex, OpenCode and DeepSeek Harness session on
 
 <br>
 
-![Kiteline: speak a task on your phone, the agent codes, tests and sends back a screenshot](docs/images/hero-en.jpg)
+![Kiteline: speak a task on your phone, the agent codes, tests and sends back a screenshot](assets/images/hero-en.jpg)
 
 ## Install
 
@@ -48,7 +48,7 @@ On a Linux server without a desktop, add `--service` to run it as a systemd user
 
 **On your phone**, get Kiteline from the [App Store](https://apps.apple.com/app/id6825244029) (iPhone, iPad and Apple Watch) and scan the pairing code shown on your computer. No account to create.
 
-Your existing agent sessions show up on the phone right away. More in the [install guide](docs/user/install.md).
+Your existing agent sessions show up on the phone right away. More in the [install guide](guide/user/install.md).
 
 ## "So what's the catch?"
 
@@ -69,12 +69,12 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 
 <table>
 <tr>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-1-en.mp4"><img src="docs/media/demo-en-1.webp" alt="Dispatch by voice, get a screenshot back"></a><br><sub><b>No more coding blind.</b> Send a task by voice; the agent reports back with screenshots.</sub></td>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-2-en.mp4"><img src="docs/media/demo-en-2.webp" alt="Approve from the lock screen or your watch"></a><br><sub><b>Approve from anywhere.</b> Lock screen, phone or watch; risky commands always ask twice.</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-1-en.mp4"><img src="assets/media/demo-en-1.webp" alt="Dispatch by voice, get a screenshot back"></a><br><sub><b>No more coding blind.</b> Send a task by voice; the agent reports back with screenshots.</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-2-en.mp4"><img src="assets/media/demo-en-2.webp" alt="Approve from the lock screen or your watch"></a><br><sub><b>Approve from anywhere.</b> Lock screen, phone or watch; risky commands always ask twice.</sub></td>
 </tr>
 <tr>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-3-en.mp4"><img src="docs/media/demo-en-3.webp" alt="Every computer, every agent"></a><br><sub><b>Every computer, every agent.</b> Mac, Windows, Linux and Remote-SSH in one list.</sub></td>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-4-en.mp4"><img src="docs/media/demo-en-4.webp" alt="Start work on the go"></a><br><sub><b>Start work on the go.</b> Dispatch a task and check today's progress at a glance.</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-3-en.mp4"><img src="assets/media/demo-en-3.webp" alt="Every computer, every agent"></a><br><sub><b>Every computer, every agent.</b> Mac, Windows, Linux and Remote-SSH in one list.</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/kiteline-4-en.mp4"><img src="assets/media/demo-en-4.webp" alt="Start work on the go"></a><br><sub><b>Start work on the go.</b> Dispatch a task and check today's progress at a glance.</sub></td>
 </tr>
 </table>
 
@@ -118,9 +118,9 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 
 The per-platform matrix is in **[PLUGINS.md](PLUGINS.md)**. It is generated from the capabilities each plugin declares and updated with every release.
 
-**Why are some agents view-only?** Kiteline never touches your AI credentials and never modifies an agent. It only acts through interfaces the agent itself offers: its local server or IPC, extension points such as hooks or an editor URI, or the terminal (tmux) it runs in. When an agent offers none of these, Kiteline can still show its sessions and full transcripts from disk, but it won't simulate input or patch the agent to take control. The app tells you why a session is view-only and how to enable more, for example by starting the CLI in tmux. Details are in the [plugin guide](docs/plugin-development.md#why-some-agents-are-view-only).
+**Why are some agents view-only?** Kiteline never touches your AI credentials and never modifies an agent. It only acts through interfaces the agent itself offers: its local server or IPC, extension points such as hooks or an editor URI, or the terminal (tmux) it runs in. When an agent offers none of these, Kiteline can still show its sessions and full transcripts from disk, but it won't simulate input or patch the agent to take control. The app tells you why a session is view-only and how to enable more, for example by starting the CLI in tmux. Details are in the [plugin guide](guide/plugin-development.md#why-some-agents-are-view-only).
 
-**Build a plugin.** New agents are added as plugins: a manifest plus a small Python module running in the watcher. The [plugin development guide](docs/plugin-development.md) covers the manifest, the interface and the rules, and `tools/plugin_check.py` lets you test a plugin on your own machine. Open a pull request: we review and test it, then sign it and publish it to the official plugin index, and every Kiteline user gets it without an app update.
+**Build a plugin.** New agents are added as plugins: a manifest plus a small Python module running in the watcher. The [plugin development guide](guide/plugin-development.md) covers the manifest, the interface and the rules, and `tools/plugin_check.py` lets you test a plugin on your own machine. Open a pull request: we review and test it, then sign it and publish it to the official plugin index, and every Kiteline user gets it without an app update.
 
 ## FAQ
 
@@ -128,7 +128,7 @@ The per-platform matrix is in **[PLUGINS.md](PLUGINS.md)**. It is generated from
 Kiteline doesn't sign in to any AI service, doesn't use your subscription's tokens and never calls a model API, so it doesn't change how your agents talk to their providers. Your agents keep running on your computer under your own account, exactly as before. Kiteline reads the transcripts they write and types into the same session the way you would.
 
 **Does my code go through your servers?**
-On the same network, no: the phone talks to your computer directly over HTTPS, pinned to a certificate your computer issued at pairing. From another network Kiteline first tries a direct peer-to-peer connection and only falls back to the relay when that fails. Everything is end-to-end encrypted; the relay can't read it and doesn't store it. See [Remote access](docs/user/remote-access.md).
+On the same network, no: the phone talks to your computer directly over HTTPS, pinned to a certificate your computer issued at pairing. From another network Kiteline first tries a direct peer-to-peer connection and only falls back to the relay when that fails. Everything is end-to-end encrypted; the relay can't read it and doesn't store it. See [Remote access](guide/user/remote-access.md).
 
 **Do I have to change how I work?**
 No. Keep starting sessions in VS Code or the terminal. Kiteline finds them on its own. Terminal sessions that should accept replies from the phone need to run inside tmux.
@@ -142,17 +142,17 @@ Yes. Install Kiteline on the server with `--service`, or add the server as a Rem
 **How is this different from Claude Code's Remote Control?**
 Remote Control continues one Claude Code session in the Claude app. Kiteline shows every agent on every computer in one list, and adds lock-screen and Apple Watch approvals, screenshots and test reports from the agent, to-dos, goals, group chats between sessions, a code editor with Git and a terminal.
 
-More answers in the [FAQ](docs/user/faq.md).
+More answers in the [FAQ](guide/user/faq.md).
 
 ## Documentation
 
-- [Install and first run](docs/user/install.md)
-- [Supported agents and how each one connects](docs/user/agents.md)
-- [Approvals, plans and questions](docs/user/approvals.md)
-- [Remote access](docs/user/remote-access.md)
-- [Privacy and security](docs/user/privacy.md)
-- [FAQ](docs/user/faq.md)
-- Building a plugin for another agent: [plugin development guide](docs/plugin-development.md)
+- [Install and first run](guide/user/install.md)
+- [Supported agents and how each one connects](guide/user/agents.md)
+- [Approvals, plans and questions](guide/user/approvals.md)
+- [Remote access](guide/user/remote-access.md)
+- [Privacy and security](guide/user/privacy.md)
+- [FAQ](guide/user/faq.md)
+- Building a plugin for another agent: [plugin development guide](guide/plugin-development.md)
 
 ## Architecture
 
@@ -217,40 +217,40 @@ flowchart LR
 
 <table>
 <tr>
-<td><img src="docs/images/iphone-en/01-agents.jpg" alt="All agents"></td>
-<td><img src="docs/images/iphone-en/03-approve.jpg" alt="Approve"></td>
-<td><img src="docs/images/iphone-en/06-plan.jpg" alt="Plan approval"></td>
-<td><img src="docs/images/iphone-en/07-live.jpg" alt="Live steps"></td>
-<td><img src="docs/images/iphone-en/02-world.jpg" alt="World mode"></td>
+<td><img src="assets/images/iphone-en/01-agents.jpg" alt="All agents"></td>
+<td><img src="assets/images/iphone-en/03-approve.jpg" alt="Approve"></td>
+<td><img src="assets/images/iphone-en/06-plan.jpg" alt="Plan approval"></td>
+<td><img src="assets/images/iphone-en/07-live.jpg" alt="Live steps"></td>
+<td><img src="assets/images/iphone-en/02-world.jpg" alt="World mode"></td>
 </tr>
 <tr>
-<td><img src="docs/images/iphone-en/04-codex.jpg" alt="Codex"></td>
-<td><img src="docs/images/iphone-en/05-voice.jpg" alt="Voice"></td>
-<td><img src="docs/images/iphone-en/08-overview.jpg" alt="Overview"></td>
-<td><img src="docs/images/iphone-en/09-watch.jpg" alt="Apple Watch"></td>
-<td><img src="docs/images/iphone-en/10-remote.jpg" alt="Remote access"></td>
+<td><img src="assets/images/iphone-en/04-codex.jpg" alt="Codex"></td>
+<td><img src="assets/images/iphone-en/05-voice.jpg" alt="Voice"></td>
+<td><img src="assets/images/iphone-en/08-overview.jpg" alt="Overview"></td>
+<td><img src="assets/images/iphone-en/09-watch.jpg" alt="Apple Watch"></td>
+<td><img src="assets/images/iphone-en/10-remote.jpg" alt="Remote access"></td>
 </tr>
 </table>
 
 <table>
 <tr>
-<td width="25%"><img src="docs/images/watch-en/1-now.jpg" alt="Watch: approve"></td>
-<td width="25%"><img src="docs/images/watch-en/3-question.jpg" alt="Watch: answer"></td>
-<td width="25%"><img src="docs/images/watch-en/4-plan.jpg" alt="Watch: plan"></td>
-<td width="25%"><img src="docs/images/watch-en/5-usage.jpg" alt="Watch: usage"></td>
+<td width="25%"><img src="assets/images/watch-en/1-now.jpg" alt="Watch: approve"></td>
+<td width="25%"><img src="assets/images/watch-en/3-question.jpg" alt="Watch: answer"></td>
+<td width="25%"><img src="assets/images/watch-en/4-plan.jpg" alt="Watch: plan"></td>
+<td width="25%"><img src="assets/images/watch-en/5-usage.jpg" alt="Watch: usage"></td>
 </tr>
 </table>
 
-![Mac app: sessions side by side, a plan waiting for approval and two sessions messaging each other](docs/images/mac-main-en.jpg)
+![Mac app: sessions side by side, a plan waiting for approval and two sessions messaging each other](assets/images/mac-main-en.jpg)
 
-![World mode on the Mac](docs/images/mac-world-en.jpg)
+![World mode on the Mac](assets/images/mac-world-en.jpg)
 
-![Flow Board: every session on one screen, each tool call a line, light running along it as the call happens](docs/images/flow-board-en.jpg)
+![Flow Board: every session on one screen, each tool call a line, light running along it as the call happens](assets/images/flow-board-en.jpg)
 
 <table>
 <tr>
-<td width="62%"><img src="docs/images/ipad-split-en.jpg" alt="iPad split view"></td>
-<td width="38%"><img src="docs/images/mac-g-pick-panel-en.jpg" alt="Start a group chat"></td>
+<td width="62%"><img src="assets/images/ipad-split-en.jpg" alt="iPad split view"></td>
+<td width="38%"><img src="assets/images/mac-g-pick-panel-en.jpg" alt="Start a group chat"></td>
 </tr>
 </table>
 
@@ -349,7 +349,7 @@ Packages:
 
 ## Contributing
 
-Issues, discussions and pull requests are welcome, especially **plugins for new agents** (see the [plugin development guide](docs/plugin-development.md)). Before opening a pull request, please read [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues, discussions and pull requests are welcome, especially **plugins for new agents** (see the [plugin development guide](guide/plugin-development.md)). Before opening a pull request, please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

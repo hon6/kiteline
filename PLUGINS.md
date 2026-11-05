@@ -4,7 +4,7 @@ What Kiteline can do with each agent, per platform and form. This file is genera
 
 **Full** = view, reply, approve, answer questions and interrupt; **View only** = sessions and transcripts can be viewed; ✓ = tested by us on that platform and form; — = the agent has no such form.
 
-Why are some agents view-only? See the [plugin development guide](docs/plugin-development.md#why-some-agents-are-view-only). Want support for another agent? Build a plugin with the guide and open a pull request.
+Why are some agents view-only? See the [plugin development guide](guide/plugin-development.md#why-some-agents-are-view-only). Want support for another agent? Build a plugin with the guide and open a pull request.
 
 **English** · [简体中文](PLUGINS.zh-CN.md)
 

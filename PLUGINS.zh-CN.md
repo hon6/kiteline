@@ -4,7 +4,7 @@
 
 **全部** = 查看、回复、确认、回答提问、中断；**只读** = 只能查看会话和对话记录；✓ = 我们在该平台、该形态上实测通过；— = 该 Agent 没有这种形态。
 
-为什么有的 Agent 只能查看，见[插件开发指南](docs/plugin-development.zh-CN.md#为什么有的-agent-只能查看)。想支持新的 Agent？欢迎按指南开发插件并提交 Pull Request。
+为什么有的 Agent 只能查看，见[插件开发指南](guide/plugin-development.zh-CN.md#为什么有的-agent-只能查看)。想支持新的 Agent？欢迎按指南开发插件并提交 Pull Request。
 
 [English](PLUGINS.md) · **简体中文**
 

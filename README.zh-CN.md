@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/icon.png" width="112" alt="Kiteline">
+<img src="assets/images/icon.png" width="112" alt="Kiteline">
 
 # Kiteline
 
@@ -26,7 +26,7 @@ Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harn
 
 <br>
 
-![Kiteline：手机上说一句，Agent 写代码、跑测试、截图发回来](docs/images/hero-zh.jpg)
+![Kiteline：手机上说一句，Agent 写代码、跑测试、截图发回来](assets/images/hero-zh.jpg)
 
 ## 安装
 
@@ -48,7 +48,7 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 **手机上**，到 [App Store](https://apps.apple.com/app/id6825244029) 下载 Kiteline（iPhone、iPad、Apple Watch），扫电脑上显示的配对码。不用注册账号。
 
-电脑上已有的 Agent 会话会马上出现在手机上。详见[安装说明](docs/user/install.zh-CN.md)。
+电脑上已有的 Agent 会话会马上出现在手机上。详见[安装说明](guide/user/install.zh-CN.md)。
 
 ## 「要花钱吗？」
 
@@ -69,12 +69,12 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 <table>
 <tr>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=64"><img src="docs/media/demo-zh-1.webp" alt="语音派活"></a><br><sub><b>语音派活</b>：手机上说一句，电脑上的 Agent 立刻开工。</sub></td>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=150"><img src="docs/media/demo-zh-2.webp" alt="随时确认"></a><br><sub><b>随时确认</b>：允许、拒绝、回答提问、批准计划，轻点即可。</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=64"><img src="assets/media/demo-zh-1.webp" alt="语音派活"></a><br><sub><b>语音派活</b>：手机上说一句，电脑上的 Agent 立刻开工。</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=150"><img src="assets/media/demo-zh-2.webp" alt="随时确认"></a><br><sub><b>随时确认</b>：允许、拒绝、回答提问、批准计划，轻点即可。</sub></td>
 </tr>
 <tr>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=120"><img src="docs/media/demo-zh-3.webp" alt="多 Agent"></a><br><sub><b>多 Agent</b>：插件市场装一个就行，不用等 App 更新。</sub></td>
-<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=206"><img src="docs/media/demo-zh-4.webp" alt="世界模式"></a><br><sub><b>世界模式</b>：每台电脑一间机房，每个会话一个工位。</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=120"><img src="assets/media/demo-zh-3.webp" alt="多 Agent"></a><br><sub><b>多 Agent</b>：插件市场装一个就行，不用等 App 更新。</sub></td>
+<td width="50%"><a href="https://tars.betac.cn/assets/video/intro-zh.mp4#t=206"><img src="assets/media/demo-zh-4.webp" alt="世界模式"></a><br><sub><b>世界模式</b>：每台电脑一间机房，每个会话一个工位。</sub></td>
 </tr>
 </table>
 
@@ -118,9 +118,9 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 各平台、各形态的详细情况见 **[插件清单](PLUGINS.zh-CN.md)**，它按各插件声明的能力自动生成，随每次发版更新。
 
-**为什么有的 Agent 只能查看？** Kiteline 不碰你的 AI 凭证，也不修改任何 Agent，只通过 Agent 自己提供的途径操作：它的本机服务或 IPC 接口、hooks 或编辑器 URI 这类扩展点，或者它所在的终端（tmux）。一个 Agent 如果这些都没有提供，Kiteline 仍能从磁盘读取并显示它的会话和完整对话，但不会为了操作它而模拟输入或改动 Agent 本身。App 会说明某个会话为什么只读、怎样才能操作（例如把命令行放进 tmux 里运行）。详见[插件开发指南](docs/plugin-development.zh-CN.md#为什么有的-agent-只能查看)。
+**为什么有的 Agent 只能查看？** Kiteline 不碰你的 AI 凭证，也不修改任何 Agent，只通过 Agent 自己提供的途径操作：它的本机服务或 IPC 接口、hooks 或编辑器 URI 这类扩展点，或者它所在的终端（tmux）。一个 Agent 如果这些都没有提供，Kiteline 仍能从磁盘读取并显示它的会话和完整对话，但不会为了操作它而模拟输入或改动 Agent 本身。App 会说明某个会话为什么只读、怎样才能操作（例如把命令行放进 tmux 里运行）。详见[插件开发指南](guide/plugin-development.zh-CN.md#为什么有的-agent-只能查看)。
 
-**开发插件**：新的 Agent 以插件形式接入，一个插件由一份清单加一个在会话监听里运行的 Python 小模块组成。[插件开发指南](docs/plugin-development.zh-CN.md)介绍了清单、接口和必须遵守的规则，用 `tools/plugin_check.py` 可以在本机测试插件。欢迎提交 Pull Request：我们审核、实测后签名，发布到官方插件索引，所有 Kiteline 用户无需更新 App 即可使用。
+**开发插件**：新的 Agent 以插件形式接入，一个插件由一份清单加一个在会话监听里运行的 Python 小模块组成。[插件开发指南](guide/plugin-development.zh-CN.md)介绍了清单、接口和必须遵守的规则，用 `tools/plugin_check.py` 可以在本机测试插件。欢迎提交 Pull Request：我们审核、实测后签名，发布到官方插件索引，所有 Kiteline 用户无需更新 App 即可使用。
 
 ## 常见问题
 
@@ -128,7 +128,7 @@ irm https://tars.betac.cn/install.ps1 | iex
 Kiteline 不登录任何 AI 服务，不用你订阅的 token，也不调用任何模型接口，不会改变 Agent 和服务商之间的通信方式。Agent 照旧在你的电脑上、用你自己的账号运行；Kiteline 读它们写下的会话记录，再像你自己打字一样往同一个会话里输入。
 
 **代码会经过你们的服务器吗？**
-同一个网络里不会：手机直连电脑，走 HTTPS，配对时锁定电脑自己签发的证书。在别的网络时先尝试点对点直连，打不通才经中继转发；全程端到端加密，中继看不到内容，也不存储。详见[远程访问](docs/user/remote-access.zh-CN.md)。
+同一个网络里不会：手机直连电脑，走 HTTPS，配对时锁定电脑自己签发的证书。在别的网络时先尝试点对点直连，打不通才经中继转发；全程端到端加密，中继看不到内容，也不存储。详见[远程访问](guide/user/remote-access.zh-CN.md)。
 
 **要改变工作习惯吗？**
 不用。会话照样在 VS Code 或终端里开，Kiteline 自己找到它们。终端里的会话要能从手机回复，需要跑在 tmux 里。
@@ -142,17 +142,17 @@ Kiteline 不登录任何 AI 服务，不用你订阅的 token，也不调用任�
 **和 Claude Code 官方的 Remote Control 有什么不同？**
 Remote Control 是在 Claude App 里接着用一个 Claude Code 会话。Kiteline 把每台电脑上的每个 Agent 放进一个列表，还有锁屏和 Apple Watch 上的确认、Agent 发回的截图和测试报告、待办、目标、会话群、带 Git 的代码编辑器和终端。
 
-更多见[常见问题](docs/user/faq.zh-CN.md)。
+更多见[常见问题](guide/user/faq.zh-CN.md)。
 
 ## 文档
 
-- [安装与首次使用](docs/user/install.zh-CN.md)
-- [支持的 Agent 和各自的接入方式](docs/user/agents.zh-CN.md)
-- [确认请求、计划审批和提问](docs/user/approvals.zh-CN.md)
-- [远程访问](docs/user/remote-access.zh-CN.md)
-- [隐私与安全](docs/user/privacy.zh-CN.md)
-- [常见问题](docs/user/faq.zh-CN.md)
-- 给别的 Agent 写插件：[插件开发指南](docs/plugin-development.md)
+- [安装与首次使用](guide/user/install.zh-CN.md)
+- [支持的 Agent 和各自的接入方式](guide/user/agents.zh-CN.md)
+- [确认请求、计划审批和提问](guide/user/approvals.zh-CN.md)
+- [远程访问](guide/user/remote-access.zh-CN.md)
+- [隐私与安全](guide/user/privacy.zh-CN.md)
+- [常见问题](guide/user/faq.zh-CN.md)
+- 给别的 Agent 写插件：[插件开发指南](guide/plugin-development.md)
 
 ## 架构
 
@@ -217,40 +217,40 @@ flowchart LR
 
 <table>
 <tr>
-<td><img src="docs/images/iphone/01-agents.jpg" alt="所有 Agent"></td>
-<td><img src="docs/images/iphone/03-approve.jpg" alt="确认请求"></td>
-<td><img src="docs/images/iphone/06-plan.jpg" alt="批准计划"></td>
-<td><img src="docs/images/iphone/07-live.jpg" alt="实时同步"></td>
-<td><img src="docs/images/iphone/02-world.jpg" alt="世界模式"></td>
+<td><img src="assets/images/iphone/01-agents.jpg" alt="所有 Agent"></td>
+<td><img src="assets/images/iphone/03-approve.jpg" alt="确认请求"></td>
+<td><img src="assets/images/iphone/06-plan.jpg" alt="批准计划"></td>
+<td><img src="assets/images/iphone/07-live.jpg" alt="实时同步"></td>
+<td><img src="assets/images/iphone/02-world.jpg" alt="世界模式"></td>
 </tr>
 <tr>
-<td><img src="docs/images/iphone/04-codex.jpg" alt="Codex"></td>
-<td><img src="docs/images/iphone/05-voice.jpg" alt="语音"></td>
-<td><img src="docs/images/iphone/08-overview.jpg" alt="全局概览"></td>
-<td><img src="docs/images/iphone/09-watch.jpg" alt="Apple Watch"></td>
-<td><img src="docs/images/iphone/10-remote.jpg" alt="远程访问"></td>
+<td><img src="assets/images/iphone/04-codex.jpg" alt="Codex"></td>
+<td><img src="assets/images/iphone/05-voice.jpg" alt="语音"></td>
+<td><img src="assets/images/iphone/08-overview.jpg" alt="全局概览"></td>
+<td><img src="assets/images/iphone/09-watch.jpg" alt="Apple Watch"></td>
+<td><img src="assets/images/iphone/10-remote.jpg" alt="远程访问"></td>
 </tr>
 </table>
 
 <table>
 <tr>
-<td width="25%"><img src="docs/images/watch/1-now.jpg" alt="手表：确认"></td>
-<td width="25%"><img src="docs/images/watch/3-question.jpg" alt="手表：回答"></td>
-<td width="25%"><img src="docs/images/watch/4-plan.jpg" alt="手表：计划"></td>
-<td width="25%"><img src="docs/images/watch/5-usage.jpg" alt="手表：用量"></td>
+<td width="25%"><img src="assets/images/watch/1-now.jpg" alt="手表：确认"></td>
+<td width="25%"><img src="assets/images/watch/3-question.jpg" alt="手表：回答"></td>
+<td width="25%"><img src="assets/images/watch/4-plan.jpg" alt="手表：计划"></td>
+<td width="25%"><img src="assets/images/watch/5-usage.jpg" alt="手表：用量"></td>
 </tr>
 </table>
 
-![Mac 端：两个会话并排，一个计划等批准，两个会话在互发消息](docs/images/mac-main.jpg)
+![Mac 端：两个会话并排，一个计划等批准，两个会话在互发消息](assets/images/mac-main.jpg)
 
-![Mac 端的世界模式](docs/images/mac-world.jpg)
+![Mac 端的世界模式](assets/images/mac-world.jpg)
 
-![数据流大屏：所有会话一块屏，每次工具调用一根线，调用发生时光点沿线流过](docs/images/flow-board.jpg)
+![数据流大屏：所有会话一块屏，每次工具调用一根线，调用发生时光点沿线流过](assets/images/flow-board.jpg)
 
 <table>
 <tr>
-<td width="62%"><img src="docs/images/ipad-split.jpg" alt="iPad 分栏"></td>
-<td width="38%"><img src="docs/images/mac-g-pick-panel.jpg" alt="拉群协作"></td>
+<td width="62%"><img src="assets/images/ipad-split.jpg" alt="iPad 分栏"></td>
+<td width="38%"><img src="assets/images/mac-g-pick-panel.jpg" alt="拉群协作"></td>
 </tr>
 </table>
 
@@ -347,7 +347,7 @@ python -m kiteline --headless    # 没有图形界面的服务器：配对码打
 
 ## 参与贡献
 
-欢迎提 Issue、参与讨论、提交 Pull Request，尤其欢迎**为新的 Agent 开发插件**（见[插件开发指南](docs/plugin-development.zh-CN.md)）。提 Pull Request 前请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+欢迎提 Issue、参与讨论、提交 Pull Request，尤其欢迎**为新的 Agent 开发插件**（见[插件开发指南](guide/plugin-development.zh-CN.md)）。提 Pull Request 前请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可
 
