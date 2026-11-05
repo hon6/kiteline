@@ -1,0 +1,119 @@
+{
+ "id": "antigravity",
+ "name": "Antigravity",
+ "version": "1.0.2",
+ "summary": "Google 的 agent 编程工具：查看命令行、桌面版的会话、状态和完整对话；命令行在 tmux 中运行时可回复、确认、回答提问和中断",
+ "summaryEn": "Google's agentic coding tool: view sessions, status and full conversations from the CLI and desktop app; reply, confirm, answer questions and interrupt when the CLI runs in tmux",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.gemini/antigravity-cli",
+   "~/.gemini/antigravity",
+   "~/.gemini/antigravity-ide"
+  ],
+  "commands": [
+   "agy"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "回复和确认需要 Antigravity CLI 在 tmux 中运行"
+   },
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "桌面版和 IDE 的会话只能查看"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "命令行在 Windows 终端里运行时可回复和确认（不用 tmux）"
+   },
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "桌面版和 IDE 的会话只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复和确认需要 Antigravity CLI 在 tmux 中运行"
+   },
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "桌面版和 IDE 的会话只能查看"
+   }
+  }
+ },
+ "limitsNote": "Google 账号的 Antigravity 配额只在 Antigravity 中显示（要读它的登录凭证才能查询，所以不接），用 Gemini API Key 按量付费时请在 Google AI Studio 查看。token 按 Antigravity 自己的记录统计",
+ "limitsNoteEn": "Your Google account's Antigravity quota is only shown inside Antigravity (querying it would require reading its sign-in credentials, so it isn't shown here); with pay-as-you-go Gemini API keys, check Google AI Studio. Tokens are counted from Antigravity's own records",
+ "mark": [
+  {
+   "d": "M12 3c-2.9 0-4.6 5.4-9 18h3.6c2-5.9 3.4-8.6 5.4-8.6s3.4 2.7 5.4 8.6H21C16.6 8.4 14.9 3 12 3z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "Antigravity",
+ "caps": [],
+ "notes": "Windows 上也能从手机回复、确认、回答提问、中断和关闭 Antigravity CLI 的会话（不用 tmux）。",
+ "notesEn": "On Windows you can now reply, confirm, answer questions, interrupt and close Antigravity CLI sessions from your phone (no tmux needed).",
+ "gaps": [
+  {
+   "kind": "unsupported",
+   "text": "桌面版和 IDE 只能查看：它们没有对外的操作接口",
+   "textEn": "The desktop app and IDE are view-only: they offer no external control interface"
+  },
+  {
+   "kind": "untested",
+   "text": "Mac 上还没实测（Linux 上已全部实测）",
+   "textEn": "Not yet tested on Mac (fully tested on Linux)"
+  },
+  {
+   "kind": "untested",
+   "text": "桌面版和 IDE 的查看还没在真机上实测（按它们和命令行共用的数据格式做的）",
+   "textEn": "Viewing desktop app and IDE sessions hasn't been tested on a real computer yet (built on the data format they share with the CLI)"
+  },
+  {
+   "kind": "untested",
+   "text": "没有用 Google 账号登录实测（用 Gemini API Key 测的），登录账号后的界面若有不同，以电脑上为准",
+   "textEn": "Not tested signed in with a Google account (tested with a Gemini API key); if the signed-in interface differs, go by what your computer shows"
+  }
+ ]
+}

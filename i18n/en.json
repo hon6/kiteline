@@ -4679,6 +4679,8 @@
  "额度": "Limit",
  "额度插件": "",
  "额度：%@": "Usage limits: %@",
+ "做不到：%@": "Not possible: %@",
+ "未实测：%@": "Not yet tested: %@",
  "风筝线": "Kite Lines",
  "风筝线：侧栏左侧连起最近 15 分钟有往来的会话": "Kite Lines: Link sessions that exchanged messages in the last 15 minutes along the left of the sidebar",
  "风筝线：流动的虚线连起最近 15 分钟有往来的会话": "Kite Lines: Flowing dashed lines link sessions that exchanged messages in the last 15 minutes",

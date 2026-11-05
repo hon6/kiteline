@@ -136,6 +136,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// 自测截图用：切到某一页、放到屏幕里压在最底下（不激活、不抢焦点），返回窗口
     func showForCapture(tab: SettingsTab) -> NSWindow? {
         tabs.selectedTabViewItemIndex = tab.rawValue
+        // 放进屏幕（系统列表才算对行高）但全透明、鼠标穿透：用户屏幕上看不见（同新手引导的 showForCapture）
+        window?.alphaValue = 0
+        window?.ignoresMouseEvents = true
         window?.setFrameOrigin(NSPoint(x: 60, y: 60))
         window?.orderBack(nil)
         return window

@@ -27,7 +27,7 @@ TOOLS = {"run_terminal_command": "Bash", "read_file": "Read", "search_replace": 
          "exit_plan_mode": "ExitPlanMode", "monitor": "Bash"}
 TAIL_BYTES = 512 * 1024
 BUSY_MARKS = ("[stop]", "Ctrl+c:cancel")
-READ_ONLY = (("Windows 上没有 tmux，Grok Build 的会话只能查看", "Windows has no tmux, so Grok Build sessions are view-only.")
+READ_ONLY = (("Windows 上从手机操作 Grok Build 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Grok Build on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
              ("Grok Build 不在 tmux 中运行，只能查看；在 tmux 中启动 grok 后即可从手机回复和确认",
               "Grok Build isn't running in tmux, so this session is view-only. Start grok in tmux to reply and confirm from your phone."))
@@ -38,6 +38,41 @@ OPTIONS = ({"key": "4", "label": "拒绝", "labelEn": "Deny", "style": "destruct
 
 
 def create(kl):
+    def ps_text():
+        """「进程号 命令行」一行一个：中台的跨平台进程列举（HOST_CAPS proc.list，Windows 也行）；老中台退回 ps"""
+        if hasattr(kl, "process_list"):
+            return "\n".join("%d %s" % (p["pid"], p["cmd"]) for p in kl.process_list())
+        try:
+            return subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    # 终端：中台的通用终端层（tmux、Windows 控制台同一套，HOST_CAPS term.any）；老中台没有时只认 tmux
+    _term_pane = getattr(kl, "term_pane", None) or kl.find_tmux_pane
+    # Windows 控制台上的回复、确认、中断：在 Win11 真机实测过才开放（11-05：没测过的不放出来）
+    WINDOWS_TESTED = False
+
+    def term_pane(pid):
+        pane = _term_pane(pid)
+        if pane and str(pane).startswith("console:") and not WINDOWS_TESTED:
+            return None
+        return pane
+
+    def term_screen(pane, lines=None):
+        if hasattr(kl, "term_screen"):
+            return kl.term_screen(pane, lines)
+        try:
+            return subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", pane] + (["-S", "-%d" % lines] if lines else []),
+                                  capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def term_keys(pane, *names):
+        if hasattr(kl, "term_keys"):
+            return kl.term_keys(pane, *names)
+        for name in names:
+            term_keys(pane, name)
+
     GROK_HOME = os.environ.get("GROK_HOME") or os.path.join(kl.HOME, ".grok")
     SESSIONS = os.path.join(GROK_HOME, "sessions")
 
@@ -210,7 +245,7 @@ def create(kl):
     def grok_processes():
         """grok 进程 → 它开着的会话目录（进程一直开着自己会话的 events.jsonl）"""
         try:
-            out = subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+            out = ps_text()
         except (OSError, subprocess.SubprocessError):
             return {}
         found = {}
@@ -247,9 +282,8 @@ def create(kl):
         return None
 
     def screen(pane):
-        try:
-            out = subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", pane], capture_output=True, text=True, timeout=3).stdout
-        except (OSError, subprocess.SubprocessError):
+        out = term_screen(pane)
+        if not out:
             return None
         return "\n".join(out.rstrip().splitlines()[-25:])
 
@@ -274,7 +308,7 @@ def create(kl):
                 summary = read_json(os.path.join(folder, "summary.json")) or {}
                 note = scan(folder)
                 cwd = (summary.get("info") or {}).get("cwd") or unquote(os.path.basename(os.path.dirname(folder)))
-                pane = kl.find_tmux_pane(pid)
+                pane = term_pane(pid)
                 self.pids[sid] = pid
                 busy, approval = note["busy"], note["approval"]
                 text = screen(pane) if pane else None
@@ -319,7 +353,7 @@ def create(kl):
 
         def _pid(self, sid):
             pid = self.pids.get(sid)
-            pane = kl.find_tmux_pane(pid) if pid else None
+            pane = term_pane(pid) if pid else None
             if not pane:
                 raise RuntimeError("这个 Grok Build 会话不在 tmux 里运行，只能查看；在 tmux 中启动 grok 后，就可以从手机回复和确认")
             return pid, pane
@@ -338,10 +372,10 @@ def create(kl):
                 text = screen(pane) or ""
                 if not any(mark in text for mark in BUSY_MARKS):
                     return "当前没有进行中的任务"
-                subprocess.run(["tmux", "send-keys", "-t", pane, "C-c"], check=True, timeout=10)
+                term_keys(pane, "C-c")
                 time.sleep(0.5)
                 # 「等模型」时中断，Grok 把那句话放回输入框：清掉，免得下一条接在后面
-                subprocess.run(["tmux", "send-keys", "-t", pane, "C-u"], check=True, timeout=10)
+                term_keys(pane, "C-u")
                 return "已中断"
             if key not in ("2", "3", "4"):
                 raise RuntimeError("不支持的选项：%s" % key)
@@ -360,12 +394,12 @@ def create(kl):
                 choice = next((p for p in picked if p in labels), None)
                 if choice is not None and labels.index(choice) < 9:
                     # 按选项序号（1–9）直接选
-                    subprocess.run(["tmux", "send-keys", "-t", pane, str(labels.index(choice) + 1)], check=True, timeout=10)
+                    term_keys(pane, str(labels.index(choice) + 1))
                 else:
                     custom = next((p for p in picked if p), None)
                     if not custom:
                         raise RuntimeError("没有选择答案")
-                    subprocess.run(["tmux", "send-keys", "-t", pane, "z"], check=True, timeout=10)   # z 跳到自己填的那行
+                    term_keys(pane, "z")   # z 跳到自己填的那行
                     time.sleep(0.3)
                     kl.tmux_send(pid, custom, [], False)
                 time.sleep(0.4)

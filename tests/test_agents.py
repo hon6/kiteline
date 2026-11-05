@@ -1599,6 +1599,214 @@ check("Grok：token 用量按 turn_completed 的 modelUsage，输入减掉读缓
 check("Grok：没有 grok 进程就没有开着的会话", grok.sessions() == [])
 del os.environ["GROK_HOME"]
 
+print("\n== CodeBuddy / WorkBuddy 插件（plugins/codebuddy：sessions/<pid>.json + projects/*.jsonl + tmux；单独下发）")
+CBHOME = os.path.join(ROOT, "codebuddy")
+CBCHAT = os.path.join(CBHOME, "projects", "tmp-cb-proj", "cb-1.jsonl")
+os.makedirs(os.path.dirname(CBCHAT))
+os.makedirs(os.path.join(CBHOME, "sessions"))
+with open(os.path.join(CBHOME, "sessions", "%d.json" % os.getpid()), "w") as handle:
+    json.dump({"pid": os.getpid(), "sessionId": "cb-1", "cwd": "/tmp/cb-proj", "startedAt": 1, "kind": "interactive", "version": "2.179.3"}, handle)
+CBLINES = [
+    {"id": "u1", "timestamp": 1793822555000, "type": "message", "role": "user", "content": [{"type": "input_text", "text": "跑一下测试"}]},
+    {"id": "a1", "timestamp": 1793822555100, "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "好的"}],
+     "providerData": {"messageId": "m1", "requestModelName": "Auto", "usage": {"inputTokens": 100, "outputTokens": 20, "inputTokensDetails": [{"cached_tokens": 30}]}}},
+    {"id": "f1", "timestamp": 1793822555200, "type": "function_call", "callId": "c1", "name": "Bash", "arguments": "{\"command\": \"npm test\"}",
+     "providerData": {"messageId": "m1", "usage": {"inputTokens": 100, "outputTokens": 20, "inputTokensDetails": [{"cached_tokens": 30}]}}},
+    {"id": "ai", "timestamp": 1793822555300, "type": "ai-title", "aiTitle": "跑测试"}]
+with open(CBCHAT, "w") as handle:
+    for entry in CBLINES:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+os.environ["CODEBUDDY_CONFIG_DIR"] = CBHOME
+cb = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "codebuddy")
+cbsnap = W.AgentPlugins([], external=[cb], off=()).sessions()
+check("CodeBuddy：sessions/<pid>.json 认出开着的会话、标题取 ai-title、有没结果的工具调用算忙", len(cbsnap) == 1
+      and cbsnap[0]["sessionId"] == "cb-1" and cbsnap[0]["title"] == "跑测试" and cbsnap[0]["activity"] in ("busy", "waiting")
+      and cbsnap[0]["agent"] == "codebuddy", str(cbsnap)[:300])
+with open(CBCHAT, "a") as handle:
+    for entry in ({"id": "r1", "timestamp": 1793822556000, "type": "function_call_result", "callId": "c1", "status": "completed",
+                   "output": {"type": "text", "text": "ok"}},
+                  {"id": "a2", "timestamp": 1793822556100, "type": "message", "role": "assistant", "status": "incomplete",
+                   "content": [{"type": "output_text", "text": "Interrupted by user"}]}):
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+cbitems = [i for line, entry in enumerate(open(CBCHAT)) for i in cb.normalize(line, json.loads(entry))]
+check("CodeBuddy：记录规整（user / text / tool / result / 中断提示）",
+      [(i["t"], i.get("name")) for i in cbitems] == [("user", None), ("text", None), ("tool", "Bash"), ("result", None), ("event", None)]
+      and cbitems[2]["input"].get("command") == "npm test", str(cbitems)[:400])
+cbsnap = W.AgentPlugins([], external=[cb], off=()).sessions()
+check("CodeBuddy：被中断后是空闲", cbsnap and cbsnap[0]["activity"] == "idle", str(cbsnap)[:200])
+cbuse = cb.usage(0)
+check("CodeBuddy：token 同一次请求只算一次（messageId），输入减读缓存", len(cbuse) == 1
+      and (cbuse[0]["input"], cbuse[0]["output"], cbuse[0]["cacheRead"], cbuse[0]["requests"]) == (70, 20, 30, 1), cbuse)
+del os.environ["CODEBUDDY_CONFIG_DIR"]
+
+print("\n== ZCode 插件（plugins/zcode：~/.zcode/cli/db/db.sqlite，只读；单独下发）")
+ZHOME = os.path.join(ROOT, "zcode")
+os.makedirs(os.path.join(ZHOME, "cli", "db"))
+zdb = sqlite3.connect(os.path.join(ZHOME, "cli", "db", "db.sqlite"))
+zdb.executescript("""
+create table session (id text primary key, parent_id text, directory text, title text, version text, time_created integer,
+  time_updated integer, time_archived integer, time_deleted integer);
+create table message (id text primary key, session_id text, time_created integer, time_updated integer, data text, sequence integer);
+create table part (id text primary key, message_id text, session_id text, time_created integer, time_updated integer, data text, sequence integer);
+create table model_usage (id integer primary key, session_id text, model_id text, started_at integer, input_tokens integer,
+  output_tokens integer, cache_read_input_tokens integer, cache_creation_input_tokens integer);
+""")
+zdb.execute("insert into session values ('sess_1', null, '/tmp/z-proj', '跑测试', '3.17.2', 1000, 2000, null, null)")
+for mid, ts, data in (("m1", 1000, {"role": "user", "time": {"created": 1000}}),
+                      ("m2", 1001, {"role": "user", "time": {"created": 1001}, "metadata": {"visibility": "model-only"}}),
+                      ("m3", 1002, {"role": "assistant", "time": {"created": 1002, "completed": 1003}, "modelId": "glm-5.3"})):
+    zdb.execute("insert into message values (?, 'sess_1', ?, ?, ?, 0)", (mid, ts, ts, json.dumps(data)))
+for pid, mid, data in (("p1", "m1", {"type": "text", "text": "跑一下测试"}), ("p2", "m2", {"type": "text", "text": "# Environment"}),
+                       ("p3", "m3", {"type": "tool", "callID": "t1", "tool": "Bash", "state": {"status": "completed", "input": {"command": "npm test"}, "output": "ok"}}),
+                       ("p4", "m3", {"type": "text", "text": "测试通过"})):
+    zdb.execute("insert into part values (?, ?, 'sess_1', 0, 0, ?, 0)", (pid, mid, json.dumps(data, ensure_ascii=False)))
+zdb.execute("insert into model_usage values (1, 'sess_1', 'glm-5.3', 1793822555000, 100, 20, 30, 0)")
+zdb.commit()
+os.environ["ZCODE_HOME"] = ZHOME
+zc = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "zcode")
+zitems, zmore = zc.history("sess_1", None, 60)
+check("ZCode：记录规整（去掉只给模型看的系统消息，工具调用和结果、回复）",
+      [(i["t"], i.get("name")) for i in zitems] == [("user", None), ("tool", "Bash"), ("result", None), ("text", None)] and not zmore,
+      str(zitems)[:400])
+zuse = zc.usage(0)
+check("ZCode：token 按 model_usage，输入减读缓存", len(zuse) == 1 and (zuse[0]["input"], zuse[0]["output"], zuse[0]["cacheRead"]) == (70, 20, 30)
+      and zuse[0]["model"] == "glm-5.3", zuse)
+check("ZCode：只读、没开 ZCode 时不列会话", zc.read_only and zc.sessions() == [])
+zdb.close()
+del os.environ["ZCODE_HOME"]
+
+print("\n== Antigravity 插件（plugins/antigravity：~/.gemini/antigravity-cli 的会话库 + transcript_full.jsonl + tmux；单独下发）")
+AGHOME = os.path.join(ROOT, "gemini")
+AGCLI = os.path.join(AGHOME, "antigravity-cli")
+AGCID = "ac643bd1-c6f0-4585-a16f-6d1d936e1bf4"
+AGLOG = os.path.join(AGCLI, "brain", AGCID, ".system_generated", "logs")
+os.makedirs(AGLOG)
+os.makedirs(os.path.join(AGCLI, "conversations"))
+os.makedirs(os.path.join(AGCLI, "presence"))
+open(os.path.join(AGCLI, "presence", AGCID + ".lock"), "w").close()   # 退出后残留的锁：没有进程开着它，不列
+sdb = sqlite3.connect(os.path.join(AGCLI, "conversation_summaries.db"))
+sdb.execute("create table conversation_summaries (conversation_id text primary key, title text, workspace_uris text, status text, "
+            "last_modified_time text, parent_conversation_id text)")
+sdb.execute("insert into conversation_summaries values (?,?,?,?,?,?)", (AGCID, "测试会话", '["file:///tmp/agy-proj"]',
+            "CASCADE_RUN_STATUS_IDLE", "2026-11-04 23:36:14.643429181+00:00", ""))
+sdb.commit(); sdb.close()
+cdb = sqlite3.connect(os.path.join(AGCLI, "conversations", AGCID + ".db"))
+cdb.execute("create table steps (idx integer, step_type integer, status integer)")
+cdb.execute("create table gen_metadata (idx integer, data blob, size integer)")
+cdb.execute("insert into gen_metadata values (0, ?, 0)", (b"\x12\x1d\ngemini-3.1-flash-lite-preview\x9a\x01\x16gemini-3.1-pro-preview\x08",))
+cdb.commit(); cdb.close()
+AGLINES = [
+    {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-11-04T23:34:58Z",
+     "content": "<USER_REQUEST>\nrun: echo hi\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: x\n</ADDITIONAL_METADATA>"},
+    {"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-04T23:34:58Z",
+     "input_tokens": 70, "cache_read_tokens": 30, "output_tokens": 20,
+     "tool_calls": [{"name": "run_command", "args": {"CommandLine": "echo hi", "WaitMsBeforeAsync": 30}}]},
+    {"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-04T23:35:27Z", "content": "hi"},
+    {"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-04T23:35:27Z",
+     "input_tokens": 100, "cache_read_tokens": 0, "output_tokens": 20,
+     "tool_calls": [{"name": "view_file", "args": {"AbsolutePath": "/tmp/agy-proj/a.py"}}]},
+    {"step_index": 4, "source": "MODEL", "type": "GENERIC", "status": "ERROR", "created_at": "2026-11-04T23:35:30Z", "error": "user denied permission"},
+    {"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-04T23:35:31Z",
+     "input_tokens": 100, "cache_read_tokens": 0, "output_tokens": 20, "content": "做完了"},
+]
+with open(os.path.join(AGLOG, "transcript_full.jsonl"), "w") as handle:
+    handle.write("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in AGLINES))
+os.environ["ANTIGRAVITY_GEMINI_DIR"] = AGHOME
+agy = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "antigravity")
+aitems = [i for line, entry in enumerate(AGLINES) for i in agy.normalize(line, entry)]
+check("Antigravity：记录规整（只取 USER_REQUEST 里的话、run_command → Bash、AbsolutePath → file_path、结果按步号配对、出错的结果）",
+      [i["t"] for i in aitems] == ["user", "tool", "result", "tool", "result", "text"] and aitems[0]["text"] == "run: echo hi"
+      and aitems[1]["name"] == "Bash" and aitems[1]["input"]["command"] == "echo hi" and aitems[1]["toolId"] == aitems[2]["toolId"] == "s2"
+      and aitems[3]["input"].get("file_path") == "/tmp/agy-proj/a.py" and aitems[4]["isError"] and aitems[5]["text"] == "做完了", aitems)
+ause = agy.usage(0)
+check("Antigravity：token 按每次规划，input_tokens 本来就不含读缓存；模型取这次请求的（不是起标题的 flash-lite）",
+      len(ause) == 1 and (ause[0]["model"], ause[0]["input"], ause[0]["output"], ause[0]["cacheRead"], ause[0]["requests"], ause[0]["cwd"])
+      == ("gemini-3.1-pro-preview", 270, 60, 30, 3, "/tmp/agy-proj"), ause)
+check("Antigravity：锁文件残留、没有 agy 进程开着它时不列会话", agy.sessions() == [])
+del os.environ["ANTIGRAVITY_GEMINI_DIR"]
+
+print("\n== Muse Code 插件（plugins/muse-code：~/.local/share/muse 的 session.jsonl + tmux；单独下发）")
+MDATA = os.path.join(ROOT, "muse")
+MSID = "01a1a8f3-4afb-7491-807a-0dd34c8539dd"
+MDIR = os.path.join(MDATA, "sessions", "2026", "11", "04", MSID)
+os.makedirs(MDIR)
+os.makedirs(os.path.join(MDATA, "runtime", "muse", "sessions"))
+with open(os.path.join(MDATA, "runtime", "muse", "sessions", MSID + ".json"), "w") as handle:
+    json.dump({"schema_version": 1, "session_id": MSID, "process_generation_hint": "pid=999999"}, handle)   # 进程已经退了
+
+
+def mline(seq, payload_type, payload, us=1793835909620966):
+    return {"schema_version": 1, "sequence": seq, "recorded_at": us + seq * 1000, "record_type": "event",
+            "payload_type": payload_type, "payload": payload}
+
+
+def mrun(seq, **event):
+    return mline(seq, "runtime.session", {"kind": "run", "run_id": "r1", "event": event})
+
+
+MLINES = [
+    mline(3, "runtime.session.metadata", {"kind": "metadata", "record": {"provider_id": "meta"}}),
+    mline(4, "runtime.session.route_facts", {"kind": "route_facts", "record": {"cwd": "/tmp/muse-proj"}}),
+    mline(19, "session.name.changed", {"new_name": "hazel-comet"}),
+    mrun(26, kind="started", prompt="你好 muse"),
+    mrun(57, kind="model_completed", model="muse-spark-1.2", usage={"cached_tokens": 30, "input_tokens": 100, "output_tokens": 20}),
+    mrun(59, kind="reasoning_committed", text="想一想"),
+    mrun(60, kind="assistant_message_committed", message_id="m1", text="echo: 你好 muse"),
+    mrun(81, kind="terminal", terminal="completed"),
+    mrun(86, kind="started", prompt="第二句"),
+    mrun(122, kind="terminal", terminal="cancelled", reason="cancelled during model step"),
+]
+with open(os.path.join(MDIR, "session.jsonl"), "w") as handle:
+    handle.write(json.dumps({"retained_frame": "session_permission_transaction", "children": []}) + "\n")
+    handle.write("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in MLINES))
+os.environ["MUSE_DATA_DIR"] = MDATA
+muse = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "muse-code")
+mitems = [i for line, entry in enumerate(MLINES) for i in muse.normalize(line, entry)]
+check("Muse Code：记录规整（started 的 prompt 是用户的话、思考、回复、中断出提示，其余事件不出）",
+      [(i["t"], i.get("text")) for i in mitems] == [("user", "你好 muse"), ("thinking", "想一想"), ("text", "echo: 你好 muse"),
+                                                     ("user", "第二句"), ("event", "已中断")], mitems)
+muse_use = muse.usage(0)
+check("Muse Code：token 按 model_completed，输入减读缓存", len(muse_use) == 1
+      and (muse_use[0]["model"], muse_use[0]["input"], muse_use[0]["output"], muse_use[0]["cacheRead"], muse_use[0]["cwd"])
+      == ("muse-spark-1.2", 70, 20, 30, "/tmp/muse-proj"), muse_use)
+check("Muse Code：登记的进程已经退了就不列会话", muse.sessions() == [])
+mrow = next(r for r in W.AgentPlugins([], external=[muse], off=()).describe() if r["id"] == "muse-code")
+check("插件清单的功能缺口（gaps）原样带到设置页：做不到 / 未实测各有说明，Muse 确认命令暂未开放",
+      {g["kind"] for g in mrow.get("gaps", [])} <= {"unsupported", "untested"} and "untested" in {g["kind"] for g in mrow["gaps"]} and all(g.get("text") and g.get("textEn") for g in mrow["gaps"])
+      and "approve" not in mrow["abilities"] and muse.pending_options({"activity": "waiting", "pendingTool": "Bash"}) is None, mrow.get("gaps"))
+del os.environ["MUSE_DATA_DIR"]
+
+print("\n== trae-agent 插件（plugins/trae-agent：trajectories/*.json 整个重写 + tmux；单独下发）")
+trae = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "trae-agent")
+TRAJ = {"task": "run: echo hi", "start_time": "2026-11-04T19:30:00.100000", "end_time": "2026-11-04T19:21:59.000000",
+        "provider": "openai", "model": "gpt-x",
+        "llm_interactions": [{"timestamp": "2026-11-04T19:30:01.000000", "model": "gpt-x",
+                              "response": {"usage": {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 30}}}],
+        "agent_steps": [{"step_number": 1, "timestamp": "2026-11-04T19:30:01.000000",
+                         "llm_response": {"content": "先跑一下", "tool_calls": [{"call_id": "c1", "name": "bash", "arguments": {"command": "echo hi"}}]},
+                         "tool_calls": [{"call_id": "c1", "name": "bash", "arguments": {"command": "echo hi"}}],
+                         "tool_results": [{"call_id": "c1", "success": False, "result": "", "error": "boom"}], "error": None}]}
+TDIR = os.path.join(ROOT, "trae-proj", "trajectories")
+os.makedirs(TDIR)
+TPATH = os.path.join(TDIR, "trajectory_20261104_192135.json")
+with open(TPATH, "w") as handle:
+    json.dump(TRAJ, handle)
+trae.live = {"trae-1": (1, TPATH)}
+titems = trae.history("trae-1", None, 50)[0]
+check("trae-agent：轨迹规整（任务是用户的话、回复、bash → Bash、工具调用在 tool_calls 和 llm_response 里只出一次、失败的结果带 error）",
+      [i["t"] for i in titems] == ["user", "text", "tool", "result"] and titems[2]["name"] == "Bash"
+      and titems[3]["isError"] and titems[3]["text"] == "boom", titems)
+os.makedirs(os.path.join(os.environ["CCPULSE_DATA_DIR"], "plugins", "trae-agent"), exist_ok=True)
+with open(os.path.join(os.environ["CCPULSE_DATA_DIR"], "plugins", "trae-agent", "folders.json"), "w") as handle:
+    json.dump([TDIR], handle)
+tuse = trae.usage(0)
+check("trae-agent：token 按 llm_interactions（OpenAI 等的输入含读缓存，减掉）；本地时间按本地算；进程退出后照样算得到",
+      len(tuse) == 1 and (tuse[0]["model"], tuse[0]["input"], tuse[0]["output"], tuse[0]["cacheRead"]) == ("gpt-x", 70, 20, 30)
+      and tuse[0]["ts"] == int(time.mktime(time.strptime("2026-11-04T19:00:00", "%Y-%m-%dT%H:%M:%S")) * 1000), tuse)
+trow = next(r for r in W.AgentPlugins([], external=[trae], off=()).describe() if r["id"] == "trae-agent")
+check("trae-agent：做不到的（审批、提问、中断、忙时插话、Trae IDE）都在 gaps 里写明原因", trow["abilities"] == ["view", "reply"]
+      and sum(1 for g in trow["gaps"] if g["kind"] == "unsupported") >= 5, trow.get("gaps"))
+
 print("\n== Cursor 插件（plugins/cursor：hooks 记录 + 配套扩展 + tmux；单独下发）")
 CHOME = os.path.join(ROOT, "cursor-home")
 CSTATE = os.path.join(os.environ["CCPULSE_DATA_DIR"], "cursor")

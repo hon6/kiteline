@@ -1,0 +1,102 @@
+{
+ "id": "trae-agent",
+ "name": "trae-agent",
+ "version": "1.0.1",
+ "summary": "字节跳动开源的命令行编程 agent（不是 Trae IDE）：查看会话、状态和完整对话；在 tmux 中运行时可从手机发任务",
+ "summaryEn": "ByteDance's open-source command-line coding agent (not the Trae IDE): view sessions, status and full conversations; send tasks from your phone when it runs in tmux",
+ "needs": [
+  "fs.read",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "commands": [
+   "trae-cli"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply"
+    ],
+    "verified": false,
+    "note": "发任务需要 trae-agent 在 tmux 中运行"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "从手机操作暂未开放（Windows 上还没实测），只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply"
+    ],
+    "verified": true,
+    "note": "发任务需要 trae-agent 在 tmux 中运行"
+   }
+  }
+ },
+ "limitsNote": "trae-agent 使用你自己配置的模型服务（Anthropic、OpenAI、豆包等），额度和余额请在对应服务的控制台查看，「今日用量」中不显示；token 按 trae-agent 的轨迹记录统计",
+ "limitsNoteEn": "trae-agent uses the model service you configure (Anthropic, OpenAI, Doubao and others); check quota and balance in that service's console, as it isn't shown under Today's usage. Tokens are counted from trae-agent's trajectory files",
+ "gaps": [
+  {
+   "kind": "untested",
+   "text": "Windows 上从手机回复、确认、中断还没实测，暂未开放，只能查看（Kiteline 已能往 Windows 终端里发按键，逐家实测后开放）",
+   "textEn": "Replying, confirming and interrupting from your phone on Windows aren't tested yet, so they're off and sessions are view-only (Kiteline can now type into Windows terminals; each agent is enabled once tested)"
+  },
+  {
+   "kind": "untested",
+   "text": "Windows 上的查看还没实测（找进程的办法换成了 Windows 也能用的）",
+   "textEn": "Viewing on Windows isn't tested yet (process detection now works on Windows too)"
+  },
+  {
+   "kind": "unsupported",
+   "text": "Trae IDE 接不了：它的对话库是加密的，AI 部分走本机私有协议，要破解或逆向才能读，这里不做",
+   "textEn": "The Trae IDE can't be supported: its chat database is encrypted and its AI runs over a private local protocol, which would have to be cracked or reverse-engineered"
+  },
+  {
+   "kind": "unsupported",
+   "text": "没有审批和提问：trae-agent 本身不弹确认、也不提问，工具直接执行",
+   "textEn": "No approvals or questions: trae-agent itself never asks for confirmation or asks questions; tools run directly"
+  },
+  {
+   "kind": "unsupported",
+   "text": "不能中断：trae-agent 没有只停当前任务的办法，Ctrl+C 会退出整个程序",
+   "textEn": "Can't interrupt: trae-agent has no way to stop just the current task; Ctrl+C quits the whole program"
+  },
+  {
+   "kind": "unsupported",
+   "text": "忙时不能插话：trae-agent 在执行任务时不接收新输入，要等这个任务做完",
+   "textEn": "Can't add messages while it's busy: trae-agent ignores new input while a task is running, so wait for it to finish"
+  },
+  {
+   "kind": "unsupported",
+   "text": "只看得到当前任务的完整记录：在同一个窗口里开始新任务时，trae-agent 会清掉上一个任务的记录",
+   "textEn": "Only the current task's full record is available: when a new task starts in the same window, trae-agent clears the previous task's record"
+  },
+  {
+   "kind": "untested",
+   "text": "Mac 上还没实测（Linux 上已实测）",
+   "textEn": "Not yet tested on Mac (tested on Linux)"
+  }
+ ],
+ "mark": [
+  {
+   "d": "M4 4h16v3.2h-6.4V20h-3.2V7.2H4z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "trae-agent",
+ "caps": [],
+ "notes": "改进 Windows 上找会话的办法；从手机操作 Windows 上的会话在实测通过前暂不开放，设置 → 插件中有说明。",
+ "notesEn": "Better session detection on Windows; controlling Windows sessions from your phone stays off until tested, as noted in Settings → Plugins."
+}

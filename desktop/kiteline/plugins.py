@@ -417,6 +417,8 @@ class PluginStore:
                 # 额度、余额能不能显示、为什么没有（每个插件一句，规范 4.5）
                 "limitsNote": row.get("limitsNote") or entry.get("limitsNote") or None,
                 "limitsNoteEn": row.get("limitsNoteEn") or entry.get("limitsNoteEn") or None,
+                # 功能缺口：[{kind: unsupported 确定做不到 / untested 还没实测, text, textEn}]
+                "gaps": row.get("gaps") or entry.get("gaps") or [],
                 "action": action,
                 "target": target and {k: target.get(k) for k in ("version", "notes", "notesEn", "minApp", "size")},
                 "pending": plugin_id in self.prefs["pending"],

@@ -94,6 +94,13 @@ public static class PluginsPage
         // 额度、余额能不能显示、为什么没有（每个插件一句）
         if (plugin.Str("limitsNote") is { Length: > 0 } limits)
             lines.Children.Add(Ui.Text(L("额度：%@", Lang.IsEnglish && plugin.Str("limitsNoteEn") is { Length: > 0 } en ? en : L(limits)), 11, color: "Text3", lines: 0).Wrap());
+        // 功能缺口：确定做不到的（带原因）、还没实测的，各一行
+        foreach (var gap in plugin.Arr("gaps").Items())
+        {
+            if (gap.Str("text") is not { Length: > 0 } text) continue;
+            var shown = Lang.IsEnglish && gap.Str("textEn") is { Length: > 0 } gapEn ? gapEn : L(text);
+            lines.Children.Add(Ui.Text(L(gap.Str("kind") == "untested" ? "未实测：%@" : "做不到：%@", shown), 11, color: "Text3", lines: 0).Wrap());
+        }
         var (status, warn) = Status(plugin);
         if (status is not null) lines.Children.Add(Ui.Text(status, 11.5, color: warn ? "Red" : "Text2", lines: 3).Wrap());
         // 接入方式（默认不接的插件）、各平台兼容情况：点开才显示，免得列表太长

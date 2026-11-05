@@ -79,6 +79,8 @@ final class PluginStore: ObservableObject {
         /// 额度、余额能不能显示、为什么没有（每个插件一句）
         let limitsNote: String?
         let limitsNoteEn: String?
+        /// 功能缺口：[{kind: unsupported 确定做不到 / untested 还没实测, text, textEn}]，插件那一项下面逐条显示
+        let gaps: [[String: Any]]
         let action: String?          // install / update / needsApp
         let target: [String: Any]?
         let pending: Bool
@@ -415,7 +417,8 @@ final class PluginStore: ObservableObject {
                        optIn: optIn, optInEn: row["optInEn"] as? String ?? entry["optInEn"] as? String,
                        options: row["options"] as? [[String: Any]] ?? entry["options"] as? [[String: Any]] ?? [],
                        limitsNote: row["limitsNote"] as? String ?? entry["limitsNote"] as? String,
-                       limitsNoteEn: row["limitsNoteEn"] as? String ?? entry["limitsNoteEn"] as? String, action: action, target: target,
+                       limitsNoteEn: row["limitsNoteEn"] as? String ?? entry["limitsNoteEn"] as? String,
+                       gaps: row["gaps"] as? [[String: Any]] ?? entry["gaps"] as? [[String: Any]] ?? [], action: action, target: target,
                        pending: prefs.pending.contains(id), canRemove: installed.contains(id),
                        autoInstall: (current != nil || found || prefs.pending.contains(id)) && !prefs.held.contains(id),
                        held: prefs.held.contains(id), kind: entry["kind"] as? String ?? "agent")
@@ -815,26 +818,60 @@ private struct PluginErrorCard: View {
 /// 检测到本机装了对应的 agent 自动启用，插件有新版本自动更新：这一页主要是看状态、手动开关
 struct PluginsPane: View {
     @ObservedObject var store = PluginStore.shared
+    /// 右边滚到的那家（左边跟着选中）
+    @State private var focus: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("每个插件把一家编程 agent 接进 Kiteline，在手机和电脑上查看它的会话、回复和审批。检测到本机装了对应的 agent 会自动启用（标明需手动开启的除外），插件有新版本时自动更新。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            ScrollView {
-                VStack(spacing: 0) {
-                    // 技能包不是 agent，不列出来
-                    let shown = store.rows.filter { $0.kind != "skills" }
-                    ForEach(shown) { row in
-                        PluginRowView(row: row, busy: store.busy[row.id] != nil)
-                        if row.id != shown.last?.id { Divider().padding(.leading, 46) }
+            // 两栏（11-05）：左边 agent 名字，右边每家的详情（兼容表、接入方式直接展开）一个接一个、一直往下滚；
+            // 点左边的名字右边滚过去，右边滚到哪家左边就选中哪家
+            // 技能包不是 agent，不列出来
+            let shown = store.rows.filter { $0.kind != "skills" }
+            if shown.isEmpty {
+                Text(store.checking ? L("正在读取插件…") : L("本机 Kiteline 还没连上，稍后再看"))
+                    .font(.app(size: 12)).foregroundStyle(.secondary).padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .tarsCard(padding: 6)
+            } else {
+                let current = focus ?? shown.first?.id
+                HStack(alignment: .top, spacing: 12) {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(spacing: 2) {
+                                ForEach(shown) { row in
+                                    PluginNameRow(row: row, selected: row.id == current) {
+                                        withAnimation(.snappy(duration: 0.3)) { focus = row.id }
+                                    }
+                                    .id(row.id)
+                                }
+                            }
+                            .padding(6)
+                        }
+                        .onChange(of: current) { _, id in
+                            guard let id else { return }
+                            withAnimation(.snappy(duration: 0.2)) { proxy.scrollTo(id) }
+                        }
                     }
-                    if shown.isEmpty {
-                        Text(store.checking ? L("正在读取插件…") : L("本机 Kiteline 还没连上，稍后再看"))
-                            .font(.app(size: 12)).foregroundStyle(.secondary).padding(12)
+                    .tarsCard(padding: 0)
+                    .frame(width: 190)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(shown) { row in
+                                PluginRowView(row: row, busy: store.busy[row.id] != nil).id(row.id)
+                                if row.id != shown.last?.id { Divider().padding(.leading, 46) }
+                            }
+                            // 最后一家也能滚到顶上（左边才选得中它）
+                            Color.clear.frame(height: 220)
+                        }
+                        .scrollTargetLayout()
+                        .padding(6)
                     }
+                    .scrollPosition(id: $focus, anchor: .top)
+                    .tarsCard(padding: 0)
                 }
-                .tarsCard(padding: 6)
             }
             HStack {
                 Text(note).font(.app(size: 11.5)).foregroundStyle(.secondary)
@@ -867,14 +904,12 @@ private struct PluginRowView: View {
     let row: PluginStore.Row
     let busy: Bool
     @ObservedObject private var store = PluginStore.shared
-    @State private var expanded = PluginStore.expandAllForCapture
-    @State private var showOptIn = PluginStore.expandAllForCapture || PluginStore.expandOptInForCapture
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             line.opacity(dimmed ? 0.55 : 1)
             // 接入方式、兼容表放在整行下面、占满宽度（和文字左对齐），不跟右边的按钮挤。接入方式是开启前要读的，关着也不调暗
-            if showOptIn, let text = optInText {
+            if let text = optInText {
                 Text(verbatim: text).font(.app(size: 11.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -882,7 +917,7 @@ private struct PluginRowView: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
                     .padding(.leading, 40)
             }
-            if expanded, !row.support.isEmpty { SupportGrid(support: row.support).padding(.leading, 40).opacity(dimmed ? 0.55 : 1) }
+            if !row.support.isEmpty { SupportGrid(support: row.support).padding(.leading, 40).opacity(dimmed ? 0.55 : 1) }
             // 单项开关（默认关、要读那家凭证的那几项）：插件开着才给
             if row.version != nil, row.enabled {
                 ForEach(Array(row.options.enumerated()), id: \.offset) { _, option in
@@ -914,17 +949,13 @@ private struct PluginRowView: View {
                 if let note = limitsText {
                     Text(L("额度：%@", note)).font(.app(size: 11)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                 }
+                ForEach(Array(gapLines.enumerated()), id: \.offset) { _, line in
+                    Text(line).font(.app(size: 11)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                }
                 if let status {
                     Text(status.0).font(.app(size: 11.5))
                         .foregroundStyle(status.1 ? AnyShapeStyle(Color.red) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
                         .fixedSize(horizontal: false, vertical: true)
-                }
-                if optInText != nil || !row.support.isEmpty {
-                    HStack(spacing: 14) {
-                        if optInText != nil { disclosure("接入方式", open: showOptIn) { showOptIn.toggle() } }
-                        if !row.support.isEmpty { disclosure("各平台兼容情况", open: expanded) { expanded.toggle() } }
-                    }
-                    .padding(.top, 2)
                 }
             }
             Spacer(minLength: 8)
@@ -962,21 +993,19 @@ private struct PluginRowView: View {
         }
     }
 
-    private func disclosure(_ title: LocalizedStringKey, open: Bool, toggle: @escaping () -> Void) -> some View {
-        Button(action: toggle) {
-            HStack(spacing: 3) {
-                Text(title)
-                Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold))
-            }
-            .font(.app(size: 11)).foregroundStyle(.secondary).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     /// 额度、余额的说明：英文界面用插件给的英文，没给就查表
     private var limitsText: String? {
         guard let text = row.limitsNote, !text.isEmpty else { return nil }
         return Lang.shared.isEnglish ? (row.limitsNoteEn ?? ServerLang.ui(text)) : text
+    }
+
+    /// 功能缺口：「做不到：…」「未实测：…」各一行；英文界面用插件给的英文，没给就查表
+    private var gapLines: [String] {
+        row.gaps.compactMap { gap in
+            guard let text = gap["text"] as? String, !text.isEmpty else { return nil }
+            let shown = Lang.shared.isEnglish ? ((gap["textEn"] as? String) ?? ServerLang.ui(text)) : text
+            return (gap["kind"] as? String) == "untested" ? L("未实测：%@", shown) : L("做不到：%@", shown)
+        }
     }
 
     /// 默认不接的插件的接入说明：英文界面用插件给的英文，没给就查表
@@ -1028,6 +1057,40 @@ private struct PluginRowView: View {
             return (L("新版本 %@ 需要 Kiteline %@ 或更新版本", row.target?["version"] as? String ?? "", minimum), false)
         default: return nil
         }
+    }
+}
+
+/// 设置 → 插件左栏的一行：标志、名字，下面一句状态（版本 / 未安装 / 已关闭）；选中的淡色底 + 细边
+private struct PluginNameRow: View {
+    let row: PluginStore.Row
+    let selected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 8) {
+                AgentGlyph(row.id, size: 13)
+                    .frame(width: 22, height: 22)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.name).font(.app(size: 12.5, weight: .medium)).lineLimit(1)
+                    Text(state).font(.app(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Color.tarsBrand.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(selected ? Color.tarsBrand.opacity(0.35) : Color.clear, lineWidth: 0.5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var state: String {
+        if row.status == "error" || row.status == "retired" { return L("出错") }
+        guard row.version != nil else { return row.action == "install" ? L("未安装") : L("未检测到") }
+        return row.enabled ? (row.version ?? "") : L("已关闭")
     }
 }
 

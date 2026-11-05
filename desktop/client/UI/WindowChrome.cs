@@ -141,10 +141,26 @@ public static class WindowChrome
 }
 
 /// 侧栏的玻璃底：系统有窗口模糊（Windows 亚克力 / 云母、KDE 模糊）时只铺一层半透明的底色；
-/// 没有但能透明（GNOME）时画模糊后的桌面壁纸再盖底色；都不行就是不透明的侧栏色
+/// 没有但能透明（GNOME）时画模糊后的桌面壁纸再盖底色；都不行就是不透明的侧栏色。
+/// 侧栏是浮动面板：四边离开窗口 Gap、圆角 Radius，外面一圈是窗口底色（SidebarFloatFrame）、一层柔和投影（FloatShadow）
 public sealed class SidebarGlass : Control
 {
     public enum Mode { Opaque, System, Wallpaper }
+
+    /// 浮动面板离窗口边、离右边内容的距离，面板圆角
+    public const double Gap = 16, Radius = 20;
+
+    /// 面板下面的柔和投影（单独一层：同一元素上的阴影会吞掉后画的内容；底色透明，系统画外阴影时会挖掉面板里面，不压暗玻璃）
+    public static Border FloatShadow()
+    {
+        var shadow = new Border { Margin = new Thickness(Gap), CornerRadius = new CornerRadius(Radius), Background = Brushes.Transparent, IsHitTestVisible = false };
+        void Update() => shadow.BoxShadow = shadow.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Dark
+            ? new BoxShadows(new BoxShadow { OffsetY = 10, Blur = 32, Spread = -6, Color = Palette.Color(0, 0.42) }, [new BoxShadow { Blur = 2, Color = Palette.Color(0, 0.20) }])
+            : new BoxShadows(new BoxShadow { OffsetY = 8, Blur = 28, Spread = -6, Color = Palette.Color(0, 0.10) }, [new BoxShadow { Blur = 2, Color = Palette.Color(0, 0.04) }]);
+        shadow.ActualThemeVariantChanged += (_, _) => Update();
+        Update();
+        return shadow;
+    }
 
     public static Mode Current { get; private set; } = Mode.Opaque;
     public static event Action? Changed;
@@ -167,10 +183,11 @@ public sealed class SidebarGlass : Control
     public override void Render(DrawingContext context)
     {
         var rect = new Rect(Bounds.Size);
+        var shape = new RoundedRect(rect, Radius);
         switch (Current)
         {
             case Mode.System:
-                context.FillRectangle(Palette.Get("SidebarTint"), rect);
+                context.DrawRectangle(Palette.Get("SidebarTint"), null, shape);
                 break;
             case Mode.Wallpaper when Wallpaper.Image is { } image && TopLevel.GetTopLevel(this) is Window window && window.Screens.ScreenFromWindow(window) is { } screen:
                 // 这块控件在屏幕上的位置（物理像素）→ 壁纸图里的那一块
@@ -180,13 +197,37 @@ public sealed class SidebarGlass : Control
                 var fx = image.PixelSize.Width / (double)screenRect.Width;
                 var fy = image.PixelSize.Height / (double)screenRect.Height;
                 var source = new Rect((origin.X - screenRect.X) * fx, (origin.Y - screenRect.Y) * fy, Bounds.Width * scale * fx, Bounds.Height * scale * fy);
-                context.DrawImage(image, source, rect);
-                context.FillRectangle(Palette.Get("SidebarWallpaperTint"), rect);
+                using (context.PushClip(shape))
+                {
+                    context.DrawImage(image, source, rect);
+                    context.FillRectangle(Palette.Get("SidebarWallpaperTint"), rect);
+                }
                 break;
             default:
-                context.FillRectangle(Palette.Get("Sidebar"), rect);
+                context.DrawRectangle(Palette.Get("Sidebar"), null, shape);
                 break;
         }
+        // 面板一圈细边（也盖住和外圈窗口底色接缝处的抗锯齿）
+        context.DrawRectangle(null, new Pen(Palette.Get("SidebarEdge"), 1), new RoundedRect(rect.Deflate(0.5), Radius - 0.5));
+    }
+}
+
+/// 浮动侧栏外面那一圈：窗口底色（和右边内容同色），中间挖掉面板（系统玻璃要从这里透出来）；空白处按住拖窗口，同标题栏
+public sealed class SidebarFloatFrame : Control
+{
+    public SidebarFloatFrame()
+    {
+        PointerPressed += WindowChrome.DragWindow;
+        ActualThemeVariantChanged += (_, _) => InvalidateVisual();
+    }
+
+    public override void Render(DrawingContext context)
+    {
+        var rect = new Rect(Bounds.Size);
+        var gap = SidebarGlass.Gap;
+        if (rect.Width <= gap * 2 || rect.Height <= gap * 2) { context.FillRectangle(Palette.Get("Window"), rect); return; }
+        var hole = new RectangleGeometry(rect.Deflate(gap), SidebarGlass.Radius, SidebarGlass.Radius);
+        context.DrawGeometry(Palette.Get("Window"), null, new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(rect), hole));
     }
 }
 

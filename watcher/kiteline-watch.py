@@ -1613,9 +1613,14 @@ def user_origin(origin):
 
 def bridge_said(entry):
     """Claude 忙时手机发的话，后台送达 mod 在两次工具调用之间插进了这一轮：记录里是 isMeta 的 user 行、origin 是 kiteline 插件，
-    照你说的话显示（VS Code 不显示 isMeta 行）"""
+    文字块开头垫了零宽空格，照你说的话显示（VS Code 不显示 isMeta 行）。
+    只认垫了零宽空格的：Claude Code 替插件执行斜杠命令时写的 <local-command-caveat> 说明、展开的技能正文也是 isMeta + kiteline 来源"""
     origin = entry.get("origin")
-    return isinstance(origin, dict) and origin.get("kind") == "plugin" and origin.get("name") == BRIDGE_MOD_NAME
+    if not (isinstance(origin, dict) and origin.get("kind") == "plugin" and origin.get("name") == BRIDGE_MOD_NAME):
+        return False
+    content = (entry.get("message") or {}).get("content")
+    return isinstance(content, list) and any(
+        isinstance(block, dict) and block.get("type") == "text" and str(block.get("text") or "").startswith("​") for block in content)
 
 
 def peer_body(origin, raw):
@@ -1893,7 +1898,7 @@ def normalize_line(offset, entry):
                 continue
             btype = block.get("type")
             if btype == "text":
-                cleaned = strip_reminders(block.get("text"))
+                cleaned = strip_reminders(block.get("text")).lstrip("​")
                 if cleaned:
                     texts.append(cleaned)
             elif btype == "image":
@@ -4214,7 +4219,8 @@ export const register: Register = on => {
     const result = await next(e)
     if (e.agent_id !== undefined) return result
     for (const text of later.splice(0)) {
-      const added = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(() => undefined)
+      // 开头垫零宽空格：watcher 据此认出是你的话（替插件执行命令时 Claude Code 写的说明行也是 isMeta、kiteline 来源，不能显示）
+      const added = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: `\\u200b${text}` }] } }).catch(() => undefined)
       if (!added || added.deny !== undefined) later.push(text)
     }
     return result
@@ -9125,6 +9131,8 @@ def tmux_send(pid, text, keys, submit):
     if hosted:   # 托管会话：写进守护进程拿着的伪终端（见 HostedSessions）
         return HOSTED.send(hosted, text, keys, submit)
     pane = _TMUX_PANES.get(pid) or find_tmux_pane(pid)
+    if not pane and IS_WINDOWS and pid_alive(pid):
+        return console_send(pid, text, keys, submit)   # Windows 没有 tmux：写进它所在的控制台
     if not pane:
         raise RuntimeError("这个 CLI 会话不在 tmux 里，无法远程投递（在 tmux 中启动 claude 即可）")
     if text:
@@ -9142,6 +9150,321 @@ def tmux_send(pid, text, keys, submit):
     if submit:
         time.sleep(0.15)
         subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"], check=True, timeout=10)
+    return pane
+
+
+# ---------------------------------------------------------------------------
+# 通用终端层（插件用，规范 4.4 的 term.*）：tmux 窗格、托管会话、Windows 控制台用同一套调用
+#   term_pane(pid)            → 窗格标识：tmux 的 "%3"、"hosted:<id>"、Windows 的 "console:<pid>"；不可操作时 None
+#   term_screen(pane, lines)  → 屏幕上最后几十行的文字（判断是不是在等确认、忙不忙）
+#   term_keys(pane, *names)   → 按键，名字用 tmux 的写法：Enter、Escape、Up、Down、Tab、BTab、BSpace、C-c、C-u、C-q、单个字符
+#   tmux_send(pid, …)         → 发文字 + 按键 + 回车（Windows 上没有 tmux 时走控制台）
+# Windows 上没有 tmux：在一个没有控制台的子进程里 AttachConsole 到 CLI 所在的控制台，WriteConsoleInputW 写按键、
+# ReadConsoleOutputCharacterW 读屏幕（同电脑端给 Claude Code 用的写法，delivery_win.console_input_main）。
+# 每个会话一个常驻子进程（ConsoleBridge），目标进程退了它也退，免得拖住终端窗口不关（11-05）。
+# ---------------------------------------------------------------------------
+
+_PROCESS_CACHE = [0.0, []]
+
+
+def process_list():
+    """本机进程（插件用，HOST_CAPS proc.list）：[{"pid", "cmd" 完整命令行, "start" 启动时间（秒）或 None}]。
+    Unix 用 ps；Windows 没有 ps，用进程快照 + NtQueryInformationProcess 读命令行（11-05）。2 秒内重复调用用缓存"""
+    if time.time() - _PROCESS_CACHE[0] < 2.0:
+        return _PROCESS_CACHE[1]
+    out = []
+    if IS_WINDOWS:
+        ntdll = ctypes.WinDLL("ntdll")
+
+        class USTR(ctypes.Structure):
+            _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
+
+        for pid, name in _win_process_names().items():
+            if not pid:
+                continue
+            cmd = name
+            handle = _win_open(pid)
+            if handle:
+                try:
+                    size = wintypes.ULONG(0)
+                    buffer = ctypes.create_string_buffer(8192)
+                    status = ntdll.NtQueryInformationProcess(handle, 60, buffer, len(buffer), ctypes.byref(size)) & 0xFFFFFFFF
+                    if status == 0xC0000004 and size.value:   # STATUS_INFO_LENGTH_MISMATCH
+                        buffer = ctypes.create_string_buffer(size.value)
+                        status = ntdll.NtQueryInformationProcess(handle, 60, buffer, len(buffer), ctypes.byref(size)) & 0xFFFFFFFF
+                    if status == 0:
+                        text = USTR.from_buffer(buffer)
+                        if text.Buffer and text.Length:
+                            cmd = ctypes.wstring_at(text.Buffer, text.Length // 2)
+                finally:
+                    _k32.CloseHandle(handle)
+            start = _win_start_token(pid)
+            out.append({"pid": pid, "cmd": cmd, "start": int(start) if start else None})
+    else:
+        try:
+            text = subprocess.run(["ps", "-axww", "-o", "pid=,lstart=,command="], capture_output=True, text=True, timeout=5,
+                                  env=dict(os.environ, LC_ALL="C", LANG="C")).stdout
+        except (OSError, subprocess.SubprocessError):
+            text = ""
+        for line in text.splitlines():
+            parts = line.split()
+            if len(parts) < 7 or not parts[0].isdigit():
+                continue
+            try:
+                start = int(time.mktime(time.strptime(" ".join(parts[1:6]), "%a %b %d %H:%M:%S %Y")))
+            except ValueError:
+                start = None
+            out.append({"pid": int(parts[0]), "cmd": " ".join(parts[6:]), "start": start})
+    _PROCESS_CACHE[0], _PROCESS_CACHE[1] = time.time(), out
+    return out
+
+
+_CONSOLE_VK = {"Enter": (0x0D, "\r"), "Escape": (0x1B, "\x1b"), "Up": (0x26, ""), "Down": (0x28, ""), "Left": (0x25, ""),
+               "Right": (0x27, ""), "Tab": (0x09, "\t"), "BTab": (0x09, "\t"), "BSpace": (0x08, "\b"), "Home": (0x24, ""),
+               "End": (0x23, ""), "Space": (0x20, " ")}
+
+
+def _console_records(tokens):
+    """[{"text": …} | {"key": "C-c" / "Enter"…}] → INPUT_RECORD 参数 (按下?, vk, 扫描码, 字符, 控制键状态)"""
+    out = []
+    user32 = ctypes.WinDLL("user32")
+    for token in tokens:
+        if "text" in token:
+            data = str(token["text"]).encode("utf-16-le")
+            for unit in (int.from_bytes(data[i:i + 2], "little") for i in range(0, len(data), 2)):
+                ch = chr(unit)
+                vk = {"\r": 0x0D, "\n": 0x0D, "\x1b": 0x1B, "\t": 0x09}.get(ch, 0)
+                out.append((vk, user32.MapVirtualKeyW(vk, 0) if vk else 0, "\r" if ch == "\n" else ch, 0))
+            continue
+        name = str(token.get("key") or "")
+        if name.startswith("C-") and len(name) == 3:
+            letter = name[2].upper()
+            out.append((ord(letter), user32.MapVirtualKeyW(ord(letter), 0), chr(ord(letter) - 64), 0x0008))   # LEFT_CTRL_PRESSED
+        elif name in _CONSOLE_VK:
+            vk, ch = _CONSOLE_VK[name]
+            state = 0x0010 if name == "BTab" else (0x0100 if not ch else 0)   # SHIFT_PRESSED / ENHANCED_KEY（方向键）
+            out.append((vk, user32.MapVirtualKeyW(vk, 0), ch, state))
+        elif len(name) == 1:
+            out.append((0, 0, name, 0))
+        else:
+            raise ValueError("不支持的按键：%s" % name)
+    return out
+
+
+def console_io_main(pid):
+    """子进程入口（ccpulse-watch.py console-io <pid>）：常驻，stdin 一行一个请求 {"op": "keys", "tokens"} / {"op": "read"}，
+    stdout 一行一个回答 {"ok", "text"?, "error"?}。目标进程退了就退出"""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class CHAR(ctypes.Union):
+        _fields_ = [("UnicodeChar", wintypes.WCHAR), ("AsciiChar", ctypes.c_char)]
+
+    class KEY(ctypes.Structure):
+        _fields_ = [("bKeyDown", wintypes.BOOL), ("wRepeatCount", wintypes.WORD), ("wVirtualKeyCode", wintypes.WORD),
+                    ("wVirtualScanCode", wintypes.WORD), ("uChar", CHAR), ("dwControlKeyState", wintypes.DWORD)]
+
+    class EVENT(ctypes.Union):
+        _fields_ = [("KeyEvent", KEY), ("_pad", ctypes.c_byte * 16)]
+
+    class RECORD(ctypes.Structure):
+        _fields_ = [("EventType", wintypes.WORD), ("Event", EVENT)]
+
+    class COORD(ctypes.Structure):
+        _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("Left", wintypes.SHORT), ("Top", wintypes.SHORT), ("Right", wintypes.SHORT), ("Bottom", wintypes.SHORT)]
+
+    class INFO(ctypes.Structure):
+        _fields_ = [("dwSize", COORD), ("dwCursorPosition", COORD), ("wAttributes", wintypes.WORD),
+                    ("srWindow", RECT), ("dwMaximumWindowSize", COORD)]
+
+    out = sys.stdout
+
+    def reply(obj):
+        out.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        out.flush()
+
+    kernel32.FreeConsole()
+    if not kernel32.AttachConsole(wintypes.DWORD(pid)):
+        reply({"ok": False, "error": "无法连接到会话所在的终端（AttachConsole 失败，错误 %d）" % ctypes.get_last_error()})
+        return 2
+    kernel32.SetConsoleCtrlHandler(None, True)   # 用户在那个终端里按 Ctrl+C 时别把自己也结束了
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                     wintypes.DWORD, wintypes.HANDLE]
+    conin = kernel32.CreateFileW("CONIN$", 0xC0000000, 3, None, 3, 0, None)
+    conout = kernel32.CreateFileW("CONOUT$", 0xC0000000, 3, None, 3, 0, None)
+    reply({"ok": True, "ready": True})
+
+    def alive():
+        handle = kernel32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = wintypes.DWORD()
+        kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        return code.value == 259   # STILL_ACTIVE
+
+    def watchdog():
+        while alive():
+            time.sleep(1)
+        os._exit(0)
+
+    threading.Thread(target=watchdog, daemon=True).start()
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+        except ValueError:
+            continue
+        try:
+            if request.get("op") == "keys":
+                records = []
+                for vk, scan, ch, state in _console_records(request.get("tokens") or []):
+                    for down in (True, False):
+                        rec = RECORD()
+                        rec.EventType = 1
+                        rec.Event.KeyEvent = KEY(down, 1, vk, scan, CHAR(UnicodeChar=ch or "\0"), state)
+                        records.append(rec)
+                if records:
+                    array = (RECORD * len(records))(*records)
+                    written = wintypes.DWORD()
+                    if not kernel32.WriteConsoleInputW(wintypes.HANDLE(conin), array, len(records), ctypes.byref(written)):
+                        raise OSError("写入终端输入失败（错误 %d）" % ctypes.get_last_error())
+                reply({"ok": True})
+            elif request.get("op") == "read":
+                info = INFO()
+                if not kernel32.GetConsoleScreenBufferInfo(wintypes.HANDLE(conout), ctypes.byref(info)):
+                    raise OSError("读不到终端内容（错误 %d）" % ctypes.get_last_error())
+                width = info.dwSize.X
+                bottom = info.srWindow.Bottom
+                top = max(0, bottom - int(request.get("lines") or (bottom - info.srWindow.Top)))
+                rows = []
+                buffer = ctypes.create_unicode_buffer(width + 1)
+                for row in range(top, bottom + 1):
+                    count = wintypes.DWORD()
+                    kernel32.ReadConsoleOutputCharacterW(wintypes.HANDLE(conout), buffer, width, COORD(0, row), ctypes.byref(count))
+                    rows.append(buffer.value[:count.value].rstrip())
+                reply({"ok": True, "text": "\n".join(rows)})
+            else:
+                reply({"ok": False, "error": "unknown op"})
+        except Exception as exc:   # 一条请求出错不退出
+            reply({"ok": False, "error": str(exc)})
+    return 0
+
+
+class ConsoleBridge:
+    """watcher 这边：每个 Windows 控制台会话一个常驻子进程（console_io_main），按行问答；子进程挂了下次再起"""
+
+    def __init__(self):
+        self.procs = {}
+        self.lock = threading.Lock()
+
+    def _command(self, pid):
+        exe = os.path.basename(sys.executable).lower()
+        base = [sys.executable] if exe.startswith("python") else [sys.executable, "--run-script"]
+        return base + [os.path.abspath(__file__), "console-io", str(pid)]
+
+    def _proc(self, pid):
+        proc = self.procs.get(pid)
+        if proc and proc.poll() is None:
+            return proc
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        proc = subprocess.Popen(self._command(pid), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=env, creationflags=0x00000008, text=True, encoding="utf-8", bufsize=1)   # DETACHED_PROCESS
+        first = json.loads(proc.stdout.readline() or "{}")
+        if not first.get("ok"):
+            proc.kill()
+            raise RuntimeError(first.get("error") or "无法连接到会话所在的终端")
+        self.procs[pid] = proc
+        return proc
+
+    def ask(self, pid, request):
+        with self.lock:
+            proc = self._proc(pid)
+            try:
+                proc.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+                proc.stdin.flush()
+                answer = json.loads(proc.stdout.readline() or "{}")
+            except (OSError, ValueError):
+                self.procs.pop(pid, None)
+                raise RuntimeError("和会话所在终端的连接断了，请重试")
+        if not answer.get("ok"):
+            raise RuntimeError(answer.get("error") or "终端操作失败")
+        return answer
+
+
+CONSOLE = ConsoleBridge()
+_SCREEN_CACHE = {}
+
+
+def term_pane(pid):
+    """可操作的终端：tmux 窗格 / 托管会话 / Windows 控制台；都不是返回 None"""
+    if not pid:
+        return None
+    hosted = HOSTED.by_pid(pid)
+    if hosted:
+        return "hosted:%s" % hosted.get("id")
+    pane = find_tmux_pane(pid)
+    if pane:
+        return pane
+    if IS_WINDOWS and pid_alive(pid):
+        return "console:%d" % pid
+    return None
+
+
+def term_screen(pane, lines=None):
+    """屏幕上的文字（最后 lines 行；不给就是当前一屏）。读不到返回空字符串。Windows 上 1 秒内重复读用缓存（每次要问子进程）"""
+    if not pane:
+        return ""
+    if pane.startswith("console:"):
+        key = (pane, lines)
+        hit = _SCREEN_CACHE.get(key)
+        if hit and time.time() - hit[0] < 1.0:
+            return hit[1]
+        try:
+            text = CONSOLE.ask(int(pane.split(":", 1)[1]), {"op": "read", "lines": lines or 0}).get("text") or ""
+        except RuntimeError:
+            text = ""
+        _SCREEN_CACHE[key] = (time.time(), text)
+        return text
+    if pane.startswith("hosted:"):
+        return ""
+    try:
+        cmd = ["tmux", "capture-pane", "-p", "-J", "-t", pane] + (["-S", "-%d" % lines] if lines else [])
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def term_keys(pane, *names):
+    """按键（tmux 的写法）"""
+    if not pane:
+        raise RuntimeError("这个会话不在可操作的终端里")
+    if pane.startswith("console:"):
+        _SCREEN_CACHE.clear()
+        CONSOLE.ask(int(pane.split(":", 1)[1]), {"op": "keys", "tokens": [{"key": name} for name in names]})
+        return
+    if pane.startswith("hosted:"):
+        raise RuntimeError("托管会话不支持这个按键")
+    for name in names:
+        subprocess.run(["tmux", "send-keys", "-t", pane, name], check=True, timeout=10)
+
+
+def console_send(pid, text, keys, submit):
+    """Windows：发文字、按键、回车。文字和回车分开写（同电脑端 send_console：一口气写进去有的 TUI 当成粘贴，回车只换行）"""
+    pane = "console:%d" % pid
+    if text:
+        CONSOLE.ask(pid, {"op": "keys", "tokens": [{"text": text.replace("\r\n", "\n").replace("\n", " ")}]})
+    for key in keys or []:
+        name = TMUX_KEYS.get(str(key).lower())
+        if not name:
+            raise RuntimeError("不支持的按键：%s" % key)
+        term_keys(pane, name)
+    if submit:
+        time.sleep(0.4)
+        term_keys(pane, "Enter")
+    _SCREEN_CACHE.clear()
     return pane
 
 
@@ -12667,6 +12990,11 @@ HOST_CAPS = {
     "secret.read": 1,    # 读 agent 自己存在本机的凭据
     "install.file": 1,   # 往 agent 里装带标记的组件，停用即删
     "term.tmux": 1,      # 往 tmux 窗格发文字和按键
+    # 通用终端层：term_pane / term_screen / term_keys，tmux、托管会话、Windows 控制台同一套调用；
+    # Windows 上没有 tmux 的命令行 agent 也能回复、确认、中断（11-05）。老中台没有这几个函数，插件退回只认 tmux
+    "term.any": 1,
+    # 跨平台进程列举 process_list()：Windows 上没有 ps，插件找进程用它（11-05）
+    "proc.list": 1,
     # 界面动作单（规范 3.3 的第一步）：插件的 send 可以回 {"message", "ui": [动作…]}，电脑端按顺序做、做完把前台还给用户：
     #   {"do": "focus", "app", "folder"}  把 app 里打开了这个项目的窗口切到前台，核对确实在前台
     #   {"do": "plugin", "step"}          回头请插件做一步（cmd agent_ui → 插件的 ui_step），比如窗口在前台后再往里填字
@@ -12778,6 +13106,9 @@ class AgentPlugin:
     # 英文：内置的走 i18n/en.json，外部插件写清单的 limitsNoteEn
     limits_note = None
     limits_note_en = None
+    # 功能上的缺口（设置 → 插件里那家下面逐条显示，规范 4.2 的 gaps）：[{"kind": "unsupported" 确定做不到 / "untested" 还没实测,
+    # "text": 中文（做不到的要写原因）, "textEn": 英文}]。没列的就是都做到了、也测过
+    gaps = ()
 
     def option_on(self, key):
         """用户在设置里打开了这一项没有"""
@@ -13389,6 +13720,9 @@ def load_external_plugins(root=None):
                 plugin.opt_in, plugin.opt_in_en = str(manifest["optIn"]), manifest.get("optInEn") or plugin.opt_in_en
             if manifest.get("limitsNote"):
                 plugin.limits_note, plugin.limits_note_en = str(manifest["limitsNote"]), manifest.get("limitsNoteEn") or None
+            if isinstance(manifest.get("gaps"), list):
+                plugin.gaps = tuple(g for g in manifest["gaps"] if isinstance(g, dict) and g.get("text")
+                                    and g.get("kind") in ("unsupported", "untested"))
             if isinstance(manifest.get("options"), list):
                 plugin.options = tuple(o for o in manifest["options"] if isinstance(o, dict) and o.get("id") and o.get("name"))
             plugin.source = "external"
@@ -13579,6 +13913,8 @@ class AgentPlugins:
                 row["limitsNote"] = plugin.limits_note
                 if plugin.limits_note_en:
                     row["limitsNoteEn"] = plugin.limits_note_en
+            if plugin.gaps:
+                row["gaps"] = [dict(g) for g in plugin.gaps]
             row.update(self.status.get(plugin.id) or {})
             out.append(row)
         return out + list(self.broken)
@@ -16764,6 +17100,8 @@ _STAGE_TEXT_MODEL = (
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 2 and sys.argv[1] == "console-io" and IS_WINDOWS:
+        sys.exit(console_io_main(int(sys.argv[2])))
     if len(sys.argv) > 1 and sys.argv[1] == "hold":
         sys.exit(command_hold(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "attach":

@@ -1,0 +1,99 @@
+{
+ "id": "zcode",
+ "name": "ZCode",
+ "version": "1.0.2",
+ "summary": "智谱的 agent 编程应用（桌面版和命令行）：查看会话、状态和完整对话（只读）",
+ "summaryEn": "Zhipu's agentic coding app (desktop and CLI): view sessions, status and full conversations (view-only)",
+ "needs": [
+  "fs.read",
+  "db.read",
+  "proc"
+ ],
+ "detect": {
+  "paths": [
+   "~/.zcode"
+  ],
+  "commands": [
+   "zcode"
+  ]
+ },
+ "support": {
+  "mac": {
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "ZCode 没有对外的操作接口，只能查看"
+   },
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "只能查看"
+   }
+  },
+  "windows": {
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "ZCode 没有对外的操作接口，只能查看"
+   },
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "只能查看"
+   }
+  },
+  "linux": {
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "ZCode 没有对外的操作接口，只能查看"
+   },
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": true,
+    "note": "只能查看"
+   }
+  }
+ },
+ "limitsNote": "ZCode 配合的 GLM Coding Plan 额度（5 小时、每周）只能在智谱网页上查看，本机不记录，「今日用量」中不显示；token 按 ZCode 自己的记录统计",
+ "limitsNoteEn": "The GLM Coding Plan quota used with ZCode (5-hour and weekly) can only be checked on Zhipu's website and isn't recorded on your computer, so it isn't shown under Today's usage. Tokens are counted from ZCode's own records",
+ "mark": [
+  {
+   "d": "M4 4h16v3.2L9.2 16.8H20V20H4v-3.2L14.8 7.2H4z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "ZCode",
+ "caps": [],
+ "notes": "改进 Windows 上找会话的办法；从手机操作 Windows 上的会话在实测通过前暂不开放，设置 → 插件中有说明。",
+ "notesEn": "Better session detection on Windows; controlling Windows sessions from your phone stays off until tested, as noted in Settings → Plugins.",
+ "gaps": [
+  {
+   "kind": "untested",
+   "text": "Windows 上的查看还没实测（找进程的办法换成了 Windows 也能用的）",
+   "textEn": "Viewing on Windows isn't tested yet (process detection now works on Windows too)"
+  },
+  {
+   "kind": "unsupported",
+   "text": "回复、确认、回答提问、中断都做不到：ZCode 没有对外的操作接口，桌面版自带的命令行也没有可操作的终端界面",
+   "textEn": "Replying, confirming, answering questions and interrupting aren't possible: ZCode offers no external control interface, and the CLI bundled with the desktop app has no interactive terminal interface"
+  },
+  {
+   "kind": "untested",
+   "text": "Mac、Windows 上还没实测（Linux 上已实测）",
+   "textEn": "Not yet tested on Mac or Windows (tested on Linux)"
+  }
+ ]
+}

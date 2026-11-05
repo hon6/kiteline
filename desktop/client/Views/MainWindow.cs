@@ -27,7 +27,10 @@ public sealed class MainWindow : Window
     ContentControl detail = new();
     ColumnDefinition sidebarColumn = new();
     /// 左边栏和它右边的细线、拖宽度的把手：世界模式里收起会话列表时一起藏起来
-    Control? sidebarPanel, sidebarLine, sidebarSplitter;
+    Control? sidebarPanel, sidebarSplitter;
+    /// 侧栏那一列的宽度、最小宽度（面板宽 + 两边空隙）
+    static double SidebarColumnWidth => (Prefs.Number("sidebarWidth") ?? SidebarView.Width0) + SidebarGlass.Gap * 2;
+    static double SidebarMin => 260 + SidebarGlass.Gap * 2;
     /// 侧栏顶上的世界入口（进了世界底下一道主题色）
     WorldGlobe? globe;
     Icon? flowIcon;
@@ -141,26 +144,27 @@ public sealed class MainWindow : Window
     void Build()
     {
         var grid = new Grid();
-        sidebarColumn = new ColumnDefinition(new GridLength(Prefs.Number("sidebarWidth") ?? SidebarView.Width0)) { MinWidth = 260, MaxWidth = 400 };
+        // 侧栏是浮动面板（四边离开 Gap、圆角、柔和投影）：那一列 = 面板宽 + 两边空隙；存的 sidebarWidth 仍是面板宽（同以前的列宽，升级后宽度不变）
+        sidebarColumn = new ColumnDefinition(new GridLength(SidebarColumnWidth)) { MinWidth = SidebarMin, MaxWidth = 400 + SidebarGlass.Gap * 2 };
         grid.ColumnDefinitions.Add(sidebarColumn);
         grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-        glass = new SidebarGlass();
-        var sidebar = new Panel { Children = { glass, new SidebarView(), SidebarTopBar() } };
+        glass = new SidebarGlass { Margin = new Thickness(SidebarGlass.Gap) };
+        var sidebar = new Panel
+        {
+            Children = { new SidebarFloatFrame(), SidebarGlass.FloatShadow(), glass, new SidebarView { Margin = new Thickness(SidebarGlass.Gap) }, SidebarTopBar() },
+        };
         sidebarPanel = sidebar;
         Grid.SetColumn(sidebar, 0);
         // 顶上飞的纸鸢（透明小窗口挂在主窗口上沿，同 Mac 版）
         KiteOverlay.Attach(this, sidebar);
-        // 侧栏右边一道细线；拖动改宽度的把手叠在右边内容的左缘（透明、不占地方，不然中间会露出一道缝）
-        var line = new Border { Width = 1, HorizontalAlignment = HorizontalAlignment.Right, IsHitTestVisible = false }.Res(Border.BackgroundProperty, "SidebarEdge");
-        Grid.SetColumn(line, 0);
+        // 拖动改宽度的把手铺满面板和右边内容之间的空隙（透明）
         var splitter = new GridSplitter
         {
-            Width = 6, MinWidth = 0, Margin = new Thickness(-3, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = Brushes.Transparent,
+            Width = SidebarGlass.Gap, MinWidth = 0, Margin = new Thickness(-SidebarGlass.Gap, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = Brushes.Transparent,
             ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndCurrent,
         };
-        splitter.DragCompleted += (_, _) => Prefs.Set("sidebarWidth", sidebarColumn.ActualWidth);
+        splitter.DragCompleted += (_, _) => Prefs.Set("sidebarWidth", sidebarColumn.ActualWidth - SidebarGlass.Gap * 2);
         Grid.SetColumn(splitter, 1);
-        sidebarLine = line;
         sidebarSplitter = splitter;
         // 右边不透明（只有侧栏是玻璃）
         detail = new ContentControl();
@@ -176,7 +180,6 @@ public sealed class MainWindow : Window
         var detailBox = new Border { Child = detailLayers }.Res(Border.BackgroundProperty, "Window");
         Grid.SetColumn(detailBox, 1);
         grid.Children.Add(sidebar);
-        grid.Children.Add(line);
         grid.Children.Add(detailBox);
         grid.Children.Add(splitter);
         toast = new ToastLayer();
@@ -232,7 +235,7 @@ public sealed class MainWindow : Window
         flow.Res(Border.BorderBrushProperty, "GlassEdge");
         flow.Tip(L("数据流大屏：所有会话读了什么、做了什么、产出去了哪，连成一块屏（Ctrl+Shift+D）"));
         UpdateWorldButtons();
-        var bar = Ui.H(8, compose, world, flow).Margin(16 + WindowChrome.CaptionLeftWidth, 8, 16, 0);
+        var bar = Ui.H(8, compose, world, flow).Margin(SidebarGlass.Gap + 12 + WindowChrome.CaptionLeftWidth, SidebarGlass.Gap + 8, 16, 0);
         bar.VerticalAlignment = VerticalAlignment.Top;
         bar.HorizontalAlignment = HorizontalAlignment.Left;
         return bar;
@@ -364,10 +367,10 @@ public sealed class MainWindow : Window
         if (WorldPanel.Current is { } world) world.IsVisible = on;
         UpdateWorldButtons();
         var collapsed = on && main.SidebarCollapsed;
-        foreach (var c in new[] { sidebarPanel, sidebarLine, sidebarSplitter }) if (c is not null) c.IsVisible = !collapsed;
+        foreach (var c in new[] { sidebarPanel, sidebarSplitter }) if (c is not null) c.IsVisible = !collapsed;
         KiteOverlay.Shared?.Refresh();
-        sidebarColumn.MinWidth = collapsed ? 0 : 260;
-        sidebarColumn.Width = new GridLength(collapsed ? 0 : Prefs.Number("sidebarWidth") ?? SidebarView.Width0);
+        sidebarColumn.MinWidth = collapsed ? 0 : SidebarMin;
+        sidebarColumn.Width = new GridLength(collapsed ? 0 : SidebarColumnWidth);
     }
 
     string? shownKind;

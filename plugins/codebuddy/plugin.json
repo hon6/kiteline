@@ -1,0 +1,113 @@
+{
+ "id": "codebuddy",
+ "name": "CodeBuddy / WorkBuddy",
+ "version": "1.0.2",
+ "summary": "腾讯的编程 agent（CodeBuddy Code 命令行、WorkBuddy 桌面版）：查看会话、状态和完整对话；命令行在 tmux 中运行时可回复、确认、回答提问和中断",
+ "summaryEn": "Tencent's coding agent (CodeBuddy Code CLI and the WorkBuddy desktop app): view sessions, status and full conversations; reply, confirm, answer questions and interrupt when the CLI runs in tmux",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.codebuddy",
+   "~/.workbuddy",
+   "~/.workbuddy-ai"
+  ],
+  "commands": [
+   "codebuddy",
+   "cbc"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "回复和确认需要 CodeBuddy Code 在 tmux 中运行"
+   },
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "WorkBuddy 桌面版的会话只能查看"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "从手机操作暂未开放（Windows 上还没实测），只能查看"
+   },
+   "desktop": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "WorkBuddy 桌面版的会话只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复和确认需要 CodeBuddy Code 在 tmux 中运行"
+   },
+   "desktop": {
+    "abilities": [],
+    "note": "WorkBuddy 没有 Linux 版"
+   }
+  }
+ },
+ "limitsNote": "CodeBuddy / WorkBuddy 按积分计费，积分用量只能在网页的「用量」页查看，本机不记录、也没有查询接口，「今日用量」中不显示；token 按本机记录统计",
+ "limitsNoteEn": "CodeBuddy / WorkBuddy bill in credits, which you can only check on the Usage page of their website; nothing is recorded on your computer and there's no query interface, so they aren't shown under Today's usage. Tokens are counted from local records",
+ "mark": [
+  {
+   "d": "M12 2.5a9.5 9.5 0 100 19 9.5 9.5 0 000-19zm0 3a6.5 6.5 0 015.6 3.2l-2.6 1.5A3.5 3.5 0 008.5 12a3.5 3.5 0 006.5 1.8l2.6 1.5A6.5 6.5 0 1112 5.5z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "CodeBuddy",
+ "caps": [],
+ "notes": "改进 Windows 上找会话的办法；从手机操作 Windows 上的会话在实测通过前暂不开放，设置 → 插件中有说明。",
+ "notesEn": "Better session detection on Windows; controlling Windows sessions from your phone stays off until tested, as noted in Settings → Plugins.",
+ "gaps": [
+  {
+   "kind": "untested",
+   "text": "Windows 上从手机回复、确认、中断还没实测，暂未开放，只能查看（Kiteline 已能往 Windows 终端里发按键，逐家实测后开放）",
+   "textEn": "Replying, confirming and interrupting from your phone on Windows aren't tested yet, so they're off and sessions are view-only (Kiteline can now type into Windows terminals; each agent is enabled once tested)"
+  },
+  {
+   "kind": "unsupported",
+   "text": "WorkBuddy 桌面版只能查看：它没有对外的操作接口",
+   "textEn": "The WorkBuddy desktop app is view-only: it offers no external control interface"
+  },
+  {
+   "kind": "untested",
+   "text": "Mac 上还没实测（Linux 上已全部实测）",
+   "textEn": "Not yet tested on Mac (fully tested on Linux)"
+  },
+  {
+   "kind": "untested",
+   "text": "WorkBuddy 桌面版还没在 Mac、Windows 真机上实测（它没有 Linux 版）",
+   "textEn": "The WorkBuddy desktop app hasn't been tested on a real Mac or Windows computer yet (it has no Linux version)"
+  }
+ ]
+}

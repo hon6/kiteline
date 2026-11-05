@@ -28,7 +28,7 @@ TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "completed": 
 SESSION_LINE = re.compile(r"Session:\s+(\d{8}_\d{6}_[0-9a-f]{6})")
 BUSY_MARKS = ("Ctrl+C cancel", "processing...", "reasoning...")
 APPROVAL_MARK, QUESTION_MARK = "Dangerous Command", "Hermes needs your input"
-READ_ONLY = (("Windows 上没有 tmux，Hermes 的会话只能查看", "Windows has no tmux, so Hermes sessions are view-only.")
+READ_ONLY = (("Windows 上从手机操作 Hermes 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Hermes on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
              ("Hermes 不在 tmux 中运行，只能查看；在 tmux 中启动 hermes 后即可从手机回复和确认",
               "Hermes isn't running in tmux, so this session is view-only. Start hermes in tmux to reply and confirm from your phone."))
@@ -41,6 +41,41 @@ USAGE_KEEP_MS = 92 * 86400000
 
 
 def create(kl):
+    def ps_text():
+        """「进程号 命令行」一行一个：中台的跨平台进程列举（HOST_CAPS proc.list，Windows 也行）；老中台退回 ps"""
+        if hasattr(kl, "process_list"):
+            return "\n".join("%d %s" % (p["pid"], p["cmd"]) for p in kl.process_list())
+        try:
+            return subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    # 终端：中台的通用终端层（tmux、Windows 控制台同一套，HOST_CAPS term.any）；老中台没有时只认 tmux
+    _term_pane = getattr(kl, "term_pane", None) or kl.find_tmux_pane
+    # Windows 控制台上的回复、确认、中断：在 Win11 真机实测过才开放（11-05：没测过的不放出来）
+    WINDOWS_TESTED = False
+
+    def term_pane(pid):
+        pane = _term_pane(pid)
+        if pane and str(pane).startswith("console:") and not WINDOWS_TESTED:
+            return None
+        return pane
+
+    def term_screen(pane, lines=None):
+        if hasattr(kl, "term_screen"):
+            return kl.term_screen(pane, lines)
+        try:
+            return subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", pane] + (["-S", "-%d" % lines] if lines else []),
+                                  capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def term_keys(pane, *names):
+        if hasattr(kl, "term_keys"):
+            return kl.term_keys(pane, *names)
+        for name in names:
+            term_keys(pane, name)
+
     if os.environ.get("HERMES_HOME"):
         HERMES_HOME = os.environ["HERMES_HOME"]
     elif os.name == "nt" and os.environ.get("LOCALAPPDATA"):
@@ -156,7 +191,7 @@ def create(kl):
     def hermes_processes():
         """交互的 hermes 进程（Python 跑的 …/bin/hermes；网关、ACP、仪表盘不算）→ 工作目录"""
         try:
-            out = subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+            out = ps_text()
         except (OSError, subprocess.SubprocessError):
             return {}
         procs = {}
@@ -178,10 +213,8 @@ def create(kl):
         return procs
 
     def screen(pane, lines=40):
-        try:
-            out = subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", pane] + (["-S", "-%d" % lines] if lines > 60 else []),
-                                 capture_output=True, text=True, timeout=3).stdout
-        except (OSError, subprocess.SubprocessError):
+        out = term_screen(pane, lines if lines > 60 else None)
+        if not out:
             return None
         return out if lines > 60 else "\n".join(out.rstrip().splitlines()[-lines:])
 
@@ -252,7 +285,7 @@ def create(kl):
             """开着的会话 → pid：tmux 里的看欢迎框的会话 id；不在 tmux 的取它工作目录下最近的命令行会话"""
             found = {}
             for pid, cwd in hermes_processes().items():
-                sid, pane = None, kl.find_tmux_pane(pid)
+                sid, pane = None, term_pane(pid)
                 if pane:
                     hits = SESSION_LINE.findall(screen(pane, 5000) or "")
                     sid = hits[-1] if hits else None
@@ -286,7 +319,7 @@ def create(kl):
                     elif item["t"] == "result":
                         calls.pop(item.get("toolId"), None)
                 open_call = list(calls.values())[-1] if calls else None
-                pane = kl.find_tmux_pane(pid)
+                pane = term_pane(pid)
                 state = pane_state(pane) if pane else None
                 self.pids[sid], self.panes[sid] = pid, state
                 updated = int(float(messages[-1]["timestamp"]) * 1000) if messages else int(float(session.get("started_at") or 0) * 1000)
@@ -366,7 +399,7 @@ def create(kl):
 
         def _pane(self, sid):
             pid = self.pids.get(sid)
-            pane = kl.find_tmux_pane(pid) if pid else None
+            pane = term_pane(pid) if pid else None
             if not pane:
                 raise RuntimeError("这个 Hermes 会话不在 tmux 里运行，只能查看；在 tmux 中启动 hermes 后，就可以从手机回复和确认")
             return pid, pane
@@ -392,7 +425,7 @@ def create(kl):
                 elif state != "busy":
                     return "当前没有进行中的任务"
                 else:
-                    subprocess.run(["tmux", "send-keys", "-t", pane, "C-c"], check=True, timeout=10)
+                    term_keys(pane, "C-c")
                     return "已中断"
             if key not in APPROVAL_DOWNS:
                 raise RuntimeError("不支持的选项：%s" % key)

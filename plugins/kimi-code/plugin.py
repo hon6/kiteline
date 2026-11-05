@@ -32,7 +32,7 @@ TOOLS = {"Read": "Read", "Write": "Write", "Edit": "Edit", "Bash": "Bash", "Glob
          "TodoList": "TodoWrite", "FetchURL": "WebFetch", "AskUserQuestion": "AskUserQuestion", "ExitPlanMode": "ExitPlanMode",
          "Agent": "Agent"}
 TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "completed"}
-READ_ONLY = (("Windows 上没有 tmux，Kimi Code 的会话只能查看", "Windows has no tmux, so Kimi Code sessions are view-only.")
+READ_ONLY = (("Windows 上从手机操作 Kimi Code 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Kimi Code on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
              ("Kimi Code 不在 tmux 中运行（或在桌面版、VS Code 中），只能查看；在 tmux 中启动 kimi 后即可从手机回复和确认",
               "Kimi Code isn't running in tmux (or runs in the desktop app or VS Code), so this session is view-only. "
@@ -47,6 +47,41 @@ SESSION_LINE = re.compile(r"Session:\s+(session_[0-9a-f-]{36})")
 
 
 def create(kl):
+    def ps_text():
+        """「进程号 命令行」一行一个：中台的跨平台进程列举（HOST_CAPS proc.list，Windows 也行）；老中台退回 ps"""
+        if hasattr(kl, "process_list"):
+            return "\n".join("%d %s" % (p["pid"], p["cmd"]) for p in kl.process_list())
+        try:
+            return subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    # 终端：中台的通用终端层（tmux、Windows 控制台同一套，HOST_CAPS term.any）；老中台没有时只认 tmux
+    _term_pane = getattr(kl, "term_pane", None) or kl.find_tmux_pane
+    # Windows 控制台上的回复、确认、中断：在 Win11 真机实测过才开放（11-05：没测过的不放出来）
+    WINDOWS_TESTED = False
+
+    def term_pane(pid):
+        pane = _term_pane(pid)
+        if pane and str(pane).startswith("console:") and not WINDOWS_TESTED:
+            return None
+        return pane
+
+    def term_screen(pane, lines=None):
+        if hasattr(kl, "term_screen"):
+            return kl.term_screen(pane, lines)
+        try:
+            return subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", pane] + (["-S", "-%d" % lines] if lines else []),
+                                  capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def term_keys(pane, *names):
+        if hasattr(kl, "term_keys"):
+            return kl.term_keys(pane, *names)
+        for name in names:
+            term_keys(pane, name)
+
     KIMI_HOME = os.environ.get("KIMI_CODE_HOME") or os.path.join(kl.HOME, ".kimi-code")
 
     def read_json(path):
@@ -258,7 +293,7 @@ def create(kl):
     def kimi_processes():
         """本机的 Kimi Code 进程（Node 把进程名设成 kimi-code）→ 工作目录"""
         try:
-            out = subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+            out = ps_text()
         except (OSError, subprocess.SubprocessError):
             return {}
         procs = {}
@@ -370,15 +405,10 @@ def create(kl):
                 if pid in taken:
                     continue
                 sid = None
-                pane = kl.find_tmux_pane(pid)
+                pane = term_pane(pid)
                 if pane:
-                    try:
-                        screen = subprocess.run(["tmux", "capture-pane", "-p", "-J", "-S", "-5000", "-t", pane],
-                                                capture_output=True, text=True, timeout=3).stdout
-                        hits = SESSION_LINE.findall(screen)
-                        sid = hits[-1] if hits else None
-                    except (OSError, subprocess.SubprocessError):
-                        pass
+                    hits = SESSION_LINE.findall(term_screen(pane, 5000) or "")
+                    sid = hits[-1] if hits else None
                 if not sid and cwd:
                     sid = newest_in(cwd, set(found))
                 if sid and sid not in found:
@@ -397,7 +427,7 @@ def create(kl):
                 note = scan(wire) if os.path.isfile(wire) else scan("")
                 updated = int(os.path.getmtime(wire) * 1000) if os.path.isfile(wire) else int(state.get("updatedAt") or now)
                 cwd = state.get("cwd") or ""
-                tmux = kl.find_tmux_pane(pid)
+                tmux = term_pane(pid)
                 self.pids[sid] = pid
                 pending = note["pending"]
                 self.pending[sid] = pending
@@ -439,7 +469,7 @@ def create(kl):
 
         def _pid(self, sid):
             pid = self.pids.get(sid)
-            if not pid or not kl.find_tmux_pane(pid):
+            if not pid or not term_pane(pid):
                 raise RuntimeError("这个 Kimi Code 会话不在 tmux 里运行，只能查看；在 tmux 中启动 kimi 后，就可以从手机回复和确认")
             return pid
 

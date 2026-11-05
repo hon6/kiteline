@@ -1,9 +1,24 @@
 # Kiteline 电脑端（Windows / Linux）更新记录
 
+## 1.0.27（2026-11-05）
+
+### 新功能
+
+- **支持 CodeBuddy / WorkBuddy 和 ZCode**（Windows、Linux）：电脑上装有腾讯 CodeBuddy Code、WorkBuddy 或智谱 ZCode 时，Kiteline 自动安装对应插件，会话可在手机上查看（状态、完整记录、任务清单），「今日用量」和用量页计入它们的 token。CodeBuddy Code 在 Linux 上用 tmux 运行时，还可发送消息、允许或拒绝命令、回答提问、中断和关闭会话；WorkBuddy 桌面版、ZCode 和 Windows 上的会话只能查看。
+- **支持 Antigravity 和 Muse Code**（Windows、Linux）：电脑上装有 Google Antigravity 或 Meta Muse Code 时，Kiteline 自动安装对应插件，会话可在手机上查看（状态、完整记录），「今日用量」和用量页计入它们的 token。在 Linux 上用 tmux 运行 Antigravity 命令行或 Muse Code 时，还可发送消息、中断和关闭会话，Antigravity 还可允许或拒绝命令、回答提问（Muse Code 的命令请在电脑上确认）；Antigravity 桌面版、IDE 和 Windows 上的会话只能查看。
+- **支持 trae-agent**（Windows、Linux）：电脑上装有字节跳动开源的 trae-agent 命令行时，Kiteline 自动安装对应插件，可在手机上查看它的任务和完整记录，「今日用量」和用量页计入它的 token；在 Linux 上用 tmux 运行时还可从手机发任务。trae-agent 本身没有审批和提问，也不能中断正在执行的任务。Trae IDE 的对话数据是加密的，暂不支持。
+- **Windows 上从手机操作 Antigravity**（Windows）：Antigravity 命令行在 Windows 终端里运行时，也能从手机回复、允许或拒绝命令、回答提问、中断和关闭会话，不用 tmux。其他命令行 agent 在 Windows 上逐家实测后开放。
+- **插件说明更清楚**（Windows、Linux）：设置 → 插件中，每个插件下面逐条列出做不到的功能（附原因）和还没实测的功能，开启前就能知道它在手机上能做什么、不能做什么。
+
+### 改进
+
+- **会话列表改为浮动面板**（Windows、Linux）：主窗口左侧的会话列表与窗口四边、右侧内容各留出间距，以圆角面板浮在窗口上，并带一层柔和的投影，与 macOS 新版的侧栏样式一致。面板与右侧内容之间的空隙可直接拖动来调整列表宽度，空隙的上沿可拖动窗口；原先调整好的列表宽度保持不变。
+
 ## 1.0.26（2026-11-04）
 
 ### 新功能
 
+- **支持 Kimi Code、Hermes、Grok Build**（Windows、Linux）：电脑上装有 Kimi Code（月之暗面）、Hermes（Nous Research）或 Grok Build（xAI）时，Kiteline 自动安装对应插件。它们的会话可在手机上查看（状态、完整记录、任务清单）；在 Linux 上用 tmux 运行时，还可发送消息、允许或拒绝命令、回答提问、中断和关闭会话（Windows 上只能查看）。「今日用量」和用量页计入三者的 token（Hermes 含花费）；Kimi Code 会员的额度和加油包余额可在插件下打开「显示订阅额度」后查看。
 - **远端电脑上可以后台运行 Claude Code，不再打开 VS Code**（Windows、Linux）：在经 SSH 连接的电脑上新建任务、恢复会话时，Kiteline 可以直接在那台电脑上后台运行 Claude Code，不再在本机打开 VS Code 窗口，也减少 VS Code 的内存占用。按设备开启，默认关闭：在设置 →「来源」中点击那台电脑的「后台运行…」，或点击会话页上方「当前会话支持后台托管 Claude」的提示，先检测出口 IP，确认地区、网络和代理无误后再开启。后台运行的 Claude Code 就在项目所在的电脑上运行，使用与 VS Code 中的 Claude Code 相同的网络设置（代理、证书、接口地址），每次启动前都会核对，无法确认时改在 VS Code 中打开并告知原因。开启后，之后发送消息、确认、关闭都不切换前台，本机锁屏时也能操作；SSH 断开或本机睡眠后，会话仍在那台电脑上继续运行。VS Code 中正开着的会话可以一键转到后台，在 Claude 空闲时点击「在 VS Code 中打开」又可以转回 VS Code 接着这段对话。会话终端中新增的「claude」显示这个会话原本的界面，可以直接操作；在那台电脑的终端里运行 python3 ~/.ccpulse/ccpulse-watch.py attach 也能实时查看和操作。会话页的提示可以选择「不再提示」。那台电脑上只在 VS Code 中用过 Claude Code、没有单独安装命令行版也可以使用；Windows 电脑暂不支持。
 - **手机上的操作不再打扰你用电脑**（Windows、Linux）：从手机发消息、批准或拒绝命令、回答 Claude 的提问、中断回复时，Kiteline 现在把内容直接交给 Claude Code 会话，不再把 VS Code 切到前台粘贴、按键。你在电脑上打字、使用其他程序都不受影响，电脑锁屏时也能发送。Claude 等你确认时，VS Code 中照常显示确认框，在手机或电脑上任一处作答即可，另一处的确认框随之关闭；这时从手机发出的消息会排在确认之后送达。Claude 正在工作时发出的消息，与在电脑上趁它工作时输入的一样，会在它做完手头这一步后立即交给它，不必等这一轮回复结束；这类消息在 Kiteline 的对话中照常显示，在 VS Code 中不单独显示。回答提问时，Claude 收到的是你选中的选项本身。由手机发来的消息在 VS Code 中上方注明「Prompt from the kiteline plugin」。适用于 Kiteline 更新后新开或恢复的 Claude Code 会话，VS Code 中和终端中的都可以；更新前已经开着的会话仍按原来的方式发送。在终端中运行的会话现在不用 tmux 也可以从手机回复；从别的电脑经 Remote-SSH 连到这台 Linux 电脑、在 VS Code 中运行的会话，原先只能在打开 VS Code 窗口的那台电脑上操作，现在这台电脑上的 Kiteline 也能直接发送。
 - **新任务可以打开任意文件夹**（Windows、Linux）：「新任务」的项目列表最后新增「打开其他文件夹…」，可以选择还没用过 Claude Code 的目录（例如刚建好的项目），在其中新建会话。在本机使用系统的选择文件夹窗口；对经 Remote-SSH 连接的电脑，可以在 Kiteline 中逐级浏览那台电脑上的文件夹，支持筛选、显示隐藏文件夹和新建文件夹，Git 仓库会单独标出。新版 iPhone App 中的「新任务」也可以这样浏览这台电脑上的文件夹。

@@ -495,6 +495,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var closed = false
     /// 用户自己拖过大小：之后内容再变也不自动改面板大小
     private var userSized = false
+    /// 最近一次定下（或正在动画变过去）的大小
+    private var fitted: NSSize?
+    /// 正在动画变过去的位置（动画中途窗口的 frame 是中间值）
+    private var sliding: NSRect?
     private var lastIdeal: NSSize = .zero
     /// 拖边最小能缩到多大（窗口的 minSize 会被 SwiftUI 改回去，在 windowWillResize 里自己拦）
     private var minimum = NSSize(width: 240, height: 120)
@@ -644,22 +648,39 @@ final class PanelController: NSObject, NSWindowDelegate {
                       height: min(max(ideal.height, 140), visible.height - 40))
     }
 
-    private func place(size: NSSize, center: CGPoint) {
+    private func place(size: NSSize, center: CGPoint, animated: Bool = false) {
+        fitted = size
         var frame = NSRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height)
         if !panel.unconstrained, let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? panel.parent?.screen ?? NSScreen.main {
             let visible = screen.visibleFrame
             frame.origin.x = min(max(frame.minX, visible.minX + 8), visible.maxX - frame.width - 8)
             frame.origin.y = min(max(frame.minY, visible.minY + 8), visible.maxY - frame.height - 8)
         }
-        panel.setFrame(frame.integral, display: true)
+        // 测试实例的静音面板看不见，也不走窗口动画（屏幕外、全透明的窗口动画不生效）
+        if animated, !Self.quiet {
+            sliding = frame.integral
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.25
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                panel.animator().setFrame(frame.integral, display: true)
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated { if self?.sliding == frame.integral { self?.sliding = nil } }
+            })
+        } else {
+            sliding = nil
+            panel.setFrame(frame.integral, display: true)
+        }
     }
 
-    /// 内容变了（数据到了、展开了）：用户没手动改过大小就跟着内容变，中心不动
+    /// 内容变了（数据到了、展开了、往里点了一层）：用户没手动改过大小就跟着内容变。
+    /// 标题栏不动、底边平滑伸缩（11-05 反馈：切换页面时内容横向滑动，弹窗高度随内容平滑过渡）
     private func refit() {
         guard shown, !closed, !userSized else { return }
         let size = targetSize()
-        guard abs(size.width - panel.frame.width) > 0.5 || abs(size.height - panel.frame.height) > 0.5 else { return }
-        place(size: size, center: CGPoint(x: panel.frame.midX, y: panel.frame.midY))
+        // 跟正在变过去的大小比：动画中途窗口大小一直在变，别每一帧都重新开始
+        if let fitted, abs(size.width - fitted.width) <= 0.5, abs(size.height - fitted.height) <= 0.5 { return }
+        let top = (sliding ?? panel.frame).maxY
+        place(size: size, center: CGPoint(x: panel.frame.midX, y: top - size.height / 2), animated: true)
     }
 
     // MARK: NSWindowDelegate

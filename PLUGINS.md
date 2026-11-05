@@ -19,24 +19,43 @@ Why are some agents view-only? See the [plugin development guide](docs/plugin-de
 | **DeepSeek Harness** <br><sub>built-in plugin, opt-in</sub> | Desktop app | Full ✓ | Full ✓ | — <sup>3</sup> |
 |  | CLI | Full | Full | Full ✓ |
 | **Proma** <br><sub>built-in plugin</sub> | Desktop app | View only <sup>4</sup> | View only <sup>4</sup> | View only ✓ <sup>4</sup> |
-| **Cursor** <br><sub>[plugin](plugins/cursor)</sub> | Editor | View · Reply · Approve · Interrupt <sup>5</sup> | View · Reply · Approve · Interrupt ✓ <sup>5</sup> | View · Reply · Approve · Interrupt ✓ <sup>5</sup> |
-|  | CLI | View · Reply · Approve · Interrupt <sup>6</sup> | View only <sup>7</sup> | View · Reply · Approve · Interrupt ✓ <sup>6</sup> |
-| **Grok Build** <br><sub>[plugin](plugins/grok), coming soon</sub> | CLI | Full <sup>8</sup> | View only <sup>9</sup> | Full ✓ <sup>8</sup> |
-| **Hermes** <br><sub>[plugin](plugins/hermes), coming soon</sub> | CLI | Full <sup>10</sup> | View only <sup>9</sup> | Full ✓ <sup>10</sup> |
-| **Kimi Code** <br><sub>[plugin](plugins/kimi-code), coming soon</sub> | CLI | Full <sup>11</sup> | View only <sup>9</sup> | Full ✓ <sup>11</sup> |
-|  | Desktop app | View only <sup>12</sup> | — | — |
-| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>13</sup> | View only <sup>9</sup> | View · Reply · Approve · Interrupt ✓ <sup>13</sup> |
+| **Antigravity** <br><sub>[plugin](plugins/antigravity)</sub> | CLI | Full <sup>5</sup> | Full ✓ <sup>6</sup> | Full ✓ <sup>5</sup> |
+|  | Desktop app | View only <sup>7</sup> | View only <sup>7</sup> | View only <sup>7</sup> |
+| **CodeBuddy / WorkBuddy** <br><sub>[plugin](plugins/codebuddy)</sub> | CLI | Full <sup>8</sup> | View only <sup>9</sup> | Full ✓ <sup>8</sup> |
+|  | Desktop app | View only <sup>10</sup> | View only <sup>10</sup> | — <sup>11</sup> |
+| **Cursor** <br><sub>[plugin](plugins/cursor)</sub> | Editor | View · Reply · Approve · Interrupt <sup>12</sup> | View · Reply · Approve · Interrupt ✓ <sup>12</sup> | View · Reply · Approve · Interrupt ✓ <sup>12</sup> |
+|  | CLI | View · Reply · Approve · Interrupt <sup>13</sup> | View only <sup>14</sup> | View · Reply · Approve · Interrupt ✓ <sup>13</sup> |
+| **Grok Build** <br><sub>[plugin](plugins/grok)</sub> | CLI | Full <sup>15</sup> | View only <sup>9</sup> | Full ✓ <sup>15</sup> |
+| **Hermes** <br><sub>[plugin](plugins/hermes)</sub> | CLI | Full <sup>16</sup> | View only <sup>9</sup> | Full ✓ <sup>16</sup> |
+| **Kimi Code** <br><sub>[plugin](plugins/kimi-code)</sub> | CLI | Full <sup>17</sup> | View only <sup>9</sup> | Full ✓ <sup>17</sup> |
+|  | Desktop app | View only <sup>18</sup> | — | — |
+| **Muse Code** <br><sub>[plugin](plugins/muse-code)</sub> | CLI | View · Reply · Interrupt <sup>19</sup> | View only <sup>9</sup> | View · Reply · Interrupt ✓ <sup>19</sup> |
+| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>20</sup> | View only <sup>21</sup> | View · Reply · Approve · Interrupt ✓ <sup>20</sup> |
+| **trae-agent** <br><sub>[plugin](plugins/trae-agent)</sub> | CLI | View · Reply <sup>22</sup> | View only <sup>9</sup> | View · Reply ✓ <sup>22</sup> |
+| **ZCode** <br><sub>[plugin](plugins/zcode)</sub> | Desktop app | View only <sup>23</sup> | View only <sup>23</sup> | View only <sup>23</sup> |
+|  | CLI | View only <sup>24</sup> | View only <sup>24</sup> | View only ✓ <sup>24</sup> |
 
 1. CLI sessions need to run in tmux
 2. Codex has no desktop app for Linux
 3. DeepSeek Harness has no desktop app for Linux
 4. Proma offers no interface for remote control, so it's view-only; reply and approve in Proma on the computer
-5. Use Cursor's editor window (the Agents window isn't supported) and restart Cursor once after the plugin is installed; sending to an idle chat from your phone needs Kiteline 3.49.15 / desktop 1.0.20 or later
-6. Replying and approving need the Cursor CLI to run in tmux
-7. Windows has no tmux, so it's view-only; messages sent while Cursor is working go out when the current turn ends
-8. 回复和确认需要 Grok Build 在 tmux 中运行
-9. Windows has no tmux, so it's view-only
-10. 回复和确认需要 Hermes 在 tmux 中运行
-11. 回复和确认需要 Kimi Code 在 tmux 中运行
-12. 桌面版的会话只能查看
-13. Replying and approving need Qwen Code to run in tmux
+5. Replying and approving need Antigravity CLI to run in tmux
+6. The CLI can reply and confirm when it runs in a Windows terminal (no tmux needed)
+7. Desktop app and IDE sessions are view-only
+8. 回复和确认需要 CodeBuddy Code 在 tmux 中运行
+9. Phone control isn't available yet (not tested on Windows), so it's view-only
+10. WorkBuddy 桌面版的会话只能查看
+11. WorkBuddy 没有 Linux 版
+12. Use Cursor's editor window (the Agents window isn't supported) and restart Cursor once after the plugin is installed; sending to an idle chat from your phone needs Kiteline 3.49.15 / desktop 1.0.20 or later
+13. Replying and approving need the Cursor CLI to run in tmux
+14. Windows has no tmux, so it's view-only; messages sent while Cursor is working go out when the current turn ends
+15. Replying and approving need Grok Build to run in tmux
+16. Replying and approving need Hermes to run in tmux
+17. Replying and approving need Kimi Code to run in tmux
+18. Desktop app sessions are view-only
+19. Replying needs Muse Code to run in tmux; confirming commands from your phone isn't available yet
+20. Replying and approving need Qwen Code to run in tmux
+21. Windows has no tmux, so it's view-only
+22. Sending tasks needs trae-agent to run in tmux
+23. ZCode 没有对外的操作接口，只能查看
+24. 只能查看

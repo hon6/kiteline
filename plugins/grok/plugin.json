@@ -1,7 +1,7 @@
 {
  "id": "grok",
  "name": "Grok Build",
- "version": "1.0.0",
+ "version": "1.0.2",
  "summary": "xAI 的终端编程 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复、确认、回答提问和中断",
  "summaryEn": "xAI's terminal coding agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux",
  "needs": [
@@ -21,21 +21,35 @@
  "support": {
   "mac": {
    "cli": {
-    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
+    ],
     "verified": false,
     "note": "回复和确认需要 Grok Build 在 tmux 中运行"
    }
   },
   "windows": {
    "cli": {
-    "abilities": ["view"],
+    "abilities": [
+     "view"
+    ],
     "verified": false,
-    "note": "Windows 上没有 tmux，只能查看"
+    "note": "从手机操作暂未开放（Windows 上还没实测），只能查看"
    }
   },
   "linux": {
    "cli": {
-    "abilities": ["view", "reply", "approve", "answer", "interrupt"],
+    "abilities": [
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
+    ],
     "verified": true,
     "note": "回复和确认需要 Grok Build 在 tmux 中运行"
    }
@@ -51,6 +65,28 @@
  ],
  "speaker": "Grok",
  "caps": [],
- "notes": "新接入 Grok Build：查看会话和完整对话；在 tmux 中运行时可从手机回复、审批命令、回答提问、中断和关闭会话；用量统计计入 Grok Build 的 token。",
- "notesEn": "New: Grok Build support. View sessions and full conversations; when it runs in tmux, reply, approve commands, answer questions, interrupt and close sessions from your phone. Usage stats include Grok Build's tokens."
+ "notes": "改进 Windows 上找会话的办法；从手机操作 Windows 上的会话在实测通过前暂不开放，设置 → 插件中有说明。",
+ "notesEn": "Better session detection on Windows; controlling Windows sessions from your phone stays off until tested, as noted in Settings → Plugins.",
+ "gaps": [
+  {
+   "kind": "untested",
+   "text": "Windows 上从手机回复、确认、中断还没实测，暂未开放，只能查看（Kiteline 已能往 Windows 终端里发按键，逐家实测后开放）",
+   "textEn": "Replying, confirming and interrupting from your phone on Windows aren't tested yet, so they're off and sessions are view-only (Kiteline can now type into Windows terminals; each agent is enabled once tested)"
+  },
+  {
+   "kind": "untested",
+   "text": "Windows 上的查看还没实测（找进程的办法换成了 Windows 也能用的）",
+   "textEn": "Viewing on Windows isn't tested yet (process detection now works on Windows too)"
+  },
+  {
+   "kind": "untested",
+   "text": "Mac 上还没实测（Linux 上已全部实测）",
+   "textEn": "Not yet tested on Mac (fully tested on Linux)"
+  },
+  {
+   "kind": "untested",
+   "text": "没有用真实 Grok 账号实测（用 Grok Build 的自定义模型接口测的），登录账号后的界面若有不同，以电脑上为准",
+   "textEn": "Not tested with a real Grok account (tested through Grok Build's custom model setting); if the signed-in interface differs, go by what your computer shows"
+  }
+ ]
 }

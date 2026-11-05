@@ -1387,17 +1387,25 @@ try:
     check("mod：Claude 忙时发的话留着，下一批工具跑完插进这一轮（session.append），没赶上的这一轮完了再提交",
           "classic.PostToolBatch" in mod_ts and "$.session.append(" in mod_ts and "result = 'later'" in mod_ts
           and "later.splice(0)" in mod_ts.split("on('turn.complete'")[1].split("on('classic.PostToolBatch'")[0])
+    check("mod：插进去的话开头垫零宽空格（watcher 靠它认）", "text: `\\u200b${text}`" in mod_ts.split("on('classic.PostToolBatch'")[1].split("on('tool.call'")[0])
     meta_row = {"type": "user", "isMeta": True, "timestamp": ts(1), "uuid": "m1",
-                "message": {"role": "user", "content": [{"type": "text", "text": "顺便看看 README"}]}}
+                "message": {"role": "user", "content": [{"type": "text", "text": "\u200b顺便看看 README"}]}}
     got_said = W.normalize_line(0, dict(meta_row, origin={"kind": "plugin", "name": "kiteline"}))
-    check("插进这一轮的那行（isMeta、来源 kiteline）照你说的显示；别的 isMeta 行照旧不显示",
+    check("插进这一轮的那行（isMeta、来源 kiteline、垫了零宽空格）照你说的显示、去掉零宽空格；别的 isMeta 行照旧不显示",
           [(it["t"], it["text"]) for it in got_said] == [("user", "顺便看看 README")]
           and W.normalize_line(0, meta_row) == [] and W.normalize_line(0, dict(meta_row, origin={"kind": "plugin", "name": "other"})) == [], str(got_said))
+    kl = {"kind": "plugin", "name": "kiteline"}
+    caveat = {"type": "user", "isMeta": True, "timestamp": ts(1), "uuid": "c1", "origin": kl, "message": {"role": "user", "content":
+              "<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request.</local-command-caveat>"}}
+    skill_body = {"type": "user", "isMeta": True, "timestamp": ts(1), "uuid": "s1", "origin": kl,
+                  "message": {"role": "user", "content": [{"type": "text", "text": "Base directory for this skill: /x"}]}}
+    check("手机发斜杠命令时 Claude Code 写的说明行、展开的技能正文（也是 isMeta + kiteline）不显示成你说的话（11-05 截图）",
+          W.normalize_line(0, caveat) == [] and W.normalize_line(0, skill_body) == [])
     said_path = os.path.join(root, "bridge-said.jsonl")
     with open(said_path, "w") as handle:
         handle.write(json.dumps({"type": "user", "timestamp": ts(1), "uuid": "p1", "origin": {"kind": "peer", "from": "x"}, "isMeta": True,
                                  "message": {"role": "user", "content": "<cross-session-message from=\"x\">来信</cross-session-message>"}}, ensure_ascii=False) + "\n")
-        handle.write(json.dumps(dict(meta_row, origin={"kind": "plugin", "name": "kiteline"}), ensure_ascii=False) + "\n")
+        handle.write(json.dumps(dict(meta_row, origin=kl), ensure_ascii=False) + "\n")
     check("别的会话来信开始的一轮，中途插进你的话：这一轮算你的（答完照常推送）", W.scan_transcript(said_path).get("turnFrom") == "user",
           str(W.scan_transcript(said_path).get("turnFrom")))
 

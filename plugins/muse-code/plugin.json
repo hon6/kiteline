@@ -1,0 +1,94 @@
+{
+ "id": "muse-code",
+ "name": "Muse Code",
+ "version": "1.0.2",
+ "summary": "Meta 的终端编程 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复和中断",
+ "summaryEn": "Meta's terminal coding agent: view sessions, status and full conversations; reply and interrupt when it runs in tmux",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.local/share/muse",
+   "~/Library/Application Support/muse"
+  ],
+  "commands": [
+   "muse"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "回复需要 Muse Code 在 tmux 中运行；从手机确认命令暂未开放"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "从手机操作暂未开放（Windows 上还没实测），只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复需要 Muse Code 在 tmux 中运行；从手机确认命令暂未开放"
+   }
+  }
+ },
+ "limitsNote": "Muse Code 不在本机记录订阅额度（在 Muse Code 中运行 muse usage 查看），「今日用量」中不显示；用 Meta API Key 按量付费时请在 Meta 开发者后台查看。token 按 Muse Code 自己的记录统计",
+ "limitsNoteEn": "Muse Code doesn't record your plan allowance on your computer (run muse usage in Muse Code to see it), so it isn't shown under Today's usage; with pay-as-you-go Meta API keys, check the Meta developer dashboard. Tokens are counted from Muse Code's own records",
+ "mark": [
+  {
+   "d": "M3 19V5.5L12 13l9-7.5V19h-3.2v-7L12 17l-5.8-5v7z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "Muse",
+ "caps": [],
+ "notes": "改进 Windows 上找会话的办法；从手机操作 Windows 上的会话在实测通过前暂不开放，设置 → 插件中有说明。",
+ "notesEn": "Better session detection on Windows; controlling Windows sessions from your phone stays off until tested, as noted in Settings → Plugins.",
+ "gaps": [
+  {
+   "kind": "untested",
+   "text": "Windows 上从手机回复、确认、中断还没实测，暂未开放，只能查看（Kiteline 已能往 Windows 终端里发按键，逐家实测后开放）",
+   "textEn": "Replying, confirming and interrupting from your phone on Windows aren't tested yet, so they're off and sessions are view-only (Kiteline can now type into Windows terminals; each agent is enabled once tested)"
+  },
+  {
+   "kind": "untested",
+   "text": "从手机确认命令还没用真实账号实测，暂未开放：Muse Code 等你确认时，请在电脑上确认",
+   "textEn": "Confirming commands from your phone hasn't been tested with a real account yet, so it isn't available: when Muse Code asks for confirmation, confirm on your computer"
+  },
+  {
+   "kind": "untested",
+   "text": "回答提问还没做：没有真实账号，看不到它的提问界面，请在电脑上回答",
+   "textEn": "Answering questions isn't built yet: without a real account its question interface couldn't be examined, so answer on your computer"
+  },
+  {
+   "kind": "untested",
+   "text": "对话里的工具调用（运行的命令、改的文件）还没用真实账号核对，可能显示不全",
+   "textEn": "Tool calls in the conversation (commands run, files changed) haven't been checked with a real account and may not all show"
+  },
+  {
+   "kind": "untested",
+   "text": "Mac 上还没实测（Linux 上已全部实测）",
+   "textEn": "Not yet tested on Mac (fully tested on Linux)"
+  }
+ ]
+}

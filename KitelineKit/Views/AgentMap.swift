@@ -10,62 +10,114 @@ struct AgentMapSheet: View {
     @State private var error: String?
     @State private var path: [AgentPage] = []
 
+    /// Mac：往里点是往前（新页面从右边滑进来），返回是往后（从左边滑回来）
+    @State private var forward = true
+
     var body: some View {
-        NavigationStack(path: $path) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let reply {
-                        let agents = reply.agents
-                        Text(agents.isEmpty ? "尚未派出子 agent" : "\(agents.count) 个子 agent · 轻点查看详情")
-                            .font(.ui(.footnote)).foregroundStyle(.secondary)
-                        AgentBranch(node: mainNode, children: children(of: "main", in: agents), all: agents, key: key)
-                        if !reply.tasks.isEmpty {
-                            let running = reply.tasks.filter(\.running).count
-                            Text(L("%lld 个后台任务", count: reply.tasks.count) + (running > 0 ? L("（%@ 个运行中）", "\(running)") : "") + L(" · 轻点查看详情"))
-                                .font(.ui(.footnote)).foregroundStyle(.secondary).padding(.top, 6)
-                            ForEach(reply.tasks) { task in
-                                Button { if TouchTravel.isTap { path.append(.task(task)) } } label: { TaskCard(task: task) }
-                                    .buttonStyle(PressableStyle())
-                            }
-                        }
-                    } else if let error {
-                        LoadFailed(error: error) { await load() }.padding(.top, 40)
-                    } else {
-                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+        #if os(macOS)
+        // Mac 小窗不用系统的导航（推进去没有滑动、工具栏里也不画返回键）：自己叠页面，左右滑动切换；
+        // 宽度固定、高度跟着当前页面的内容走（11-05 反馈：点子 agent 在弹窗里左滑出新内容，弹窗高度自适应）
+        NavigationStack {
+            ZStack(alignment: .top) {
+                if let page = path.last {
+                    subpage(page).id(page).transition(slide)
+                } else {
+                    mapPage.transition(slide)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .top)
+            .clipped()
+            .toolbar {
+                if !path.isEmpty {
+                    ToolbarItem(placement: .navigation) {
+                        Button { back() } label: { Image(systemName: "chevron.left") }
+                            .keyboardShortcut("[", modifiers: .command)
+                            .help(L("返回"))
+                            .panelToolbarItem()
                     }
                 }
-                .padding(16)
             }
-            .navigationTitle("Agent map")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
             .doneButton { dismiss() }
-            .navigationDestination(for: AgentPage.self) { page in
-                Group {
-                    switch page {
-                    case .agent(let agent): AgentDetailView(key: key, agent: agent, all: reply?.agents ?? [])
-                    case .task(let task): TaskDetailView(key: key, task: task)
-                    case .transcript(let agent): SubagentTranscriptView(key: key, agent: agent)
-                    }
-                }
-                .agentSubpage(back: { if !path.isEmpty { path.removeLast() } }, done: { dismiss() })
-            }
-            .task {
-                // 开着时每 4 秒刷新一次：子 agent 做完、后台命令结束能马上看到
-                while !Task.isCancelled {
-                    await load()
-                    try? await Task.sleep(for: .seconds(4))
-                }
-            }
+        }
+        .environment(\.openAgentPage) { push($0) }
+        .task { await refresh() }
+        .panelFrame(width: 640)
+        #else
+        NavigationStack(path: $path) {
+            mapPage
+                .navigationBarTitleDisplayMode(.inline)
+                .doneButton { dismiss() }
+                .navigationDestination(for: AgentPage.self) { subpage($0) }
+                .task { await refresh() }
         }
         .environment(\.openAgentPage) { path.append($0) }
-        #if os(macOS)
-        .panelFrame(width: 640, height: 620)
-        #else
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         #endif
+    }
+
+    private var mapPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let reply {
+                    let agents = reply.agents
+                    Text(agents.isEmpty ? "尚未派出子 agent" : "\(agents.count) 个子 agent · 轻点查看详情")
+                        .font(.ui(.footnote)).foregroundStyle(.secondary)
+                    AgentBranch(node: mainNode, children: children(of: "main", in: agents), all: agents, key: key)
+                    if !reply.tasks.isEmpty {
+                        let running = reply.tasks.filter(\.running).count
+                        Text(L("%lld 个后台任务", count: reply.tasks.count) + (running > 0 ? L("（%@ 个运行中）", "\(running)") : "") + L(" · 轻点查看详情"))
+                            .font(.ui(.footnote)).foregroundStyle(.secondary).padding(.top, 6)
+                        ForEach(reply.tasks) { task in
+                            Button { if TouchTravel.isTap { push(.task(task)) } } label: { TaskCard(task: task) }
+                                .buttonStyle(PressableStyle())
+                        }
+                    }
+                } else if let error {
+                    LoadFailed(error: error) { await load() }.padding(.top, 40)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle("Agent map")
+    }
+
+    @ViewBuilder
+    private func subpage(_ page: AgentPage) -> some View {
+        switch page {
+        case .agent(let agent): AgentDetailView(key: key, agent: agent, all: reply?.agents ?? [])
+        case .task(let task): TaskDetailView(key: key, task: task)
+        case .transcript(let agent): SubagentTranscriptView(key: key, agent: agent)
+        }
+    }
+
+    private var slide: AnyTransition {
+        .asymmetric(insertion: .move(edge: forward ? .trailing : .leading), removal: .move(edge: forward ? .leading : .trailing))
+    }
+
+    private func push(_ page: AgentPage) {
+        #if os(macOS)
+        forward = true
+        withAnimation(.snappy(duration: 0.28)) { path.append(page) }
+        #else
+        path.append(page)
+        #endif
+    }
+
+    private func back() {
+        guard !path.isEmpty else { return }
+        forward = false
+        withAnimation(.snappy(duration: 0.28)) { _ = path.removeLast() }
+    }
+
+    /// 开着时每 4 秒刷新一次：子 agent 做完、后台命令结束能马上看到
+    private func refresh() async {
+        while !Task.isCancelled {
+            await load()
+            try? await Task.sleep(for: .seconds(4))
+        }
     }
 
     private var mainNode: AgentNode {
@@ -100,28 +152,6 @@ enum AgentPage: Hashable {
 
 extension EnvironmentValues {
     @Entry var openAgentPage: (AgentPage) -> Void = { _ in }
-}
-
-extension View {
-    /// Agent map 里推进去的页面。Mac 小窗的工具栏里系统不画返回键（11-04 用户点进子 agent 详情后退不出来），
-    /// 自己画「‹」（⌘[），「完成」每一层都有；iPhone 照旧用系统的返回、下滑关
-    @ViewBuilder
-    func agentSubpage(back: @escaping () -> Void, done: @escaping () -> Void) -> some View {
-        #if os(macOS)
-        navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button(action: back) { Image(systemName: "chevron.left") }
-                        .keyboardShortcut("[", modifiers: .command)
-                        .help(L("返回"))
-                        .panelToolbarItem()
-                }
-            }
-            .doneButton(done)
-        #else
-        self
-        #endif
-    }
 }
 
 /// 树里的一个节点（主 agent 或子 agent）
