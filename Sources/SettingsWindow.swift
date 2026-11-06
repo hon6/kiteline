@@ -61,11 +61,128 @@ enum SettingsTab: Int, CaseIterable {
     }
 }
 
+/// 设置窗口一页的外壳：SwiftUI 页面贴顶、贴左右放，底边不约束。页面算出的大小不放进自己的 preferredContentSize
+/// （NSTabViewController 看到它会自己把窗口一下设过去，打断动画），只经 onSizeChange 告诉 SettingsTabsController
+final class SettingsPaneContainer: NSViewController {
+    private let hosting: NSViewController
+    var onSizeChange: (() -> Void)?
+    var paneSize: NSSize { hosting.preferredContentSize }
+
+    init(hosting: NSViewController) {
+        self.hosting = hosting
+        super.init(nibName: nil, bundle: nil)
+        addChild(hosting)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let container = NSView()
+        let content = hosting.view
+        content.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: container.topAnchor),
+            content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        view = container
+    }
+
+    override func preferredContentSizeDidChange(for viewController: NSViewController) {
+        onSizeChange?()
+    }
+}
+
+/// 设置窗口的标签页：切换标签、页面内容变高变矮时，窗口高度带动画过渡（顶边不动，同系统设置）。
+/// 系统自带的切换是瞬间跳到新高度；这里先记下切换前的窗口大小，切完退回去，再动画变到新页的大小。
+/// 每页包在 SettingsPaneContainer 里，页面自身的尺寸约束不直接撑窗口，动画中途的布局不会让窗口跳到终点。
+final class SettingsTabsController: NSTabViewController {
+    private var frameBeforeSwitch: NSRect?
+
+    override func tabView(_ tabView: NSTabView, willSelect tabViewItem: NSTabViewItem?) {
+        frameBeforeSwitch = view.window?.frame
+        super.tabView(tabView, willSelect: tabViewItem)
+    }
+
+    override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        super.tabView(tabView, didSelect: tabViewItem)
+        let from = frameBeforeSwitch
+        frameBeforeSwitch = nil
+        guard let window = view.window, let child = tabViewItem?.viewController else { return }
+        guard window.isVisible, let from else { return fit(child, animated: false) }   // 还没显示：直接定到这页的大小
+        if window.frame != from { window.setFrame(from, display: false) }
+        fit(child, animated: true)
+    }
+
+    /// 页面内容变了尺寸（展开、收起某一节、第一次算出尺寸）：窗口开着就动画过去，没开就直接定好；
+    /// 不交给系统（系统是瞬间跳过去的），也不理没选中的页
+    func paneSizeChanged(_ pane: NSViewController) {
+        guard isSelected(pane) else { return }
+        fit(pane, animated: view.window?.isVisible == true)
+    }
+
+    /// 窗口刚建好：按当前页定大小（之前算出的尺寸变化那时还没有窗口可调）
+    func fitSelected() {
+        guard tabViewItems.indices.contains(selectedTabViewItemIndex),
+              let child = tabViewItems[selectedTabViewItemIndex].viewController else { return }
+        fit(child, animated: false)
+    }
+
+    private func isSelected(_ child: NSViewController) -> Bool {
+        tabViewItems.indices.contains(selectedTabViewItemIndex) && tabViewItems[selectedTabViewItemIndex].viewController === child
+    }
+
+    private func target(for child: NSViewController, in window: NSWindow) -> NSRect? {
+        var size = (child as? SettingsPaneContainer)?.paneSize ?? child.preferredContentSize
+        if size.width < 1 || size.height < 1 { size = child.view.fittingSize }
+        guard size.width >= 1, size.height >= 1 else { return nil }
+        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+        frame.origin = NSPoint(x: window.frame.minX, y: window.frame.maxY - frame.height)   // 顶边不动
+        return frame
+    }
+
+    private func fit(_ child: NSViewController, animated: Bool) {
+        guard let window = view.window, let frame = target(for: child, in: window), frame != window.frame else { return }
+        if animated {
+            animate(window, to: frame)
+        } else {
+            resizeTimer?.invalidate()
+            window.setFrame(frame, display: true)
+        }
+    }
+
+    /// 自己逐帧改窗口大小，0.25 秒先快后慢。不用系统的窗口动画（setFrame(_:display:animate:)、animator()）：
+    /// 系统里开了「减弱动态效果」或调小了窗口缩放时间时它们会被跳过，animator() 在窗口空闲一阵后第一帧还常被判定为
+    /// 已结束、直接跳到终点（11-05 在用户的 Mac 上实测）。计时从第一帧算起，新页首次渲染卡一下也不会吃掉动画。
+    private var resizeTimer: Timer?
+
+    private func animate(_ window: NSWindow, to end: NSRect) {
+        resizeTimer?.invalidate()
+        let start = window.frame
+        let duration = 0.25
+        var began: CFTimeInterval?
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak window] timer in
+            guard let window else { return timer.invalidate() }
+            let now = CACurrentMediaTime()
+            if began == nil { began = now }
+            let progress = min(1, (now - began!) / duration)
+            let eased = progress < 0.5 ? 2 * progress * progress : 1 - pow(-2 * progress + 2, 2) / 2
+            func mix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { (a + (b - a) * eased).rounded() }
+            window.setFrame(NSRect(x: mix(start.minX, end.minX), y: mix(start.minY, end.minY),
+                                   width: mix(start.width, end.width), height: mix(start.height, end.height)), display: true)
+            if progress >= 1 { timer.invalidate() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        resizeTimer = timer
+    }
+}
+
 /// 设置窗口：系统设置同款的工具栏标签页，每页是一个 SwiftUI 视图
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     static let shared = SettingsWindowController()
     static let width: CGFloat = 780
-    private let tabs = NSTabViewController()
+    private let tabs = SettingsTabsController()
 
     private init() {
         tabs.tabStyle = .toolbar
@@ -73,8 +190,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             // 每页一样宽：工具栏上 11 个标签都摆得下（窄了后几个会收进「»」里找不到）
             let hosting = NSHostingController(rootView: AnyView(SettingsWindowController.pane(tab).frame(minWidth: SettingsWindowController.width).tarsLook(wrapButtons: true)))
             hosting.sizingOptions = [.preferredContentSize]
-            hosting.title = tab.title   // 工具栏式标签页拿当前页的标题当窗口标题；不设就显示 Untitled
-            let item = NSTabViewItem(viewController: hosting)
+            // 页面视图包一层只贴顶边的容器：它自己的尺寸约束不再直接撑窗口（否则动画中途一次布局就让窗口跳到目标大小），
+            // 窗口大小由 SettingsTabsController 按 preferredContentSize 动画调整
+            let pane = SettingsPaneContainer(hosting: hosting)
+            pane.title = tab.title   // 工具栏式标签页拿当前页的标题当窗口标题；不设就显示 Untitled
+            pane.onSizeChange = { [weak tabs, weak pane] in if let tabs, let pane { tabs.paneSizeChanged(pane) } }
+            let item = NSTabViewItem(viewController: pane)
             item.label = tab.title
             item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
             tabs.addTabViewItem(item)
@@ -83,6 +204,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.styleMask = [.titled, .closable]
         window.title = L("Kiteline 设置")
         window.isReleasedWhenClosed = false
+        tabs.fitSelected()
         super.init(window: window)
         window.delegate = self
         // 换了界面语言：顶上的标签页、窗口标题是 AppKit 的，建好就不变，跟着重设（页面内容是 SwiftUI，自己会换）
@@ -182,6 +304,8 @@ struct GeneralPane: View {
         Form {
             ProfileSection()
             LookSection()
+            // 消息翻译：原文语言、翻译为、翻译服务（同手机，见 KitelineKit/Views/TranslateViews.swift）
+            TarsTranslateSection()
             PeerSection()
             Section("提醒") {
                 Toggle("Claude 请求确认时提醒", isOn: binding(\.notifyOnNeedsAttention))
@@ -835,7 +959,10 @@ enum PhoneAccess {
         if let info = P2P.shared.joinInfo, let id = info["id"] as? String, let relay = info["relay"] as? String {
             remote = "&id=\(id)&r=\(relay.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")"
         }
-        return "\(base)/?t=\(token)\(fingerprint)\(remote)"
+        // mk、mp：微信小程序扫同一个码时用（电脑的小程序长期公钥、小程序入口端口，见 MPGate.swift；App 忽略）
+        var mini = ""
+        if let gate = AppState.shared.mobile.mpGate { mini = "&mk=\(gate.keys.publicB64URL)&mp=\(gate.port)" }
+        return "\(base)/?t=\(token)\(fingerprint)\(remote)\(mini)"
     }
 
     /// 默认选哪个地址扫码：自定义 > Tailscale > 局域网

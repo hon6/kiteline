@@ -32,8 +32,8 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 | **Muse Code** <br><sub>[plugin](plugins/muse-code)</sub> | CLI | View · Reply · Interrupt <sup>19</sup> | View only <sup>9</sup> | View · Reply · Interrupt ✓ <sup>19</sup> |
 | **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>20</sup> | View only <sup>21</sup> | View · Reply · Approve · Interrupt ✓ <sup>20</sup> |
 | **trae-agent** <br><sub>[plugin](plugins/trae-agent)</sub> | CLI | View · Reply <sup>22</sup> | View only <sup>9</sup> | View · Reply ✓ <sup>22</sup> |
-| **ZCode** <br><sub>[plugin](plugins/zcode)</sub> | Desktop app | View only <sup>23</sup> | View only <sup>23</sup> | View only <sup>23</sup> |
-|  | CLI | View only <sup>24</sup> | View only <sup>24</sup> | View only ✓ <sup>24</sup> |
+| **ZCode** <br><sub>[plugin](plugins/zcode)</sub> | Desktop app | Full ✓ <sup>23</sup> | Full ✓ <sup>23</sup> | Full ✓ <sup>23</sup> |
+|  | CLI | Full ✓ <sup>23</sup> | Full ✓ <sup>23</sup> | Full ✓ <sup>23</sup> |
 
 1. CLI sessions need to run in tmux
 2. Codex has no desktop app for Linux
@@ -57,5 +57,4 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 20. Replying and approving need Qwen Code to run in tmux
 21. Windows has no tmux, so it's view-only
 22. Sending tasks needs trae-agent to run in tmux
-23. ZCode 没有对外的操作接口，只能查看
-24. 只能查看
+23. Controllable from your phone with models added using an API key; models from your account sign-in are view-only; confirm turns started on your computer there

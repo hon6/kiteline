@@ -121,6 +121,7 @@ for arch in $ARCHS; do
     -framework UserNotifications \
     -framework Security \
     -framework SystemConfiguration \
+    -Xlinker -weak_framework -Xlinker Translation \
     -o "$KIT/$arch/$EXEC_NAME" \
     $SOURCES
   BINS+=("$KIT/$arch/$EXEC_NAME")
@@ -145,7 +146,7 @@ cp "$ROOT/Resources/ThirdPartyNotices.json" "$APP/Contents/Resources/"   # 设�
 # 英文：界面文字（Localizable.strings / .stringsdict，由 tools/i18n.py build 生成）和权限说明（InfoPlist.strings）
 cp -R "$ROOT/Resources/en.lproj" "$APP/Contents/Resources/"
 # 网页版已下线（10-22）：Resources/web 不再打进 App，服务端根路径只回说明页（见 MobileServer.noticePage）
-# 世界模式的网页（three.js，各端共用一份，见 Sources/WorldView.swift、docs/world.md）
+# 世界模式的网页（three.js，各端共用一份，见 Sources/WorldView.swift、world.md（内部文档））
 cp -R "$ROOT/Resources/world" "$APP/Contents/Resources/"
 # 代码 IDE 的编辑器内核（CodeMirror 6 打成一个 HTML，iPhone / Mac 共用；tools/editor/build.sh 生成）
 cp -R "$ROOT/Resources/editor" "$APP/Contents/Resources/"

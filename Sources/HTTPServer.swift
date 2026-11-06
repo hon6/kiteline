@@ -55,8 +55,11 @@ struct HTTPResponse {
 
 /// SSE 这类长连接的写端。写操作都在服务器自己的队列上排队。
 final class HTTPStream {
-    private let connection: NWConnection
+    private let connection: NWConnection?
     private let queue: DispatchQueue
+    /// 不经 TCP 连接的流（微信小程序的加密隧道，见 MPGate.swift）：写进来的字节交给它，关闭时调 closer
+    private let sink: ((Data) -> Void)?
+    private let closer: (() -> Void)?
     private(set) var isClosed = false
     var onClose: (() -> Void)?
     let remoteAddress: String
@@ -65,6 +68,16 @@ final class HTTPStream {
         self.connection = connection
         self.queue = queue
         self.remoteAddress = remoteAddress
+        sink = nil
+        closer = nil
+    }
+
+    init(queue: DispatchQueue, remoteAddress: String, sink: @escaping (Data) -> Void, closer: @escaping () -> Void) {
+        connection = nil
+        self.queue = queue
+        self.remoteAddress = remoteAddress
+        self.sink = sink
+        self.closer = closer
     }
 
     /// 交给连接、还没发出去的字节数（只在 queue 上读写）
@@ -75,13 +88,15 @@ final class HTTPStream {
     func send(_ data: Data) {
         queue.async {
             guard !self.isClosed else { return }
+            if let sink = self.sink { sink(data); return }
+            guard let connection = self.connection else { return }
             if self.pending + data.count > HTTPStream.maxPending {
                 Log.write("实时连接（\(self.remoteAddress)）积压超过 8 MB 没发出去，断开")
                 self.close()
                 return
             }
             self.pending += data.count
-            self.connection.send(content: data, completion: .contentProcessed { [weak self] error in
+            connection.send(content: data, completion: .contentProcessed { [weak self] error in
                 guard let self else { return }
                 self.queue.async { self.pending -= data.count }
                 if error != nil { self.close() }
@@ -93,7 +108,8 @@ final class HTTPStream {
         queue.async {
             guard !self.isClosed else { return }
             self.isClosed = true
-            self.connection.cancel()
+            self.connection?.cancel()
+            self.closer?()
             let callback = self.onClose
             self.onClose = nil
             callback?()

@@ -1,13 +1,25 @@
 # Kiteline 电脑端（Windows / Linux）更新记录
 
+## 1.0.28（2026-11-06）
+
+### 新功能
+
+- **消息翻译**（Windows、Linux）：每条消息下方新增「翻译」，点一下即可把这条消息翻译为所选语言，再点「原文」还原；鼠标移到「翻译」上会同时显示设置按钮。第一次使用时可选择原文语言（默认自动检测）、目标语言和翻译服务（Google 翻译或 MyMemory，均无需注册或填写密钥；「自动」模式下 Google 翻译不可用时改用 MyMemory），之后在消息旁的设置按钮或「设置 → 通用」中随时修改。代码块、行内代码和链接保持原样，表格按格翻译。打开「自动翻译助手的回复」后，与目标语言不同的回复显示在屏幕上时会自动翻译。也可在右键菜单中选择「翻译」。
+
+### 问题修复
+
+- **Windows 上用搜狗等输入法打字不上屏**（Windows）：部分用户在消息输入框中用搜狗等中文输入法打字时，候选框正常弹出，选字后文字却没有进入输入框。现已修复，输入法在各输入框中都能正常上屏。
+- **从手机发送命令后不再多出一条英文说明**（Windows、Linux）：从手机给 Claude Code 会话发送斜杠命令（如切换思考强度）后，对话中会多出一条以「local-command-caveat」开头的英文说明，并显示为你发送的消息。现已不再显示。
+
 ## 1.0.27（2026-11-05）
 
 ### 新功能
 
-- **支持 CodeBuddy / WorkBuddy 和 ZCode**（Windows、Linux）：电脑上装有腾讯 CodeBuddy Code、WorkBuddy 或智谱 ZCode 时，Kiteline 自动安装对应插件，会话可在手机上查看（状态、完整记录、任务清单），「今日用量」和用量页计入它们的 token。CodeBuddy Code 在 Linux 上用 tmux 运行时，还可发送消息、允许或拒绝命令、回答提问、中断和关闭会话；WorkBuddy 桌面版、ZCode 和 Windows 上的会话只能查看。
+- **支持 CodeBuddy / WorkBuddy 和 ZCode**（Windows、Linux）：电脑上装有腾讯 CodeBuddy Code、WorkBuddy 或智谱 ZCode 时，Kiteline 自动安装对应插件，会话可在手机上查看（状态、完整记录、任务清单），「今日用量」和用量页计入它们的 token。CodeBuddy Code 在 Linux 上用 tmux 运行时，还可发送消息、允许或拒绝命令、回答提问、中断和关闭会话；WorkBuddy 桌面版和 Windows 上的会话只能查看。
 - **支持 Antigravity 和 Muse Code**（Windows、Linux）：电脑上装有 Google Antigravity 或 Meta Muse Code 时，Kiteline 自动安装对应插件，会话可在手机上查看（状态、完整记录），「今日用量」和用量页计入它们的 token。在 Linux 上用 tmux 运行 Antigravity 命令行或 Muse Code 时，还可发送消息、中断和关闭会话，Antigravity 还可允许或拒绝命令、回答提问（Muse Code 的命令请在电脑上确认）；Antigravity 桌面版、IDE 和 Windows 上的会话只能查看。
 - **支持 trae-agent**（Windows、Linux）：电脑上装有字节跳动开源的 trae-agent 命令行时，Kiteline 自动安装对应插件，可在手机上查看它的任务和完整记录，「今日用量」和用量页计入它的 token；在 Linux 上用 tmux 运行时还可从手机发任务。trae-agent 本身没有审批和提问，也不能中断正在执行的任务。Trae IDE 的对话数据是加密的，暂不支持。
 - **Windows 上从手机操作 Antigravity**（Windows）：Antigravity 命令行在 Windows 终端里运行时，也能从手机回复、允许或拒绝命令、回答提问、中断和关闭会话，不用 tmux。其他命令行 agent 在 Windows 上逐家实测后开放。
+- **ZCode 可从手机操作**（Windows、Linux）：使用 API Key 添加的模型时，可以从手机给智谱 ZCode 的会话发消息，这一轮要确认的命令、要回答的提问会出现在手机上，也可以中断；电脑上的 ZCode 退出再打开后能看到这一轮。使用 ZCode 账号登录的模型的会话只能在手机上查看。电脑上 ZCode 窗口里发起的那一轮，仍请在电脑上确认，对话里有提示。
 - **插件说明更清楚**（Windows、Linux）：设置 → 插件中，每个插件下面逐条列出做不到的功能（附原因）和还没实测的功能，开启前就能知道它在手机上能做什么、不能做什么。
 
 ### 改进

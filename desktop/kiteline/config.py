@@ -49,6 +49,8 @@ DEFAULT_MOBILE = {
     "installOpenCodePlugin": True,
     "httpsEnabled": True,
     "httpsPort": 0,
+    "mpEnabled": True,             # 微信小程序入口（加密隧道，见 mpgate.py）
+    "mpPort": 8768,
     "pushContact": "mailto:ccpulse@users.noreply.github.com",
     "voiceLocale": "zh-CN",
     "uiLanguage": "system",   # 电脑端自己的界面（托盘、控制台）：system 跟随系统 / zh / en；发给手机的字按各台手机的语言，和它无关

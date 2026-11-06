@@ -1,13 +1,14 @@
 {
  "id": "zcode",
  "name": "ZCode",
- "version": "1.0.2",
- "summary": "智谱的 agent 编程应用（桌面版和命令行）：查看会话、状态和完整对话（只读）",
- "summaryEn": "Zhipu's agentic coding app (desktop and CLI): view sessions, status and full conversations (view-only)",
+ "version": "1.1.2",
+ "summary": "智谱的 agent 编程桌面应用：查看会话、状态和完整对话；使用 API Key 添加的模型时可从手机发消息、确认、回答提问和中断",
+ "summaryEn": "Zhipu's agentic coding desktop app: view sessions, status and full conversations; with models added using an API key, send messages, confirm, answer questions and interrupt from your phone",
  "needs": [
   "fs.read",
   "db.read",
-  "proc"
+  "proc",
+  "proc.pipe"
  ],
  "detect": {
   "paths": [
@@ -21,49 +22,73 @@
   "mac": {
    "desktop": {
     "abilities": [
-     "view"
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
     ],
-    "verified": false,
-    "note": "ZCode 没有对外的操作接口，只能查看"
+    "verified": true,
+    "note": "使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认"
    },
    "cli": {
     "abilities": [
-     "view"
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
     ],
-    "verified": false,
-    "note": "只能查看"
+    "verified": true,
+    "note": "使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认"
    }
   },
   "windows": {
    "desktop": {
     "abilities": [
-     "view"
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
     ],
-    "verified": false,
-    "note": "ZCode 没有对外的操作接口，只能查看"
+    "verified": true,
+    "note": "使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认"
    },
    "cli": {
     "abilities": [
-     "view"
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
     ],
-    "verified": false,
-    "note": "只能查看"
+    "verified": true,
+    "note": "使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认"
    }
   },
   "linux": {
    "desktop": {
     "abilities": [
-     "view"
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
     ],
-    "verified": false,
-    "note": "ZCode 没有对外的操作接口，只能查看"
+    "verified": true,
+    "note": "使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认"
    },
    "cli": {
     "abilities": [
-     "view"
+     "view",
+     "reply",
+     "approve",
+     "answer",
+     "interrupt"
     ],
     "verified": true,
-    "note": "只能查看"
+    "note": "使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认"
    }
   }
  },
@@ -77,23 +102,28 @@
  ],
  "speaker": "ZCode",
  "caps": [],
- "notes": "改进 Windows 上找会话的办法；从手机操作 Windows 上的会话在实测通过前暂不开放，设置 → 插件中有说明。",
- "notesEn": "Better session detection on Windows; controlling Windows sessions from your phone stays off until tested, as noted in Settings → Plugins.",
+ "notes": "使用 ZCode 账号登录的模型的会话改为只读并说明原因（之前从手机发消息会没有反应）；从手机发起的这一轮失败时在对话里提示原因；提示改为「退出 ZCode 再打开就能看到」。",
+ "notesEn": "Sessions using a model from your ZCode account sign-in are now view-only with an explanation (sending from your phone used to do nothing); if a turn from your phone fails, the conversation says why; the hint now says to quit and reopen ZCode to see the turn.",
  "gaps": [
   {
-   "kind": "untested",
-   "text": "Windows 上的查看还没实测（找进程的办法换成了 Windows 也能用的）",
-   "textEn": "Viewing on Windows isn't tested yet (process detection now works on Windows too)"
+   "kind": "unsupported",
+   "text": "使用 ZCode 账号登录的模型（如 GLM Coding Plan）的会话只能查看：这类模型要由 ZCode 桌面版提供登录状态，要从手机操作就得读 ZCode 的登录凭证，这里不做。在 ZCode 设置里用 API Key 添加的模型可以从手机操作",
+   "textEn": "Sessions using a model from your ZCode account sign-in (such as the GLM Coding Plan) are view-only: those models need the ZCode desktop app's sign-in, and controlling them from your phone would mean reading ZCode's sign-in credentials, which Kiteline doesn't do. Models added with an API key in ZCode's settings can be controlled from your phone"
   },
   {
    "kind": "unsupported",
-   "text": "回复、确认、回答提问、中断都做不到：ZCode 没有对外的操作接口，桌面版自带的命令行也没有可操作的终端界面",
-   "textEn": "Replying, confirming, answering questions and interrupting aren't possible: ZCode offers no external control interface, and the CLI bundled with the desktop app has no interactive terminal interface"
+   "text": "电脑上的 ZCode 窗口里发起的那一轮，它要确认的命令、要回答的提问只弹在电脑上，手机上处理不了：那一轮在 ZCode 桌面版自己的进程里，Kiteline 收不到",
+   "textEn": "For turns started in the ZCode window on your computer, command confirmations and questions only appear on your computer and can't be handled from your phone: those turns run inside the ZCode desktop app's own process, which Kiteline can't reach"
   },
   {
-   "kind": "untested",
-   "text": "Mac、Windows 上还没实测（Linux 上已实测）",
-   "textEn": "Not yet tested on Mac or Windows (tested on Linux)"
+   "kind": "unsupported",
+   "text": "电脑上发起的那一轮也不能从手机中断（同上）；从手机发起的那一轮可以",
+   "textEn": "Turns started on your computer can't be interrupted from your phone either (same reason); turns started from your phone can"
+  },
+  {
+   "kind": "unsupported",
+   "text": "电脑上的 ZCode 窗口不会实时显示从手机发起的那一轮（切换对话也不刷新），退出 ZCode 再打开就能看到",
+   "textEn": "The ZCode window on your computer doesn't show turns started from your phone as they happen (switching conversations doesn't refresh it); quit and reopen ZCode to see them"
   }
  ]
 }

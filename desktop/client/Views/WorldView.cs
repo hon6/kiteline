@@ -17,7 +17,7 @@ using static Kiteline.Lang;
 namespace Kiteline.Views;
 
 /// 世界模式（同 Mac 版 Sources/WorldView.swift）：机房 = agent、卫星 = 设备、方块人 = 会话的像素世界。网页各端共用一份（Resources/world），
-/// 电脑端后台在 /world/ 上提供，网页自己连后台取状态、收实时事件、发私聊（docs/world.md「直连模式」）。
+/// 电脑端后台在 /world/ 上提供，网页自己连后台取状态、收实时事件、发私聊（world.md（内部文档）「直连模式」）。
 /// Windows 用系统的 WebView2 嵌在右边整块（Win11 自带运行时）；Linux 上 Avalonia 嵌不了网页，开成单独的浏览器应用窗口。
 /// 网页里点屏幕 / 卫星 / 门：WebView2 里经 postMessage 交给这里；浏览器窗口里经后台 POST /api/world/intent → 实时事件 world_intent 回来
 public static class World

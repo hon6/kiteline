@@ -1,13 +1,25 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.28 (2026-11-06)
+
+### New Features
+
+- **Message translation** (Windows, Linux): A new Translate button under each message translates it into the language you choose; click Original to switch back. Hovering over Translate also shows the settings button. The first time, choose the source language (detected automatically by default), the target language, and the translation service (Google Translate or MyMemory, with no sign-up or key required; in Automatic mode, MyMemory is used when Google Translate is unavailable). Change them anytime from the settings button next to the message or in Settings > General. Code blocks, inline code, and links stay unchanged, and tables are translated cell by cell. Turn on Automatically Translate Replies to have replies in a different language translated as they appear on screen. Translate is also available in the right-click menu.
+
+### Bug Fixes
+
+- **Chinese input methods such as Sogou now enter text on Windows** (Windows): For some users typing with Sogou or similar Chinese input methods, the candidate window appeared but the chosen characters were not entered into the message box. Chosen characters are now entered correctly in every text field.
+- **No extra English notice after sending a command from your phone** (Windows, Linux): After you sent a slash command (such as changing the effort level) to a Claude Code session from your phone, an extra notice beginning with "local-command-caveat" appeared in the conversation as if you had sent it. It no longer appears.
+
 ## 1.0.27 (2026-11-05)
 
 ### New Features
 
-- **CodeBuddy / WorkBuddy and ZCode support** (Windows, Linux): When Tencent's CodeBuddy Code or WorkBuddy, or Zhipu's ZCode, is installed on your computer, Kiteline installs the matching plugin automatically. You can follow their sessions on your phone (status, full conversation, task lists), and Today's Usage and the Usage page count their tokens. On Linux, when CodeBuddy Code runs in tmux, you can also send messages, allow or deny commands, answer questions, interrupt and close sessions; the WorkBuddy desktop app, ZCode and sessions on Windows are view-only.
+- **CodeBuddy / WorkBuddy and ZCode support** (Windows, Linux): When Tencent's CodeBuddy Code or WorkBuddy, or Zhipu's ZCode, is installed on your computer, Kiteline installs the matching plugin automatically. You can follow their sessions on your phone (status, full conversation, task lists), and Today's Usage and the Usage page count their tokens. On Linux, when CodeBuddy Code runs in tmux, you can also send messages, allow or deny commands, answer questions, interrupt and close sessions; the WorkBuddy desktop app and sessions on Windows are view-only.
 - **Antigravity and Muse Code support** (Windows, Linux): When Google Antigravity or Meta Muse Code is installed on your computer, Kiteline installs the matching plugin automatically. You can follow their sessions on your phone (status, full conversation), and Today's Usage and the Usage page count their tokens. On Linux, when the Antigravity CLI or Muse Code runs in tmux, you can also send messages, interrupt and close sessions, and for Antigravity allow or deny commands and answer questions (confirm Muse Code's commands on your computer); sessions in the Antigravity desktop app and IDE, and sessions on Windows, are view-only.
 - **trae-agent support** (Windows, Linux): When ByteDance's open-source trae-agent CLI is installed on your computer, Kiteline installs the matching plugin automatically. You can follow its tasks and full records on your phone, and Today's Usage and the Usage page count its tokens; on Linux, when it runs in tmux, you can also send tasks from your phone. trae-agent itself has no approvals or questions and can't interrupt a running task. The Trae IDE keeps its chat data encrypted, so it isn't supported.
 - **Control Antigravity on Windows from your phone** (Windows): When the Antigravity CLI runs in a Windows terminal, you can reply, allow or deny commands, answer questions, interrupt and close sessions from your phone, no tmux needed. Other command-line agents on Windows will follow as each is tested.
+- **Control ZCode from your phone** (Windows, Linux): With models added using an API key, send messages to Zhipu ZCode sessions from your phone; commands to confirm and questions to answer in that turn show up on your phone, and you can interrupt it. Quit and reopen ZCode on your computer to see that turn there. Sessions using a model from your ZCode account sign-in are view-only on your phone. Turns started in the ZCode window on your computer are still confirmed there, as noted in the conversation.
 - **Clearer plugin notes** (Windows, Linux): In Settings → Plugins, each plugin now lists the features it can't offer (with the reason) and the ones not yet tested, so you know what it can and can't do from your phone before turning it on.
 
 ### Improvements

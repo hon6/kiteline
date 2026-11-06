@@ -10,6 +10,8 @@ struct MessageRow<Content: View>: View {
     var time: Double? = nil
     /// Mac 上：Claude 的文字回复，时间旁边一个小喇叭，点了朗读
     var speak: (text: String, id: String)? = nil
+    /// 能翻译的文字消息：下面带「翻译」角标（见 TranslateViews.swift）
+    var translate: (text: String, id: String)? = nil
     @ViewBuilder let content: Content
 
     #if os(macOS)
@@ -33,11 +35,9 @@ struct MessageRow<Content: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: gap) {
             if side == .me { Spacer(minLength: chatWidth > 0 ? min(meRoom, chatWidth * meRatio) : meRoom) } else { avatar }
-            VStack(alignment: side == .me ? .trailing : .leading, spacing: 6) {
-                content
-                #if os(macOS)
+            BubbleFooterLayout(spacing: footerShown ? 6 : 0, trailing: side == .me) {
+                VStack(alignment: side == .me ? .trailing : .leading, spacing: 6) { content }
                 footer
-                #endif
             }
             .environment(\.bubbleTail, first)
             if side == .me { avatar } else { Spacer(minLength: 0) }
@@ -68,11 +68,28 @@ struct MessageRow<Content: View>: View {
         }
     }
 
-    #if os(macOS)
+    /// 这条要不要显示角标（设置里能关；关了以后翻过的那条照样留着「原文」）
+    private var badgeShown: Bool {
+        guard let translate else { return false }
+        return Translator.shared.showBadge || Translator.shared.state(translate.id) != nil
+    }
+
+    private var footerShown: Bool {
+        #if os(macOS)
+        return time != nil || badgeShown
+        #else
+        return badgeShown
+        #endif
+    }
+
+    /// 下面那行小字：Mac 是时间、朗读 + 翻译；iPhone 只有翻译（时间隔 5 分钟才在中间显示一次）。
+    /// 翻译角标靠气泡外侧那边（助手的靠右、我的靠左），和时间分在两头
     @ViewBuilder private var footer: some View {
-        if let time {
+        if footerShown {
             HStack(spacing: 6) {
-                Text(Format.clock(time))
+                if side == .me { badge; Spacer(minLength: 8) }
+                #if os(macOS)
+                if let time { Text(Format.clock(time)) }
                 if let speak {
                     Button { Speaker.shared.toggle(speak.text, id: speak.id) } label: {
                         Image(systemName: Speaker.shared.speaking == speak.id ? "speaker.wave.2.fill" : "speaker.wave.2")
@@ -80,13 +97,20 @@ struct MessageRow<Content: View>: View {
                     .buttonStyle(.plain)
                     .help(Speaker.shared.speaking == speak.id ? L("停止朗读") : L("朗读这条"))
                 }
+                #endif
+                if side == .bot { Spacer(minLength: 8); badge }
             }
             .font(.app(size: 11))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 4)
+        } else {
+            Color.clear.frame(width: 0, height: 0)
         }
     }
-    #endif
+
+    @ViewBuilder private var badge: some View {
+        if badgeShown, let translate { TranslateBadge(id: translate.id, text: translate.text) }
+    }
 }
 
 extension EnvironmentValues {
@@ -344,6 +368,14 @@ struct UserMessage: View {
     let item: ChatItem
     /// 长按「转发文件」时消息里有好几个文件：先选一个
     @State private var picking: [String]?
+    @State private var translator = Translator.shared
+
+    /// 能翻译的：有文字、不是语音（语音下面的转写框不翻）
+    static func translatable(_ item: ChatItem) -> (text: String, id: String)? {
+        let text = FileLink.splitAttached(item.text ?? "").text
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return (text, item.id)
+    }
 
     var body: some View {
         let text = item.text ?? ""
@@ -360,13 +392,15 @@ struct UserMessage: View {
                 VoiceBubble(id: clip.id, duration: clip.duration, mine: true)
                 TranscriptBox(text: text)
             } else {
-                Bubble(mine: true, text: shown.isEmpty ? nil : shown, actions: actions(text, files: files)) {
+                let display = translator.shown(item.id) ?? shown
+                Bubble(mine: true, text: display.isEmpty ? nil : display, actions: actions(text, files: files)) {
                     VStack(alignment: .leading, spacing: 6) {
                         if let images = item.images, !images.isEmpty { MessageImages(key: key, images: images) }
                         if !files.isEmpty { AttachedFiles(key: key, paths: files) }
-                        if !shown.isEmpty { Text(shown).fixedSize(horizontal: false, vertical: true) }
+                        if !display.isEmpty { Text(display).fixedSize(horizontal: false, vertical: true) }
                     }
                 }
+                .translateHost(item.id, text: shown)
             }
             if item.queued == true {
                 Text("Claude 工作时插入").font(.ui(.caption2)).foregroundStyle(.secondary)
@@ -385,11 +419,12 @@ struct UserMessage: View {
             let cwd = model.session(key)?.cwd ?? model.pastMeta[key]?.cwd
             Clipboard.copy(PromptLink.make(prompt: prompt, project: cwd.map { ($0 as NSString).lastPathComponent }))
         }]
-        guard !text.isEmpty, !readOnly else { return forward + link + favorite }
+        let translate = [translator.menuAction(id: item.id, text: prompt)].compactMap { $0 }
+        guard !text.isEmpty, !readOnly else { return translate + forward + link + favorite }
         return [
             MenuAction(title: L("引用"), symbol: "quote.opening") { model.chat(key).quote = Quote.make(FileLink.splitAttached(text).text) },
             MenuAction(title: L("重新发送"), symbol: "arrow.clockwise") { model.send(key, text: text, images: []) },
-        ] + forward + link + favorite
+        ] + translate + forward + link + favorite
     }
 }
 
@@ -400,22 +435,33 @@ struct BotText: View {
     let item: ChatItem
     @State private var adding: AddTodosRequest?
     @State private var picking: [String]?
+    @State private var translator = Translator.shared
+
+    /// 助手的文字回复能翻译（会话之间的信件、图片、网页、待办卡片这些不翻）
+    static func translatable(_ item: ChatItem) -> (text: String, id: String)? {
+        guard item.t == "text", item.peer == nil, let text = item.text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return (text, item.id)
+    }
 
     var body: some View {
         let text = item.text ?? ""
         let files = FileLink.mentions(in: text)
-        Bubble(mine: false, text: text, actions: (readOnly ? [] : [
+        let display = translator.shown(item.id) ?? text
+        Bubble(mine: false, text: display, actions: (readOnly ? [] : [
             MenuAction(title: L("引用"), symbol: "quote.opening") { model.chat(key).quote = Quote.make(text) },
             MenuAction(title: L("加入待办"), symbol: "checklist") { addTodo(text) },
-        ]) + [model.forwardFilesAction(key: key, paths: files) { picking = files },
+        ]) + [translator.menuAction(id: item.id, text: text),
+              model.forwardFilesAction(key: key, paths: files) { picking = files },
               model.favoriteAction(key: key, item: item, mine: false)].compactMap { $0 } + [
             MenuAction(title: Speaker.shared.speaking == item.id ? L("停止朗读") : L("朗读"), symbol: "speaker.wave.2") {
                 Speaker.shared.toggle(text, id: item.id)
             },
         ]) {
             // 气泡贴着字走（同微信）：一两句的回复不再拉成一整行的灰条；有代码块、分隔线的照样撑满
-            MarkdownView(text, fill: false)
+            MarkdownView(display, fill: false)
         }
+        .translateHost(item.id, text: text, auto: true)
         .sheetPanel(item: $adding) { AddTodosSheet(request: $0) }
         .sheetPanel(item: Binding(get: { picking.map(MentionedFiles.init) }, set: { picking = $0?.paths })) { FilePickSheet(key: key, paths: $0.paths) }
     }

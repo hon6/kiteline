@@ -142,6 +142,24 @@ static class SelfTest
                     break;
                 case "imageshot": Pump(0.4); if (Views.ImageViewer.LastWindow is Window viewer) Shot(viewer, arg); break;
                 // 收藏当前会话最后一条文字回复、最后一条带图的消息（同右键「收藏」）
+                // translate[:engine]：点当前会话最后一条文字回复的「翻译」（跳过第一次的设置弹窗）；translate:ask 看设置弹窗；translated 打印状态
+                case "translate":
+                    if (main.Selection is string trKey && model.Chat(trKey).Items.Values.OrderBy(i => i.Ts ?? 0)
+                            .LastOrDefault(i => i.T == "text" && i.Peer is null && !string.IsNullOrWhiteSpace(i.Text)) is { } trItem)
+                    {
+                        Model.Translator.Configured = arg != "ask";
+                        if (arg.Length > 0 && arg != "ask") Model.Translator.Engine = arg;
+                        Model.Translator.Tap(trItem.Id, trItem.Text!);
+                        Console.WriteLine($"[capture] 翻译 {trItem.Id}");
+                    }
+                    break;
+                case "autotranslate": Model.Translator.Configured = true; if (arg.Length > 0 && arg != "on" && arg != "off") Model.Translator.Engine = arg; Model.Translator.AutoTranslateOn = arg != "off"; break;
+                case "translated":
+                    if (main.Selection is string tdKey)
+                        foreach (var it in model.Chat(tdKey).Items.Values)
+                            if (Model.Translator.StateOf(it.Id) is { } st)
+                                Console.WriteLine($"[capture] 翻译状态 {it.Id}={st.Phase} {st.Error} {(st.Text ?? "")[..Math.Min(60, (st.Text ?? "").Length)]}");
+                    break;
                 case "favlatest":
                     if (main.Selection is string favKey)
                     {

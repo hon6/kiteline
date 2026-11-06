@@ -393,6 +393,8 @@
 "Git 状态读取超时" = "Timed out reading Git status";
 "Git 状态读取超时 · 可能需要在电脑上允许 Kiteline 访问该文件夹" = "Timed out reading Git status · Kiteline on your computer may need permission to access this folder.";
 "GlobalMemoryStatusEx 失败" = "GlobalMemoryStatusEx failed";
+"Google 翻译" = "Google Translate";
+"Google 翻译返回了无法识别的内容" = "Google Translate returned an unrecognized response";
 "HTTPS 服务" = "HTTPS Service";
 "IP 地址" = "IP Address";
 "IPC 帧长度不对：%@" = "Invalid IPC frame length: %@";
@@ -444,6 +446,9 @@
 "Mac 未允许 Kiteline 使用语音识别（系统设置 → 隐私与安全性 → 语音识别）" = "Kiteline is not allowed to use speech recognition on your Mac (System Settings → Privacy & Security → Speech Recognition).";
 "Mac 未授予 Kiteline「本地网络」权限，无法连接局域网中的机器（系统设置 → 隐私与安全性 → 本地网络，开启 Kiteline）" = "Kiteline doesn’t have “Local Network” permission on this Mac, so it can’t connect to computers on the local network. Turn on Kiteline in System Settings → Privacy & Security → Local Network.";
 "Mac 浏览器" = "Mac Browser";
+"MyMemory 今日免费额度已用完" = "MyMemory's free daily quota has been used up";
+"MyMemory 翻译失败" = "MyMemory translation failed";
+"MyMemory 返回了无法识别的内容" = "MyMemory returned an unrecognized response";
 "M月d日" = "MMM d";
 "M月d日 EEEE" = "EEEE, MMM d";
 "M月d日 HH:mm" = "MMM d, HH:mm";
@@ -591,6 +596,7 @@
 "。已打开的 VS Code 窗口需要关闭后重新打开" = ". Any open VS Code windows must be closed and reopened.";
 "。提醒：" = ". Note: ";
 "。提醒：%@" = ". Note: %@";
+"。翻译时消息文字会发送到该服务。" = ". Message text is sent to this service when translating.";
 "「%@」" = "“%@”";
 "「%@」上的 Kiteline" = "Kiteline on “%@”";
 "「%@」可能包含密钥或密码，默认不传到手机。仍要取回吗？" = "“%@” may contain keys or passwords, so it isn't sent to your phone by default. Fetch it anyway?";
@@ -614,6 +620,7 @@
 "「与 iPhone 一致」即使用 iPhone 上 Kiteline「设置 → 外观」中的选项。手表始终使用深色外观；手表不提供宋体、楷体等中文字体，选择后中文仍显示为苹方，数字和英文使用同风格字体。" = "“Same as iPhone” uses the options in Kiteline Settings → Appearance on iPhone. The watch always uses a dark appearance. The watch does not offer Chinese fonts such as Songti and Kaiti; Chinese text still displays in PingFang, and numbers and English use a matching style.";
 "「今日用量」中显示 5 小时与本周额度（免费版为 30 天额度），取自 Codex 自己的记录，回复一次后更新" = "Shows 5-hour and weekly limits under Today's usage (a 30-day limit on the free plan), taken from Codex's own records and updated after each reply";
 "「按住说话」识别语言" = "Hold to Talk Recognition Language";
+"「自动检测」会按消息内容判断原文语言；与目标语言相同的内容保持不变。" = "Detect Language identifies the source language from the message; text already in the target language stays unchanged.";
 "一" = "Mon";
 "一共" = "Total";
 "一台手机" = "A phone";
@@ -663,6 +670,7 @@
 "下载 iPhone App" = "Download the iPhone App";
 "下载不完整，请重试" = "The download is incomplete. Try again.";
 "下载中 %@%%" = "Downloading %@%%";
+"下载中…" = "Downloading…";
 "下载后在后台自动安装，装好后重启即可。" = "It installs in the background after downloading. Restart when it's done.";
 "下载失败" = "Download failed.";
 "下载失败（%@）" = "Download failed (%@)";
@@ -675,6 +683,7 @@
 "下载插件失败" = "Couldn't download the plugin";
 "下载电脑端" = "Download the Desktop App";
 "下载的插件包校验不通过" = "The downloaded plugin package failed verification";
+"下载语言包" = "Download Language Pack";
 "不会自动睡眠，手机可随时连接" = "Won't go to sleep automatically, so your phone can connect at any time.";
 "不会自动锁屏，离开电脑时也能从手机向 VS Code 发消息" = "The screen won't lock automatically, so you can send messages to VS Code from your phone when you step away.";
 "不保存" = "Don't Save";
@@ -770,6 +779,7 @@
 "主题色用于图标和链接的强调色、发送按钮与开关，以及你发送的消息气泡。选择自定义颜色后，浅色与深色模式下的气泡和按钮将自动适配。" = "Accent Color applies to the accent of icons and links, the send button, switches and the bubbles of messages you send. When you choose a custom color, bubbles and buttons adapt automatically in light and dark mode.";
 "主题色用于强调色、主按钮以及你发送的消息气泡。代码始终使用等宽字体。此处设置仅作用于这台电脑上的 Kiteline：iPhone 请在 iPhone 的设置中修改，Apple Watch 请在「Apple Watch」页修改。" = "Accent Color applies to highlights, primary buttons and the bubbles of messages you send. Code always uses a monospaced font. These settings apply only to Kiteline on this computer. Change iPhone settings on your iPhone, and Apple Watch settings on the Apple Watch page.";
 "主题色用于强调色、主按钮以及你发送的消息气泡。宋体为系统内置字体，其余中文字体在首次选择时从 Apple 字体服务下载。选择自定义颜色后，浅色与深色模式下的气泡和按钮将自动适配。代码始终使用等宽字体；窗口标题和工具栏属于系统界面，保持系统字体。主窗口顶部的纸鸢飞在窗口外侧，不响应鼠标，主窗口被遮挡时暂停。此处设置仅作用于这台 Mac：iPhone 和网页版请在各自的设置中修改，Apple Watch 请在「Apple Watch」页修改。" = "Accent Color applies to highlights, primary buttons and the bubbles of messages you send. Songti is a built-in system font; other Chinese fonts are downloaded from Apple's font service the first time you select them. When you choose a custom color, bubbles and buttons adapt automatically in light and dark mode. Code always uses a monospaced font; window titles and the toolbar belong to the system interface and keep the system font. The kite at the top of the main window flies outside the window, ignores the pointer, and pauses when the main window is covered. This setting applies only to this Mac. Change iPhone and web settings on those devices, and change Apple Watch settings on the “Apple Watch” page.";
+"乌克兰语" = "Ukrainian";
 "乐器" = "Instruments";
 "九宫格" = "Nine-Grid";
 "也可从左侧列表拖入会话，拖至哪一侧即从该侧拆分。" = "You can also drag a session in from the list on the left. Drop it on a side to split there.";
@@ -883,6 +893,7 @@
 "任务进展" = "Task Progress";
 "任务进展：%@" = "Task progress: %@";
 "仿宋" = "FangSong";
+"优先使用 Google 翻译，不可用时改用 MyMemory" = "Uses Google Translate first, then MyMemory if unavailable";
 "会在电脑上为新分支打开一个新的 VS Code 窗口" = "A new VS Code window will open on your computer for the new branch.";
 "会话" = "Sessions";
 "会话 " = "Sessions ";
@@ -953,6 +964,7 @@
 "例如：把登录模块的单元测试全部跑通，并修复发现的问题" = "e.g. Get every unit test in the login module passing and fix the issues found";
 "依次查看" = "Cycle through";
 "侧栏" = "the sidebar";
+"俄语" = "Russian";
 "保存" = "Save";
 "保存中…" = "Saving…";
 "保存失败：%@" = "Save failed: %@";
@@ -978,6 +990,7 @@
 "修改群名" = "Rename Group";
 "修改花费提醒 / 上限" = "Edit Cost Alert / Cap";
 "修改设备名称" = "Rename Device";
+"做不到：%@" = "Not possible: %@";
 "停下的原因" = "Why it stopped";
 "停在当前步骤" = "Stop at Current Step";
 "停止" = "Stop";
@@ -1052,6 +1065,7 @@
 "全部通过" = "All passed";
 "全部重新连接" = "Reconnect All";
 "全部项目" = "All Projects";
+"公开免费接口，每天可翻译约 5000 字" = "Free public service, about 5,000 characters per day";
 "六" = "Sat";
 "兰亭黑" = "Lanting Hei";
 "兰亭黑-简，清瘦的黑体" = "Lanting Hei, a slim sans-serif";
@@ -1076,6 +1090,7 @@
 "关闭加密" = "Turn Off Encryption";
 "关闭右侧标签页" = "Close Tabs to the Right";
 "关闭后不再接入这家 agent，并删除装进它里面的 Kiteline 组件" = "When turned off, Kiteline stops connecting to this agent and removes the Kiteline components installed in it";
+"关闭后仍可在消息的菜单中选择「翻译」。" = "When off, Translate is still available in the message menu.";
 "关闭当前终端" = "Close Current Terminal";
 "关闭所有 VS Code 窗口后重新打开" = "Close all VS Code windows and reopen them";
 "关闭执行过程" = "Close execution trace";
@@ -1241,6 +1256,8 @@
 "单指拖动" = "Drag with one finger";
 "单独安装" = "Installed Separately";
 "卫星" = "Satellites";
+"印地语" = "Hindi";
+"印尼语" = "Indonesian";
 "危险命令二次确认" = "Second Confirmation for High-Risk Commands";
 "危险命令需二次确认" = "Confirm Risky Commands Twice";
 "危险命令需在手表上二次确认" = "Risky commands require a second confirmation on the watch.";
@@ -1264,6 +1281,8 @@
 "原因" = "Reason";
 "原因与局域网检测项相同。请在电脑上打开 Kiteline 的「手机访问」重新扫码" = "The cause is the same as the local network check. On your computer, open Kiteline’s “Phone Access” and scan the code again.";
 "原图 %@ · %lld%%" = "Original %@ · %lld%%";
+"原文" = "Original";
+"原文语言" = "Translate From";
 "原消息" = "Original Message";
 "参数" = "Parameters";
 "参数无效" = "Invalid parameters.";
@@ -1325,6 +1344,7 @@
 "取消标记" = "Unmark";
 "取消私聊" = "End private chat";
 "取消置顶" = "Unpin";
+"取消翻译" = "Cancel Translation";
 "取消静音" = "Unmute";
 "取自 agent 记录" = "From agent records";
 "受限模式" = "Restricted Mode";
@@ -1486,6 +1506,7 @@
 "圆体" = "Rounded";
 "圆体-简，笔画圆润" = "Rounded, soft strokes";
 "圆润的黑体" = "Rounded sans serif";
+"土耳其语" = "Turkish";
 "在 App Store Connect 换 1.1 的截图并重新提交审核" = "Replace the 1.1 screenshots in App Store Connect and resubmit for review";
 "在 Kiteline 设置中开启「登录时自动启动」" = "Turn on “Launch at Login” in Kiteline Settings.";
 "在 Kiteline 设置中开启远程访问；无法连接时检查网络" = "Turn on Remote Access in Kiteline Settings. If you can't connect, check your network.";
@@ -1537,9 +1558,11 @@
 "在手表上轻点即可发送给 Claude。最多 8 条，每条不超过 40 字。" = "Tap on the watch to send to Claude. Up to 8 items, each up to 40 characters.";
 "在指定项目中新建 Claude Code 会话" = "Start a new Claude Code session in the selected project.";
 "在新工作树中检出" = "Check Out in New Worktree";
+"在本机完成翻译，消息不离开设备，下载语言包后可离线使用" = "Translates on this device so messages never leave it; works offline once the language pack is downloaded";
 "在此新建任务" = "New Task Here";
 "在此项目中新建会话" = "New Session in This Project";
 "在此项目中新建会话…" = "New Session in This Project…";
+"在每条消息下显示「翻译」" = "Show Translate Under Each Message";
 "在浏览器中打开" = "Open in Browser";
 "在独立分支中进行（git worktree）" = "Separate Branch (git worktree)";
 "在独立分支里做" = "Work in a Separate Branch";
@@ -1721,6 +1744,7 @@
 "小" = "Small";
 "小地图" = "Minimap";
 "尚无设备开启网页推送" = "No devices have web push turned on yet.";
+"尚未下载「%@ → %@」语言包" = "The %@ → %@ language pack is not downloaded";
 "尚未填写 Bark 地址" = "No Bark address entered yet.";
 "尚未安装电脑端？查看安装步骤" = "No desktop app yet? See how to install";
 "尚未授权（%@），按住说话不可用" = "Not authorized (%@). Hold to Talk is unavailable.";
@@ -1776,6 +1800,7 @@
 "已%@" = "Done: %@";
 "已上传 %@ 个文件" = "Uploaded files: %@";
 "已上传 %lld 个文件" = "Uploaded %lld files";
+"已下载语言包时使用系统翻译（在本机完成），否则依次改用 Google 翻译、MyMemory" = "Uses System Translation on this device when the language pack is downloaded; otherwise Google Translate, then MyMemory";
 "已丢弃更改" = "Changes discarded";
 "已丢弃此区块" = "Hunk discarded";
 "已中断" = "Interrupted";
@@ -2068,6 +2093,8 @@
 "开启后，当前会话中 Agent 的新回复将自动朗读；其他会话需要确认或完成时也会语音播报。长按某条回复并选择「朗读」可单独朗读。" = "When on, new replies from the agent in the current session are read aloud automatically. Other sessions are also announced aloud when they need approval or finish. Touch and hold a reply and choose “Read Aloud” to read it on its own.";
 "开启后，这台电脑上的新建任务和恢复的会话不再打开 VS Code，由 Kiteline 在那台电脑上后台运行 Claude Code，可减少 VS Code 的内存占用；发送消息、确认均不切换前台，电脑锁屏时也能操作。" = "When turned on, new tasks and resumed sessions on this computer no longer open VS Code. Kiteline runs Claude Code in the background on that computer instead, reducing VS Code's memory use. Sending messages and approvals don't switch the foreground window, and work even while the computer is locked.";
 "开启推送" = "Turn On Push";
+"开启自动翻译后，与目标语言不同的回复显示在屏幕上时自动翻译。" = "With automatic translation on, replies in a different language are translated as they appear on screen. ";
+"开启自动翻译后，与目标语言不同的回复显示在屏幕上时自动翻译。关闭「翻译」按钮后仍可在消息的菜单中选择「翻译」。" = "With automatic translation on, replies in a different language are translated as they appear on screen. When the Translate button is off, Translate is still available in the message menu.";
 "开启远程访问" = "Turn On Remote Access";
 "开始" = "Start";
 "开始于" = "Started";
@@ -2134,6 +2161,7 @@
 "微软语音需要联网：待朗读的文字将发送至微软服务器合成（与 Edge 浏览器的「大声朗读」相同）。无法连接时自动改用电脑内置语音。" = "Microsoft voices require an internet connection. Text to be read aloud is sent to Microsoft’s servers for synthesis, the same as “Read Aloud” in the Edge browser. If the connection fails, the computer’s built-in voice is used instead.";
 "微软语音（推荐，最接近真人发音）" = "Microsoft (Recommended, Most Natural)";
 "微软雅黑 UI" = "Microsoft YaHei UI";
+"德语" = "German";
 "忙碌 %@" = "Busy %@";
 "快" = "Fast";
 "快捷回复" = "Quick Replies";
@@ -2162,6 +2190,7 @@
 "恢复贮藏" = "Pop Stash";
 "恢复默认" = "Restore Defaults";
 "恢复默认头像和昵称" = "Restore Default Avatar and Nickname";
+"意大利语" = "Italian";
 "慢" = "Slow";
 "成功" = "Success";
 "成员会话都已关闭。发消息后会在原来的项目里恢复它们，接着协作。" = "All member sessions are closed. Send a message to resume them in their projects and continue working together.";
@@ -2624,6 +2653,7 @@
 "无法移到虚拟屏幕" = "Can’t Move to Virtual Display";
 "无法获取图片" = "Couldn’t Get Image";
 "无法获取此截图" = "Couldn't get this screenshot.";
+"无法识别原文语言" = "Could not identify the source language";
 "无法识别的按键" = "Unrecognized key.";
 "无法识别该链接。请扫描电脑上 Kiteline「手机访问」中的二维码。" = "This link is not recognized. Scan the QR code in Phone Access in Kiteline on your computer.";
 "无法读取 %@%@：系统正在等待你允许 Kiteline 访问「文稿」/ 网络磁盘，项目状态、文件浏览和改动报告将无法加载" = "Can't read %@%@: the system is waiting for you to allow Kiteline to access Documents or network volumes. Project status, file browsing and change reports won't load.";
@@ -2656,6 +2686,7 @@
 "日" = "Sun";
 "日报" = "Daily Report";
 "日期" = "Date";
+"日语" = "Japanese";
 "早安 · %@ 个会话待确认" = "Good morning · %@ sessions awaiting approval";
 "早安 · %lld 个会话待确认" = "Good morning · %lld sessions awaiting approval";
 "早安 · 昨晚的动态" = "Good morning · Last night’s activity";
@@ -2690,6 +2721,7 @@
 "显示上一个标签页" = "Show Previous Tab";
 "显示下一个标签页" = "Show Next Tab";
 "显示全部" = "Show All";
+"显示原文" = "Show Original";
 "显示名（可选）" = "Display Name (Optional)";
 "显示器唤醒" = "display woke";
 "显示器配置变化" = "display configuration changed";
@@ -2704,6 +2736,7 @@
 "显示花费" = "Show Spending";
 "显示花费金额" = "Show Cost Amount";
 "显示设备详情" = "Shows device details";
+"显示译文（%@）" = "Show Translation (%@)";
 "显示详细数字" = "Show Detailed Numbers";
 "显示隐藏文件夹" = "Show Hidden Folders";
 "晓伊（女声，活泼）" = "Xiaoyi (female, lively)";
@@ -2829,6 +2862,7 @@
 "未命名项目" = "Untitled Project";
 "未完成" = "Unfinished";
 "未实测" = "Not yet tested";
+"未实测：%@" = "Not yet tested: %@";
 "未开启" = "Off";
 "未开启或未启动（%@）：锁屏推送、按住说话和离线外壳均需要 HTTPS" = "Not turned on or not running (%@): lock screen push notifications, Hold to Talk and the offline shell all require HTTPS.";
 "未开启本地网络权限" = "Local network access is off.";
@@ -2878,6 +2912,7 @@
 "未知请求" = "Unknown request";
 "未知请求：%@" = "Unknown request: %@";
 "未知错误" = "Unknown error";
+"未能下载：%@" = "Download failed: %@";
 "未能切换到会话「%@」（VS Code 当前为「%@」）。为避免发错会话，此消息未发送。" = "Could not switch to session “%@” (VS Code is currently on “%@”). To avoid sending to the wrong session, this message was not sent.";
 "未能将消息粘贴进 VS Code 的输入框（电脑前台被「%@」占用），消息未发送" = "Couldn’t paste the message into the VS Code input box (“%@” was in front on the computer). The message wasn’t sent.";
 "未能将消息粘贴进 VS Code 的输入框，消息未发送" = "Couldn’t paste the message into the VS Code input box. The message wasn’t sent.";
@@ -2915,7 +2950,7 @@
 "本地网络" = "Local Network";
 "本地网络权限" = "Local Network Access";
 "本月" = "Month";
-"本机" = "This Computer";
+"本机" = "On-Device";
 "本机 Kiteline 还没连上，稍后再看" = "Kiteline on this computer isn't connected yet. Check back shortly.";
 "本机 watcher v%@ 就绪" = "Local watcher v%@ ready";
 "本机 watcher 启动失败：%@" = "Local watcher failed to start: %@";
@@ -3197,6 +3232,7 @@
 "此目录文件过多，仅列出前 2000 个。" = "This folder has too many files. Only the first 2,000 are listed.";
 "此目录还没有使用 Git 管理。" = "This folder isn't managed by Git yet.";
 "此类会话请在它自己的程序中关闭" = "Close this kind of session in its own app.";
+"此系统不支持系统翻译" = "System Translation is not supported on this system";
 "此系统不支持自动更新" = "Automatic updates aren't supported on this system";
 "此设备不支持 Apple Watch" = "This device doesn't support Apple Watch.";
 "此设备不支持远程访问" = "This device does not support remote access.";
@@ -3278,6 +3314,9 @@
 "没能把这个 VS Code 窗口切到前台，请在电脑上处理" = "Couldn’t bring this VS Code window to the front. Please handle it on the computer";
 "没能按下对话框上的按钮，请在电脑上处理" = "Couldn’t press the button in the dialog. Please handle it on the computer";
 "没认出这台电脑的软件包管理器：请手动安装 %@" = "This computer's package manager wasn't recognized. Install %@ manually.";
+"法语" = "French";
+"波兰语" = "Polish";
+"泰语" = "Thai";
 "活动" = "Activity";
 "浅色" = "Light";
 "测试" = "Tests";
@@ -3316,6 +3355,7 @@
 "消息中的文件" = "Files in Message";
 "消息已在 VS Code 输入框中，但按回车后未能提交。请在电脑上检查该会话的输入框" = "The message is in the VS Code input box, but pressing Return didn’t submit it. Check the session’s input box on your computer.";
 "消息已在 VS Code 输入框中，但按回车后未能提交（电脑前台被「%@」占用）。请在电脑上检查该会话的输入框" = "The message is in the VS Code input box, but pressing Return didn’t submit it (“%@” was in front on the computer). Check the session’s input box on your computer.";
+"消息翻译" = "Message Translation";
 "深色" = "Dark";
 "混合重置（保留改动，不暂存）" = "Mixed Reset (Keep Changes, Unstaged)";
 "添加" = "Add";
@@ -3365,6 +3405,7 @@
 "点击选择图片文件" = "Click to choose an image file.";
 "点对点直连" = "Direct Peer-to-Peer";
 "点对点连到电脑" = "Peer-to-peer connection to the computer";
+"点消息下的「翻译」即可把这条消息翻译为所选语言，再点「原文」还原。" = "Click Translate under a message to translate it into the selected language, and click Original to switch back. ";
 "照片" = "Photos";
 "父提交" = "Parent";
 "父提交（合并）" = "Parents (Merge)";
@@ -3643,9 +3684,17 @@
 "粤语" = "Cantonese";
 "系统" = "System";
 "系统将弹出以下对话框" = "The system will show the following dialog.";
+"系统翻译不可用：%@" = "System Translation unavailable: %@";
+"系统翻译不支持「%@ → %@」" = "System Translation does not support %@ → %@";
+"系统翻译不支持这组语言" = "System Translation does not support this language pair";
+"系统翻译尚未下载这组语言" = "The language pack for System Translation has not been downloaded";
+"系统翻译没有响应" = "System Translation did not respond";
+"系统翻译语言包" = "System Translation Language Pack";
+"系统翻译（本机）" = "System Translation (On-Device)";
 "系统语音识别" = "System Speech Recognition";
 "系统语音识别（%@）" = "System speech recognition (%@)";
 "系统语音识别（首次使用时自动下载更准确的本机模型，约 1 GB）" = "System speech recognition (a more accurate on-device model, about 1 GB, downloads on first use)";
+"繁体中文" = "Chinese (Traditional)";
 "约 " = "About ";
 "约 ¥16.50/月" = "About ¥16.50/month";
 "约 ¥8.17/月" = "About ¥8.17/month";
@@ -3726,6 +3775,15 @@
 "群设置" = "Group Settings";
 "翩翩体" = "Pianpian";
 "翩翩体-简，轻快的硬笔字" = "Pianpian, light pen script";
+"翻译" = "Translate";
+"翻译中…" = "Translating…";
+"翻译为" = "Translate To";
+"翻译失败" = "Translation failed";
+"翻译服务" = "Translation Service";
+"翻译设置" = "Translation Settings";
+"翻译质量较好；部分网络环境下可能无法连接" = "Good translation quality; may be unreachable on some networks";
+"翻译这条消息" = "Translate This Message";
+"联网" = "Online";
 "能做到：%@" = "Supports: %@";
 "能跑就别动" = "If it works,\ndon't touch it";
 "自动" = "Auto";
@@ -3736,6 +3794,8 @@
 "自动启动时只在后台运行（托盘图标），不打开主窗口。" = "When started automatically, Kiteline runs in the background (tray icon) without opening the main window.";
 "自动换行" = "Word Wrap";
 "自动接受编辑" = "Auto-Accept Edits";
+"自动检测" = "Detect Language";
+"自动翻译助手的回复" = "Automatically Translate Replies";
 "自动识别" = "Auto-detected";
 "自动运镜" = "Auto camera";
 "自动重试 %@ 次未成功：%@" = "Still failing after %@ automatic retries: %@";
@@ -3757,10 +3817,13 @@
 "花费数据取自 Claude Code 记录的 cost-state（会话结束或恢复时写入）；进行中的会话按同一机器、同一模型的平均费率估算（图中浅色部分）。" = "Cost data comes from the cost state that Claude Code records (written when a session ends or resumes). Sessions still in progress are estimated at the average rate for the same computer and model (the lighter portion of the chart).";
 "花费金额" = "Cost";
 "若此前未允许 Kiteline 访问本地网络，请前往 iPhone「设置 → Kiteline」开启「本地网络」。" = "If Kiteline hasn’t been allowed to access the local network, go to Settings › Kiteline on your iPhone and turn on “Local Network.”";
+"英语" = "English";
 "苹方 + San Francisco" = "PingFang + San Francisco";
 "范围" = "Scope";
+"荷兰语" = "Dutch";
 "获取" = "Fetch";
 "落后 %@ 个" = "Behind %@";
+"葡萄牙语" = "Portuguese";
 "虚拟屏幕" = "Virtual Display";
 "虚拟屏幕中的窗口" = "Windows on the Virtual Screen";
 "虚拟屏幕（看不见）" = "Virtual screen (invisible)";
@@ -3773,6 +3836,7 @@
 "补充说明（可选），例如：核对这份报价单的金额" = "Add a note (optional), e.g. Check the amounts in this quote";
 "补充说明（选填）：使用方式、所在系统等" = "Notes (optional): how you use it, which system, etc.";
 "被 Claude 停掉了" = "Stopped by Claude";
+"西班牙语" = "Spanish";
 "要做的事" = "What to do";
 "要它们协作什么（可选）" = "What should they work on together? (Optional)";
 "要用户做的事" = "What the user needs to do";
@@ -3830,6 +3894,7 @@
 "证书尚未就绪" = "The certificate isn't ready yet.";
 "识别引擎" = "Recognition Engine";
 "诊断" = "Diagnostics";
+"译文" = "Translation";
 "试听" = "Preview";
 "试用 %@ 天结束后，" = "After the %@-day trial ends,";
 "该主机的密钥文件（%@）只在 Kiteline 中设置，VS Code 无法使用，可能连接失败；请在 ~/.ssh/config 中为 %@ 添加 IdentityFile" = "This host's key file (%@) is set only in Kiteline, so VS Code can't use it and may fail to connect. Add an IdentityFile for %@ in ~/.ssh/config.";
@@ -3848,6 +3913,7 @@
 "该设备已登记" = "This device is already registered.";
 "详情 %@ 条、任务 %@ 项" = "Details: %@ messages, %@ tasks";
 "语言" = "Language";
+"语言包已就绪（%@ → %@），可离线翻译" = "Language pack ready (%@ → %@); works offline";
 "语速" = "Speaking Rate";
 "语音" = "Voice";
 "语音不存在" = "Voice not found.";
@@ -3965,6 +4031,7 @@
 "超过 45 秒没有心跳，判定链路故障" = "No heartbeat for over 45 seconds. Treating the connection as failed.";
 "超过 45 秒没有心跳，重启本机 watcher" = "No heartbeat for over 45 seconds. Restarting local watcher.";
 "超高" = "Extra High";
+"越南语" = "Vietnamese";
 "趣味" = "Fun";
 "跑命令和测试" = "Running commands and tests";
 "跟随" = "Follow";
@@ -4053,6 +4120,7 @@
 "返回 Kiteline，状态将自动更新" = "Return to Kiteline. The status will update automatically.";
 "还不知道这个会话的进度，稍后再试" = "This session's progress isn't known yet. Try again later";
 "还原" = "Revert";
+"还原为原文" = "Show Original";
 "还原此提交" = "Revert This Commit";
 "还有 %lld 个文件" = "%lld more files";
 "还没有上传过图片" = "No image has been uploaded yet";
@@ -4144,6 +4212,8 @@
 "远端终端中的 CLI 会话需在 tmux 中运行才能远程操作" = "CLI sessions in a remote terminal must run in tmux to be controlled remotely.";
 "远端项目" = "Remote Projects";
 "远端项目在后台运行 Claude Code" = "Run Claude Code in the background for remote projects";
+"连不上 Google 翻译" = "Could not reach Google Translate";
+"连不上 MyMemory" = "Could not reach MyMemory";
 "连不上 X11 显示" = "Can't connect to the X11 display";
 "连不上插件服务器" = "Can't reach the plugin server";
 "连不上本机服务" = "Can't reach the service on this computer.";
@@ -4225,6 +4295,7 @@
 "重新发送" = "Resend";
 "重新检测" = "Check Again";
 "重新汇总" = "Summarize Again";
+"重新翻译" = "Translate Again";
 "重新载入" = "Reload";
 "重新载入会丢掉未保存的修改。" = "Reloading will discard unsaved changes.";
 "重新连接" = "Reconnect";
@@ -4250,9 +4321,11 @@
 "闲置 %@ 分钟后将进入睡眠，睡眠期间手机无法连接，定时任务也不会执行" = "After %@ minutes of inactivity the computer will go to sleep. Your phone can't connect while it sleeps, and scheduled tasks won't run.";
 "闲置 %@ 分钟后自动锁屏：锁屏期间无法把手机消息发进 VS Code（终端里放在 tmux 中运行的会话不受影响）" = "Locks automatically after %@ minutes of inactivity. While locked, messages from your phone cannot be sent into VS Code (sessions running in tmux in Terminal are not affected).";
 "闲置 30 分钟" = "idle for 30 minutes";
+"阿拉伯语" = "Arabic";
 "附图片" = "Attach Image";
 "附截图" = "Attach Screenshot";
 "除系统字体和等宽字体外，其余字体由 Apple 字体服务提供：首次选择时下载（数 MB 至十余 MB），下载完成前以同风格的系统字体显示。长时间阅读建议选用「正文」或「书卷」类字体。代码始终使用等宽字体。" = "Apart from the system font and monospaced font, other fonts are provided by Apple's font service. They download the first time you select them (several MB to over 10 MB), and until the download finishes, a system font of the same style is shown. For long reading, Body or Book-style fonts are recommended. Code always uses a monospaced font.";
+"除系统翻译外，翻译时消息文字会发送到所选服务。" = "Except for System Translation, message text is sent to the selected service when translating.";
 "随时处理确认请求" = "Respond to Approval Requests Anytime";
 "随时跟进" = "Stay in the loop";
 "随时随地与 Claude Code 协作" = "Work with Claude Code from Anywhere.";
@@ -4303,6 +4376,7 @@
 "静音 / 取消静音会话" = "Mute / Unmute Session";
 "静音（仅在需要确认时提醒）" = "Mute (Alerts Only for Approvals)";
 "靛青" = "Indigo";
+"韩语" = "Korean";
 "页面上找不到 %@" = "Couldn't find %@ on the page";
 "页面和内容直接由你的电脑提供，不经过任何服务器；电脑关机或不在这个网络时打不开。拿到网址的人都能查看，请只发给信任的人；停止分享后立即失效。" = "The page and its content come straight from your computer and never pass through any server, so it can't be opened while your computer is off or away from this network. Anyone with the address can view it, so share it only with people you trust. It stops working as soon as you stop sharing.";
 "项目" = "Projects";
@@ -4320,8 +4394,6 @@
 "领先 %@ 个提交（未推送）" = "Ahead by %@ commits (not pushed)";
 "额度" = "Limit";
 "额度：%@" = "Usage limits: %@";
-"做不到：%@" = "Not possible: %@";
-"未实测：%@" = "Not yet tested: %@";
 "风筝线" = "Kite Lines";
 "风筝线：侧栏左侧连起最近 15 分钟有往来的会话" = "Kite Lines: Link sessions that exchanged messages in the last 15 minutes along the left of the sidebar";
 "风筝线：流动的虚线连起最近 15 分钟有往来的会话" = "Kite Lines: Flowing dashed lines link sessions that exchanged messages in the last 15 minutes";

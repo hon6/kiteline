@@ -18,7 +18,8 @@ public sealed class MessageRow : Grid
 {
     const double AvatarSize = 30, Gap = 12, Edge = 24, MeRoom = 200, MeRatio = 0.23, RowGap = 10, TurnGap = 20;
 
-    public MessageRow(bool me, bool first, double? time, Control content, string agent, double chatWidth, (string Text, string Id)? speak = null, string? key = null)
+    public MessageRow(bool me, bool first, double? time, Control content, string agent, double chatWidth, (string Text, string Id)? speak = null, string? key = null,
+                      (string Text, string Id)? translate = null)
     {
         Margin = new Thickness(Edge, ChatType.Px(first ? TurnGap : RowGap), Edge, ChatType.Px(RowGap));
         // 助手的头像：按 Agent 详情里设的画，点了打开 Agent 详情
@@ -27,12 +28,20 @@ public sealed class MessageRow : Grid
         avatar.VerticalAlignment = VerticalAlignment.Top;
         var column = new StackPanel { Spacing = 6, HorizontalAlignment = me ? HorizontalAlignment.Right : HorizontalAlignment.Left };
         column.Children.Add(content);
-        if (time is double t)
+        if (time is not null || translate is not null)
         {
-            var footer = Ui.H(6, Ui.Text(Format.Clock(t), 11, color: "Text3"),
+            // 下面一行小字：时间、朗读，和气泡一样宽；「翻译」靠气泡外侧（助手的靠右、我的靠左）
+            var info = Ui.H(6, time is double t ? Ui.Text(Format.Clock(t), 11, color: "Text3") : null,
                 speak is { } s ? new Tap(Ui.Sym("speaker.wave.2", 11, "Text3"), () => Speaker.Toggle(s.Text, s.Id), 4).Tip(L("朗读这条")) : null);
-            footer.Margin = new Thickness(4, 0);
-            footer.HorizontalAlignment = me ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+            info.HorizontalAlignment = me ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+            var footer = new DockPanel { Margin = new Thickness(4, 0), HorizontalAlignment = HorizontalAlignment.Stretch, LastChildFill = true };
+            if (translate is { } tr)
+            {
+                var badge = new TranslateBadge(tr.Id, tr.Text) { Margin = me ? new Thickness(0, 0, 8, 0) : new Thickness(8, 0, 0, 0) };
+                DockPanel.SetDock(badge, me ? Dock.Left : Dock.Right);
+                footer.Children.Add(badge);
+            }
+            footer.Children.Add(info);
             column.Children.Add(footer);
         }
         if (me)
@@ -104,7 +113,7 @@ public sealed class Bubble : Panel
 
     /// later：菜单打开时才算的一项（收藏 / 取消收藏：收藏过没有会变）
     public Bubble(bool mine, bool tail, Control content, string? copyText = null, IEnumerable<(string Title, Action Run)>? actions = null,
-                  Func<(string Title, Action Run)?>? later = null)
+                  Func<(string Title, Action Run)?>? later = null, Func<(string Title, Action Run)?>? translate = null)
     {
         this.mine = mine;
         this.tail = tail;
@@ -116,8 +125,10 @@ public sealed class Bubble : Panel
         var menu = new List<(string, Action)>();
         if (!string.IsNullOrWhiteSpace(copyText)) menu.Add((L("拷贝"), () => SessionMenu.Copy(copyText)));
         if (actions is not null) menu.AddRange(actions);
-        if (menu.Count > 0 || later is not null)
-            this.Menu(() => menu.Concat(later?.Invoke() is { } extra ? [extra] : []).Select(m => (Control)Ui.Item(m.Item1, m.Item2)));
+        // translate：「翻译 / 显示原文」打开菜单时才定（翻没翻过会变），放在固定几项后面
+        if (menu.Count > 0 || later is not null || translate is not null)
+            this.Menu(() => menu.Concat(translate?.Invoke() is { } t ? [t] : []).Concat(later?.Invoke() is { } extra ? [extra] : [])
+                .Select(m => (Control)Ui.Item(m.Item1, m.Item2)));
     }
 
     /// 气泡上的字的颜色：我的气泡跟着主题（经典主题是深色字）
@@ -189,7 +200,7 @@ public static class UserMessage
             var content = new StackPanel { Spacing = 6 };
             if (item.Images is { Count: > 0 } images) content.Children.Add(new MessageImages(key, images));
             if (files.Count > 0) content.Children.Add(FileOpen.Chips(key, files));
-            if (shown.Length > 0) content.Children.Add(new RichText(shown, ChatType.Size, color: Bubble.TextColor(true)));
+            if (shown.Length > 0) content.Children.Add(new TranslatedContent(item.Id, shown, t => new RichText(t, ChatType.Size, color: Bubble.TextColor(true))));
             stack.Children.Add(new Bubble(true, first, content, shown, text.Length == 0 ? null :
             [
                 (L("引用"), () => chat.Quote = Quote.Make(text)),
@@ -198,7 +209,7 @@ public static class UserMessage
                 (L("复制为提示词链接"), () => SessionMenu.Copy(PromptLinks.Make(shown.Trim(),
                     (model.Session(key)?.Cwd ?? (model.PastMeta.TryGetValue(key, out var past) ? past.Cwd : null)) is string cwd
                         ? System.IO.Path.GetFileName(cwd.TrimEnd('/', '\\')) : null))),
-            ], () => FavoriteState.Shared.MenuAction(key, item, true)));
+            ], () => FavoriteState.Shared.MenuAction(key, item, true), () => TranslateUi.MenuAction(item.Id, shown)));
         }
         if (item.Queued == true) stack.Children.Add(Ui.Text(L("Claude 工作时插入"), 11, color: "Text2").HAlign(HorizontalAlignment.Right));
         return stack;
@@ -217,12 +228,12 @@ public static class BotText
     {
         var model = AppModel.Shared;
         var text = item.Text ?? "";
-        var bubble = new Bubble(false, first, new MarkdownView(text, fill: false, openLink), Markdown.Plain(text),
+        var bubble = new Bubble(false, first, new TranslatedContent(item.Id, text, t => new MarkdownView(t, fill: false, openLink), auto: true), Markdown.Plain(text),
         [
             (L("引用"), () => model.Chat(key).Quote = Quote.Make(text)),
             (L("加入待办"), () => TodoActions.Add(key, item)),
             (L("朗读"), () => Speaker.Toggle(text, item.Id)),
-        ], () => FavoriteState.Shared.MenuAction(key, item, false));
+        ], () => FavoriteState.Shared.MenuAction(key, item, false), () => TranslateUi.MenuAction(item.Id, text));
         if (item.Asks is not { Count: > 0 } asks) return bubble;
         return new StackPanel { Spacing = 8, Children = { bubble, AskPrompt.Make(key, item, asks) } };
     }

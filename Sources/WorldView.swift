@@ -5,7 +5,7 @@ import SwiftUI
 import KitelineKit
 import WebKit
 
-// 世界模式：右边整块是 three.js 画的像素世界（Resources/world，Mac / iPhone / Windows / Linux 共用一份网页，协议见 docs/world.md）。
+// 世界模式：右边整块是 three.js 画的像素世界（Resources/world，Mac / iPhone / Windows / Linux 共用一份网页，协议见 world.md（内部文档））。
 // 机房 = agent，卫星 = 设备，方块人 = 会话；新消息从机房经卫星打一道光弧到会话的电脑、头顶冒气泡；
 // agent 之间发消息时几个人站起来面对面聊。点屏幕弹出会话详情，点卫星弹设备详情；右上角那扇开着的门离开世界。
 

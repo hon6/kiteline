@@ -692,11 +692,12 @@ struct ChatRowView: View {
             if let inbound = GroupText.parse(item.text ?? "") {
                 GroupInboundMessage(key: key, item: item, inbound: inbound)
             } else {
-                MessageRow(side: .me, first: first, time: item.ts) { UserMessage(key: key, item: item) }
+                MessageRow(side: .me, first: first, time: item.ts, translate: UserMessage.translatable(item)) { UserMessage(key: key, item: item) }
             }
         case .bot(let item, let first):
             MessageRow(side: .bot, first: first, time: item.ts,
-                       speak: item.t == "text" ? (item.text ?? "", item.id) : nil) {
+                       speak: item.t == "text" ? (item.text ?? "", item.id) : nil,
+                       translate: BotText.translatable(item)) {
                 if item.peer != nil {
                     PeerCard(key: key, item: item)
                 } else if item.t == "agent_image" {

@@ -1671,7 +1671,73 @@ check("ZCode：记录规整（去掉只给模型看的系统消息，工具调�
 zuse = zc.usage(0)
 check("ZCode：token 按 model_usage，输入减读缓存", len(zuse) == 1 and (zuse[0]["input"], zuse[0]["output"], zuse[0]["cacheRead"]) == (70, 20, 30)
       and zuse[0]["model"] == "glm-5.3", zuse)
-check("ZCode：只读、没开 ZCode 时不列会话", zc.read_only and zc.sessions() == [])
+check("ZCode：没开 ZCode 时不列会话；有发消息、确认、回答（经它的后台服务）", zc.sessions() == []
+      and {"reply", "approve", "answer"} <= set(zc.abilities()))
+# 插件内部的 SERVER / ServerError / server_command 是 create() 里的局部变量：从闭包里拿
+_zcells = lambda f: dict(zip(f.__code__.co_freevars, [c.cell_contents for c in (f.__closure__ or ())]))
+zS, zErr = _zcells(type(zc).send)["SERVER"], _zcells(type(zc).send)["ServerError"]
+zcmd = _zcells(type(zS).start)["server_command"]
+zapp = os.path.join(ROOT, "zlocal", "Programs", "ZCode")
+for rel in ("ZCode.exe", "resources/glm/zcode.cjs", "resources/config/provider/zcode-builtin.json"):
+    os.makedirs(os.path.dirname(os.path.join(zapp, rel)), exist_ok=True)
+    open(os.path.join(zapp, rel), "w").close()
+_zold = {k: os.environ.pop(k, None) for k in ("ZCODE_BIN", "LOCALAPPDATA", "PATH")}
+os.environ["LOCALAPPDATA"], os.environ["PATH"] = os.path.join(ROOT, "zlocal"), ""
+zc_cmd, zc_env = zcmd()
+for k, v in _zold.items():
+    os.environ.pop(k, None)
+    if v is not None:
+        os.environ[k] = v
+check("ZCode：用桌面版自带的命令行时指给它内置服务商配置（否则正式安装的版本起不来）",
+      zc_cmd == [os.path.join(zapp, "ZCode.exe"), os.path.join(zapp, "resources", "glm", "zcode.cjs")]
+      and zc_env.get("ZCODE_BIN") is None and zc_env.get("ELECTRON_RUN_AS_NODE") == "1"
+      and zc_env.get("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE") == os.path.join(zapp, "resources", "config", "provider", "zcode-builtin.json"),
+      (zc_cmd, zc_env))
+_zjoin, _zreq = zS.join, zS.request
+zS.join = lambda sid, cwd: None
+def _zbusy(method, params, timeout=30):
+    raise zErr({"code": -32010, "message": "A prompt is already running for this session"})
+zS.request = _zbusy
+zmsgs = []
+for own in (True, False):
+    (zS.own.add if own else zS.own.discard)("sess_busy")
+    try:
+        zc.send("sess_busy", "hi", [])
+    except RuntimeError as exc:
+        zmsgs.append(str(exc))
+zS.own.discard("sess_busy")
+zS.join, zS.request = _zjoin, _zreq
+check("ZCode：这一轮还没结束时再发，按是手机还是电脑发起的给中文提示",
+      len(zmsgs) == 2 and "上一轮还没结束" in zmsgs[0] and "电脑上发起" in zmsgs[1], zmsgs)
+# 账号登录的模型（providerId account:…）：后台服务拿不到登录状态，只读、不发
+_znow = int(time.time() * 1000)
+zdb.execute("insert into session values ('sess_acct', null, '/tmp/z-acct', '账号模型', '3.17.2', ?, ?, null, null)", (_znow - 5000, _znow - 1000))
+zdb.execute("insert into message values ('a1', 'sess_acct', ?, ?, ?, 0)", (_znow - 4000, _znow - 4000, json.dumps(
+    {"role": "user", "time": {"created": _znow - 4000}, "model": {"providerID": "account:bigmodel-start-plan", "modelID": "GLM-5.3"}})))
+zdb.execute("insert into message values ('a2', 'sess_acct', ?, ?, ?, 0)", (_znow - 3000, _znow - 3000, json.dumps(
+    {"role": "assistant", "time": {"created": _znow - 3000, "completed": _znow - 2000}, "providerId": "account:bigmodel-start-plan", "modelId": "GLM-5.3"})))
+zdb.commit()
+zS.own.add("sess_other")   # 让 sessions() 不因为没开 ZCode 返回空
+os.environ["ZCODE_BIN"] = sys.executable   # 假装找得到命令行程序，只看账号模型这一条
+zrows = {s["sessionId"]: s for s in zc.sessions()}
+del os.environ["ZCODE_BIN"]
+zS.own.discard("sess_other")
+try:
+    zc.send("sess_acct", "hi", [])
+    zsent = "发出去了"
+except RuntimeError as exc:
+    zsent = str(exc)
+check("ZCode：账号登录模型的会话只读并说明原因，发消息被拒",
+      zrows.get("sess_acct", {}).get("readOnly") is True and "账号登录的模型" in (zrows["sess_acct"].get("readOnlyReason") or "")
+      and "account" in (zrows["sess_acct"].get("readOnlyReasonEn") or "") and "账号登录的模型" in zsent, (zrows.get("sess_acct"), zsent))
+# 从手机发起的那一轮失败（如模型起不来）：turn.failed 记下原因，推成灰色小提示
+class _ZProc:
+    stdout = [json.dumps({"method": "session/event", "params": {"sessionId": "sess_1", "type": "turn.failed",
+                          "payload": {"error": {"message": "Select a model before continuing"}}}}) + "\n"]
+zS.own.add("sess_1")
+zS._read(_ZProc())
+zfail = [i["text"] for sid, items in zc.pump() if sid == "sess_1" for i in items if i.get("t") == "event"]
+check("ZCode：从手机发起的那一轮失败时对话里提示原因", "sess_1" not in zS.own and any("没能完成" in t and "Select a model" in t for t in zfail), zfail)
 zdb.close()
 del os.environ["ZCODE_HOME"]
 
@@ -2163,7 +2229,7 @@ cglobals["USAGE_BACKEND"] = real_backend
 capi.shutdown()
 capi.server_close()
 
-print("\n== 关闭会话（插件实现了 close 才给 caps close，见 docs/agent-plugins.md 4.4）")
+print("\n== 关闭会话（插件实现了 close 才给 caps close，见 guide/plugin-development.md 4.4）")
 
 
 class CloserDemo(W.AgentPlugin):
@@ -2198,7 +2264,7 @@ except RuntimeError as exc:
 check("没实现 close 的插件：关闭时报不支持", "不支持远程关闭" in refused, refused)
 check("Qwen 插件实现了 close（tmux 里发 /quit）", type(qwen).close is not W.AgentPlugin.close)
 
-print("\n== 别家 agent 的 token 用量（AgentPlugin.usage → 用量报表，见 docs/agent-plugins.md 4.6）")
+print("\n== 别家 agent 的 token 用量（AgentPlugin.usage → 用量报表，见 guide/plugin-development.md 4.6）")
 u_now = int(time.time() * 1000)
 u_iso = lambda ms: time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ms / 1000)) + ".%03dZ" % (ms % 1000)
 

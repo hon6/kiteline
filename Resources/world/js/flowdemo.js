@@ -6,7 +6,7 @@ const PROJECTS = {
   'content-studio': ['studio/render.py', 'studio/cover.py', 'studio/templates/post.html', 'models/loader.py', 'scripts/batch.sh', 'tests/test_render.py'],
   '官网': ['site/index.html', 'site/app.css', 'site/download.js', 'site/en/index.html', 'deploy.sh'],
   desktop: ['client/Views/Settings.cs', 'client/Views/Sidebar.cs', 'client/Model/AppModel.cs', 'host/server.py', 'host/delivery.py', 'tests/test_delivery.py'],
-  'data-pipeline': ['etl/extract.py', 'etl/transform.py', 'etl/load.py', 'dags/daily.py', 'tests/test_transform.py', 'docs/schema.md'],
+  'data-pipeline': ['etl/extract.py', 'etl/transform.py', 'etl/load.py', 'dags/daily.py', 'tests/test_transform.py', 'schema.md（内部文档）'],
 };
 const SESSIONS = [
   ['shop-app', '会员资料编辑', 'busy', [2, 4, '开发中']], ['shop-app', '支付回调重试', 'busy', [3, 4, '测试中']], ['shop-app', '购物车价格精度', 'idle', null],

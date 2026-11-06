@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 import WebKit
 
-// 世界模式（iPhone、iPad）：整屏是像素世界（网页同 Mac，Resources/world 由 tools/sync-world.sh 拷进 iPhone App，协议见 docs/world.md）。
+// 世界模式（iPhone、iPad）：整屏是像素世界（网页同 Mac，Resources/world 由 tools/sync-world.sh 拷进 iPhone App，协议见 world.md（内部文档））。
 // 数据走手机已经连着的那条通道（局域网、远程访问都一样）：整份状态、对话增量、会话之间的消息、负载、待办转给网页；
 // 图片、头像、朗读的语音由这里代取。点屏幕弹出会话页，点卫星弹设备详情，右上角的门关掉世界
 

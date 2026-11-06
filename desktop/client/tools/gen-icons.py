@@ -37,7 +37,7 @@ MAP = {
  "square.and.arrow.down": ["arrow_download", "save"], "square.and.arrow.up": ["share"], "square.and.pencil": ["compose"],
  "square.split.1x2": ["layout_row_two", "split_horizontal"], "square.split.2x1": ["layout_column_two", "split_vertical"], "stop": ["stop", "record_stop"], "sun.haze": ["weather_haze"],
  "sun.max": ["weather_sunny"], "text.bubble": ["comment"], "text.cursor": ["text_cursor", "textbox"], "text.word.spacing": ["text_word_count", "text_column_one"],
- "trash": ["delete"], "waveform": ["waveform", "sound_wave_circle", "device_eq"], "wifi.exclamationmark": ["wifi_warning"], "wifi.slash": ["wifi_off"],
+ "trash": ["delete"], "translate": ["translate"], "waveform": ["waveform", "sound_wave_circle", "device_eq"], "wifi.exclamationmark": ["wifi_warning"], "wifi.slash": ["wifi_off"],
  "wrench.and.screwdriver": ["wrench_screwdriver", "wrench"], "xmark": ["dismiss"], "xmark.circle": ["dismiss_circle"], "xmark.seal": ["dismiss_circle"],
  "terminal": ["window_console"], "globe": ["globe"], "laptopcomputer": ["laptop"], "paperclip": ["attach"], "map.fill": ["map"],
  "book": ["book"], "keyboard": ["keyboard"], "command": ["keyboard_command", "keyboard"], "return": ["arrow_enter_left", "arrow_enter"], "play": ["play"], "pause": ["pause"],

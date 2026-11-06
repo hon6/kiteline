@@ -45,7 +45,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     /// 哪个编程 agent 的会话（claude-code / codex / …，见 Shared/AgentMark.swift）；老版本电脑端不给，按 Claude Code 算
     var agent: String
     /// 看、回复、确认、中断以外还能出的按钮：mode 权限模式 / model 换模型 / compact 压缩 / subagents 子 agent / tests 测试记录
-    /// （docs/agent-plugins.md 4.4）。按这个出按钮，不认 agent 名字；老版本电脑端不给：Claude Code 的会话全有，别家全没有
+    /// （guide/plugin-development.md 4.4）。按这个出按钮，不认 agent 名字；老版本电脑端不给：Claude Code 的会话全有，别家全没有
     var caps: Set<String>
     /// 待确认卡片上的按钮（插件给，比如只有「允许这一次」的、四个选项的）；没有就按老样子画
     var pendingOptions: [PendingOption]?

@@ -3,7 +3,7 @@ import CryptoKit
 import SwiftUI
 import KitelineKit
 
-/// Agent 插件（规范见 docs/agent-plugins.md；同电脑端 desktop/kiteline/plugins.py）：官方插件索引、下载校验安装、
+/// Agent 插件（规范见 guide/plugin-development.md；同电脑端 desktop/kiteline/plugins.py）：官方插件索引、下载校验安装、
 /// 自动更新、出错退回、出错报告。
 ///
 /// - 插件装在 watcher 的数据目录（默认 ~/.ccpulse/plugins/<id>/：plugin.json、plugin.py、assets/），watcher 启动时加载；
@@ -887,7 +887,7 @@ struct PluginsPane: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(22)
-        .frame(width: SettingsWindowController.width, height: 440, alignment: .top)
+        .frame(width: SettingsWindowController.width, height: 600, alignment: .top)   // 11-05 反馈矮，440 → 600
         .onAppear { store.check() }
     }
 

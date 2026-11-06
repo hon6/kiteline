@@ -1,7 +1,7 @@
 // 数据流大屏：所有会话一块屏。左边是它们读进来的东西，中间一列是每个会话，右边是做的事和产出去了哪；
 // 每次工具调用画一串线穿过各列（一次一根，越忙越密），发生时一道亮光带着星芒沿线走一趟。
 // 卡片铺在一张带格子的画布上，镜头会自己 2D 运镜：平移、推近到正在忙的那张卡、旁边列出它最近的调用，再拉回全景。
-// 和世界共用一套宿主（Mac / iPhone 的 WKWebView、Windows 的 WebView2、Linux 浏览器直连），消息协议同 docs/world.md 第 9 节，
+// 和世界共用一套宿主（Mac / iPhone 的 WKWebView、Windows 的 WebView2、Linux 浏览器直连），消息协议同 world.md（内部文档） 第 9 节，
 // 另外会去 api/history 补每个会话最近的调用，一打开就是满的。
 
 import * as THREE from '../vendor/three.module.min.js';

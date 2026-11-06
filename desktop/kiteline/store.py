@@ -34,7 +34,7 @@ def display_title(snap):
     return title if title else snap.get("name", "")
 
 
-# 看、回复、确认、中断以外手机上还能出的按钮（docs/agent-plugins.md 4.4）；Claude Code 的会话和老 watcher 不带，按 agent 补。
+# 看、回复、确认、中断以外手机上还能出的按钮（guide/plugin-development.md 4.4）；Claude Code 的会话和老 watcher 不带，按 agent 补。
 # close（关闭会话，1.0.12 起）只由电脑端给：手机连老电脑端时的兜底全套里没有它
 CLAUDE_CAPS = ["mode", "model", "compact", "subagents", "tests", "close"]
 

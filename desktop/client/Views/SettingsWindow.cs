@@ -143,6 +143,8 @@ public sealed class SettingsWindow : Window
 
         form.Children.Add(ProfileSection(profile));
         form.Children.Add(LookSection(status));
+        // 消息翻译（同 Mac 版 设置 → 通用 →「翻译」）：存在这台电脑的客户端偏好里
+        form.Children.Add(TranslateUi.Section());
         form.Children.Add(Form.Section(L("会话之间的消息"), [
             Form.Toggle(L("纸鸢传信：纸鸢从发信会话飞到收信会话"), PeerPrefs.Flights, on => PeerPrefs.Set(PeerPrefs.FlightsKey, on)),
             Form.Toggle(L("风筝线：流动的虚线连起最近 15 分钟有往来的会话"), PeerPrefs.Lanes, on => PeerPrefs.Set(PeerPrefs.LanesKey, on)),

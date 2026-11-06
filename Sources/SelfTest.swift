@@ -778,6 +778,16 @@ extension SelfTest {
             } else { Log.write("[capture] 读不到图片 \(arg)") }
         case "zoom": Log.write("[capture] 缩放 \(arg)：\(KitelineKit.zoom(arg))")
         // 收藏：favlatest = 收藏当前会话最后一条文字回复和最后一条带图的消息；favopen:<第几条> = 点收藏页那条的「原消息」
+        case "translate":
+            // translate[:engine]：点当前会话最后一条回复的「翻译」（跳过第一次的设置弹窗）；translate:ask 不跳过（看设置弹窗）
+            let key = KitelineModel.shared.selection ?? ""
+            Log.write("[capture] 翻译：\(arg == "ask" ? KitelineKit.translateLatest(key: key, configured: false) : KitelineKit.translateLatest(key: key, engine: arg.isEmpty ? nil : arg))")
+            delay = 1
+        case "autotranslate":
+            // autotranslate[:engine|off]：打开（或关闭）「自动翻译」
+            KitelineKit.setAutoTranslate(arg != "off", engine: ["", "on", "off"].contains(arg) ? nil : arg)
+            delay = 1
+        case "translated": Log.write("[capture] 翻译状态：\(KitelineKit.translateStates)")
         case "favlatest": Log.write("[capture] 收藏：\(KitelineKit.favoriteLatest(key: KitelineModel.shared.selection ?? ""))"); delay = 3
         case "favopen": Log.write("[capture] 打开收藏：\(KitelineKit.openFavorite(Int(arg) ?? 0))，左边栏选中 \(KitelineModel.shared.selection ?? "-")"); delay = 3
         case "panelsize":

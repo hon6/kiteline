@@ -123,6 +123,7 @@ public static partial class Icons
         ["text.cursor"] = ("textbox", 63503, 63504, 63528, 63529),
         ["text.word.spacing"] = ("text_word_count", 63500, 63501, 63525, 63526),
         ["trash"] = ("delete", 62284, 62285, 62284, 62285),
+        ["translate"] = ("translate", 63539, 63540, 63563, 63564),
         ["waveform"] = ("sound_wave_circle", 60207, 60208, 60216, 60217),
         ["wifi.exclamationmark"] = ("wifi_warning", 61020, 63485, 61020, 63510),
         ["wifi.slash"] = ("wifi_off", 61017, 61018, 61017, 61018),

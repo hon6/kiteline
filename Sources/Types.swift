@@ -92,7 +92,7 @@ struct SessionSnapshot: Codable, Equatable {
     /// 只读时给用户看的一句话（插件给，比如「不在 tmux 中运行，只能查看」）；En 是插件自带的英文（我们的词表里没有也能翻）
     var readOnlyReason: String?
     var readOnlyReasonEn: String?
-    /// 看、回复、确认、中断以外手机上还能出的按钮：mode / model / compact / subagents / tests（docs/agent-plugins.md 4.4）。
+    /// 看、回复、确认、中断以外手机上还能出的按钮：mode / model / compact / subagents / tests（guide/plugin-development.md 4.4）。
     /// 插件的会话 watcher 给；Claude Code 的和老 watcher 不带，按 agent 补（见 capsPayload）
     var caps: [String]?
     /// 待确认卡片上的按钮，插件给；没有就是手机按老样子画（拒绝 / 允许 / 本会话都允许）

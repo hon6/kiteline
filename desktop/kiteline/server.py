@@ -62,7 +62,7 @@ p.en { margin-top: 16px; font-size: 13px; }
 </html>
 """
 NOTICE_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-# 世界模式的网页（Resources/world，各端共用一份，见 docs/world.md）：只许连自己、图片和音频可以是 blob / data
+# 世界模式的网页（Resources/world，各端共用一份，见 world.md（内部文档））：只许连自己、图片和音频可以是 blob / data
 WORLD_CSP = ("default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; "
              "script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'")
 WORLD_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",

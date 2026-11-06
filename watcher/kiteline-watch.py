@@ -921,7 +921,7 @@ _USAGE = {}
 #   设定 {met:false, sentinel:true, condition}；清除（/goal clear、出了救不回来的错）{met:true, sentinel:true}
 #   没达成 {met:false, reason}；达成 {met:true, reason, iterations, durationMs, tokens}；做不到 {met:false, failed:true, …}
 # 停下来（接口出错、检查超时、用量到上限……）另记一条系统提示「Goal paused · 原因 · send a message to continue」。
-# 快照的 goal（各家同一套，docs/agent-plugins.md 4.6）：
+# 快照的 goal（各家同一套，guide/plugin-development.md 4.6）：
 #   {text 目标, state, checks 检查了几次, reason 最近一次检查的说法（还差什么 / 为什么做不到）, note 停下的原因,
 #    since 设定时间, at 最近变化（毫秒）, turns 用了几轮, durationMs 用时, tokens 用掉的 token, budget token 预算（Codex）}
 #   state：active 进行中 / paused 停下了（发消息继续）/ blocked 受阻 / limited 额度或预算用完 /
@@ -3600,7 +3600,7 @@ def command_e2e_setup(argv):
 # 给编程 agent 装技能（截图、网页测试报告、待办与关键信息）
 #   技能是一份 JSON 数据（SKILLS_BUILTIN）：每个技能的正文模板，以及各家 agent 从哪个目录读技能（targets）。
 #   插件目录里有电脑端下发、校验过签名的新版（plugins/skills/skills.json，版本更高）就用它：改技能正文、加一家 agent
-#   只要发一份 JSON，不用发版（技能包是 kind: "skills" 的插件包，bash relay/plugins.sh skills <版本> 从这里导出，见 docs/agent-plugins.md）。watcher 只管照着装：写进各家的技能目录、带版本标记，关掉的按标记删（只删我们装的）。
+#   只要发一份 JSON，不用发版（技能包是 kind: "skills" 的插件包，bash relay/plugins.sh skills <版本> 从这里导出，见 guide/plugin-development.md）。watcher 只管照着装：写进各家的技能目录、带版本标记，关掉的按标记删（只删我们装的）。
 #   哪些技能开着由电脑端经环境变量 CCPULSE_SKILLS 带来（逗号分隔的 id，可以为空）；没带这个变量就不动（测试、老电脑端）。
 # ---------------------------------------------------------------------------
 
@@ -9202,10 +9202,10 @@ def process_list():
             out.append({"pid": pid, "cmd": cmd, "start": int(start) if start else None})
     else:
         try:
-            text = subprocess.run(["ps", "-axww", "-o", "pid=,lstart=,command="], capture_output=True, text=True, timeout=5,
+            text = subprocess.run(["ps", "-axww", "-o", "pid=,lstart=,command="], capture_output=True, text=True, timeout=15,
                                   env=dict(os.environ, LC_ALL="C", LANG="C")).stdout
         except (OSError, subprocess.SubprocessError):
-            text = ""
+            return []   # 这次没列出来：不缓存，下次重试
         for line in text.splitlines():
             parts = line.split()
             if len(parts) < 7 or not parts[0].isdigit():
@@ -12967,7 +12967,7 @@ class PromaLink:
 
 
 # ---------------------------------------------------------------------------
-# Agent 插件（规范见 docs/agent-plugins.md）
+# Agent 插件（规范见 guide/plugin-development.md）
 #
 # Claude Code 以外的每家 agent 是一个插件：找会话、翻成统一的快照和对话项、把手机上的操作翻成它的动作。
 # 连接、读文件、起进程这些通用能力由中台（本文件前面的函数和类）提供，插件在 needs 里列出用到的，
@@ -13080,11 +13080,11 @@ class AgentPlugin:
     normalize = None
     # 只读的 agent：手机上回复、确认时给的说明
     read_only = None
-    # 各平台、各形态能做到什么（设置页的兼容表、docs/agent-plugins.md）：{平台: {形态: support_form(...)}}。
+    # 各平台、各形态能做到什么（设置页的兼容表、guide/plugin-development.md）：{平台: {形态: support_form(...)}}。
     # 平台 mac / windows / linux；形态 cli 命令行 / vscode VS Code 扩展 / desktop 桌面版。
     # 能力：view 查看会话和记录（读）、reply 发消息和插话（写）、approve 审批命令 / answer 回答提问 / interrupt 中断（执行）
     support = {}
-    # 看、回复、确认、中断以外，手机上还能出哪些按钮（快照的 caps，docs/agent-plugins.md 4.4）：
+    # 看、回复、确认、中断以外，手机上还能出哪些按钮（快照的 caps，guide/plugin-development.md 4.4）：
     # mode 权限模式 / model 换模型 / compact 压缩上下文 / subagents 子 agent / tests 测试记录。目前只有 Claude Code 有
     caps = ()
     # 单色标志：24×24 画布的 SVG 路径（奇偶填充）[{"d": …, "opacity": 1}]。手机内置表里没有这家时画它，不用为新 agent 发 App
@@ -13115,7 +13115,7 @@ class AgentPlugin:
         return "%s.%s" % (self.id, key) in PLUGIN_OPTIONS_ON
 
     def standardize(self, snap):
-        """补上客户端认的标准字段（docs/agent-plugins.md 第五节）：caps、待确认卡片的按钮、只读的说明"""
+        """补上客户端认的标准字段（guide/plugin-development.md 第五节）：caps、待确认卡片的按钮、只读的说明"""
         caps = snap.setdefault("caps", list(self.caps))
         # 关闭会话：插件实现了 close()、这个会话也关得了就给（客户端菜单里出「关闭会话」）
         if not snap.get("readOnly") and "close" not in caps and self.closable(snap):

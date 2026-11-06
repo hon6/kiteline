@@ -11,6 +11,8 @@ namespace Kiteline.UI;
 /// Windows 上的中文输入法。Avalonia 11.3 自己那套有两个毛病（Win11 + 微软拼音，10-31 真机实测）：
 /// 窗口里换过一次输入控件（消息框 ↔ 终端 ↔ 搜索框）后，新拿焦点的那个收不到组字和上屏的字，要重开客户端才好；候选窗固定在屏幕顶上。
 /// 这里统一截窗口的输入法消息（IMM32）自己处理：拼音画在输入处、上屏的字插进去、候选窗放到光标下面。
+/// 候选窗只用 CFS_CANDIDATEPOS 定位：CFS_EXCLUDE 会让搜狗等中文输入法卡住——候选照常弹出、选了字却不上屏
+/// （11-05 反馈；Chromium、Avalonia 对中文输入法也只用 CANDIDATEPOS）
 /// 只管终端（ITarget）和普通输入框（TextBox）；别的控件（代码编辑器）照旧交给 Avalonia
 public static class WinIme
 {
@@ -25,7 +27,7 @@ public static class WinIme
     }
 
     const uint WM_IME_STARTCOMPOSITION = 0x010D, WM_IME_ENDCOMPOSITION = 0x010E, WM_IME_COMPOSITION = 0x010F;
-    const int GCS_COMPSTR = 0x0008, GCS_RESULTSTR = 0x0800, CFS_FORCE_POSITION = 0x0020, CFS_EXCLUDE = 0x0080;
+    const int GCS_COMPSTR = 0x0008, GCS_RESULTSTR = 0x0800, CFS_FORCE_POSITION = 0x0020, CFS_CANDIDATEPOS = 0x0040;
 
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
@@ -60,12 +62,19 @@ public static class WinIme
         if (target is null) return IntPtr.Zero;
         var himc = ImmGetContext(hwnd);
         if (himc == IntPtr.Zero) return IntPtr.Zero;
+        // 上屏的字读不到时交回系统默认处理（转成 WM_IME_CHAR → WM_CHAR，Avalonia 当打字收下），别把这次上屏吞掉
+        var passOn = false;
         try
         {
             if (msg == WM_IME_COMPOSITION)
             {
                 var flags = (long)lParam;
-                if ((flags & GCS_RESULTSTR) != 0) target.Commit(Read(himc, GCS_RESULTSTR));
+                if ((flags & GCS_RESULTSTR) != 0)
+                {
+                    var result = Read(himc, GCS_RESULTSTR);
+                    if (result.Length > 0) target.Commit(result);
+                    else passOn = true;
+                }
                 if ((flags & GCS_COMPSTR) != 0) target.Preedit(Read(himc, GCS_COMPSTR));
             }
             else if (msg == WM_IME_ENDCOMPOSITION) target.Preedit("");
@@ -77,7 +86,7 @@ public static class WinIme
         }
         finally { ImmReleaseContext(hwnd, himc); }
         // 处理了：不再交给 Avalonia 和系统默认处理（不会再生成 WM_CHAR，字不会进两遍）
-        handled = true;
+        handled = !passOn;
         return IntPtr.Zero;
     }
 
@@ -96,13 +105,12 @@ public static class WinIme
         var rect = target.CaretRect;
         if (target.Visual.TranslatePoint(rect.TopLeft, top) is not Point at) return;
         var scale = top.RenderScaling;
-        int x = (int)(at.X * scale), y = (int)(at.Y * scale), w = Math.Max(1, (int)(rect.Width * scale)), h = Math.Max(1, (int)(rect.Height * scale));
+        int x = (int)(at.X * scale), y = (int)(at.Y * scale), h = Math.Max(1, (int)(rect.Height * scale));
         var composition = new COMPOSITIONFORM { Style = CFS_FORCE_POSITION, Pos = new POINT { X = x, Y = y } };
         ImmSetCompositionWindow(himc, ref composition);
         var candidate = new CANDIDATEFORM
         {
-            Index = 0, Style = CFS_EXCLUDE, Pos = new POINT { X = x, Y = y + h },
-            Area = new RECT { Left = x, Top = y, Right = x + w, Bottom = y + h },
+            Index = 0, Style = CFS_CANDIDATEPOS, Pos = new POINT { X = x, Y = y + h },
         };
         ImmSetCandidateWindow(himc, ref candidate);
     }
@@ -130,7 +138,14 @@ public static class WinIme
         {
             Preedit("");
             if (string.IsNullOrEmpty(text)) return;
+            var before = box.Text ?? "";
             box.RaiseEvent(new TextInputEventArgs { RoutedEvent = InputElement.TextInputEvent, Text = text });
+            // 没插进去（事件被别处拦了等）：直接替换选中的文字，保证选了的字一定进框；有长度上限的框不硬塞
+            if ((box.Text ?? "") != before || box.MaxLength > 0) return;
+            int start = Math.Clamp(Math.Min(box.SelectionStart, box.SelectionEnd), 0, before.Length);
+            int end = Math.Clamp(Math.Max(box.SelectionStart, box.SelectionEnd), start, before.Length);
+            box.Text = before[..start] + text + before[end..];
+            box.SelectionStart = box.SelectionEnd = box.CaretIndex = start + text.Length;
         }
     }
 }

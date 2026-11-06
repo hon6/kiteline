@@ -12,7 +12,7 @@ using static Kiteline.Lang;
 
 namespace Kiteline.Views;
 
-/// 设置 → 插件（同 Mac 版 PluginsPane；规范见 docs/agent-plugins.md）：我们做好的 Agent 插件，每家一行——标志、名字、版本、
+/// 设置 → 插件（同 Mac 版 PluginsPane；规范见 guide/plugin-development.md）：我们做好的 Agent 插件，每家一行——标志、名字、版本、
 /// 本机装没装这家 agent、能做什么、开关；有新版本、要先更新 Kiteline、出错时右边给对应的按钮。
 /// 检测到本机装了对应的 agent 自动启用，插件有新版本自动更新：这一页主要是看状态、手动开关
 public static class PluginsPage

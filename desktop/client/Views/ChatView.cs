@@ -221,7 +221,8 @@ public sealed class ChatView : Grid
             case UserRow u:
                 // Kiteline 送进来的会话群消息：画成一张群消息卡片（不显示给 agent 看的群说明、回复方法）
                 if (GroupText.Parse(u.Item.Text) is { } inbound) return GroupCards.Inbound(key, u.Item, inbound);
-                return new MessageRow(true, u.First, u.Item.Ts, UserMessage.Make(key, u.Item, u.First), agent, width);
+                return new MessageRow(true, u.First, u.Item.Ts, UserMessage.Make(key, u.Item, u.First), agent, width,
+                    translate: FileLinks.SplitAttached(u.Item.Text ?? "").Item1 is { } said && !string.IsNullOrWhiteSpace(said) ? (said, u.Item.Id) : null);
             case BotRow b:
                 Control body = b.Item.Peer is not null ? PeerCard.Make(key, b.Item) : b.Item.T switch
                 {
@@ -233,7 +234,8 @@ public sealed class ChatView : Grid
                     "tool" => TodoCard.Make(b.Item.Input.Arr("todos").Items().ToList()),
                     _ => BotText.Make(key, b.Item, b.First, openLink),
                 };
-                return new MessageRow(false, b.First, b.Item.Ts, body, agent, width, b.Item.T == "text" ? (b.Item.Text ?? "", b.Item.Id) : null, key);
+                return new MessageRow(false, b.First, b.Item.Ts, body, agent, width, b.Item.T == "text" ? (b.Item.Text ?? "", b.Item.Id) : null, key,
+                    translate: b.Item.Peer is null && b.Item.T == "text" && !string.IsNullOrWhiteSpace(b.Item.Text) ? (b.Item.Text!, b.Item.Id) : null);
             case StepsRow st:
                 return new MessageRow(false, st.First, st.Steps.LastOrDefault()?.Item.Ts, StepsCard.Make(key, st), agent, width, key: key);
             case Kiteline.Model.EventRow e:

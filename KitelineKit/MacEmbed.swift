@@ -154,6 +154,35 @@ public enum KitelineKit {
         return picked.joined(separator: ", ")
     }
 
+    /// 消息翻译的设置存在哪份偏好里（App 的 AppConfig.defaults：测试实例是隔离的那份）
+    public nonisolated static func useTranslatorDefaults(_ defaults: UserDefaults) {
+        // 只在主线程调用（启动、换外观时的 AppAppearance.apply）
+        nonisolated(unsafe) let store = defaults
+        MainActor.assumeIsolated { Translator.shared.use(store) }
+    }
+
+    /// 自测用：点这个会话最后一条文字回复下面的「翻译」（configured = 跳过第一次的设置弹窗；engine 换翻译服务），返回点的是哪条
+    public static func translateLatest(key: String, configured: Bool = true, engine: String? = nil) -> String {
+        guard let model else { return "-" }
+        let items = model.chat(key).items.values.sorted(by: ChatItem.ordered)
+        guard let item = items.last(where: { BotText.translatable($0) != nil }), let text = item.text else { return "-" }
+        let translator = Translator.shared
+        if let engine, let value = Translator.Engine(rawValue: engine) { translator.engine = value }
+        translator.configured = configured
+        translator.tap(item.id, text: text)
+        return item.id
+    }
+
+    /// 自测用：打开 / 关闭「自动翻译」（engine 换翻译服务）
+    public static func setAutoTranslate(_ on: Bool, engine: String? = nil) {
+        if let engine, let value = Translator.Engine(rawValue: engine) { Translator.shared.engine = value }
+        Translator.shared.configured = true
+        Translator.shared.auto = on
+    }
+
+    /// 自测用：翻译状态（每条：working / done / failed:原因 / original）
+    public static var translateStates: String { Translator.shared.debugStates }
+
     /// 自测用：点收藏页第 index 条的「原消息」
     public static func openFavorite(_ index: Int) -> String {
         guard let model else { return "-" }

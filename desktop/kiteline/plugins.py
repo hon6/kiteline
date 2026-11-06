@@ -1,4 +1,4 @@
-"""Agent 插件（规范见 docs/agent-plugins.md；同 Mac 版 Sources/PluginStore.swift）：官方插件索引、下载校验安装、
+"""Agent 插件（规范见 guide/plugin-development.md；同 Mac 版 Sources/PluginStore.swift）：官方插件索引、下载校验安装、
 自动更新、出错退回、出错报告。
 
 - 插件装在 watcher 的数据目录里（默认 ~/.ccpulse/plugins/<id>/：plugin.json、plugin.py、assets/），watcher 启动时加载；

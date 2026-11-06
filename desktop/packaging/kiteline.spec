@@ -14,7 +14,7 @@ datas = [
     (os.path.join(DESKTOP, "CHANGELOG.en.md"), "."),   # 英文手机看的更新记录
     # 发给英文手机的字的翻译表（kiteline/i18n.py 在自己旁边找它）
     (os.path.join(DESKTOP, "kiteline", "i18n_en.json"), "kiteline"),
-    # 世界模式的网页（客户端打开 http://127.0.0.1:端口/world/，见 docs/world.md）
+    # 世界模式的网页（客户端打开 http://127.0.0.1:端口/world/，见 world.md（内部文档））
     (os.path.join(ROOT, "Resources", "world"), "world"),
     # 游客链接（局域网只读分享）看的页面（后台 /g/<编号> 给，见 kiteline/guest.py）
     (os.path.join(ROOT, "Resources", "guest"), "guest"),

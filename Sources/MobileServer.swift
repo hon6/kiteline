@@ -43,6 +43,8 @@ import KitelineKit
 final class MobileServer {
     private var server: HTTPServer?
     private var secureServer: HTTPServer?
+    /// 微信小程序入口（加密隧道，见 MPGate.swift）：和 HTTPS 一起开，端口 = 手机服务端口 + 3
+    private(set) var mpGate: MPGate?
     let push = WebPush()
     let voices = VoiceStore()
     private(set) var secureStatus = "未启动"
@@ -159,6 +161,20 @@ final class MobileServer {
                 } catch {
                     self.secureStatus = "启动失败：\(error)"
                 }
+                if self.mpGate == nil {
+                    let gate = MPGate(route: { [weak self] request, reply in self?.route(request, reply: reply) },
+                                      hostName: { Host.current().localizedName ?? "电脑" })
+                    do {
+                        try gate.start(host: config.bindAddress, port: UInt16(clamping: config.port + 3))
+                        self.mpGate = gate
+                        if config.remoteEnabled, MPGate.remoteAllowed, let link = MPRelayLink(gate: gate, relay: config.effectiveRelay) {
+                            gate.relay = link   // 远程：电脑主动连中继，小程序经中继找到这台电脑
+                            link.start()
+                        }
+                    } catch {
+                        Log.write("小程序入口启动失败：\(error)")
+                    }
+                }
             }
         }
     }
@@ -175,6 +191,8 @@ final class MobileServer {
         server = nil
         secureServer?.stop()
         secureServer = nil
+        mpGate?.stop()
+        mpGate = nil
         statusText = "已停止"
     }
 

@@ -561,7 +561,7 @@ enum Delivery {
     /// 动作单里认得的程序（插件写 app 名，这里换成 bundle id）
     static let uiApps: [String: (bundleId: String, name: String)] = ["cursor": ("com.todesktop.230313mzl4w4u92", "Cursor")]
 
-    /// 插件回的动作单（watcher 的 HOST_CAPS「ui.keys」，规范 docs/agent-plugins.md 3.3 的第一步），按顺序做：
+    /// 插件回的动作单（watcher 的 HOST_CAPS「ui.keys」，规范 guide/plugin-development.md 3.3 的第一步），按顺序做：
     ///   focus  把 app 里打开了这个项目的窗口切到前台，核对确实在前台
     ///   plugin 回头请插件做一步（agent_ui），比如 Cursor 的配套扩展在窗口到前台后往对话输入框里填字
     ///   key    核对前台还是那个窗口，按键

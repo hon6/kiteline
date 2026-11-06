@@ -36,7 +36,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.27"
+VERSION = "1.0.28"
 
 
 class App:
@@ -121,6 +121,8 @@ class App:
             log.write("手机服务启动失败：%s" % exc)
         if m["enabled"] and m["httpsEnabled"]:
             threading.Thread(target=self._start_https, daemon=True).start()
+        if m["enabled"] and m.get("mpEnabled", True):
+            self._start_mpgate()
         threading.Thread(target=self._ticker, daemon=True).start()
         self.alerts.start()   # 到某台机器的连接断了：告诉手机，给「尝试重连」
         self.updater.start()
@@ -140,6 +142,21 @@ class App:
             from . import bridge, shellext
             threading.Thread(target=bridge.ensure_current, daemon=True).start()
             threading.Thread(target=shellext.ensure_current, daemon=True).start()
+
+    def _start_mpgate(self):
+        """微信小程序入口：局域网 WebSocket（加密隧道，见 mpgate.py）"""
+        from . import mpgate
+        m = self.cfg.mobile
+        try:
+            self.mpgate = mpgate.Gate(self.server.route, lambda: self.host)
+            self.mpgate.start(m["bindAddress"], int(m.get("mpPort") or mpgate.DEFAULT_PORT))
+        except OSError as exc:
+            log.write("小程序入口启动失败：%s" % exc)
+            return
+        if m["remoteEnabled"] and mpgate.remote_allowed():
+            # 远程：电脑主动连中继，小程序经中继找到这台电脑（内容端到端加密）。远程要 Pro，小程序暂不开放（见 mpgate.remote_allowed）
+            self.mpgate.relay = mpgate.RelayLink(self.mpgate, self.cfg.relay())
+            self.mpgate.relay.start()
 
     def _start_https(self):
         net = netinfo.current()
@@ -283,6 +300,10 @@ class App:
         for server in (self.http, self.https):
             if server:
                 server.stop()
+        if getattr(self, "mpgate", None):
+            self.mpgate.stop()
+            if getattr(self.mpgate, "relay", None):
+                self.mpgate.relay.stop()
         if self.mdns:
             self.mdns.close()
         self.p2p.stop()
@@ -775,6 +796,12 @@ class App:
         info = self.p2p.join_info
         if info and self.cfg.mobile["remoteEnabled"]:
             query.update({"id": info["id"], "r": info["relay"]})
+        gate = getattr(self, "mpgate", None)
+        if gate and gate.status.startswith("监听"):
+            # 微信小程序扫同一个码：mk = 电脑的小程序长期公钥（核对身份用），mp = 小程序入口端口（见 mpgate.py）
+            import base64
+            query.update({"mk": base64.urlsafe_b64encode(gate.keys.public).decode("ascii").rstrip("="),
+                          "mp": int(self.cfg.mobile.get("mpPort") or 8768)})
         return urllib.parse.urlencode(query)
 
     def pairing_addresses(self):
