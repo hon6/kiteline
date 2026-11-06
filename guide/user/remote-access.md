@@ -13,7 +13,7 @@ Turn on **Remote Access** on the computer, then open the iPhone app once while i
 1. Kiteline first tries a direct peer-to-peer connection: QUIC over [iroh](https://github.com/n0-computer/iroh), with UDP hole punching.
 2. Only if that fails does traffic pass through the Kiteline relay (tars.betac.cn, Shanghai).
 
-Either way, everything is end-to-end encrypted. The relay can't read the traffic, doesn't store it and doesn't log IP addresses. Moving from Wi-Fi to cellular keeps the connection alive. You don't need a public IP, a server of your own or an open port. Self-hosted relays are supported.
+Either way, everything is end-to-end encrypted. The relay can't read the traffic, doesn't store it and doesn't log IP addresses. Moving from Wi-Fi to cellular keeps the connection alive. You don't need a public IP, a server of your own or an open port. You can also run your own relay: see [Self-hosted relay](self-hosted-relay.md).
 
 Remote access requires a **Kiteline Pro** subscription, monthly or annual, priced on the App Store. It pays for the relay servers.
 
