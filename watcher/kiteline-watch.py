@@ -16351,6 +16351,18 @@ def term_fast(line):
     return True
 
 
+def unused_session(snap):
+    """一句话都还没发过的 Claude Code 会话：VS Code 里新开没用的标签、扩展预先起好备用的 claude、新建会话没提交成功留下的空标签。
+    进程和会话登记都有，对话记录还没写出来，列出来只是一行空会话（11-07），等发了第一句、有了对话记录再列。
+    后台托管的照列（要从终端里接着操作）；正在干活、等确认的也照列"""
+    if snap.get("agent") not in (None, "claude-code") or snap.get("hosted"):
+        return False
+    if snap.get("activity") != "idle" or snap.get("transcriptUpdatedAt"):
+        return False
+    path = snap.get("transcriptPath")
+    return bool(path) and not os.path.exists(path)
+
+
 def collect_snapshots(debug_state):
     snapshots = []
     if not os.path.isdir(SESSIONS_DIR):
@@ -16438,6 +16450,7 @@ def main():
             annotate_branches(snapshots)
             TERMS.annotate(snapshots)
             HOSTED.annotate(snapshots)
+            snapshots = [snap for snap in snapshots if not unused_session(snap)]
             STAGES.annotate(snapshots)
             watcher.track(snapshots)
             GOALS.annotate(snapshots)

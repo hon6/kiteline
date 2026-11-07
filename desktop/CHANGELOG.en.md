@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.29 (2026-11-07)
+
+### Bug Fixes
+
+- **No more empty sessions in the list** (Windows, Linux): Sessions opened in the editor on your computer but never used, and blank sessions left behind when a new session could not be submitted, used to appear in the list with no content. They now appear only after the first message is sent.
+
 ## 1.0.28 (2026-11-06)
 
 ### New Features

@@ -1,5 +1,11 @@
 # Kiteline Release Notes
 
+## 3.49.24 (2026-11-07)
+
+### Bug Fixes
+
+- **No more empty sessions in the list** (Mac, iPhone, iPad): Sessions opened in the editor on your computer but never used, and blank sessions left behind when a new session could not be submitted, used to appear in the list with no content. They now appear only after the first message is sent.
+
 ## 3.49.23 (2026-11-06)
 
 ### New Features
