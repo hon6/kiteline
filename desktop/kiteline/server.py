@@ -18,6 +18,7 @@ import time
 import uuid
 
 from . import aggregate, bark, config, delivery, faces, guest, i18n, log, netinfo, setup_tools, tls, tts
+from . import translate as translator
 from .httpd import Response, StreamReply
 from .store import hostable as store_hostable
 
@@ -420,7 +421,8 @@ class MobileServer:
                 return "master", None
             pro = request.headers.get("x-kiteline-pro")
             device = self.app.devices.authenticate(token, request.remote, request.headers.get("x-kiteline-client"),
-                                                   request.headers.get("user-agent"), None if pro is None else pro == "1")
+                                                   request.headers.get("user-agent"), None if pro is None else pro == "1",
+                                                   request.headers.get("x-kiteline-mp"))
             if device:
                 return "device", device
             if token.startswith("p") and self.app.pairing.link_valid(token):
@@ -1692,6 +1694,19 @@ def r_tts(s, request, *_):
     return Response(200, {"Content-Type": mime, "Cache-Control": "private, max-age=86400"}, data)
 
 
+def r_translate(s, request, *_):
+    # 翻译一条消息（微信小程序用；同 Mac 的 POST /api/translate）：电脑联网翻好回去
+    body = request.json or {}
+    text = str(body.get("text") or "").strip()
+    if not text or len(text) > 8000:
+        return Response.error("翻译内容为空或过长", 400)
+    try:
+        r = translator.run(text, body.get("to") or None, body.get("from") or None, bool(body.get("local")))
+    except translator.TranslateError as e:
+        return Response.error(str(e), 502)
+    return Response.json(dict(r, ok=True))
+
+
 def r_bark(s, request, *_):
     m = s.app.cfg.mobile
     return Response.json({"ok": True, "url": m["barkURL"], "mode": m["barkMode"], "encrypted": bool(m["barkKey"]),
@@ -1807,7 +1822,7 @@ ROUTES = {
     ("POST", "/api/schedules"): r_schedules_add, ("POST", "/api/schedules/update"): r_schedules_update,
     ("POST", "/api/schedules/delete"): r_schedules_delete, ("POST", "/api/schedules/run"): r_schedules_run,
     ("POST", "/api/new-session"): r_new_session, ("POST", "/api/resume"): r_resume, ("POST", "/api/viewed"): r_viewed, ("GET", "/api/tts/voices"): r_tts_voices,
-    ("POST", "/api/tts"): r_tts, ("GET", "/api/bark"): r_bark, ("POST", "/api/bark"): r_bark_set, ("POST", "/api/bark/test"): r_bark_test,
+    ("POST", "/api/tts"): r_tts, ("POST", "/api/translate"): r_translate, ("GET", "/api/bark"): r_bark, ("POST", "/api/bark"): r_bark_set, ("POST", "/api/bark/test"): r_bark_test,
     ("POST", "/api/alerts/reconnect"): r_alerts_reconnect, ("POST", "/api/world/intent"): r_world_intent,
     ("POST", "/api/notify/test"): r_notify_test, ("POST", "/api/stuck/tick"): r_stuck_tick, ("POST", "/api/idleclose/tick"): r_idleclose_tick,
     ("POST", "/api/reminders/tick"): r_reminders_tick, ("POST", "/api/schedules/tick"): r_schedules_tick,

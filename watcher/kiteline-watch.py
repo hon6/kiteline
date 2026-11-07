@@ -1223,7 +1223,19 @@ def snapshot_session(payload):
     # 没有标题：拿 VS Code 标签上的名字（第一句）当标题，列表里认得出、投递时也对得上标签；tabNames 是标签可能显示的几个名字
     names = [] if title else tab_names(session_id, transcript, scan)
     pending_tool = scan["pendingTool"]
+    pending_id = scan["pendingId"]
     message = scan["message"]
+    # 在等确认、记录里却没有这次调用：从 mod 那里补（见 bridge_ask）
+    ask = bridge_ask(session_id, payload.get("startedAt")) if (waiting_for or needs) and not pending_tool else None
+    if ask:
+        held = ask_item(session_id, ask, transcript)
+        pending_tool, pending_id = held["name"], held["toolId"]
+        questions = (held.get("input") or {}).get("questions") if held["name"] == "AskUserQuestion" else None
+        first = questions[0] if isinstance(questions, list) and questions and isinstance(questions[0], dict) else {}
+        if isinstance(first.get("question"), str) and first["question"].strip():
+            waiting_for = first["question"].strip()
+    else:
+        _ASK_ITEMS.pop(session_id, None)
 
     if waiting_for:
         activity, reason = "waiting", waiting_for
@@ -1269,7 +1281,7 @@ def snapshot_session(payload):
         "effort": scan.get("effort"),
         "subagents": subagent_count(transcript),
         "pendingTool": pending_tool,
-        "pendingId": scan["pendingId"],
+        "pendingId": pending_id,
         "startedAt": payload.get("startedAt"),
         "statusUpdatedAt": payload.get("statusUpdatedAt"),
         "updatedAt": payload.get("updatedAt"),
@@ -4183,7 +4195,7 @@ import type { Register } from 'claude-code'
 // Kiteline 把指令写进 <Claude 配置目录>/kiteline/inbox/<会话>.json（{items: [{id, op, …, expires}]}），这里每 0.4 秒看一眼，
 // 照做后写 <会话>.ack-<id>.json；<会话>.alive 记下这个进程什么时候装上的，Kiteline 据此知道这个会话能走这条路
 type Item = { id: string; op: string; text?: string; decision?: string; answers?: Record<string, string>; tool?: string; expires?: number }
-type Waiter = { agent: string; tool: string; key: string; wake: (item: Item | null) => void }
+type Waiter = { agent: string; tool: string; key: string; wake: (item: Item | null) => void; input: unknown; id: string; at: number }
 
 let dir = ''
 let sid = ''
@@ -4193,6 +4205,14 @@ let windows = false
 const done = new Set<string>()
 const waiters: Waiter[] = []
 const later: string[] = []
+
+// 正在等的确认（命令、提问、计划）写进 <会话>.asks.json：新版 Claude Code 答完之前不把这次工具调用写进对话记录，
+// Kiteline 靠这份在手机、电脑上画出问题和选项
+const publish = ($: any) => {
+  if (!dir || !sid) return
+  const items = waiters.map(w => ({ tool: w.tool, input: w.input, toolUseId: w.id, agent: w.agent, at: w.at }))
+  void Promise.resolve($.fs.write(`${dir}/${sid}.asks.json`, JSON.stringify({ items }))).catch(() => undefined)
+}
 
 // 同一次工具调用在 tool.call 和确认请求里的参数对得上：键排好序再比
 const canon = (value: unknown): string => JSON.stringify(value, (_, x) =>
@@ -4243,8 +4263,10 @@ export const register: Register = on => {
     if (!dir) return next(e)
     let wake: (item: Item | null) => void = () => {}
     const answered = new Promise<Item | null>(resolve => { wake = resolve })
-    const waiter: Waiter = { agent: e.agent_id ?? '', tool: e.tool_name, key: canon(e.tool_input), wake: item => wake(item) }
+    const waiter: Waiter = { agent: e.agent_id ?? '', tool: e.tool_name, key: canon(e.tool_input), wake: item => wake(item),
+      input: e.tool_input, id: (e as typeof e & { tool_use_id?: string }).tool_use_id ?? '', at: await $.clock.now() }
     waiters.push(waiter)
+    publish($)
     const sleeper = $.process.spawn({ argv: windows ? ['powershell', '-NoProfile', '-Command', 'Start-Sleep 86400'] : ['sleep', '86400'] })
     const child = sleeper[Symbol.asyncIterator]()
     let item: Item | null = null
@@ -4252,6 +4274,7 @@ export const register: Register = on => {
       item = await Promise.race([answered, child.next().then(() => null, () => null)])
     } finally {
       waiters.splice(waiters.indexOf(waiter), 1)
+      publish($)
       void child.return?.(undefined)
     }
     if (!item) return next(e)
@@ -4310,7 +4333,9 @@ export const register: Register = on => {
           } else if (item.op === 'perm' || item.op === 'answer') {
             // 交给手机上那张卡片对应的确认框：回答只给提问框；带了工具名的按名字对，对不上说明手机看到的已经过时了
             const tool = item.op === 'answer' ? 'AskUserQuestion' : item.tool
-            const fits = waiters.filter(w => !tool || w.tool === tool)
+            // 「允许」不拿去答提问框（没带答案，答了等于白答、还把这个等待用掉了）；拒绝可以（同在电脑上按 Esc）
+            const fits = waiters.filter(w => (!tool || w.tool === tool)
+              && !(item.op === 'perm' && item.decision !== 'deny' && w.tool === 'AskUserQuestion'))
             const waiter = fits.find(w => w.agent === '') ?? fits[0]
             if (waiter) waiter.wake(item)
             else result = 'none'
@@ -4369,7 +4394,7 @@ def bridge_tidy(folder=None, now=None):
         return
     for name in names:
         path = os.path.join(folder, name)
-        keep = 30 * 86400 if name.endswith(".alive") else 3600
+        keep = 30 * 86400 if name.endswith((".alive", ".asks.json")) else 3600
         try:
             if now - os.path.getmtime(path) > keep:
                 os.remove(path)
@@ -4397,6 +4422,49 @@ def bridge_alive(session_id, started_at):
         cached = _BRIDGE_ALIVE[session_id] = (mtime, at)
     started = started_at if isinstance(started_at, (int, float)) and not isinstance(started_at, bool) else 0
     return cached[1] > 0 and cached[1] >= started
+
+
+_ASK_ITEMS = {}    # 会话 → 从 mod 那里补出来的待确认工具调用（对话项，见 bridge_ask）
+
+
+def bridge_ask(session_id, started_at):
+    """mod 写的「正在等的确认」（<会话>.asks.json）里主 agent 最近的一个：新版 Claude Code（2.1.319 实测）弹出提问框、确认框后，
+    答完之前不把这次工具调用写进对话记录，单看记录认不出在等什么，手机、电脑上只剩一张没有选项的「需要输入」。
+    这个进程写的才算（早于进程启动的是上一个进程留下的）。没有回 None"""
+    if not session_id or not bridge_alive(session_id, started_at):
+        return None
+    path = os.path.join(bridge_dir(), "%s.asks.json" % session_id)
+    try:
+        if isinstance(started_at, (int, float)) and os.path.getmtime(path) * 1000 < started_at:
+            return None
+        with open(path, encoding="utf-8") as handle:
+            items = json.load(handle).get("items")
+    except (OSError, ValueError, AttributeError):
+        return None
+    mine = [x for x in items or [] if isinstance(x, dict) and not x.get("agent") and isinstance(x.get("tool"), str) and x["tool"]]
+    return mine[-1] if mine else None
+
+
+def ask_item(session_id, ask, transcript):
+    """待确认的调用 → 对话项（同记录里的 tool 项），客户端照常画提问 / 计划 / 权限卡片。同一次调用只造一次（id 不变，客户端不重复）；
+    id 用记录当前末尾的位置 + 900，排在已有内容后面、不和以后写进来的行撞"""
+    tool_input = ask.get("input") if isinstance(ask.get("input"), dict) else {}
+    tool_id = ask.get("toolUseId") or "ask-" + hashlib.sha1(
+        json.dumps([ask["tool"], tool_input], sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+    held = _ASK_ITEMS.get(session_id)
+    if held and held["toolId"] == tool_id:
+        return held
+    try:
+        size = os.path.getsize(transcript) if transcript else 0
+    except OSError:
+        size = 0
+    at = ask.get("at")
+    name = ask["tool"]
+    item = dict({"id": "%d.900" % size, "ts": int(at) if isinstance(at, (int, float)) else int(time.time() * 1000),
+                 "t": "tool", "toolId": tool_id, "name": name, "brief": tool_brief(name, tool_input),
+                 "input": shrink(tool_input)}, **stage_hint(name, tool_input))
+    _ASK_ITEMS[session_id] = item
+    return item
 
 
 def _bridge_items(path):
@@ -15465,6 +15533,7 @@ class Watcher:
         self.agents = {}       # sessionId -> claude-code / 插件 id
         self.plugins = plugins or AgentPlugins()
         self.live = set()      # 这一轮还在跑的会话
+        self.asks_shown = {}   # 会话 → 已经推给客户端的补出来的待确认调用（对话项 id）
 
     # --- 增量 ---
 
@@ -15533,11 +15602,20 @@ class Watcher:
                     entry = parse_line(raw)
                     if entry is not None:
                         items.append(outbox_item(offset, entry))
+            # 记录里没有的待确认调用（见 bridge_ask）：出现时推一条；答完了让客户端重新拉对话，把补的那条去掉
+            held = _ASK_ITEMS.get(sid) if claude else None
+            shown = self.asks_shown.get(sid)
+            if held and shown != held["id"]:
+                items.append(held)
+                self.asks_shown[sid] = held["id"]
             if items:
                 if claude:
                     PEERS.observe(sid, items)
                 STAGES.feed(sid, items)
                 emit({"event": "entries", "sessionId": sid, "items": items})
+            if shown and not held:
+                del self.asks_shown[sid]
+                emit({"event": "reset", "sessionId": sid})
         links = PEERS.drain()
         if links:
             emit({"event": "peers", "links": links})
@@ -15664,7 +15742,8 @@ class Watcher:
             if before is not None:
                 ts_to = request.get("beforeTs") or (max(ts_values) + 1 if ts_values else 0)
             outbox = read_outbox(session_id, ts_from, ts_to)
-            return {"items": items + outbox, "hasMore": has_more, "end": end}
+            held = _ASK_ITEMS.get(session_id) if before is None else None
+            return {"items": items + outbox + ([held] if held else []), "hasMore": has_more, "end": end}
         if cmd == "media":
             session_id = request.get("sessionId")
             ref = str(request.get("ref") or "")

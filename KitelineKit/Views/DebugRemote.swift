@@ -2,6 +2,9 @@
 import ActivityKit
 import SwiftUI
 import UIKit
+#if canImport(Translation)
+import Translation
+#endif
 
 /// 只在调试版、截图版里：从 Mac 上发 Darwin 通知遥控 App（点不了屏幕时测排版用）。
 ///   模拟器：xcrun simctl spawn <设备> notifyutil -p tars.demo.<动作>
@@ -23,6 +26,7 @@ import UIKit
 ///   inboundsend session|project <补充说明> = 在发送面板里填好说明、点「发送」（发给选中的会话 / 第一个项目新建会话）；
 ///   openfile / sharefile <会话 key> <路径> = 当作在消息里点了这个文件路径 / 长按「转发文件」（见 FileOpener；InboundShareHost 接）
 ///   route <IP>...（以数字开头或带冒号）= 每个地址走哪张网卡、算不算直连 / 走隧道（记进 remote-notes.txt）；free on|off = 模拟免费版开 / 关
+///   translated = 每条翻译的状态、试过的服务和失败原因、语言包状态记进 remote-notes.txt
 ///   tap <按钮上的字> = 点一下这个按钮（同 VoiceOver 双击，走无障碍的「激活」；先找字完全一样的，没有再找以它开头的）；
 ///   labels = 屏幕上能点的东西的字记进 remote-notes.txt（tap 找不到时看看叫什么）；type <文字> = 往第一个输入框里打字（筛选框、搜索框）
 private extension UIView {
@@ -236,6 +240,33 @@ enum DebugRemote {
                 // route 后面跟地址才是这条；route usage 之类的页面名转给 MainView
                 // 每个地址走哪张网卡（免费版不经 VPN 隧道连局域网的判断，见 LocalRoute），写进 remote-notes.txt
                 note("route " + LocalRoute.explain(Array(parts.dropFirst())))
+            } else if parts.first == "trhost" {
+                // trhost [local] <英文>：直接交给连着的电脑翻，看结果（不受当前翻译服务设置影响）
+                let local = parts.count > 1 && parts[1] == "local"
+                let text = parts.dropFirst(local ? 2 : 1).joined(separator: " ")
+                Task {
+                    guard let host = Translator.shared.hostTranslate else { note("trhost：电脑没有翻译功能"); return }
+                    let t0 = Date()
+                    do { note("trhost\(local ? " local" : "")：\(try await host(text, "auto", "zh-Hans", local))（\(String(format: "%.2f", Date().timeIntervalSince(t0))) 秒）") }
+                    catch { note("trhost 失败：\((error as? TranslateError)?.message ?? "\(error)")") }
+                }
+            } else if parts.first == "trprobe" {
+                Task { await Translator.shared.probeApple() }
+            } else if parts.first == "translated" {
+                // 每条翻译的状态、试过哪些服务、为什么换下一个 / 失败，加上当前设置和系统翻译语言包状态
+                let t = Translator.shared
+                note("translate 设置 \(t.source)→\(t.target) \(t.engine.rawValue) auto=\(t.auto)：\(t.debugStates)")
+                #if canImport(Translation)
+                if #available(iOS 18, *) {
+                    Task {
+                        let a = LanguageAvailability()
+                        for (from, to) in [("en", "zh-Hans"), ("zh-Hans", "en")] {
+                            let status = await a.status(from: Locale.Language(identifier: from), to: Locale.Language(identifier: to))
+                            note("translate 语言包 \(from)→\(to)：\(status)")
+                        }
+                    }
+                }
+                #endif
             } else if parts.first == "free", parts.count == 2 {
                 // 模拟免费版开 / 关（同设置里的开关；截图版没有这个开关）
                 #if DEBUG

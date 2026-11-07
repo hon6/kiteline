@@ -23,11 +23,12 @@ final class Translator {
     // MARK: 设置
 
     enum Engine: String, CaseIterable, Identifiable {
-        case auto, apple, google, mymemory
+        case auto, computer, apple, google, mymemory
         var id: String { rawValue }
         var title: String {
             switch self {
             case .auto: return L("自动")
+            case .computer: return L("电脑翻译")
             case .apple: return L("系统翻译")
             case .google: return L("Google 翻译")
             case .mymemory: return "MyMemory"
@@ -35,9 +36,10 @@ final class Translator {
         }
         var note: String {
             switch self {
-            case .auto: return L("已下载语言包时使用系统翻译（在本机完成），否则依次改用 Google 翻译、MyMemory")
+            case .auto: return L("先交给连着的电脑翻译，再依次尝试本机系统翻译、Google 翻译、MyMemory")
+            case .computer: return L("交给连着的电脑翻译：Mac 使用系统翻译在电脑上完成，其他电脑联网翻译")
             case .apple: return L("在本机完成翻译，消息不离开设备，下载语言包后可离线使用")
-            case .google: return L("翻译质量较好；部分网络环境下可能无法连接")
+            case .google: return L("翻译质量较好；部分网络环境下无法连接，连不上时自动改用其他服务")
             case .mymemory: return L("公开免费接口，每天可翻译约 5000 字")
             }
         }
@@ -45,6 +47,7 @@ final class Translator {
         var tag: String? {
             switch self {
             case .auto: return nil
+            case .computer: return L("电脑")
             case .apple: return L("本机")
             case .google, .mymemory: return L("联网")
             }
@@ -223,11 +226,24 @@ final class Translator {
         showingOriginal.remove(id)
         let doc = TranslateDoc(text)
         guard !doc.pieces.isEmpty else { states[id] = .done(text); return }
-        let order: [Engine]
+        // 选了联网服务时，连不上 / 被限流 / 额度用完就换别的（11-07 手机选了 Google，大陆网络连不上，条条失败）：
+        // 先换本机系统翻译（只在语言包已下载时，不弹下载），再换另一个联网服务。只选「系统翻译」的不换（消息不出设备）
+        // 11-07 起先交给连着的电脑翻（消息本来就是电脑发来的；Mac 用系统翻译在电脑上完成，手机上的系统翻译 iOS 18 真机报 internalError、
+        // Google 大陆连不上）。只选「系统翻译」的也可以交给电脑，但只许电脑在本机翻（local），不许它联网
+        let apple: [Engine] = Engine.appleAvailable ? [.apple] : []
+        let host: [Engine] = hostTranslate != nil ? [.computer] : []
+        var order: [Engine]
         switch engine {
-        case .auto: order = (Engine.appleAvailable ? [.apple] : []) + [.google, .mymemory]
-        default: order = [engine]
+        case .auto, .computer: order = host + apple + [.google, .mymemory]
+        case .apple: order = apple + host
+        case .google: order = [.google] + host + apple + [.mymemory]
+        case .mymemory: order = [.mymemory] + host + apple + [.google]
         }
+        // 最近连不上的联网服务先跳过（每条都白等 10 秒超时）；全被跳过时照常都试
+        let now = Date()
+        let live = order.filter { (Self.downUntil[$0] ?? .distantPast) < now }
+        if !live.isEmpty { order = live }
+        let chosen = engine
         let source = source, target = target
         let gate = gated ? autoGate : nil
         tasks[id] = Task { [weak self] in
@@ -237,13 +253,23 @@ final class Translator {
             for engine in order {
                 guard let self, !Task.isCancelled else { return }
                 do {
+                    if engine == .computer, let host = self.hostTranslate {
+                        let result = try await host(text, source, target, chosen == .apple)
+                        guard !Task.isCancelled else { return }
+                        self.cache[cacheKey] = result
+                        self.states[id] = .done(result)
+                        self.notes[id, default: []].append("用 computer")
+                        self.tasks[id] = nil
+                        return
+                    }
                     let out: [String]
                     switch engine {
+                    // 自动翻译从不弹系统的下载语言包窗口（11-07 用户报电脑上时不时弹「下载语言以翻译」）：只有手动点「翻译」才弹
                     case .apple: out = try await self.runApple(id: id, pieces: doc.pieces, source: source, target: target,
-                                                               sample: doc.pieces.joined(separator: "\n"), mayDownload: order.count == 1)
+                                                               sample: doc.pieces.joined(separator: "\n"), mayDownload: chosen == .apple && !gated)
                     case .google: out = try await Self.google(doc.pieces, source: source, target: target)
                     case .mymemory: out = try await Self.myMemory(doc.pieces, source: source, target: target)
-                    case .auto: continue
+                    case .auto, .computer: continue
                     }
                     guard !Task.isCancelled else { return }
                     let result = doc.rebuild(out)
@@ -252,8 +278,17 @@ final class Translator {
                     self.notes[id, default: []].append("用 \(engine.rawValue)")
                     self.tasks[id] = nil
                     return
+                } catch let error as TranslateError where gated && error.skip {
+                    // 自动翻译被打断（气泡滚出屏幕、换了会话）或语言包没下载：不算失败、不标红，
+                    // 回到没翻过的样子，下次出现在屏幕上再自动翻（11-07 用户报手机上翻译经常显示失败）
+                    guard !Task.isCancelled else { return }
+                    self.notes[id, default: []].append("\(engine.rawValue):\(error.message)，稍后再自动翻")
+                    self.states[id] = nil
+                    self.tasks[id] = nil
+                    return
                 } catch {
                     lastError = (error as? TranslateError)?.message ?? error.localizedDescription
+                    if let pause = (error as? TranslateError)?.pause { Self.downUntil[engine] = Date().addingTimeInterval(pause) }
                     self.notes[id, default: []].append("\(engine.rawValue):\(lastError)")
                 }
             }
@@ -263,28 +298,101 @@ final class Translator {
         }
     }
 
-    // MARK: 系统翻译（要挂在视图上：TranslationSession 只能从 .translationTask 拿到）
+    /// 交给连着的电脑翻（POST /api/translate，电脑有 translate 功能时 AppModel 填上）：(原文, 原文语言, 目标语言, 只许本机翻) → 译文
+    @ObservationIgnored var hostTranslate: ((String, String, String, Bool) async throws -> String)?
+
+    /// 联网服务连不上 / 被限流 / 额度用完后暂停到什么时候（期间先用别的服务）
+    private static var downUntil: [Engine: Date] = [:]
+
+    // MARK: 系统翻译（整个 App 一个常驻会话）
+    //
+    // TranslationSession 只能从视图的 .translationTask 拿到。原来每个消息气泡各挂一个，iOS 18 上条条报
+    // TranslationError.internalError（11-07 用户 iPhone 语言包已下载仍「重试」），气泡滚出屏幕还会中断。
+    // 现在根视图挂一个看不见的 TranslateAppleHost，要翻的消息排队交给它：同一组语言连着翻，换语言时换配置。
 
     struct AppleJob {
+        let id: String
         let token: UUID
         let pieces: [String]
-        let source: String, target: String
-        var continuation: CheckedContinuation<[String], Error>?
-        /// TranslationSession.Configuration（系统版本不够时这个类型不存在，只能放成 Any）
-        var config: Any?
+        let from: String, to: String
+        let continuation: CheckedContinuation<[String], Error>
+        /// 语言包已下载：不再调 prepareTranslation（只在要下载时才需要）
+        let installed: Bool
     }
-    private(set) var appleJobs: [String: AppleJob] = [:]
+    @ObservationIgnored private var appleQueue: [AppleJob] = []
+    @ObservationIgnored private var appleBusy = false
+    /// 常驻宿主当前的配置（TranslationSession.Configuration；系统版本不够时这个类型不存在，只能放成 Any）和它的语言
+    private(set) var appleConfig: Any?
+    @ObservationIgnored private var appleLangs: (from: String, to: String)?
+    /// 挂着的宿主（多个窗口各有一个），只有第一个真正干活
+    private(set) var appleHosts: [UUID] = []
+    @ObservationIgnored private var kickToken = UUID()
+
+    func hostAppeared(_ host: UUID) { if !appleHosts.contains(host) { appleHosts.append(host) }; kickApple() }
+    func hostGone(_ host: UUID) { appleHosts.removeAll { $0 == host }; if !appleHosts.isEmpty { kickApple() } }
 
     private func failApple(_ id: String, _ error: Error) {
-        guard let continuation = appleJobs[id]?.continuation else { return }
-        appleJobs[id] = nil
-        continuation.resume(throwing: error)
+        let gone = appleQueue.filter { $0.id == id }
+        appleQueue.removeAll { $0.id == id }
+        gone.forEach { $0.continuation.resume(throwing: error) }
     }
+
+    /// 让宿主开始翻排在最前面的：语言和当前配置一样就让配置失效（系统会重跑 .translationTask），否则换新配置
+    private func kickApple() {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        #if canImport(Translation)
+        guard !appleBusy, let next = appleQueue.first, !appleHosts.isEmpty else { return }
+        if var config = appleConfig as? TranslationSession.Configuration, appleLangs?.from == next.from, appleLangs?.to == next.to {
+            config.invalidate()
+            appleConfig = config
+        } else {
+            appleConfig = TranslationSession.Configuration(source: next.from.isEmpty ? nil : Locale.Language(identifier: next.from),
+                                                           target: Locale.Language(identifier: next.to))
+            appleLangs = (next.from, next.to)
+        }
+        // 15 秒还没开始（宿主不在窗口里、系统没响应）：排着的都放弃，交给下一个服务 / 下次再自动翻
+        let token = UUID()
+        kickToken = token
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard let self, self.kickToken == token, !self.appleBusy else { return }
+            let stuck = self.appleQueue
+            self.appleQueue = []
+            stuck.forEach { $0.continuation.resume(throwing: TranslateError(L("系统翻译没有响应"), skip: true)) }
+        }
+        #endif
+    }
+
+    #if DEBUG && os(iOS)
+    /// 调试：在真机上试几种语言写法 / 是否先 prepare，看哪种系统翻译能翻（DebugRemote 的 trprobe）
+    func probeApple() async {
+        guard #available(iOS 18, *) else { return }
+        #if canImport(Translation)
+        let supported = await LanguageAvailability().supportedLanguages
+        DebugRemote.note("probe 支持：" + supported.map { $0.maximalIdentifier }.joined(separator: ","))
+        let cases: [(String, String, Bool)] = [("en", "zh-Hans", true), ("en", "zh-Hans", false), ("en-US", "zh-Hans-CN", true),
+                                               ("en", "zh", true), ("", "zh-Hans", true)]
+        for c in cases {
+            let st = await LanguageAvailability().status(from: Locale.Language(identifier: c.0.isEmpty ? "en" : c.0), to: Locale.Language(identifier: c.1))
+            do {
+                let out = try await withCheckedThrowingContinuation { (k: CheckedContinuation<[String], Error>) in
+                    appleQueue.append(AppleJob(id: "probe", token: UUID(), pieces: ["Hello, how are you today?"], from: c.0, to: c.1, continuation: k, installed: c.2))
+                    kickApple()
+                }
+                DebugRemote.note("probe \(c) status=\(st)：成功 \(out)")
+            } catch {
+                DebugRemote.note("probe \(c) status=\(st)：失败 \((error as? TranslateError)?.message ?? "\(error)")")
+            }
+        }
+        #endif
+    }
+    #endif
 
     /// mayDownload：用户明确选了「系统翻译」，语言包没下载时让系统弹下载提示；「自动」时没下载就直接换下一个服务，不打扰
     private func runApple(id: String, pieces: [String], source: String, target: String, sample: String, mayDownload: Bool) async throws -> [String] {
         guard #available(iOS 18, macOS 15, *) else { throw TranslateError(L("此系统不支持系统翻译")) }
         #if canImport(Translation)
+        guard !appleHosts.isEmpty else { throw TranslateError(L("系统翻译没有响应"), skip: true) }
         let languages = LanguageAvailability()
         let to = Locale.Language(identifier: target)
         // 原文「自动检测」：自己先按整条消息认出语言再明确告诉系统。交给系统逐段认（source 传 nil）时，
@@ -292,21 +400,14 @@ final class Translator {
         let sourceCode = source == "auto" ? Self.detect(sample) : source
         guard let sourceCode else { throw TranslateError(L("无法识别原文语言")) }
         if Self.sameLanguage(sourceCode, target) { return pieces }
-        let from = Locale.Language(identifier: sourceCode)
-        let status = await languages.status(from: from, to: to)
+        let status = await languages.status(from: Locale.Language(identifier: sourceCode), to: to)
         if status == .unsupported { throw TranslateError(L("系统翻译不支持这组语言")) }
-        if status == .supported && !mayDownload { throw TranslateError(L("系统翻译尚未下载这组语言")) }
-        // 消息气泡不在屏幕上（滚走了、换了会话）时视图上的 .translationTask 不会跑：20 秒没开始就换下一个服务
-        let token = UUID()
+        // 用户明确选了系统翻译时，没下载语言包的自动翻译先跳过（不标失败），手动点一次「翻译」弹系统下载窗口
+        if status == .supported && !mayDownload { throw TranslateError(L("系统翻译尚未下载这组语言"), skip: engine == .apple) }
         return try await withCheckedThrowingContinuation { continuation in
-            var job = AppleJob(token: token, pieces: pieces, source: source, target: target, continuation: continuation)
-            job.config = TranslationSession.Configuration(source: from, target: to)
-            appleJobs[id] = job
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(20))
-                guard let self, self.appleJobs[id]?.token == token else { return }
-                self.failApple(id, TranslateError(L("系统翻译没有响应")))
-            }
+            appleQueue.append(AppleJob(id: id, token: UUID(), pieces: pieces, from: sourceCode, to: target,
+                                       continuation: continuation, installed: status == .installed))
+            kickApple()
         }
         #else
         throw TranslateError(L("此系统不支持系统翻译"))
@@ -314,10 +415,21 @@ final class Translator {
     }
 
     /// 整条消息的主要语言（BCP 47：zh-Hans / zh-Hant / en / ja……），认不出来是 nil
+    /// 技术内容（命令、文件名、缩写多的英文）常被认成法语、德语等（11-07 电脑上因此弹了「下载法语」）：
+    /// 给英语、中文较高的先验；认出来是别的拉丁字母语言但把握不大、英语也有一定可能时按英语算
     nonisolated static func detect(_ text: String) -> String? {
         let recognizer = NLLanguageRecognizer()
+        recognizer.languageHints = [.english: 0.5, .simplifiedChinese: 0.25, .traditionalChinese: 0.05, .japanese: 0.05, .korean: 0.03,
+                                    .french: 0.02, .german: 0.02, .spanish: 0.02, .russian: 0.02, .portuguese: 0.01, .italian: 0.01]
         recognizer.processString(text)
-        guard let language = recognizer.dominantLanguage, language != .undetermined else { return nil }
+        guard var language = recognizer.dominantLanguage, language != .undetermined else { return nil }
+        let latin: Set<NLLanguage> = [.french, .german, .spanish, .portuguese, .italian, .dutch, .catalan, .romanian, .swedish,
+                                      .danish, .norwegian, .finnish, .polish, .czech, .slovak, .hungarian, .croatian, .indonesian,
+                                      .malay, .turkish, .vietnamese]
+        if latin.contains(language) {
+            let hypotheses = recognizer.languageHypotheses(withMaximum: 5)
+            if (hypotheses[language] ?? 0) < 0.9, (hypotheses[.english] ?? 0) > 0.05 { language = .english }
+        }
         switch language {
         case .simplifiedChinese: return "zh-Hans"
         case .traditionalChinese: return "zh-Hant"
@@ -332,30 +444,61 @@ final class Translator {
     }
 
     #if canImport(Translation)
+    /// 宿主拿到会话：把排着的、语言和这个会话一样的都翻完；还有别的语言的就换配置再来
     @available(iOS 18, macOS 15, *)
-    func appleConfig(_ id: String) -> TranslationSession.Configuration? {
-        appleJobs[id]?.config as? TranslationSession.Configuration
+    func performApple(session: TranslationSession) async {
+        guard !appleBusy, let langs = appleLangs else { return }
+        appleBusy = true
+        defer {
+            appleBusy = false
+            if !Task.isCancelled { kickApple() }
+        }
+        while let index = appleQueue.firstIndex(where: { $0.from == langs.from && $0.to == langs.to }) {
+            let job = appleQueue.remove(at: index)
+            if Task.isCancelled {
+                job.continuation.resume(throwing: TranslateError(L("系统翻译被打断"), skip: true)); continue
+            }
+            do {
+                job.continuation.resume(returning: try await translateApple(job, session: session))
+            } catch {
+                if error is CancellationError || Task.isCancelled {
+                    job.continuation.resume(throwing: TranslateError(L("系统翻译被打断"), skip: true))
+                } else if "\(error)".contains("internalError") {
+                    // 11-07 用户 iPhone（iOS 18.7，语言包已下载）上任何写法都瞬间报 internalError：系统翻译在这台设备上用不了。
+                    // 一小时内「自动」直接跳过系统翻译
+                    job.continuation.resume(throwing: TranslateError(L("系统翻译在这台设备上无法使用，可在翻译设置中改用其他翻译服务"), pause: 3600))
+                } else {
+                    job.continuation.resume(throwing: TranslateError(L("系统翻译不可用：%@", error.localizedDescription) + " (\(error))"))
+                }
+            }
+        }
     }
 
     @available(iOS 18, macOS 15, *)
-    func performApple(_ id: String, session: TranslationSession) async {
-        guard var job = appleJobs[id], let continuation = job.continuation else { return }
-        // 先摘掉续体（超时不再算它），配置留着：配置变成 nil 时系统会取消正在跑的翻译，翻完再清
-        job.continuation = nil
-        appleJobs[id] = job
-        defer { if appleJobs[id]?.token == job.token { appleJobs[id] = nil } }
+    private func translateApple(_ job: AppleJob, session: TranslationSession) async throws -> [String] {
+        if !job.installed { try await session.prepareTranslation() }
+        let requests = job.pieces.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
+        var out = job.pieces
         do {
-            try await session.prepareTranslation()
-            let requests = job.pieces.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
-            let responses = try await session.translations(from: requests)
-            var out = job.pieces
-            for response in responses {
+            for response in try await session.translations(from: requests) {
                 if let index = response.clientIdentifier.flatMap(Int.init), out.indices.contains(index) { out[index] = response.targetText }
             }
-            continuation.resume(returning: out)
-        } catch {
-            continuation.resume(throwing: TranslateError(L("系统翻译不可用：%@", error.localizedDescription) + " (\(error))"))
+        } catch let error where !(error is CancellationError) && !Task.isCancelled {
+            // 整批报错：逐段翻，个别段翻不了留原文，全部翻不了才算失败
+            notes[job.id, default: []].append("apple 整批失败：\(error)，改逐段")
+            var failed = 0
+            var firstError: Error = error
+            for (index, piece) in job.pieces.enumerated() {
+                do { out[index] = try await session.translate(piece).targetText } catch {
+                    if error is CancellationError || Task.isCancelled { throw error }
+                    if failed == 0 { firstError = error }
+                    failed += 1
+                    notes[job.id, default: []].append("段\(index) 失败：\(error) 「\(piece.prefix(60))」")
+                }
+            }
+            if failed == job.pieces.count { throw firstError }
         }
+        return out
     }
     #endif
 
@@ -396,9 +539,9 @@ final class Translator {
         request.setValue("application/x-www-form-urlencoded;charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = "q=\(formEscape(text))".data(using: .utf8)
         let data: Data
-        do { data = try await URLSession.shared.data(for: request).0 } catch { throw TranslateError(L("连不上 Google 翻译")) }
+        do { data = try await URLSession.shared.data(for: request).0 } catch { throw TranslateError(L("连不上 Google 翻译"), pause: 600) }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [Any], let parts = json.first as? [Any] else {
-            throw TranslateError(L("Google 翻译返回了无法识别的内容"))
+            throw TranslateError(L("Google 翻译返回了无法识别的内容"), pause: 600)
         }
         return parts.compactMap { ($0 as? [Any])?.first as? String }.joined()
     }
@@ -435,9 +578,9 @@ final class Translator {
         request.setValue("application/x-www-form-urlencoded;charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = "q=\(formEscape(text))&langpair=\(myMemoryCode(source))|\(myMemoryCode(target))".data(using: .utf8)
         let data: Data
-        do { data = try await URLSession.shared.data(for: request).0 } catch { throw TranslateError(L("连不上 MyMemory")) }
+        do { data = try await URLSession.shared.data(for: request).0 } catch { throw TranslateError(L("连不上 MyMemory"), pause: 600) }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw TranslateError(L("MyMemory 返回了无法识别的内容")) }
-        if json["quotaFinished"] as? Bool == true { throw TranslateError(L("MyMemory 今日免费额度已用完")) }
+        if json["quotaFinished"] as? Bool == true { throw TranslateError(L("MyMemory 今日免费额度已用完"), pause: 3600) }
         // 自动检测出来和目标语言相同（「16px」这种被认成英文）：原样保留
         if (json["responseDetails"] as? String)?.localizedCaseInsensitiveContains("DISTINCT LANGUAGES") == true { return text }
         guard let reply = json["responseData"] as? [String: Any], let text = reply["translatedText"] as? String,
@@ -451,6 +594,67 @@ final class Translator {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._*")
         return text.addingPercentEncoding(withAllowedCharacters: allowed) ?? text
+    }
+}
+
+/// 电脑端给手机（微信小程序）翻译用：POST /api/translate（Sources/MobileServer.swift）。
+/// 拆段、占位同手机上的翻译（TranslateDoc：代码块、行内代码、网址不翻）；服务按 Google → MyMemory 的顺序，
+/// 前一个连不上 / 限流就换下一个。target 不给时：中文翻成英文，其余翻成简体中文。
+/// 11-07 起手机 App、电脑客户端也先交给电脑翻：macOS 26 起先用系统翻译在电脑本机翻（TranslationSession(installedSource:) 不用界面，
+/// 实测 0.1 秒），语言包没下载才联网；local = 只许本机翻（用户选了「系统翻译」：消息不出设备）
+public enum HostTranslate {
+    /// 这台电脑能不能只在本机翻（hello / state 的 features 里报 translateLocal）
+    public static var localAvailable: Bool {
+        #if canImport(Translation)
+        if #available(iOS 26, macOS 26, *) { return true }
+        #endif
+        return false
+    }
+
+    public struct Result: Sendable {
+        public let text: String
+        public let source: String
+        public let target: String
+        public let engine: String
+    }
+
+    public static func run(_ text: String, target: String?, source given: String? = nil, local: Bool = false) async throws -> Result {
+        let source = given.flatMap { $0.isEmpty || $0 == "auto" ? nil : $0 } ?? Translator.detect(text) ?? "auto"
+        let to = target.flatMap { $0.isEmpty ? nil : $0 } ?? (source.hasPrefix("zh") ? "en" : "zh-Hans")
+        if source != "auto", Translator.sameLanguage(source, to) { return Result(text: text, source: source, target: to, engine: "none") }
+        let doc = TranslateDoc(text)
+        guard !doc.pieces.isEmpty else { return Result(text: text, source: source, target: to, engine: "none") }
+        var lastError = "翻译失败"
+        #if canImport(Translation)
+        if #available(iOS 26, macOS 26, *), source != "auto" {
+            let from = Locale.Language(identifier: source), into = Locale.Language(identifier: to)
+            if await LanguageAvailability().status(from: from, to: into) == .installed {
+                do {
+                    let session = TranslationSession(installedSource: from, target: into)
+                    let requests = doc.pieces.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
+                    var out = doc.pieces
+                    for response in try await session.translations(from: requests) {
+                        if let index = response.clientIdentifier.flatMap(Int.init), out.indices.contains(index) { out[index] = response.targetText }
+                    }
+                    return Result(text: doc.rebuild(out), source: source, target: to, engine: "apple")
+                } catch {
+                    lastError = L("电脑上的系统翻译失败：%@", error.localizedDescription)
+                }
+            } else {
+                lastError = L("电脑上的系统翻译尚未下载「%@ → %@」语言包", Translator.Language.name(source), Translator.Language.name(to))
+            }
+        }
+        #endif
+        if local { throw NSError(domain: "HostTranslate", code: 2, userInfo: [NSLocalizedDescriptionKey: localAvailable ? lastError : L("这台电脑不能在本机翻译")]) }
+        for (name, run) in [("google", Translator.google), ("mymemory", Translator.myMemory)] as [(String, ([String], String, String) async throws -> [String])] {
+            do {
+                let out = try await run(doc.pieces, source, to)
+                return Result(text: doc.rebuild(out), source: source, target: to, engine: name)
+            } catch {
+                lastError = (error as? TranslateError)?.message ?? error.localizedDescription
+            }
+        }
+        throw NSError(domain: "HostTranslate", code: 1, userInfo: [NSLocalizedDescriptionKey: lastError])
     }
 }
 
@@ -470,7 +674,11 @@ actor TranslateGate {
 
 struct TranslateError: Error {
     let message: String
-    init(_ message: String) { self.message = message }
+    /// 自动翻译遇到时不算失败（被打断 / 语言包没下载），回到没翻过的样子，下次出现再翻
+    var skip = false
+    /// 联网服务暂时不可用：这么多秒内先用别的服务
+    var pause: TimeInterval?
+    init(_ message: String, skip: Bool = false, pause: TimeInterval? = nil) { self.message = message; self.skip = skip; self.pause = pause }
 }
 
 /// 把一条消息拆成「要翻的段」和「原样留着的」：代码块、空行、表格分隔行不翻；

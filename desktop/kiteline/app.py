@@ -36,7 +36,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.29"
+VERSION = "1.0.30"
 
 
 class App:
@@ -154,7 +154,7 @@ class App:
             log.write("小程序入口启动失败：%s" % exc)
             return
         if m["remoteEnabled"] and mpgate.remote_allowed():
-            # 远程：电脑主动连中继，小程序经中继找到这台电脑（内容端到端加密）。远程要 Pro，小程序暂不开放（见 mpgate.remote_allowed）
+            # 远程：电脑主动连中继，小程序经中继找到这台电脑（内容端到端加密）。远程要 Pro，由中继验小程序的通行证（relay/push/mppay.go）
             self.mpgate.relay = mpgate.RelayLink(self.mpgate, self.cfg.relay())
             self.mpgate.relay.start()
 
@@ -605,7 +605,7 @@ class App:
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
         # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup"]
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate"]
         payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff"))}
         return payload
 

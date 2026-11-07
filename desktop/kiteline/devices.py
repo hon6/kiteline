@@ -23,6 +23,8 @@ def token_hash(token):
 
 
 def default_name(agent):
+    if "MiniProgram" in agent:   # 小程序入口（mpgate）给的 User-Agent：Kiteline-MiniProgram
+        return "微信小程序"
     if "iPhone" in agent:
         return "iPhone"
     if "iPad" in agent:
@@ -79,10 +81,11 @@ class DeviceStore:
         log.write("登记设备「%s」（%s，%s）" % (device["name"], via, ip))
         return dict(device), token
 
-    def authenticate(self, token, ip, client=None, agent=None, pro=None):
+    def authenticate(self, token, ip, client=None, agent=None, pro=None, mp_user=None):
         """client：App 每个请求带的机型、系统、App 版本（X-Kiteline-Client），记下来给「设备」页和使用统计用；
         agent：User-Agent，App 的请求里系统自带构建号（TARS/202610271712 CFNetwork/…），旧版 App 也有；
         pro：订阅了 Kiteline Pro（X-Kiteline-Pro），旧版 App 不带。
+        mp_user：微信小程序带的用户编号（X-Kiteline-MP，中继给的 openid 摘要），随使用统计上报，运营后台据此对上小程序用户。
         手机 App 从 127.0.0.1 连进来只可能是点对点转进来的：记下最近一次走远程访问的时间（remoteAt）"""
         if not token.startswith(self.PREFIX):
             return None
@@ -105,7 +108,20 @@ class DeviceStore:
                     if pro is not None and device.get("pro") != pro:
                         device["pro"] = pro
                         changed = True
-                    if is_loopback(ip) and (device.get("client") or "").startswith("ios/") and stamp - device.get("remoteAt", 0) > 60_000:
+                    # 以前配对的小程序没报名字，叫成了「浏览器 2」：认出是小程序后改成「微信小程序」（只改自动起的名字）
+                    if device.get("client") == "miniprogram" and re.fullmatch(r"(Mac |Windows )?浏览器( \d+)?", device.get("name") or ""):
+                        name, n = "微信小程序", 2
+                        while any(d.get("name") == name for d in self._devices):
+                            name, n = "微信小程序 %d" % n, n + 1
+                        device["name"] = name
+                        changed = True
+                    if device.get("client") == "miniprogram" and mp_user and re.fullmatch(r"[0-9a-f]{10}", mp_user) \
+                            and device.get("mpUser") != mp_user:
+                        device["mpUser"] = mp_user
+                        changed = True
+                    # 小程序经中继来的隧道来源也记成 127.0.0.1
+                    via_remote = (device.get("client") or "").startswith("ios/") or device.get("client") == "miniprogram"
+                    if is_loopback(ip) and via_remote and stamp - device.get("remoteAt", 0) > 60_000:
                         device["remoteAt"] = stamp
                         changed = True
                     found = dict(device)

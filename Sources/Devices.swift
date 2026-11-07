@@ -28,6 +28,8 @@ final class DeviceStore {
         var pro: Bool?
         /// 最近一次经远程访问（点对点 / 中继）连进来的时间：点对点把连接转给本机 HTTPS 服务，来源是 127.0.0.1
         var remoteAt: Double?
+        /// 微信小程序：中继给的用户编号（openid 摘要，10 位十六进制），随使用统计上报，运营后台据此对上小程序用户
+        var mpUser: String?
     }
 
     static let shared = DeviceStore()
@@ -78,7 +80,7 @@ final class DeviceStore {
     }
 
     /// 验证设备令牌；顺带记下最后使用时间、IP、App 报的机型版本、构建号、订阅状态和走没走远程访问（一分钟最多写一次盘）
-    func authenticate(_ token: String, ip: String, client: String? = nil, agent: String? = nil, pro: Bool? = nil) -> Device? {
+    func authenticate(_ token: String, ip: String, client: String? = nil, agent: String? = nil, pro: Bool? = nil, mpUser: String? = nil) -> Device? {
         guard token.hasPrefix(Self.prefix) else { return nil }
         let hash = Self.hash(token)
         lock.lock()
@@ -104,8 +106,21 @@ final class DeviceStore {
             devices[index].pro = pro
             changed = true
         }
-        // 手机 App 从 127.0.0.1 连进来只可能是点对点转进来的（Mac 版 App 连本机不算）
-        if Self.isLoopback(ip), devices[index].client?.hasPrefix("ios/") == true, now - (devices[index].remoteAt ?? 0) > 60_000 {
+        // 以前配对的小程序没报名字，叫成了「浏览器」「浏览器 2」：认出是小程序后改成「微信小程序」（只改自动起的名字，用户改过的不动）
+        if devices[index].client == "miniprogram", devices[index].name.range(of: #"^(Mac |Windows )?浏览器( \d+)?$"#, options: .regularExpression) != nil {
+            var name = "微信小程序", n = 2
+            while devices.contains(where: { $0.name == name }) { name = "微信小程序 \(n)"; n += 1 }
+            devices[index].name = name
+            changed = true
+        }
+        if devices[index].client == "miniprogram", let mpUser, mpUser.range(of: "^[0-9a-f]{10}$", options: .regularExpression) != nil,
+           devices[index].mpUser != mpUser {
+            devices[index].mpUser = mpUser
+            changed = true
+        }
+        // 手机 App 从 127.0.0.1 连进来只可能是点对点转进来的（Mac 版 App 连本机不算）；小程序经中继来的隧道来源也记成 127.0.0.1
+        let viaRemote = devices[index].client?.hasPrefix("ios/") == true || devices[index].client == "miniprogram"
+        if Self.isLoopback(ip), viaRemote, now - (devices[index].remoteAt ?? 0) > 60_000 {
             devices[index].remoteAt = now
             changed = true
         }
@@ -213,6 +228,7 @@ final class DeviceStore {
     }
 
     static func defaultName(_ agent: String) -> String {
+        if agent.contains("MiniProgram") { return "微信小程序" }   // 小程序入口（MPGate）给的 User-Agent：Kiteline-MiniProgram
         if agent.contains("iPhone") { return "iPhone" }
         if agent.contains("iPad") { return "iPad" }
         if agent.contains("Android") { return "安卓手机" }

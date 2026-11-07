@@ -489,7 +489,7 @@ final class MobileServer {
 
     /// 只有内容（对话、文件、图片、差异……）、个头又大的接口：英文设备也原样回，不逐字段查表
     static let contentOnly: Set<String> = ["/api/history", "/api/media", "/api/file", "/api/files", "/api/git/diff", "/api/digest/media",
-                                           "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/trace", "/api/tts", "/api/peers", "/api/download",
+                                           "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/trace", "/api/tts", "/api/translate", "/api/peers", "/api/download",
                                            "/api/groups/messages", "/api/groups/media"]
 
     /// 每台设备的界面语言（锁屏推送按它发）：存起来，电脑重启后第一条推送也对
@@ -787,6 +787,20 @@ final class MobileServer {
             case ("GET", "/api/tts/voices"):
                 let voices = TTS.voices().map { ["id": $0.id, "name": $0.name, "label": $0.label, "quality": $0.quality] as [String: Any] }
                 respond(.json(["ok": true, "voices": voices, "best": TTS.bestVoiceId ?? "", "edge": TTS.edgeAvailable]))
+            case ("POST", "/api/translate"):
+                // 翻译一条消息（微信小程序用：小程序连不上 Google 这类服务，也没有系统翻译）：电脑这边联网翻好回去
+                let body = request.jsonBody ?? [:]
+                let text = (body["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty, text.count <= 8000 else { respond(.error("翻译内容为空或过长", status: 400)); return }
+                let target = body["to"] as? String
+                Task {
+                    do {
+                        let r = try await HostTranslate.run(text, target: target, source: body["from"] as? String, local: body["local"] as? Bool ?? false)
+                        respond(.json(["ok": true, "text": r.text, "from": r.source, "to": r.target, "engine": r.engine]))
+                    } catch {
+                        respond(.error(error.localizedDescription, status: 502))
+                    }
+                }
             case ("POST", "/api/tts"):
                 // 朗读：Mac 上的自然语音合成一段 AAC，手机播放
                 let body = request.jsonBody ?? [:]
@@ -1176,7 +1190,8 @@ final class MobileServer {
             if !expected.isEmpty, MobileServer.constantTimeEquals(token, expected) { return .master }
             if let device = DeviceStore.shared.authenticate(token, ip: request.remoteAddress, client: request.headers["x-kiteline-client"],
                                                             agent: request.headers["user-agent"],
-                                                            pro: request.headers["x-kiteline-pro"].map { $0 == "1" }) { return .device(device) }
+                                                            pro: request.headers["x-kiteline-pro"].map { $0 == "1" },
+                                                            mpUser: request.headers["x-kiteline-mp"]) { return .device(device) }
             if token.hasPrefix("p"), linkTokenValid(token) { return .link(token) }
         }
         return nil
@@ -1253,7 +1268,9 @@ final class MobileServer {
 
     private func finishPairing(_ request: HTTPRequest) -> HTTPResponse {
         Log.write("手机配对成功（\(request.remoteAddress)）")
-        let (device, token) = DeviceStore.shared.register(agent: request.headers["user-agent"] ?? "", ip: request.remoteAddress, via: "配对码")
+        // 设备报的名字（小程序是「机型（微信小程序）」）：同扫码登记一样用上，免得设备列表里叫「浏览器 2」分不清
+        let (device, token) = DeviceStore.shared.register(agent: request.headers["user-agent"] ?? "", ip: request.remoteAddress, via: "配对码",
+                                                          name: request.jsonBody?["name"] as? String)
         return .json(["ok": true, "token": token, "deviceId": device.id])
     }
 

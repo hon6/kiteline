@@ -4850,5 +4850,18 @@
  },
  "；": "; ",
  "；%@ 上也有": "; also on %@",
- "；先轻点「一键安装」装上 tmux，或在电脑终端运行 %@": "; first tap “One-Click Install” to install tmux, or run %@ in Terminal on the computer"
+ "；先轻点「一键安装」装上 tmux，或在电脑终端运行 %@": "; first tap “One-Click Install” to install tmux, or run %@ in Terminal on the computer",
+ "系统翻译被打断": "System Translation was interrupted",
+ "翻译质量较好；部分网络环境下无法连接，连不上时自动改用其他服务": "Good quality; unreachable on some networks, in which case another service is used automatically",
+ "系统翻译在这台设备上无法使用，可在翻译设置中改用其他翻译服务": "System Translation is not available on this device. Choose another translation service in Translation settings.",
+ "电脑翻译": "Computer translation",
+ "先交给连着的电脑翻译，再依次尝试本机系统翻译、Google 翻译、MyMemory": "Let the connected computer translate first, then try System Translation on this device, Google Translate and MyMemory in turn",
+ "先交给连着的电脑翻译，再依次尝试 Google 翻译、MyMemory": "Let the connected computer translate first, then try Google Translate and MyMemory in turn",
+ "交给连着的电脑翻译：Mac 使用系统翻译在电脑上完成，其他电脑联网翻译": "Let the connected computer translate: a Mac uses System Translation on the computer itself, other computers translate online",
+ "这台电脑不能在本机翻译": "This computer cannot translate locally",
+ "电脑翻译失败：%@": "Computer translation failed: %@",
+ "连不上电脑": "Cannot reach the computer",
+ "电脑返回了无法识别的内容": "The computer returned an unrecognized response",
+ "电脑上的系统翻译失败：%@": "System Translation on the computer failed: %@",
+ "电脑上的系统翻译尚未下载「%@ → %@」语言包": "The %@ → %@ language pack has not been downloaded for System Translation on the computer"
 }

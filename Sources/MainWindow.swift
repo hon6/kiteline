@@ -68,6 +68,8 @@ struct MainView: View {
         .searchable(text: $model.query, placement: .sidebar, prompt: "搜索会话")
         // 会话之间互发消息：纸鸢从发信会话飞到收信会话（开在分屏里时在标签之间飞），侧栏左边的风筝线连起最近有往来的会话
         .overlay { KitelineKit.PeerStageView(order: model.filtered.map(\.id)) }
+        // 系统翻译的常驻宿主（看不见）：对话里所有消息的系统翻译排队交给它
+        .background { TranslateAppleHost() }
         .frame(minWidth: 820, minHeight: 520)
         .sheetPanel(isPresented: $model.showNewTask) { NewTaskSheet() }   // 能拖动、改大小的面板，在窗口正中
         .sheetPanel(isPresented: Binding(get: { model.agentDetail != nil }, set: { if !$0 { model.agentDetail = nil } })) {

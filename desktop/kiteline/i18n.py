@@ -19,7 +19,7 @@ FIELDS = {"error", "message", "detail", "hint", "status", "reason", "activityTex
           "https"}   # /api/desktop/status 的服务状态（「监听中 127.0.0.1:8766」），客户端设置页显示
 # 只有内容（对话、文件、图片、差异……）、个头又大的接口：英文设备也原样回
 CONTENT_ONLY = {"/api/history", "/api/media", "/api/file", "/api/files", "/api/git/diff", "/api/digest/media",
-                "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/tts", "/api/peers", "/api/download",
+                "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/tts", "/api/translate", "/api/peers", "/api/download",
                 "/api/groups/messages", "/api/groups/media"}
 PLACEHOLDER = re.compile(r"%(?:\d+\$)?(?:lld|ld|d|@|lf|f|\.\d+f|%)")
 HAN = re.compile(r"[一-鿿]")

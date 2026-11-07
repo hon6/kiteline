@@ -1467,6 +1467,30 @@ try:
               and not glob.glob(os.path.join(inbox, BR_SID + ".ack-*")))
         resp = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "keys", "text": "x"})
         check("不认识的指令不送", resp and resp.get("bridged") is False, str(resp))
+
+        # 记录里没有在等的调用（11-07 实测：会话弹出提问框后，这一轮一直没写进记录）：从 mod 写的 asks.json 补
+        asks = os.path.join(inbox, BR_SID + ".asks.json")
+        quiz = {"questions": [{"question": "要部署吗", "header": "确认", "multiSelect": False,
+                               "options": [{"label": "部署", "description": ""}, {"label": "先不", "description": ""}]}]}
+        with open(asks, "w") as handle:
+            json.dump({"items": [{"tool": "AskUserQuestion", "input": quiz, "toolUseId": "", "agent": "", "at": started + 2000},
+                                 {"tool": "Bash", "input": {"command": "ls"}, "toolUseId": "", "agent": "sub1", "at": started + 3000}]},
+                      handle, ensure_ascii=False)
+        waiting = {"sessionId": BR_SID, "cwd": CWD, "status": "waiting", "waitingFor": "input needed", "startedAt": started}
+        snap_ask = W.snapshot_session(waiting)
+        held = W._ASK_ITEMS.get(BR_SID)
+        check("记录里没有、mod 写了在等的提问：快照带提问工具和编号、状态写问题本身，补一条提问对话项（子 agent 的不算）",
+              snap_ask["pendingTool"] == "AskUserQuestion" and snap_ask["waitingFor"] == "要部署吗" and held and held["t"] == "tool"
+              and held["name"] == "AskUserQuestion" and held["input"]["questions"][0]["options"][1]["label"] == "先不"
+              and snap_ask["pendingId"] == held["toolId"] and held["id"].endswith(".900"), str(snap_ask.get("pendingTool")))
+        W.snapshot_session(waiting)
+        check("同一次提问再看一遍：对话项不变（客户端不会出两条）", W._ASK_ITEMS.get(BR_SID) is held)
+        with open(asks, "w") as handle:
+            json.dump({"items": []}, handle)
+        snap_done = W.snapshot_session(dict(waiting, status="busy", waitingFor=None))
+        check("答完：补的项去掉", BR_SID not in W._ASK_ITEMS and snap_done["pendingTool"] is None)
+        check("mod：在等的确认写进 asks.json；「允许」不拿去答提问框（没带答案，答了等于白答）",
+              ".asks.json" in mod_ts and "publish($)" in mod_ts and "w.tool === 'AskUserQuestion'" in mod_ts)
         stop.set()
         mod_thread.join()
         began = time.time()

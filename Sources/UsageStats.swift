@@ -170,7 +170,11 @@ enum UsageStats {
                                   "push": pushed, "createdAt": Int64(d.createdAt), "lastSeen": Int64(d.lastSeen)]
         if let pro = d.pro { out["pro"] = pro }
         if let remoteAt = d.remoteAt { out["remoteAt"] = Int64(remoteAt) }
-        if let client = parseClient(d.client) {
+        if d.client == "miniprogram" {
+            // 微信小程序（来源由电脑端的小程序入口定，不能冒充）；mpUser 是中继给的用户编号，后台据此对上小程序用户和订阅
+            out["kind"] = "miniprogram"
+            if let mp = d.mpUser { out["mpUser"] = mp }
+        } else if let client = parseClient(d.client) {
             out["kind"] = client.model.hasPrefix("iPad") ? "ipad" : client.platform == "mac" ? "mac-app" : "iphone"
             out["model"] = client.model
             out["os"] = client.os

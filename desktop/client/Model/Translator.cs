@@ -18,8 +18,9 @@ public static class Translator
 
     public static readonly (string Id, string Title, string Note)[] Engines =
     [
-        ("auto", "自动", "优先使用 Google 翻译，不可用时改用 MyMemory"),
-        ("google", "Google 翻译", "翻译质量较好；部分网络环境下可能无法连接"),
+        ("auto", "自动", "先交给连着的电脑翻译，再依次尝试 Google 翻译、MyMemory"),
+        ("computer", "电脑翻译", "交给连着的电脑翻译：Mac 使用系统翻译在电脑上完成，其他电脑联网翻译"),
+        ("google", "Google 翻译", "翻译质量较好；部分网络环境下无法连接，连不上时自动改用其他服务"),
         ("mymemory", "MyMemory", "公开免费接口，每天可翻译约 5000 字"),
     ];
 
@@ -171,7 +172,19 @@ public static class Translator
         Changed?.Invoke(id);
         var cts = new CancellationTokenSource();
         running[id] = cts;
-        string[] order = engine == "auto" ? ["google", "mymemory"] : [engine];
+        // 选的联网服务连不上 / 被限流 / 额度用完就换另一个（11-07 手机端选 Google 在大陆条条失败；这里 .NET 请求 Google 会被 429）；
+        // 最近不可用的先跳过，全被跳过时照常都试
+        // 11-07 起先交给连着的电脑翻（Mac 用系统翻译在电脑上完成；本机这台电脑的后台用 Python 联网，不会像 .NET 请求那样被 Google 限流）
+        var host = HostTranslate;
+        string[] order = engine switch
+        {
+            "mymemory" => host != null ? ["mymemory", "computer", "google"] : ["mymemory", "google"],
+            "google" => host != null ? ["google", "computer", "mymemory"] : ["google", "mymemory"],
+            _ => host != null ? ["computer", "google", "mymemory"] : ["google", "mymemory"],
+        };
+        string[] live;
+        lock (downUntil) live = order.Where(e => !(downUntil.TryGetValue(e, out var until) && until > DateTime.UtcNow)).ToArray();
+        if (live.Length > 0) order = live;
         _ = Task.Run(async () =>
         {
             if (gated) await autoGate.WaitAsync();
@@ -186,8 +199,8 @@ public static class Translator
                 if (cts.IsCancellationRequested) return;
                 try
                 {
-                    var output = e == "google" ? await Google(doc.Pieces, source, target, cts.Token) : await MyMemory(doc.Pieces, source, target, cts.Token);
-                    var result = doc.Rebuild(output);
+                    var result = e == "computer" && host != null ? await host(text, source, target, cts.Token)
+                        : doc.Rebuild(e == "google" ? await Google(doc.Pieces, source, target, cts.Token) : await MyMemory(doc.Pieces, source, target, cts.Token));
                     Dispatcher.UIThread.Post(() =>
                     {
                         if (cts.IsCancellationRequested) return;
@@ -199,7 +212,11 @@ public static class Translator
                     return;
                 }
                 catch (OperationCanceledException) when (cts.IsCancellationRequested) { return; }
-                catch (TranslateException ex) { error = ex.Message; }
+                catch (TranslateException ex)
+                {
+                    error = ex.Message;
+                    if (ex.Pause is { } pause) lock (downUntil) downUntil[e] = DateTime.UtcNow.AddSeconds(pause);
+                }
                 catch (Exception ex) { error = ex.Message; }
             }
             Dispatcher.UIThread.Post(() =>
@@ -212,7 +229,17 @@ public static class Translator
         }
     }
 
-    sealed class TranslateException(string message) : Exception(message);
+    public sealed class TranslateException(string message, double? pause = null) : Exception(message)
+    {
+        /// 联网服务暂时不可用：这么多秒内先用别的服务
+        public double? Pause { get; } = pause;
+    }
+
+    /// 交给连着的电脑翻（POST /api/translate；电脑有 translate 功能时 AppModel 填上）：(原文, 原文语言, 目标语言) → 译文
+    public static Func<string, string, string, CancellationToken, Task<string>>? HostTranslate;
+
+    /// 联网服务连不上 / 被限流 / 额度用完后暂停到什么时候（期间先用另一个）
+    static readonly Dictionary<string, DateTime> downUntil = [];
 
     /// 返回的不是 JSON（被拦截、限流时给的是网页）：当作无法识别
     static JsonNode? Parse(string body)
@@ -260,9 +287,9 @@ public static class Translator
             code = (int)response.StatusCode;
             body = await response.Content.ReadAsStringAsync(token);
         }
-        catch (Exception e) when (e is not OperationCanceledException || !token.IsCancellationRequested) { throw new TranslateException(L("连不上 Google 翻译")); }
+        catch (Exception e) when (e is not OperationCanceledException || !token.IsCancellationRequested) { throw new TranslateException(L("连不上 Google 翻译"), 600); }
         if (Parse(body) is not JsonArray { Count: > 0 } json || json[0] is not JsonArray parts)
-            throw new TranslateException(L("Google 翻译返回了无法识别的内容") + $" (HTTP {code})");
+            throw new TranslateException(L("Google 翻译返回了无法识别的内容") + $" (HTTP {code})", 600);
         var sb = new StringBuilder();
         foreach (var part in parts) if (part is JsonArray { Count: > 0 } p && p[0]?.GetValueKind() == System.Text.Json.JsonValueKind.String) sb.Append((string?)p[0]);
         return sb.ToString();
@@ -293,9 +320,9 @@ public static class Translator
                 new FormUrlEncodedContent([new("q", text), new("langpair", $"{MyMemoryCode(source)}|{MyMemoryCode(target)}")]), token);
             body = await response.Content.ReadAsStringAsync(token);
         }
-        catch (Exception e) when (e is not OperationCanceledException || !token.IsCancellationRequested) { throw new TranslateException(L("连不上 MyMemory")); }
+        catch (Exception e) when (e is not OperationCanceledException || !token.IsCancellationRequested) { throw new TranslateException(L("连不上 MyMemory"), 600); }
         if (Parse(body) is not JsonObject json) throw new TranslateException(L("MyMemory 返回了无法识别的内容"));
-        if (json["quotaFinished"]?.GetValueKind() == System.Text.Json.JsonValueKind.True) throw new TranslateException(L("MyMemory 今日免费额度已用完"));
+        if (json["quotaFinished"]?.GetValueKind() == System.Text.Json.JsonValueKind.True) throw new TranslateException(L("MyMemory 今日免费额度已用完"), 3600);
         var status = json["responseStatus"]?.ToString();
         var translated = json["responseData"]?["translatedText"]?.GetValueKind() == System.Text.Json.JsonValueKind.String ? (string?)json["responseData"]!["translatedText"] : null;
         // 自动检测出来和目标语言相同（「16px」这种被认成英文）：原样保留

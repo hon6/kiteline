@@ -1,5 +1,14 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.30 (2026-11-07)
+
+### Bug Fixes
+
+- **WeChat Mini Program shown correctly in the device list** (Windows, Linux): Mini Programs paired earlier that appeared as "Browser" are renamed to "WeChat Mini Program" the next time they connect.
+- **Claude's questions always show their options**: In some sessions, when Claude asked a question, only an "Input needed" card with no options was shown. The full question and its options are now shown so you can answer directly, and "Allow" on a confirmation card is no longer taken as an answer to a question. Applies to sessions opened or resumed after updating.
+- **Let the computer translate messages**: A new "Computer translation" service is added and used first in Auto mode. When connected to a Mac, it translates with System Translation on the Mac; a Windows or Linux computer translates online on your behalf, with a more reliable connection.
+- **More reliable message translation**: When the selected translation service cannot be reached, is rate-limited or runs out of free quota, the other service is used automatically instead of failing every message.
+
 ## 1.0.29 (2026-11-07)
 
 ### Bug Fixes

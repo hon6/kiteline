@@ -658,11 +658,35 @@ final class AppModel {
         return machineStats[sourceId]
     }
 
+    /// 消息翻译先交给这台电脑（translate = 有 /api/translate；translateLocal = 能只在电脑本机翻，Mac 的系统翻译）
+    private func registerHostTranslate() {
+        guard hostFeatures.contains("translate") else { Translator.shared.hostTranslate = nil; return }
+        let api = api, local = hostFeatures.contains("translateLocal")
+        Translator.shared.hostTranslate = { text, source, target, localOnly in
+            if localOnly && !local { throw TranslateError(L("这台电脑不能在本机翻译")) }
+            let data: Data
+            do {
+                data = try await api.postData("/api/translate", body: ["text": text, "to": target, "from": source, "local": localOnly])
+            } catch let error as APIError {
+                throw TranslateError(L("电脑翻译失败：%@", error.message), pause: error.status == 400 ? nil : 60)
+            } catch {
+                throw TranslateError(L("连不上电脑"), pause: 30)
+            }
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let out = object["text"] as? String else {
+                throw TranslateError(L("电脑返回了无法识别的内容"))
+            }
+            return out
+        }
+    }
+
     private func apply(_ state: StatePayload) {
         host = state.host ?? host
         version = state.version ?? version
         HostPlatform.current = state.platform ?? ""
-        if let features = state.features { hostFeatures = Set(features) }
+        if let features = state.features {
+            hostFeatures = Set(features)
+            registerHostTranslate()
+        }
         if let value = state.hosted, value != hosted { hosted = value }
         // 先登记，下面换会话列表时新 agent 的标志就画得出来；插件信息变了而会话没变（先显示的是上次的缓存）也要重画一遍
         let agentsChanged = state.agents.map { $0 != agentProfiles } ?? false

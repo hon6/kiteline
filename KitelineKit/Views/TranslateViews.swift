@@ -321,7 +321,7 @@ private struct TranslateHost: ViewModifier {
     @State private var translator = Translator.shared
 
     func body(content: Content) -> some View {
-        apple(content)
+        content
             .onAppear { if auto { translator.autoTranslate(id, text: text) } }
             .onChange(of: translator.auto) { _, on in if auto && on { translator.autoTranslate(id, text: text) } }
             .sheetPanel(isPresented: Binding(get: { translator.askingFor?.id == id },
@@ -330,18 +330,40 @@ private struct TranslateHost: ViewModifier {
             }
     }
 
-    @ViewBuilder private func apple(_ content: Content) -> some View {
-        #if canImport(Translation)
-        if #available(iOS 18, macOS 15, *) {
-            content.translationTask(translator.appleConfig(id)) { session in
-                await translator.performApple(id, session: session)
+}
+
+/// 系统翻译的常驻宿主：根视图上挂一个（看不见），所有消息的系统翻译排队交给它（见 Translator.performApple）。
+/// 多个窗口各挂一个时只有第一个干活
+public struct TranslateAppleHost: View {
+    @State private var translator = Translator.shared
+    @State private var me = UUID()
+    public init() {}
+
+    public var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .modifier(AppleTask(active: translator.appleHosts.first == me))
+            .onAppear { translator.hostAppeared(me) }
+            .onDisappear { translator.hostGone(me) }
+    }
+
+    private struct AppleTask: ViewModifier {
+        let active: Bool
+        @State private var translator = Translator.shared
+        func body(content: Content) -> some View {
+            #if canImport(Translation)
+            if #available(iOS 18, macOS 15, *) {
+                content.translationTask(active ? translator.appleConfig as? TranslationSession.Configuration : nil) { session in
+                    await translator.performApple(session: session)
+                }
+            } else {
+                content
             }
-        } else {
+            #else
             content
+            #endif
         }
-        #else
-        content
-        #endif
     }
 }
 

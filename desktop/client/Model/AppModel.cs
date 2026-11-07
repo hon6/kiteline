@@ -363,7 +363,20 @@ public sealed partial class AppModel : ObservableObject
         if (Me != state.Me) Me = state.Me;
         var quick = state.QuickReplies ?? [];
         if (!quick.SequenceEqual(QuickReplies)) QuickReplies = quick;
-        if (state.Features is { } features) Features = features;
+        if (state.Features is { } features)
+        {
+            Features = features;
+            // 消息翻译先交给这台电脑（见 Translator.HostTranslate）
+            Translator.HostTranslate = features.Contains("translate") ? async (text, source, target, cancel) =>
+            {
+                JsonNode? reply;
+                try { reply = await Api.Post("/api/translate", new Dictionary<string, object> { ["text"] = text, ["from"] = source, ["to"] = target }, cancel: cancel); }
+                catch (ApiError e) { throw new Translator.TranslateException(L("电脑翻译失败：%@", e.Message), (int)e.Status == 400 ? null : 60); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception) { throw new Translator.TranslateException(L("连不上电脑"), 30); }
+                return reply.Str("text") ?? throw new Translator.TranslateException(L("电脑返回了无法识别的内容"));
+            } : null;
+        }
         var pins = state.Pinned ?? [];
         if (!pins.SequenceEqual(Pinned)) Pinned = pins;
         if (state.Marked is { } marks && !marks.SequenceEqual(Marked)) Marked = marks;

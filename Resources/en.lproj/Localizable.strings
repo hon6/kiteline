@@ -800,6 +800,7 @@
 "五" = "Fri";
 "交回的结果" = "Returned Result";
 "交给 %@" = "Hand to %@";
+"交给连着的电脑翻译：Mac 使用系统翻译在电脑上完成，其他电脑联网翻译" = "Let the connected computer translate: a Mac uses System Translation on the computer itself, other computers translate online";
 "交谈" = "Talk";
 "仅 iPhone 支持配对 Apple Watch。" = "Only iPhone can pair with Apple Watch.";
 "仅 token" = "Tokens only";
@@ -1009,6 +1010,8 @@
 "允许使用%@" = "Allow %@";
 "允许或拒绝" = "allow or deny";
 "允许，且本会话不再询问" = "Allow, and Don’t Ask Again in This Session";
+"先交给连着的电脑翻译，再依次尝试 Google 翻译、MyMemory" = "Let the connected computer translate first, then try Google Translate and MyMemory in turn";
+"先交给连着的电脑翻译，再依次尝试本机系统翻译、Google 翻译、MyMemory" = "Let the connected computer translate first, then try System Translation on this device, Google Translate and MyMemory in turn";
 "先分析代码并制定计划，经你批准后再执行" = "Analyze the code and draft a plan first. Carry it out after you approve.";
 "先跑起来\n再优化" = "Make it run,\nthen make it fast";
 "克劳德\\s*code" = "克劳德\\s*code";
@@ -3481,6 +3484,8 @@
 "电脑上的 VS Code 正在询问是否信任此文件夹中文件的作者，Claude Code 扩展只在受信任的文件夹中运行。请在电脑上点击「是，我信任此作者」（勾选信任上级文件夹后，其中的项目都不再询问），然后重新发送" = "VS Code on your computer is asking whether you trust the authors of the files in this folder. The Claude Code extension only runs in trusted folders. On your computer, click “Yes, I trust the authors” (if you also trust the parent folder, projects in it won’t ask again), then send again.";
 "电脑上的「%@」在你打开之后被修改过（可能是 Claude 改的）" = "“%@” on the computer changed after you opened it (possibly by Claude)";
 "电脑上的「%@」在你打开之后被修改过（可能是 Claude 改的）。" = "“%@” on the computer changed after you opened it (possibly by Claude).";
+"电脑上的系统翻译失败：%@" = "System Translation on the computer failed: %@";
+"电脑上的系统翻译尚未下载「%@ → %@」语言包" = "The %@ → %@ language pack has not been downloaded for System Translation on the computer";
 "电脑上的账户尚未设置头像（系统设置 → 用户与群组），因此默认显示名字首字。" = "The account on your computer has no avatar set (System Settings → Users & Groups), so name initials are shown by default.";
 "电脑上的账户没有可用的头像，因此默认显示名字首字。" = "The account on your computer has no available avatar, so name initials are shown by default.";
 "电脑上的这个对话框已经关闭" = "This dialog has already been closed on the computer";
@@ -3512,10 +3517,13 @@
 "电脑端免费下载，负责发现电脑上 Agent 的会话，并将你在手机上的回复和确认送达。" = "The desktop app is a free download. It finds agent sessions on your computer and delivers the replies and approvals you send from your phone.";
 "电脑端已更新到 %@" = "Your computer has been updated to %@";
 "电脑端暂不支持，请先更新 Kiteline" = "Not yet supported on the computer. Update Kiteline first.";
+"电脑翻译" = "Computer translation";
+"电脑翻译失败：%@" = "Computer translation failed: %@";
 "电脑自动选择" = "Automatic";
 "电脑语音" = "Computer Voice";
 "电脑语音合成失败" = "Speech synthesis failed on your computer.";
 "电脑账户头像" = "Computer Account Avatar";
+"电脑返回了无法识别的内容" = "The computer returned an unrecognized response";
 "电脑返回错误（%@）" = "Computer returned an error (%@)";
 "电脑（%lld/%lld 项就绪）" = "Computer (%lld of %lld Ready)";
 "留空则使用 Kiteline 中继（%@）" = "Leave empty to use the Kiteline relay (%@)";
@@ -3687,8 +3695,10 @@
 "系统翻译不可用：%@" = "System Translation unavailable: %@";
 "系统翻译不支持「%@ → %@」" = "System Translation does not support %@ → %@";
 "系统翻译不支持这组语言" = "System Translation does not support this language pair";
+"系统翻译在这台设备上无法使用，可在翻译设置中改用其他翻译服务" = "System Translation is not available on this device. Choose another translation service in Translation settings.";
 "系统翻译尚未下载这组语言" = "The language pack for System Translation has not been downloaded";
 "系统翻译没有响应" = "System Translation did not respond";
+"系统翻译被打断" = "System Translation was interrupted";
 "系统翻译语言包" = "System Translation Language Pack";
 "系统翻译（本机）" = "System Translation (On-Device)";
 "系统语音识别" = "System Speech Recognition";
@@ -3782,6 +3792,7 @@
 "翻译服务" = "Translation Service";
 "翻译设置" = "Translation Settings";
 "翻译质量较好；部分网络环境下可能无法连接" = "Good translation quality; may be unreachable on some networks";
+"翻译质量较好；部分网络环境下无法连接，连不上时自动改用其他服务" = "Good quality; unreachable on some networks, in which case another service is used automatically";
 "翻译这条消息" = "Translate This Message";
 "联网" = "Online";
 "能做到：%@" = "Supports: %@";
@@ -4172,6 +4183,7 @@
 "这台电脑上没有安装" = "Not installed on this computer";
 "这台电脑不提供朗读语音，朗读时使用 iPhone 内置语音" = "This computer doesn’t provide read-aloud voices, so the built-in iPhone voice is used when reading aloud.";
 "这台电脑不支持伪终端（需要 Windows 10 1809 或更新）：%@" = "This computer does not support pseudo terminals (Windows 10 version 1809 or later is required): %@";
+"这台电脑不能在本机翻译" = "This computer cannot translate locally";
 "这台电脑暂不支持在后台运行 Claude Code" = "This computer doesn't support running Claude Code in the background yet";
 "这台电脑没有图形界面（DISPLAY 为空），无法操作 VS Code。可在 tmux 中运行 claude" = "This computer has no graphical interface (DISPLAY is empty), so VS Code can't be controlled. You can run claude in tmux instead.";
 "这台电脑没有图形界面，无法操作 VS Code；终端里的会话放在 tmux 中运行即可从手机发送" = "This computer has no graphical interface, so VS Code can't be controlled. Run terminal sessions in tmux to send messages from your phone.";
@@ -4217,6 +4229,7 @@
 "连不上 X11 显示" = "Can't connect to the X11 display";
 "连不上插件服务器" = "Can't reach the plugin server";
 "连不上本机服务" = "Can't reach the service on this computer.";
+"连不上电脑" = "Cannot reach the computer";
 "连接" = "Connect";
 "连接中" = "Connecting";
 "连接中…" = "Connecting…";

@@ -1,5 +1,17 @@
 # Kiteline Release Notes
 
+## 3.49.25 (2026-11-07)
+
+### Improvements
+
+- **Let your computer translate messages** (Mac, iPhone, iPad): A new "Computer translation" service is added and used first in Auto mode. Your phone hands the message to the connected computer: a Mac translates it on the computer with System Translation (macOS 26 or later with the language pack downloaded), fast and without going online; other computers translate online on your behalf. When System Translation is selected but is unavailable on the phone, the Mac translates it locally instead, so messages are never sent to a third-party service.
+
+### Bug Fixes
+
+- **WeChat Mini Program shown correctly in the device list** (Mac): devices paired with a code now keep the name they report. Mini Programs paired earlier that appeared as "Browser" are renamed to "WeChat Mini Program" the next time they connect.
+- **Claude's questions always show their options** (Mac, iPhone, iPad): In some sessions, when Claude asked a question, the phone and computer showed only an "Input needed" card with no options. The full question and its options are now shown so you can answer directly, and "Allow" on a confirmation card is no longer taken as an answer to a question. Applies to sessions opened or resumed after updating.
+- **More reliable message translation** (Mac, iPhone, iPad): Automatic translation no longer pops up the system "Download Languages to Translate" window from time to time; you are asked to download a language pack only when you tap Translate yourself. English replies full of technical terms are no longer mistaken for French or other languages. Scrolling away or switching sessions during automatic translation no longer shows a failure; translation resumes when the message is back on screen. When the selected online translation service cannot be reached or runs out of free quota, another available service is used automatically instead of failing every message, and a clear message is shown when System Translation is not available on the device.
+
 ## 3.49.24 (2026-11-07)
 
 ### Bug Fixes

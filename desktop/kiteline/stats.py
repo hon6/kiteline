@@ -226,7 +226,12 @@ class UsageStats:
         agent = d.get("agent") or ""
         if d.get("build"):
             out["build"] = d["build"]
-        if client:
+        if d.get("client") == "miniprogram":
+            # 微信小程序（来源由电脑端的小程序入口定，不能冒充）；mpUser 是中继给的用户编号，后台据此对上小程序用户和订阅
+            out["kind"] = "miniprogram"
+            if d.get("mpUser"):
+                out["mpUser"] = d["mpUser"]
+        elif client:
             out["kind"] = "ipad" if client[2].startswith("iPad") else ("mac-app" if client[0] == "mac" else "iphone")
             out.update({"model": client[2], "os": client[3], "app": client[1]})
         elif agent.startswith("TARS/") or "CFNetwork" in agent:
