@@ -92,7 +92,10 @@ public sealed class RichText : SelectableTextBlock
         if (LinkAt(at) is string url) { e.Handled = true; (OpenLink ?? Links.Open)(url); }
     }
 
-    string? LinkAt(Point point)
+    /// 点链接：跨段选字（SelectScope）接管了鼠标，点了没拖动时由它来开
+    public void Open(string url) => (OpenLink ?? Links.Open)(url);
+
+    public string? LinkAt(Point point)
     {
         if (links.Count == 0 || TextLayout is not { } layout) return null;
         var hit = layout.HitTestPoint(point);
@@ -185,8 +188,9 @@ public sealed class MarkdownView : StackPanel
                 var list = new StackPanel { Spacing = 0.3 * em };
                 foreach (var item in l.Items)
                 {
-                    var marker = new TextBlock { Text = item.Marker, FontSize = em, LineHeight = ChatType.LineHeight(em), TextAlignment = TextAlignment.Right, Width = 2 * em - 6 }
-                        .Res(TextBlock.ForegroundProperty, "Text2");
+                    // 序号也能选（跨段选字时连同序号一起拷，同 VS Code）
+                    var marker = new SelectableTextBlock { Text = item.Marker, FontSize = em, LineHeight = ChatType.LineHeight(em), TextAlignment = TextAlignment.Right, Width = 2 * em - 6 }
+                        .Res(TextBlock.ForegroundProperty, "Text2").Res(SelectableTextBlock.SelectionBrushProperty, "AccentFill20");
                     var text = new RichText(Markdown.Inline(item.Text), em) { OpenLink = openLink };
                     var row = new DockPanel { Margin = new Thickness(item.Indent * 2 * em, 0, 0, 0) };
                     marker.Margin = new Thickness(0, 0, 6, 0);

@@ -276,6 +276,36 @@ static class SelfTest
                     Console.WriteLine(tapped is null ? $"[capture] 没找到按钮「{arg}」" : $"[capture] 点了「{arg}」");
                     tapped?.Click?.Invoke();
                     break;
+                case "seldrag":
+                {
+                    // 跨段选字：模拟鼠标从含「起点字」那段的这几个字按下，拖到含「终点字」那段的这几个字后面松开；打印选中的文字。seldrag:原因找到|这里
+                    var marks = arg.Split('|', 2);
+                    Point? At(string mark, bool end)
+                    {
+                        foreach (var block in window.GetVisualDescendants().OfType<SelectableTextBlock>().Where(b => b.IsEffectivelyVisible))
+                        {
+                            var text = block.Inlines is { Count: > 0 } inl ? string.Concat(inl.OfType<Avalonia.Controls.Documents.Run>().Select(r => r.Text)) : block.Text ?? "";
+                            var index = text.IndexOf(mark, StringComparison.Ordinal);
+                            if (index < 0 || block.TextLayout is not { } layout) continue;
+                            var rect = layout.HitTestTextPosition(end ? index + mark.Length - 1 : index);
+                            var point = new Point(end ? rect.Right - 1 : rect.Left + 1, rect.Top + rect.Height / 2);
+                            return block.TranslatePoint(point, window);
+                        }
+                        return null;
+                    }
+                    if (marks.Length < 2 || At(marks[0], false) is not Point down || At(marks[1], true) is not Point up) { Console.WriteLine($"[capture] seldrag 没找到「{arg}」"); break; }
+                    window.MouseDown(down, Avalonia.Input.MouseButton.Left);
+                    Pump(0.1);
+                    window.MouseMove(new Point((down.X + up.X) / 2, (down.Y + up.Y) / 2), Avalonia.Input.RawInputModifiers.LeftMouseButton);
+                    Pump(0.1);
+                    window.MouseMove(up, Avalonia.Input.RawInputModifiers.LeftMouseButton);
+                    Pump(0.1);
+                    window.MouseUp(up, Avalonia.Input.MouseButton.Left);
+                    Pump(0.2);
+                    var selectedParts = window.GetVisualDescendants().OfType<SelectableTextBlock>().Where(b => b.SelectionEnd != b.SelectionStart).Select(b => b.SelectedText);
+                    Console.WriteLine("[capture] 选中：" + string.Join(" ⏎ ", selectedParts));
+                    break;
+                }
                 case "titleshot":
                     // 按标题截某个窗口：titleshot:新任务=路径.png
                     var pair = arg.Split('=', 2);

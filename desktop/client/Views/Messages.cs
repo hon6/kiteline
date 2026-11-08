@@ -19,7 +19,7 @@ public sealed class MessageRow : Grid
     const double AvatarSize = 30, Gap = 12, Edge = 24, MeRoom = 200, MeRatio = 0.23, RowGap = 10, TurnGap = 20;
 
     public MessageRow(bool me, bool first, double? time, Control content, string agent, double chatWidth, (string Text, string Id)? speak = null, string? key = null,
-                      (string Text, string Id)? translate = null)
+                      (string Text, string Id)? translate = null, string? copy = null)
     {
         Margin = new Thickness(Edge, ChatType.Px(first ? TurnGap : RowGap), Edge, ChatType.Px(RowGap));
         // 助手的头像：按 Agent 详情里设的画，点了打开 Agent 详情
@@ -28,10 +28,26 @@ public sealed class MessageRow : Grid
         avatar.VerticalAlignment = VerticalAlignment.Top;
         var column = new StackPanel { Spacing = 6, HorizontalAlignment = me ? HorizontalAlignment.Right : HorizontalAlignment.Left };
         column.Children.Add(content);
-        if (time is not null || translate is not null)
+        // 「拷贝」：整条复制（有译文时复制显示着的译文）；默认就是能翻译的那段文字
+        Func<string?>? copyText = copy is { Length: > 0 } fixedText ? () => fixedText
+            : translate is { } tx ? () => Translator.Shown(tx.Id) ?? tx.Text : null;
+        if (time is not null || translate is not null || copyText is not null)
         {
-            // 下面一行小字：时间、朗读，和气泡一样宽；「翻译」靠气泡外侧（助手的靠右、我的靠左）
-            var info = Ui.H(6, time is double t ? Ui.Text(Format.Clock(t), 11, color: "Text3") : null,
+            // 下面一行小字：时间、拷贝、朗读，和气泡一样宽；「翻译」靠气泡外侧（助手的靠右、我的靠左）
+            Tap? copyTap = null;
+            if (copyText is not null)
+            {
+                copyTap = new Tap(Ui.Sym("doc.on.doc", 11, "Text3"), null, 4).Tip(L("拷贝这条消息"));
+                var tap = copyTap;
+                tap.Click = () =>
+                {
+                    if (copyText() is not string value) return;
+                    _ = MainWindow.Current?.Clipboard?.SetTextAsync(value);
+                    tap.Child = Ui.Sym("checkmark", 11, "Added");
+                    DispatcherTimer.RunOnce(() => tap.Child = Ui.Sym("doc.on.doc", 11, "Text3"), TimeSpan.FromSeconds(1.5));
+                };
+            }
+            var info = Ui.H(6, time is double t ? Ui.Text(Format.Clock(t), 11, color: "Text3") : null, copyTap,
                 speak is { } s ? new Tap(Ui.Sym("speaker.wave.2", 11, "Text3"), () => Speaker.Toggle(s.Text, s.Id), 4).Tip(L("朗读这条")) : null);
             info.HorizontalAlignment = me ? HorizontalAlignment.Right : HorizontalAlignment.Left;
             var footer = new DockPanel { Margin = new Thickness(4, 0), HorizontalAlignment = HorizontalAlignment.Stretch, LastChildFill = true };
@@ -122,12 +138,15 @@ public sealed class Bubble : Panel
         Children.Add(box);
         HorizontalAlignment = mine ? HorizontalAlignment.Right : HorizontalAlignment.Left;
         ClipToBounds = false;
+        // 能跨段拖选（同 VS Code）：从一段拖到另一段、列表、代码块都连着选，Ctrl+C 复制
+        var scope = SelectScope.Attach(box);
         var menu = new List<(string, Action)>();
-        if (!string.IsNullOrWhiteSpace(copyText)) menu.Add((L("拷贝"), () => SessionMenu.Copy(copyText)));
+        if (!string.IsNullOrWhiteSpace(copyText)) menu.Add((L("拷贝整条"), () => SessionMenu.Copy(copyText)));
         if (actions is not null) menu.AddRange(actions);
-        // translate：「翻译 / 显示原文」打开菜单时才定（翻没翻过会变），放在固定几项后面
+        // translate：「翻译 / 显示原文」打开菜单时才定（翻没翻过会变），放在固定几项后面；选中了字时最前面加「拷贝选中的文字」
         if (menu.Count > 0 || later is not null || translate is not null)
-            this.Menu(() => menu.Concat(translate?.Invoke() is { } t ? [t] : []).Concat(later?.Invoke() is { } extra ? [extra] : [])
+            this.Menu(() => (scope.Selected is string picked ? [(L("拷贝选中的文字"), (Action)(() => SessionMenu.Copy(picked)))] : Array.Empty<(string, Action)>())
+                .Concat(menu).Concat(translate?.Invoke() is { } t ? [t] : []).Concat(later?.Invoke() is { } extra ? [extra] : [])
                 .Select(m => (Control)Ui.Item(m.Item1, m.Item2)));
     }
 

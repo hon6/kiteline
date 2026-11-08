@@ -4864,5 +4864,12 @@
  "连不上电脑": "Cannot reach the computer",
  "电脑返回了无法识别的内容": "The computer returned an unrecognized response",
  "电脑上的系统翻译失败：%@": "System Translation on the computer failed: %@",
- "电脑上的系统翻译尚未下载「%@ → %@」语言包": "The %@ → %@ language pack has not been downloaded for System Translation on the computer"
+ "电脑上的系统翻译尚未下载「%@ → %@」语言包": "The %@ → %@ language pack has not been downloaded for System Translation on the computer",
+ "复制这条消息": "Copy this message",
+ "拷贝这条消息": "Copy this message",
+ "复制整条": "Copy entire message",
+ "收起思考": "Hide thinking",
+ "复制全部思考": "Copy all thinking",
+ "拷贝整条": "Copy entire message",
+ "拷贝选中的文字": "Copy selected text"
 }

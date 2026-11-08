@@ -161,7 +161,9 @@ struct GroupChatView: View {
         let messages = model.groups.messages[id] ?? []
         return ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    // 不用 LazyVStack（同会话的对话页，见 ChatView）：懒加载的行高是估算的，消息异步取回来后贴底滚动
+                    // 按估算高度滚过了头，停在内容外面，整页空白、要手指碰一下才弹回来
+                    VStack(alignment: .leading, spacing: 14) {
                         if let topic = group.topic, !topic.isEmpty, messages.isEmpty {
                             Text(topic).font(.ui(.footnote)).foregroundStyle(.secondary)
                         }
@@ -180,7 +182,14 @@ struct GroupChatView: View {
                 }
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: messages.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: messages.count) { old, _ in
+                    // 刚取回来（从 0 条变成有内容）直接到底、不做动画；之后来新消息再带动画滚
+                    if old == 0 {
+                        DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
+                    } else {
+                        withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
+                }
                 .onChange(of: model.groups.sending[id]?.count ?? 0) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
                 // 输入区同会话的对话页：贴在底部，消息滚到它下面
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -475,7 +484,7 @@ struct GroupMessageRow: View {
                 // 同会话里 agent 的气泡（内边距、圆角、菜单都一样）
                 Bubble(mine: false, text: message.text, actions: [
                     MenuAction(title: L("打开这个会话"), symbol: "bubble.left") { open(.chat(message.from)) },
-                ]) {
+                ], selectable: true) {
                     MarkdownView(message.text, fill: false)
                 }
                 if !delivery.isEmpty {
@@ -1370,7 +1379,7 @@ struct GroupSayMessage: View {
 
     var body: some View {
         let group = model.groupFor(key, id: item.group, name: nil)
-        Bubble(mine: false, text: item.text) {
+        Bubble(mine: false, text: item.text, selectable: true) {
             VStack(alignment: .leading, spacing: 8) {
                 GroupCardHead(label: L("发到群"), name: group?.name ?? item.group ?? L("会话群"), group: group)
                 if let to = item.to, !to.isEmpty, let group {
@@ -1405,7 +1414,7 @@ struct GroupInboundMessage: View {
             ForEach(Array(inbound.parts.enumerated()), id: \.offset) { _, part in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(part.who).font(.ui(.caption).weight(.semibold)).foregroundStyle(.secondary)
-                    MarkdownView(part.text, fill: false).textSelection(.enabled)
+                    MarkdownView(part.text, fill: false).environment(\.markdownSelectable, true)
                 }
             }
         }

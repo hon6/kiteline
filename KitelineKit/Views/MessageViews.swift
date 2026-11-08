@@ -12,7 +12,10 @@ struct MessageRow<Content: View>: View {
     var speak: (text: String, id: String)? = nil
     /// 能翻译的文字消息：下面带「翻译」角标（见 TranslateViews.swift）
     var translate: (text: String, id: String)? = nil
+    /// 下面那行的「复制」：默认复制能翻译的那段文字（显示着译文时复制译文）
+    var copy: String? = nil
     @ViewBuilder let content: Content
+    @State private var copied = false
 
     #if os(macOS)
     // 照网页版 Mac 样式：头像 30，两边留 24，我的气泡最宽约七成；头像和气泡隔 12
@@ -76,10 +79,40 @@ struct MessageRow<Content: View>: View {
 
     private var footerShown: Bool {
         #if os(macOS)
-        return time != nil || badgeShown
+        return time != nil || badgeShown || copyText != nil
         #else
-        return badgeShown
+        return badgeShown || copyText != nil
         #endif
+    }
+
+    private var copyText: String? {
+        if let copy { return copy.isEmpty ? nil : copy }
+        guard let translate else { return nil }
+        return Translator.shared.shown(translate.id) ?? translate.text
+    }
+
+    /// 每条消息下面的「复制」：整条复制，点了换成对勾一会儿
+    @ViewBuilder private var copyButton: some View {
+        if let copyText {
+            Button {
+                Clipboard.copy(copyText, feedback: false)
+                withAnimation(.snappy(duration: 0.15)) { copied = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { withAnimation { copied = false } }
+            } label: {
+                // Mac 上同旁边的朗读钮只放图标（指着有说明）；iPhone 图标 + 字，好认也好点
+                HStack(spacing: 3) {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    #if os(iOS)
+                    Text(copied ? L("已复制") : Clipboard.verb)
+                    #endif
+                }
+                .fixedSize()
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(copied ? L("已拷贝") : L("拷贝这条消息"))
+            .accessibilityLabel(L("复制这条消息"))
+        }
     }
 
     /// 下面那行小字：Mac 是时间、朗读 + 翻译；iPhone 只有翻译（时间隔 5 分钟才在中间显示一次）。
@@ -90,6 +123,7 @@ struct MessageRow<Content: View>: View {
                 if side == .me { badge; Spacer(minLength: 8) }
                 #if os(macOS)
                 if let time { Text(Format.clock(time)) }
+                copyButton
                 if let speak {
                     Button { Speaker.shared.toggle(speak.text, id: speak.id) } label: {
                         Image(systemName: Speaker.shared.speaking == speak.id ? "speaker.wave.2.fill" : "speaker.wave.2")
@@ -97,6 +131,8 @@ struct MessageRow<Content: View>: View {
                     .buttonStyle(.plain)
                     .help(Speaker.shared.speaking == speak.id ? L("停止朗读") : L("朗读这条"))
                 }
+                #else
+                copyButton
                 #endif
                 if side == .bot { Spacer(minLength: 8); badge }
             }
@@ -217,6 +253,8 @@ struct Bubble<Content: View>: View {
     /// 有文字的气泡自动带上「复制」「分享」「选择文字」
     var text: String? = nil
     var actions: [MenuAction] = []
+    /// 里面的字是能拖选的系统文字控件（RichText）：长按 / 右键交给它（选字），气泡菜单的操作并进它的菜单
+    var selectable = false
     @ViewBuilder let content: Content
     @Environment(\.bubbleTail) private var tail
     @State private var showMenu = false
@@ -231,6 +269,9 @@ struct Bubble<Content: View>: View {
 
     var body: some View {
         content
+            .environment(\.markdownSelectable, selectable)
+            .environment(\.richTone, mine ? .mine : .primary)
+            .environment(\.richMenu, selectable ? richMenu : [])
             .padding(.horizontal, ChatType.padH)
             .padding(.vertical, ChatType.padV)
             .background(color, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -249,7 +290,8 @@ struct Bubble<Content: View>: View {
             }
             #else
             .onLongPressGesture(minimumDuration: 0.4) {
-                guard !menu.isEmpty else { return }
+                // 能拖选的字：长按是系统选字（菜单里有气泡的操作），这里不再弹气泡菜单
+                guard !selectable, !menu.isEmpty else { return }
                 Haptics.tap()
                 showMenu = true
             }
@@ -260,6 +302,19 @@ struct Bubble<Content: View>: View {
             }
             #endif
             .sheetPanel(isPresented: $selecting) { SelectTextSheet(text: text ?? "") }
+    }
+
+    /// 系统选字菜单里接在「复制」「全选」后面的：整条复制 + 气泡的操作（不要「选择文字」，已经能直接选了）
+    private var richMenu: [MenuAction] {
+        var list: [MenuAction] = []
+        if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            list.append(MenuAction(title: L("复制整条"), symbol: "doc.on.doc") { Clipboard.copy(text) })
+        }
+        list += actions
+        #if os(iOS)
+        if let text, !text.isEmpty { list.append(MenuAction(title: L("分享"), symbol: "square.and.arrow.up") { SystemShare.present(text) }) }
+        #endif
+        return list
     }
 
     private var menu: [MenuAction] {
@@ -331,9 +386,8 @@ struct SelectTextSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(text)
-                    .font(.ui(.title3))
-                    .textSelection(.enabled)
+                // 系统文字控件：能拖着选任意一段（SwiftUI 的 Text 在 iPhone 上只能整段复制）
+                RichText(text: RichBuilder.plain(text, tone: .primary, size: ChatType.scaled(20)))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(20)
             }
@@ -393,11 +447,11 @@ struct UserMessage: View {
                 TranscriptBox(text: text)
             } else {
                 let display = translator.shown(item.id) ?? shown
-                Bubble(mine: true, text: display.isEmpty ? nil : display, actions: actions(text, files: files)) {
+                Bubble(mine: true, text: display.isEmpty ? nil : display, actions: actions(text, files: files), selectable: !display.isEmpty) {
                     VStack(alignment: .leading, spacing: 6) {
                         if let images = item.images, !images.isEmpty { MessageImages(key: key, images: images) }
                         if !files.isEmpty { AttachedFiles(key: key, paths: files) }
-                        if !display.isEmpty { Text(display).fixedSize(horizontal: false, vertical: true) }
+                        if !display.isEmpty { RichText(text: RichBuilder.plain(display, tone: .mine), fill: false) }
                     }
                 }
                 .translateHost(item.id, text: shown)
@@ -457,7 +511,7 @@ struct BotText: View {
             MenuAction(title: Speaker.shared.speaking == item.id ? L("停止朗读") : L("朗读"), symbol: "speaker.wave.2") {
                 Speaker.shared.toggle(text, id: item.id)
             },
-        ]) {
+        ], selectable: true) {
             // 气泡贴着字走（同微信）：一两句的回复不再拉成一整行的灰条；有代码块、分隔线的照样撑满
             MarkdownView(display, fill: false)
         }

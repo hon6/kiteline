@@ -1,5 +1,13 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.32 (2026-11-09)
+
+### Improvements
+
+- **Select and copy message text freely**: Multiple paragraphs, headings, lists and code in a reply can now be selected in one continuous drag, as in an editor, instead of stopping at each line break. Double-click selects a word and triple-click a paragraph; copy with Ctrl+C or Copy Selected Text in the right-click menu. Each message now has a Copy button underneath to copy the whole message.
+- **Copy thinking, and collapse long thinking anytime**: Expanded thinking has a copy button in its top-right corner, and long thinking has a Hide button at the bottom, so you no longer need to scroll back to the top.
+
+
 ## 1.0.31 (2026-11-08)
 
 ### Improvements

@@ -8,6 +8,8 @@ extension EnvironmentValues {
 
 struct MarkdownView: View {
     @Environment(\.markdownFlatHeadings) private var flat
+    @Environment(\.markdownSelectable) private var selectable
+    @Environment(\.richTone) private var tone
     let blocks: [MarkdownBlock]
     /// 撑满给的宽度；对话气泡里传 false，宽度贴着最长的一行（有代码块、分隔线的照样撑满）
     var fill = true
@@ -19,9 +21,23 @@ struct MarkdownView: View {
         let _ = PerfTrace.body("MarkdownView")
         // 块与块之间的空照浏览器的外边距合并：取上一块的下边距和这一块的上边距里大的那个（第一块顶上不留）
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                view(for: block)
-                    .padding(.top, index == 0 ? 0 : max(Self.margin(blocks[index - 1], flat).bottom, Self.margin(block, flat).top))
+            if selectable {
+                // 连着的段落、标题、列表拼成一段系统富文本，能从一段拖选到另一段（见 RichText）；代码块、表格照旧单独画
+                ForEach(Self.segments(blocks), id: \.start) { segment in
+                    Group {
+                        if segment.prose {
+                            RichText(text: RichBuilder.attributed(Array(blocks[segment.start..<segment.end]), flat: flat, tone: tone), fill: fill)
+                        } else {
+                            view(for: blocks[segment.start])
+                        }
+                    }
+                    .padding(.top, segment.start == 0 ? 0 : max(Self.margin(blocks[segment.start - 1], flat).bottom, Self.margin(blocks[segment.start], flat).top))
+                }
+            } else {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                    view(for: block)
+                        .padding(.top, index == 0 ? 0 : max(Self.margin(blocks[index - 1], flat).bottom, Self.margin(block, flat).top))
+                }
             }
         }
         .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
@@ -32,6 +48,26 @@ struct MarkdownView: View {
     // 排版大体照 VS Code 里的 Claude Code（见 ChatType）：列表、引用上下 1em；代码块上下 10；
     // 段落之间 VS Code 只空 0.2em，几段连在一起像一整块（10-22 反馈挤），改成 0.7em；
     // 标题按浏览器默认（字号 2 / 1.5 / 1.17 / 1 / 0.83 / 0.67em，上下各 0.67 / 0.83 / 1 / 1.33 / 1.67 / 2.33 倍自己的字号）；分隔线上下 0.5em
+
+    struct Segment { let start: Int; let end: Int; let prose: Bool }
+
+    /// 分段：连着的 isProse 块并成一段，别的块各自一段
+    static func segments(_ blocks: [MarkdownBlock]) -> [Segment] {
+        var result: [Segment] = []
+        var index = 0
+        while index < blocks.count {
+            if RichBuilder.isProse(blocks[index]) {
+                var end = index + 1
+                while end < blocks.count, RichBuilder.isProse(blocks[end]) { end += 1 }
+                result.append(Segment(start: index, end: end, prose: true))
+                index = end
+            } else {
+                result.append(Segment(start: index, end: index + 1, prose: false))
+                index += 1
+            }
+        }
+        return result
+    }
 
     private static func headingSize(_ level: Int, _ flat: Bool = false) -> CGFloat {
         flat ? ChatType.size : ChatType.size * [2, 1.5, 1.17, 1, 0.83, 0.67][min(max(level, 1), 6) - 1]

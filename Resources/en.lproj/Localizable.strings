@@ -1511,6 +1511,7 @@
 "圆润的黑体" = "Rounded sans serif";
 "土耳其语" = "Turkish";
 "在 App Store Connect 换 1.1 的截图并重新提交审核" = "Replace the 1.1 screenshots in App Store Connect and resubmit for review";
+"在 GitHub 点星" = "Star on GitHub";
 "在 Kiteline 设置中开启「登录时自动启动」" = "Turn on “Launch at Login” in Kiteline Settings.";
 "在 Kiteline 设置中开启远程访问；无法连接时检查网络" = "Turn on Remote Access in Kiteline Settings. If you can't connect, check your network.";
 "在 VS Code 中恢复" = "Resume in VS Code";
@@ -1616,9 +1617,12 @@
 "复制" = "Copy";
 "复制为提示词链接" = "Copy as Prompt Link";
 "复制会话名" = "Copy Session Name";
+"复制全部思考" = "Copy all thinking";
 "复制内容" = "Copy Content";
 "复制工作目录" = "Copy Working Directory";
+"复制整条" = "Copy entire message";
 "复制诊断信息" = "Copy Diagnostics";
+"复制这条消息" = "Copy this message";
 "复制链接" = "Copy Link";
 "复杂功能" = "Complications";
 "外观" = "Appearance";
@@ -2354,9 +2358,12 @@
 "拷贝工作树路径" = "Copy Worktree Path";
 "拷贝提交信息" = "Copy Commit Message";
 "拷贝提交号" = "Copy Commit Hash";
+"拷贝整条" = "Copy entire message";
 "拷贝新版本失败" = "Couldn't copy the new version";
 "拷贝标签名" = "Copy Tag Name";
 "拷贝相对路径" = "Copy Relative Path";
+"拷贝这条消息" = "Copy this message";
+"拷贝选中的文字" = "Copy selected text";
 "按 %@%@ 自动续期。" = "Renews automatically at %@%@.";
 "按 Agent" = "By Agent";
 "按会话" = "By Session";
@@ -2481,6 +2488,7 @@
 "收起会话列表" = "Hide Session List";
 "收起头像选择" = "Hide Avatar Choices";
 "收起常用语" = "Hide Quick Replies";
+"收起思考" = "Hide thinking";
 "收起执行过程" = "Hide execution trace";
 "收起更多功能" = "Hide More Options";
 "收起终端" = "Hide Terminal";

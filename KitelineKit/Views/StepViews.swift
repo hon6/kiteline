@@ -50,7 +50,12 @@ struct StepRow: View {
     /// 点开图片后能左右滑着看的一组（整张步骤卡片的图）
     var gallery: [ChatImage] = []
     let open: () -> Void
+    #if SNAPSHOT
+    // 截图版：TARS_DEMO_THINK=1 思考一开始就展开（看长思考底下的「收起思考」）
+    @State private var expanded = ProcessInfo.processInfo.environment["TARS_DEMO_THINK"] == "1"
+    #else
     @State private var expanded = false
+    #endif
 
     var body: some View {
         let item = step.item
@@ -85,17 +90,32 @@ struct StepRow: View {
             .buttonStyle(.steady(.plain))
             if expanded, let text = item.text {
                 // 照 VS Code：展开的思考内容和正文一样大、灰色，和标题行隔 4；左边和标题文字对齐（图标 16 + 间隔 6）
-                Text(text)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                // 用能拖选的系统文字控件（见 RichText）：Mac 上拖着选、iPhone 长按选，能复制其中一段
+                RichText(text: RichBuilder.plain(text, tone: .secondary))
+                    .environment(\.richMenu, [MenuAction(title: L("复制全部思考"), symbol: "doc.on.doc") { Clipboard.copy(text) }])
                     .padding(.horizontal, ChatType.padH)
                     .padding(.leading, 22)
                     .padding(.trailing, CopyCorner.reserve)
                     .padding(.top, ChatType.px(2))
-                    .padding(.bottom, ChatType.px(6))
+                    .padding(.bottom, ChatType.px(4))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .copyCorner(text, inset: ChatType.px(4))
+                // 思考很长时展开后要翻回顶上才收得起来：底下也放一个「收起」
+                Button { withAnimation(.snappy) { expanded = false } } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.up").font(.system(size: ChatType.size * 0.7, weight: .semibold))
+                        Text("收起思考")
+                    }
+                    .font(.appFixed(size: ChatType.size * 0.85))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, ChatType.padH)
+                    .padding(.leading, 22)
+                    .padding(.vertical, ChatType.px(4))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.steady(.plain))
+                .padding(.bottom, ChatType.px(2))
             }
             if item.t == "tool", let images = step.result?.images, !images.isEmpty {
                 // 读图片、截图这类工具：结果里的图直接显示，不用点开这一步才看得到；左边和标题文字对齐

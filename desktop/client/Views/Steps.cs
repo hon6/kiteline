@@ -67,14 +67,22 @@ public sealed class StepRow : StackPanel
         if (item.T == "thinking" && item.Text is string text)
         {
             // 展开的思考内容和正文一样大、灰色；左边和标题文字对齐（图标 16 + 间隔 6）
-            detail = new RichText(text, ChatType.Size, color: "Text2") { Margin = new Thickness(ChatType.PadH + 22, ChatType.Px(2), ChatType.PadH, ChatType.Px(6)), IsVisible = false };
+            // 能选能复制：右上角复制钮复制全部思考；思考很长时展开后要翻回顶上才收得起来，底下也放一个「收起思考」
+            var body = new RichText(text, ChatType.Size, color: "Text2") { Margin = new Thickness(0, 0, 30, 0) };
+            var collapse = new Tap(Ui.H(4, Ui.Sym("chevron.up", ChatType.Size * 0.7, "Text2"), Ui.Text(L("收起思考"), ChatType.Size * 0.85, color: "Text2")).Pad(4, ChatType.Px(3)), null, 4)
+                { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-4, ChatType.Px(4), 0, 0) };
+            var panel = new StackPanel { Children = { CopyCorner.Wrap(body, text, ChatType.Px(2)), collapse },
+                                         Margin = new Thickness(ChatType.PadH + 22, ChatType.Px(2), ChatType.PadH, ChatType.Px(6)), IsVisible = false };
+            detail = panel;
             Children.Add(detail);
-            tap.Click = () =>
+            void Toggle()
             {
                 expanded = !expanded;
                 detail.IsVisible = expanded;
                 chevron.Symbol = expanded ? "chevron.down" : "chevron.right";
-            };
+            }
+            tap.Click = Toggle;
+            collapse.Click = Toggle;
         }
         else tap.Click = () => ToolDetail.Show(key, step);
         if (item.T == "tool" && step.Result?.Images is { Count: > 0 } images)

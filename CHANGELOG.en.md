@@ -1,5 +1,17 @@
 # Kiteline Release Notes
 
+## 3.49.27 (2026-11-09)
+
+### Improvements
+
+- **Select and copy message text freely** (Mac, iPhone, iPad): Multiple paragraphs, headings and lists in a reply can now be selected in one continuous drag, as in an editor, instead of stopping at each line break. On iPhone, press and hold to select any part; the menu also offers Quote, Add to To-dos, Translate and more. Each message now has a Copy button underneath to copy the whole message.
+- **Copy thinking, and collapse long thinking anytime** (Mac, iPhone, iPad): Expanded thinking can be selected and copied, and long thinking has a Hide button at the bottom, so you no longer need to scroll back to the top.
+
+### Bug Fixes
+
+- **Session groups show messages right away** (Mac, iPhone, iPad): Opening a session group could show a blank message list until you scrolled; the latest messages now appear immediately.
+
+
 ## 3.49.26 (2026-11-08)
 
 ### Improvements
