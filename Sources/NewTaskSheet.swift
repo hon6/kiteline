@@ -114,6 +114,12 @@ struct NewTaskSheet: View {
         return order.map { ScopeBar.Option(id: $0, title: $0, count: counts[$0] ?? 0) }
     }
 
+    /// 项目列表的理想高度：一行约 43 点（两行字 + 头像，跟着字号缩放），连「打开其他文件夹…」一起，2～6 行
+    private var listIdealHeight: CGFloat {
+        let rows = loading ? 4 : shown.count + 1 + (shown.isEmpty ? 1 : 0)
+        return CGFloat(min(max(rows, 2), 6)) * 43 * max(1, Look.shared.textScale) + 10
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // 标题「新任务」在面板的标题栏里（同别的弹窗）；这一行是说明和搜索
@@ -146,7 +152,9 @@ struct NewTaskSheet: View {
                 }
             }
             .listStyle(.bordered(alternatesRowBackgrounds: false))
-            .frame(minHeight: 140, idealHeight: 220, maxHeight: .infinity)   // 面板拉高时多出来的给项目列表
+            // 理想高度按行数（最多约 6 行）：项目少时不留大片空白、多时不急着在里面滚；面板高度随之自适应（11-08）。
+            // 面板拉高时多出来的给项目列表
+            .frame(minHeight: 100, idealHeight: listIdealHeight, maxHeight: .infinity)
             .overlay { if loading { ProgressView() } }
             // 选中的被筛掉了就不选；筛得只剩一个时直接选上
             .onChange(of: shown.map(\.id)) { _, ids in

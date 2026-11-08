@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.31 (2026-11-08)
+
+### Improvements
+
+- **GitHub link on the About page**: Settings → About now links to the project on GitHub, so you can leave a star if you like it.
+
 ## 1.0.30 (2026-11-07)
 
 ### Bug Fixes

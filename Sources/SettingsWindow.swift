@@ -1319,6 +1319,7 @@ struct AboutPane: View {
                 Link("隐私政策", destination: Lang.site("privacy"))
                 Link("使用条款", destination: Lang.site("terms"))
                 Link("支持与反馈", destination: Lang.site("support"))
+                Link("在 GitHub 点星", destination: URL(string: "https://github.com/hon6/kiteline")!)
                 Button("开源许可") { LicensesWindowController.shared.show() }
             }
             .font(.app(size: 12))

@@ -1,5 +1,15 @@
 # Kiteline Release Notes
 
+## 3.49.26 (2026-11-08)
+
+### Improvements
+
+- **GitHub link on the About page** (Mac, iPhone, iPad): Settings → About now links to the project on GitHub, so you can leave a star if you like it.
+
+### Bug Fixes
+
+- **New Task window fits its content** (Mac): after typing a long task description or attaching images, the window grows automatically so everything stays visible, instead of overlapping the title bar or cutting off the buttons at the bottom. The project list also sizes itself to the number of projects.
+
 ## 3.49.25 (2026-11-07)
 
 ### Improvements

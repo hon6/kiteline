@@ -1019,7 +1019,7 @@ public sealed class SettingsWindow : Window
             Ui.Text(L("随时随地与 Claude Code 协作"), 15, color: "Text2"),
             Ui.Text(version, 13, color: "Text3"),
             links.Margin(0, 8, 0, 0),
-            Ui.H(16, Pill(L("隐私政策"), "https://tars.betac.cn/privacy"), Pill(L("使用条款"), "https://tars.betac.cn/terms"), Pill(L("支持与反馈"), "https://tars.betac.cn/support"),
+            Ui.H(16, Pill(L("隐私政策"), "https://tars.betac.cn/privacy"), Pill(L("使用条款"), "https://tars.betac.cn/terms"), Pill(L("支持与反馈"), "https://tars.betac.cn/support"), Pill(L("在 GitHub 点星"), "https://github.com/hon6/kiteline"),
                 Form.Button(L("开源许可"), LicensesWindow.Open)),
         ]);
         return stack.HAlign(HorizontalAlignment.Center).Margin(0, 70, 0, 40);

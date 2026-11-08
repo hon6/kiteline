@@ -821,6 +821,12 @@ extension SelfTest {
             } else {
                 Log.write("[capture] 没有开着的面板")
             }
+        case "inserttext":
+            // 往当前窗口（panel 之后是面板）里有焦点的文字框打字：inserttext:<文字>（\n 换行；看内容变多后面板跟不跟着长高）
+            let text = arg.replacingOccurrences(of: "\\n", with: "\n")
+            let field = (next.firstResponder as? NSTextView) ?? next.contentView.flatMap { firstTextView(in: $0) }
+            if let field { next.makeFirstResponder(field); field.insertText(text, replacementRange: field.selectedRange()) } else { Log.write("[capture] 没有文字框") }
+            delay = 1
         case "keys":
             // 按键（发进本 App 的事件队列；弹开的菜单也收得到）：keys:down,down,return（还有 up、esc、space、tab）
             let codes: [String: UInt16] = ["down": 125, "up": 126, "return": 36, "esc": 53, "space": 49, "tab": 48]
@@ -1350,6 +1356,13 @@ extension SelfTest {
             if let ns = NSEvent(cgEvent: event) { view.scrollWheel(with: ns) }
         }
         Log.write("[capture] 滑动 \(Int(distance))：\(type(of: view)) 可见区域 y=\(Int(view.contentView.bounds.origin.y))")
+    }
+
+    /// 视图树里第一个能编辑的文字框（inserttext 用）
+    private static func firstTextView(in root: NSView) -> NSTextView? {
+        if let text = root as? NSTextView, text.isEditable { return text }
+        for sub in root.subviews { if let found = firstTextView(in: sub) { return found } }
+        return nil
     }
 
     /// 左边会话列表（系统列表）的滚动视图：文档视图是表格、靠窗口左边的那个

@@ -430,6 +430,16 @@ private final class PanelHosting: NSHostingController<AnyView> {
         get { .zero }
         set { super.preferredContentSize = newValue }
     }
+
+    /// 内容重新排过版（理想大小可能变了）：面板据此跟着长高 / 变矮。只靠窗口的 windowDidUpdate 不够——那要等下一个事件，
+    /// 粘贴、程序填字、数据后到时常常等不来；SwiftUI 改理想大小也不走上面的 setter
+    ///（11-08 新任务面板：打字变高后窗口不跟，列表被挤成内部滚动，再多就顶进标题栏）
+    var onIdeal: (() -> Void)?
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        onIdeal?()
+    }
 }
 
 private struct PanelRoot: View {
@@ -528,6 +538,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.animationBehavior = .none
         panel.collectionBehavior = [.fullScreenAuxiliary]
         panel.delegate = self
+        hosting.onIdeal = { [weak self] in DispatchQueue.main.async { self?.contentChanged() } }
         panel.onCancel = { [weak self] in self?.userClose() }
     }
 
@@ -675,11 +686,25 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// 内容变了（数据到了、展开了、往里点了一层）：用户没手动改过大小就跟着内容变。
     /// 标题栏不动、底边平滑伸缩（11-05 反馈：切换页面时内容横向滑动，弹窗高度随内容平滑过渡）
     private func refit() {
-        guard shown, !closed, !userSized else { return }
+        guard shown, !closed else { return }
+        let top = (sliding ?? panel.frame).maxY
+        // 这个宽度下内容至少要多高：拖边最多缩到这里（内容变多了跟着变）
+        let least = hosting.sizeThatFits(in: NSSize(width: panel.frame.width, height: 0)).height
+        let visible = (panel.screen ?? panel.parent?.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+        let need = min(max(least, 120), visible - 40)
+        minimum.height = need
+        if userSized {
+            // 拖过大小的不改回去；但内容变多（打字、附图）在这个宽度下放不下了，就把底边往下放到刚好放下，
+            // 不让内容挤进标题栏、底部按钮被裁掉
+            let current = (sliding ?? panel.frame).height
+            guard need > current + 0.5 else { return }
+            let size = NSSize(width: panel.frame.width, height: need)
+            place(size: size, center: CGPoint(x: panel.frame.midX, y: top - size.height / 2), animated: true)
+            return
+        }
         let size = targetSize()
         // 跟正在变过去的大小比：动画中途窗口大小一直在变，别每一帧都重新开始
         if let fitted, abs(size.width - fitted.width) <= 0.5, abs(size.height - fitted.height) <= 0.5 { return }
-        let top = (sliding ?? panel.frame).maxY
         place(size: size, center: CGPoint(x: panel.frame.midX, y: top - size.height / 2), animated: true)
     }
 
@@ -706,9 +731,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         return false
     }
 
-    func windowDidUpdate(_ notification: Notification) {
+    func windowDidUpdate(_ notification: Notification) { contentChanged() }
+
+    /// 有没有工具栏、内容的理想大小变了（数据到了、展开了、打字变高）：跟着变（见 refit）。
+    /// 窗口每轮更新查一次，内容报来新的理想大小时（PanelHosting.onIdeal）也马上查
+    private func contentChanged() {
         let has = panel.toolbar != nil
-        // 有没有工具栏、内容的理想大小变了（数据到了、展开了）：用户没拖过大小就跟着变
         if has != state.toolbar || hosting.ideal != lastIdeal {
             state.toolbar = has
             lastIdeal = hosting.ideal
