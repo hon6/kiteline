@@ -514,6 +514,8 @@
 "Windows 上截整个屏幕：在 PowerShell 里用 `Add-Type -AssemblyName System.Windows.Forms,System.Drawing` 后把 " = "To capture the whole screen on Windows, in PowerShell run `Add-Type -AssemblyName System.Windows.Forms,System.Drawing`, then draw ";
 "Windows 上没有 tmux，Qwen Code 的会话只能查看" = "Windows has no tmux, so Qwen Code sessions are view-only.";
 "Windows 浏览器" = "Windows Browser";
+"Windows 防火墙还没有放行 Kiteline：同一网络里的手机、其他电脑可能连不进来" = "Windows Firewall hasn't allowed Kiteline yet: phones and other computers on the same network may not be able to connect";
+"Windows 防火墙阻止了 Kiteline 的入站连接：同一网络里的手机、其他电脑连不进来" = "Windows Firewall is blocking incoming connections to Kiteline: phones and other computers on the same network can't connect";
 "Windows/Linux 客户端：读图缩略图、看大图左右滑" = "Windows/Linux client: image thumbnails and swipe between full-size images";
 "[--desktop] [--caption 说明]  或  shot --text" = "[--desktop] [--caption text]  or  shot --text";
 "[Desktop Entry]\nType=Application\nName=Kiteline\nComment=在手机上跟进和回复 Claude Code\n" = "[Desktop Entry]\nType=Application\nName=Kiteline\nComment=Follow and reply to Claude Code from your phone\n";
@@ -561,6 +563,9 @@
 "iPhone 语音" = "iPhone Voice";
 "iPhone 长时间未响应，可能无法连接电脑" = "iPhone hasn’t responded for a while and may not be able to reach your computer";
 "macOS 上截桌面或某个窗口：`screencapture -x /tmp/s.png`（需要屏幕录制权限），再用 send-image 发。" = "To capture the desktop or a window on macOS, run `screencapture -x /tmp/s.png` (requires Screen Recording permission), then send it with send-image.";
+"macOS 防火墙已允许 Kiteline 的传入连接" = "macOS Firewall allows incoming connections to Kiteline";
+"macOS 防火墙开着「阻止所有传入连接」：同一网络里的手机、其他电脑连不进来" = "macOS Firewall is set to block all incoming connections: phones and other computers on the same network can't connect";
+"macOS 防火墙没有允许 Kiteline 的传入连接：同一网络里的手机、其他电脑连不进来" = "macOS Firewall doesn't allow incoming connections to Kiteline: phones and other computers on the same network can't connect";
 "openssl %@ 失败：%@" = "openssl %@ failed: %@";
 "pass|fail|ok|error|tests?:|项" = "pass|fail|ok|error|tests?:|items";
 "python3 -V && echo -- && (grep -m1 WATCHER_VERSION $HOME/.ccpulse/ccpulse-watch.py 2>/dev/null || echo '远端尚无 watcher（首次连接会自动部署）')" = "python3 -V && echo -- && (grep -m1 WATCHER_VERSION $HOME/.ccpulse/ccpulse-watch.py 2>/dev/null || echo 'No watcher on the remote yet (it is deployed automatically on first connection)')";
@@ -601,6 +606,7 @@
 "。提醒：" = ". Note: ";
 "。提醒：%@" = ". Note: %@";
 "。翻译时消息文字会发送到该服务。" = ". Message text is sent to this service when translating.";
+"。请确认那台电脑上 Kiteline 正在运行；若那台电脑开着防火墙，在它的「就绪检查」里点「防火墙放行 → 一键放行」" = ". Make sure Kiteline is running on that computer. If it has a firewall on, open its Readiness Check and tap Firewall Access → Allow Now.";
 "「%@」" = "“%@”";
 "「%@」上的 Kiteline" = "Kiteline on “%@”";
 "「%@」可能包含密钥或密码，默认不传到手机。仍要取回吗？" = "“%@” may contain keys or passwords, so it isn't sent to your phone by default. Fetch it anyway?";
@@ -638,6 +644,7 @@
 "一致" = "In Sync";
 "一键安装" = "Install in One Tap";
 "一键安装组件" = "Install Components";
+"一键放行" = "Allow Now";
 "三" = "Wed";
 "上一处改动" = "Previous Change";
 "上一张" = "Previous";
@@ -894,6 +901,7 @@
 "以下项目需在电脑上设置，轻点查看操作步骤。" = "Set up the following items on your computer. Tap an item to view the steps.";
 "以后再说" = "Not Now";
 "以查看会话、发送消息、审批命令和回答提问。密钥仅在本机使用，不会上传，也不会发送到手机。" = "to view sessions, send messages, approve commands, and answer questions. The key is used only on this computer and is never uploaded or sent to your phone.";
+"以管理员身份打开 PowerShell 运行：%s" = "run this in PowerShell as administrator: %s";
 "任务 %@/%@" = "Task %@/%@";
 "任务不存在" = "Task not found.";
 "任务不存在或已过期" = "The task doesn't exist or has expired";
@@ -1538,6 +1546,7 @@
 "在「%@」上选择任意文件夹，在其中新建会话" = "Choose any folder on “%@” and start a session there";
 "在「%@」中新建" = "Create in “%@”";
 "在「插件」中管理" = "Manage in Plugins";
+"在「系统设置 → 网络 → 防火墙 → 选项」中关闭「阻止所有传入连接」" = "In System Settings → Network → Firewall → Options, turn off Block all incoming connections";
 "在「系统设置 → 能耗」（或「电池 → 选项」）中开启「防止自动睡眠」" = "In System Settings → Energy (or Battery → Options), turn on “Prevent Automatic Sleeping.”";
 "在下方分屏打开" = "Open in Split Below";
 "在主窗口中打开" = "Open in Main Window";
@@ -1922,6 +1931,7 @@
 "已在 VS Code 中新建会话，内容已填入输入框" = "Started a new session in VS Code. Your text is in the input box.";
 "已在 VS Code 中新建会话，内容已填入输入框，但未能自动提交。请在电脑上按回车键提交" = "A new session was created in VS Code and the message was filled in, but it couldn't be submitted automatically. Press Return on your computer to submit it";
 "已在 VS Code 中新建会话，内容已填入输入框，将自动提交" = "Started a new session in VS Code. Your text is in the input box and will be submitted automatically.";
+"已在 ufw 中放行端口 %s" = "Ports %s are allowed in ufw";
 "已在另一个工作树中检出" = "Checked out in another worktree";
 "已在后台恢复对话" = "Resumed the conversation in the background";
 "已在后台恢复对话并提交" = "Resumed the conversation in the background and submitted";
@@ -1931,7 +1941,10 @@
 "已在后台新建会话，内容已填入输入框" = "Started a new session in the background; the text is in the input box";
 "已在独立分支 %@ 开始" = "Started on separate branch %@";
 "已在电脑上开始安装" = "Installation has started on your computer.";
+"已在电脑上弹出授权窗口：请在电脑上点「是」，完成后同一网络里的手机、其他电脑即可连接" = "An authorization window has opened on the computer. Click Yes there, and phones and other computers on the same network will be able to connect.";
+"已在电脑上弹出授权窗口：请在电脑上输入密码" = "An authorization window has opened on the computer. Enter the password there.";
 "已在电脑上弹出授权窗口：请在电脑上输入密码，安装大约需要半分钟" = "An authorization window has opened on the computer. Enter your password there. Installation takes about half a minute.";
+"已在电脑上弹出授权窗口：请在电脑上输入管理员密码，完成后同一网络里的手机、其他电脑即可连接" = "An authorization window has opened on the computer. Enter the administrator password there, and phones and other computers on the same network will be able to connect.";
 "已在电脑上打开终端：请在终端里输入密码完成安装" = "A terminal has opened on the computer. Enter your password in the terminal to finish installing.";
 "已在电脑上重新加载「%@」窗口；如果仍连不上，会再提醒你" = "Reloaded the “%@” window on the computer. If it still can’t connect, you’ll be notified again";
 "已在电脑上重新连接，VS Code 窗口正在重新加载" = "Reconnecting on the computer. The VS Code window is reloading";
@@ -2016,6 +2029,8 @@
 "已提交，感谢反馈。我们会根据反馈优先接入更多 Agent。" = "Submitted. Thank you — your feedback helps us decide which agents to support next.";
 "已收藏" = "Added to Favorites";
 "已放弃" = "Aborted";
+"已放行端口 %s，同一网络里的手机、其他电脑可以连接" = "Ports %s are allowed; phones and other computers on the same network can connect";
+"已放行：同一网络里的手机、其他电脑可以连接" = "Allowed: phones and other computers on the same network can connect";
 "已新建会话" = "New session created.";
 "已新建工作树" = "Worktree created";
 "已是最新版本" = "You're Up to Date";
@@ -3182,6 +3197,7 @@
 "正在搜索…" = "Searching…";
 "正在搜索当前 Wi-Fi 中的电脑…" = "Searching for computers on this Wi-Fi network…";
 "正在放弃" = "Aborting";
+"正在放行：请在电脑上完成授权" = "Allowing access: complete the authorization on the computer";
 "正在新建…" = "Creating…";
 "正在新建会话…" = "Starting Session…";
 "正在新建工作树" = "Creating worktree";
@@ -3516,6 +3532,7 @@
 "电脑上是 %@，轻点查看更新内容" = "Your computer has %@. Tap to see what's new";
 "电脑上未允许这次配对。请确认输入的是你自己电脑上显示的配对码，重新输入后在电脑上点「允许」" = "This pairing wasn't allowed on the computer. Make sure you entered the pairing code shown on your own computer, then enter it again and tap Allow on the computer.";
 "电脑上未允许这次配对。请确认输入的是你自己电脑上显示的验证码，重新输入后在电脑上点「允许」" = "This pairing wasn’t allowed on the computer. Make sure you entered the code shown on your own computer, then re-enter it and click “Allow” on the computer.";
+"电脑上没有完成授权" = "Authorization wasn't completed on the computer";
 "电脑上没有运行中的 Claude Code 会话" = "No Claude Code sessions are running on your computer";
 "电脑上没有运行中的会话" = "No sessions running on your computer.";
 "电脑上的 %@ 需要 Kiteline %@ 或更高版本才能完整显示，轻点前往 App Store 更新" = "%@ on your computer requires Kiteline %@ or later to display fully. Tap to update in the App Store.";
@@ -4140,6 +4157,8 @@
 "软重置（保留改动并暂存）" = "Soft Reset (Keep Changes, Staged)";
 "轻点「一键安装」，然后在电脑上注销并重新登录一次（不需要管理员密码）" = "Tap Install, then log out and back in once on your computer (no administrator password needed)";
 "轻点「一键安装」：在 VS Code 中装上 Kiteline 配套扩展，并授予 Kiteline 键盘模拟权限（只用来在 VS Code 里按回车、" = "Tap “One-Click Install” to add the Kiteline companion extension to VS Code and grant Kiteline keyboard simulation permission (used only to press Return in VS Code, ";
+"轻点「一键放行」，在电脑上的授权窗口里确认；或者%s" = "Tap Allow Now and confirm in the authorization window on the computer, or %s";
+"轻点「一键放行」，在电脑上输入管理员密码；或在「系统设置 → 网络 → 防火墙 → 选项」中把 Kiteline 设为允许传入连接" = "Tap Allow Now and enter the administrator password on the computer, or allow incoming connections for Kiteline in System Settings → Network → Firewall → Options";
 "轻点「开启」，然后关闭所有 VS Code 窗口、重新打开" = "Tap “Turn On,” then close all VS Code windows and reopen them";
 "轻点下方的「前往设置」" = "Tap “Go to Settings” below.";
 "轻点人物" = "Tap a person";
@@ -4244,9 +4263,11 @@
 "这台电脑不支持伪终端（需要 Windows 10 1809 或更新）：%@" = "This computer does not support pseudo terminals (Windows 10 version 1809 or later is required): %@";
 "这台电脑不能在本机翻译" = "This computer cannot translate locally";
 "这台电脑已移除" = "This computer has been removed";
+"这台电脑开着防火墙（ufw）：还没有放行 Kiteline 的端口 %s，同一网络里的手机、其他电脑可能连不进来" = "This computer's firewall (ufw) is on and Kiteline's ports %s aren't allowed yet: phones and other computers on the same network may not be able to connect";
 "这台电脑暂不支持在后台运行 Claude Code" = "This computer doesn't support running Claude Code in the background yet";
 "这台电脑没有图形界面（DISPLAY 为空），无法操作 VS Code。可在 tmux 中运行 claude" = "This computer has no graphical interface (DISPLAY is empty), so VS Code can't be controlled. You can run claude in tmux instead.";
 "这台电脑没有图形界面，无法操作 VS Code；终端里的会话放在 tmux 中运行即可从手机发送" = "This computer has no graphical interface, so VS Code can't be controlled. Run terminal sessions in tmux to send messages from your phone.";
+"这台电脑没有需要放行的防火墙" = "This computer has no firewall that needs changes";
 "这台电脑还未设置 Git 提交者（user.name / user.email），提交会失败。请先在电脑上设置。" = "This computer has no Git identity (user.name / user.email), so commits will fail. Set it up on the computer first.";
 "这是一个文件夹，不是文件：%@" = "This is a folder, not a file: %@";
 "这条消息没有可收藏的内容" = "This message has nothing to save";
@@ -4397,6 +4418,7 @@
 "闲置 %@ 分钟后将进入睡眠，睡眠期间手机无法连接，定时任务也不会执行" = "After %@ minutes of inactivity the computer will go to sleep. Your phone can't connect while it sleeps, and scheduled tasks won't run.";
 "闲置 %@ 分钟后自动锁屏：锁屏期间无法把手机消息发进 VS Code（终端里放在 tmux 中运行的会话不受影响）" = "Locks automatically after %@ minutes of inactivity. While locked, messages from your phone cannot be sent into VS Code (sessions running in tmux in Terminal are not affected).";
 "闲置 30 分钟" = "idle for 30 minutes";
+"防火墙放行" = "Firewall Access";
 "阿拉伯语" = "Arabic";
 "附图片" = "Attach Image";
 "附截图" = "Attach Screenshot";
@@ -4515,6 +4537,7 @@
 "（工作树）" = " (worktree)";
 "（已暂存）" = " (Staged)";
 "（已选 %@）" = " (%@ selected)";
+"（当前网络被设为「公用网络」）" = " (this network is set to Public)";
 "（当前）" = "(Current)";
 "（文件 %@）" = " (file %@)";
 "（无内容）" = "(Empty)";

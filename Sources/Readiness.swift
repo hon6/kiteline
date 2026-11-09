@@ -13,6 +13,8 @@ enum Readiness {
         var detail: String
         /// 怎么补
         var fix: String
+        /// 一键处理的按钮（手机、客户端显示，POST /api/readiness/fix）：id、按钮上的字
+        var action: (id: String, label: String)? = nil
     }
 
     static func check(completion: @escaping ([[String: Any]]) -> Void) {
@@ -111,14 +113,26 @@ enum Readiness {
         // Mac 会不会自动睡眠：睡着时手机连不上
         DispatchQueue.global(qos: .utility).async {
             let sleepMinutes = Self.systemSleepMinutes()
+            let wall = Firewall.status()
             DispatchQueue.main.async {
                 var all = items
+                if let wall {
+                    // macOS 防火墙开着、拦了 Kiteline：同一网络里的手机、别的 Kiteline 电脑连不进来
+                    all.append(Item(id: "firewall", title: "防火墙放行", level: wall.level, detail: wall.detail,
+                                    fix: wall.level == "ok" ? "" : (wall.blockAll ? "在「系统设置 → 网络 → 防火墙 → 选项」中关闭「阻止所有传入连接」"
+                                                                    : "轻点「一键放行」，在电脑上输入管理员密码；或在「系统设置 → 网络 → 防火墙 → 选项」中把 Kiteline 设为允许传入连接"),
+                                    action: wall.level == "ok" || wall.blockAll ? nil : ("allow-firewall", "一键放行")))
+                }
                 if let minutes = sleepMinutes {
                     all.append(Item(id: "sleep", title: "电脑保持唤醒", level: minutes == 0 ? "ok" : "warn",
                                     detail: minutes == 0 ? "不会自动睡眠，手机可随时连接" : "闲置 \(minutes) 分钟后将进入睡眠，睡眠期间手机无法连接，定时任务也不会执行",
                                     fix: "在「系统设置 → 能耗」（或「电池 → 选项」）中开启「防止自动睡眠」"))
                 }
-                completion(all.map { ["id": $0.id, "title": $0.title, "level": $0.level, "detail": $0.detail, "fix": $0.fix] })
+                completion(all.map { item in
+                    var dict: [String: Any] = ["id": item.id, "title": item.title, "level": item.level, "detail": item.detail, "fix": item.fix]
+                    if let action = item.action { dict["action"] = ["id": action.id, "label": action.label] }
+                    return dict
+                })
             }
         }
     }
@@ -155,3 +169,54 @@ enum Readiness {
         return nil
     }
 }
+
+/// macOS 自带的应用防火墙（系统设置 → 网络 → 防火墙）：开着时，没允许的 App 收不到传入连接，局域网里的手机、别的 Kiteline 电脑连不进来。
+/// 查用 socketfilterfw（不用管理员权限）；放行要管理员密码（系统弹框），只放行 Kiteline 自己。「阻止所有传入连接」是用户的选择，不替他关
+enum Firewall {
+    private static let tool = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+
+    private static func run(_ args: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do { try process.run() } catch { return "" }
+        process.waitUntilExit()
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
+    private static var executable: String { Bundle.main.executableURL?.path ?? CommandLine.arguments[0] }
+
+    /// 防火墙没开返回 nil（不显示这一项）。后台线程调
+    static func status() -> (level: String, detail: String, blockAll: Bool)? {
+        guard FileManager.default.isExecutableFile(atPath: tool), run(["--getglobalstate"]).contains("enabled") else { return nil }
+        if run(["--getblockall"]).contains("enabled") {
+            return ("bad", "macOS 防火墙开着「阻止所有传入连接」：同一网络里的手机、其他电脑连不进来", true)
+        }
+        if run(["--getappblocked", executable]).contains("permitted") {
+            return ("ok", "macOS 防火墙已允许 Kiteline 的传入连接", false)
+        }
+        return ("bad", "macOS 防火墙没有允许 Kiteline 的传入连接：同一网络里的手机、其他电脑连不进来", false)
+    }
+
+    /// 一键放行：系统弹管理员授权框，把 Kiteline 加进防火墙并设为允许
+    static func allow(completion: @escaping (Bool, String) -> Void) {
+        if Delivery.dryRun { completion(true, "（测试）将在电脑上放行 Kiteline 的传入连接"); return }
+        let path = executable.replacingOccurrences(of: "'", with: "")
+        let shell = "\(tool) --add '\(path)' && \(tool) --unblockapp '\(path)'"
+        let script = "do shell script \"\(shell)\" with administrator privileges with prompt \"Kiteline 要放行同一网络里的手机、其他电脑的连接\""
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            do { try process.run() } catch { DispatchQueue.main.async { completion(false, error.localizedDescription) }; return }
+            process.waitUntilExit()
+            let ok = process.terminationStatus == 0
+            Log.write("防火墙放行：\(ok ? "已完成" : "未完成（取消了授权或出错）")")
+            DispatchQueue.main.async { completion(ok, ok ? "已放行：同一网络里的手机、其他电脑可以连接" : "电脑上没有完成授权") }
+        }
+    }
+}
+

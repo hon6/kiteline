@@ -31,6 +31,8 @@ LOCAL_PATHS = {"/api/pin", "/api/mark", "/api/mute", "/api/viewed", "/api/quiet"
                "/api/state", "/api/events", "/api/computers", "/api/computers/enroll"}
 LOCAL_PREFIXES = ("/api/todos", "/api/favorites", "/api/groups", "/api/peer/", "/api/devices", "/api/push", "/api/live", "/api/desktop")
 KEY_FIELDS = ("key", "k", "source", "sourceId", "sessionKey")
+# 加电脑时连不上：多半是对方的防火墙拦着（Windows 第一次运行时关掉了系统的提示框）
+FIREWALL_HINT = "。请确认那台电脑上 Kiteline 正在运行；若那台电脑开着防火墙，在它的「就绪检查」里点「防火墙放行 → 一键放行」"
 
 
 def is_private(ip):
@@ -470,7 +472,10 @@ class Peers:
             finally:
                 conn.close()
         except Exception as exc:  # noqa: BLE001
-            return fail(describe(exc))
+            why = describe(exc)
+            if isinstance(exc, (socket.timeout, ConnectionRefusedError)):
+                why += FIREWALL_HINT
+            return fail(why)
         try:
             reply = json.loads(raw.decode("utf-8"))
         except ValueError:

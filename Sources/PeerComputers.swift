@@ -251,7 +251,11 @@ final class PeerComputers {
                 DispatchQueue.main.async { completion(.failure(RemoteError(why))) }
             }
             if let error {
-                fail(Self.describe(error)); return
+                let code = (error as NSError).code
+                // 连不上多半是对方的防火墙拦着（Windows 第一次运行时关掉了系统的提示框）
+                let hint = [NSURLErrorTimedOut, NSURLErrorCannotConnectToHost].contains(code)
+                    ? "。请确认那台电脑上 Kiteline 正在运行；若那台电脑开着防火墙，在它的「就绪检查」里点「防火墙放行 → 一键放行」" : ""
+                fail(Self.describe(error) + hint); return
             }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]

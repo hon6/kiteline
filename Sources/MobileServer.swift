@@ -593,6 +593,20 @@ final class MobileServer {
             switch (request.method, request.path) {
             case ("GET", "/api/computers"):
                 respond(.json(PeerComputers.shared.computersPayload())); return
+            case ("POST", "/api/readiness/fix"):
+                // 就绪检查里的一键处理：Mac 上目前只有「防火墙放行」（只认写死的动作，请求内容不进命令）
+                guard request.jsonBody?["action"] as? String == "allow-firewall" else {
+                    respond(.json(["ok": false, "message": "不支持的操作", "error": "不支持的操作"], status: 409)); return   // 同电脑端 r_readiness_fix
+                }
+                Log.write("就绪检查一键处理：防火墙放行，等待电脑上授权")
+                // 授权框要等人去点（手机请求等不了那么久）：先告诉手机已经弹出来了，结果写进日志，就绪检查再查一次就能看到
+                if Delivery.dryRun {
+                    Firewall.allow { ok, message in respond(.json(["ok": ok, "message": message])) }
+                } else {
+                    Firewall.allow { _, _ in }
+                    respond(.json(["ok": true, "message": "已在电脑上弹出授权窗口：请在电脑上输入管理员密码，完成后同一网络里的手机、其他电脑即可连接"]))
+                }
+                return
             case ("POST", "/api/computers/add"), ("POST", "/api/computers/remove"):
                 // 本机界面、自测用（只认主令牌）：添加 / 移除 Kiteline 电脑
                 guard case .master = auth else { respond(.error("只有这台电脑自己能用", status: 403)); return }

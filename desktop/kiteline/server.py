@@ -1428,17 +1428,20 @@ def r_profile(s, request, *_):
 
 def r_profile_set(s, request, *_):
     body = request.json or {}
+    # 电脑端没有系统自带头像：只认「名字首字」和「自己的图」，别的一律拒绝（同 Mac 版的「头像不存在」）
+    if body.get("avatar") not in (None, "", "text", "custom") and not body.get("image"):
+        return Response.error("头像不存在", 400)
     if "name" in body:
         name = str(body.get("name") or "").strip()[:40]
         s.app.cfg.update(lambda d: d["mobile"].update({"myName": name}))
     if body.get("image"):
         # 上传一张图当头像（base64）：存好后切到「自己的图」
         try:
-            data = base64.b64decode(str(body["image"]), validate=False)
+            data = base64.b64decode(str(body["image"]).split(",", 1)[-1], validate=False)
         except (ValueError, TypeError):
-            return Response.error("图片无法读取", 400)
+            return Response.error("无法打开此图片，请选择其他图片", 400)
         if not s.app.save_avatar(data):
-            return Response.error("图片无法读取", 400)
+            return Response.error("无法打开此图片，请选择其他图片", 400)
         s.app.cfg.update(lambda d: d["mobile"].update({"avatar": "custom"}))
     elif body.get("avatar") in ("text", "custom"):
         choice = body["avatar"]
@@ -1450,6 +1453,8 @@ def r_profile_set(s, request, *_):
 
 
 def r_avatar(s, request, *_):
+    if request.query.get("preset") or request.query.get("of") not in (None, "", "custom"):
+        return Response.error("没有这个头像", 404)   # 电脑端没有系统自带头像（Mac 才有 preset / of=mac）
     path = s.app.avatar_path()
     if s.app.cfg.mobile.get("avatar") != "custom" or not os.path.exists(path):
         return Response.error("未设置头像", 404)
@@ -1636,7 +1641,11 @@ def r_readiness(s, request, *_):
 def r_readiness_fix(s, request, *_):
     """就绪检查里的「一键安装」：只认 setup_tools.ACTIONS 里写死的动作，请求里的内容不进命令"""
     action = str((request.json or {}).get("action") or "")
-    ok, message = setup_tools.start(action)
+    if action == "allow-firewall":
+        from . import firewall
+        ok, message = firewall.fix(s.app.cfg)
+    else:
+        ok, message = setup_tools.start(action)
     log.write("就绪检查一键处理（%s）：%s" % (action[:40], message))
     return Response.json({"ok": ok, "message": message, "error": "" if ok else message}, 200 if ok else 409)
 

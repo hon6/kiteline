@@ -36,7 +36,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.34"
+VERSION = "1.0.35"
 
 
 class App:
@@ -128,6 +128,14 @@ class App:
             self._start_mpgate()
         threading.Thread(target=self._ticker, daemon=True).start()
         self.peers.start()
+        if m["enabled"]:
+            # 先查一遍防火墙（Windows 上要几秒）：就绪检查打开时直接用结果，被拦着的话日志里也留一句
+            from . import firewall
+            def check_firewall():
+                wall = firewall.status(self.cfg)
+                if wall and wall[0] != "ok":
+                    log.write("防火墙：%s" % wall[1])
+            threading.Thread(target=check_firewall, daemon=True).start()
         self.alerts.start()   # 到某台机器的连接断了：告诉手机，给「尝试重连」
         self.updater.start()
         self.stats.start()
@@ -770,6 +778,15 @@ class App:
                               "detail": "不会自动锁屏，离开电脑时也能从手机向 VS Code 发消息" if minutes == 0 else
                                         "闲置 %d 分钟后自动锁屏：锁屏期间无法把手机消息发进 VS Code（终端里放在 tmux 中运行的会话不受影响）" % minutes,
                               "fix": "如果希望离开电脑时也能从手机发消息：在「设置 → 隐私和安全性 → 屏幕锁定」关闭「自动锁屏」，或把「空白屏幕延时」调长"})
+        from . import firewall
+        wall = firewall.status(self.cfg)
+        if wall:
+            # 防火墙拦着：同一网络里的手机、别的 Kiteline 电脑连不进来（Windows 第一次运行时关掉了系统的提示框就会这样）
+            item = {"id": "firewall", "title": "防火墙放行", "level": wall[0], "detail": wall[1],
+                    "fix": "" if wall[0] == "ok" else "轻点「一键放行」，在电脑上的授权窗口里确认；或者%s" % firewall.manual_command(self.cfg)}
+            if wall[0] != "ok":
+                item["action"] = {"id": "allow-firewall", "label": "一键放行", "command": firewall.manual_command(self.cfg)}
+            items.append(item)
         secure = self.server.secure_status
         items.append({"id": "https", "title": "HTTPS 服务", "level": "ok" if secure.startswith("监听中") else "bad",
                       "detail": secure, "fix": "检查端口 %d 是否被占用，或防火墙是否放行" % self.cfg.https_port()})

@@ -1,5 +1,16 @@
 # Kiteline Release Notes
 
+## 3.49.30 (2026-11-09)
+
+### New Features
+
+- **Firewall alerts and one-tap access** (Mac, iPhone, iPad): If your computer's firewall blocks your phone or other computers from connecting, the Readiness Check now tells you. Tap Allow Now and enter the administrator password on the computer to allow Kiteline only. When adding a Kiteline computer times out, you're also prompted to check that computer's firewall.
+- **More reliable connections to your other computers** (iPhone, iPad): Connecting to a computer through a public address or port forwarding no longer fails because that address isn't on its certificate. Only the certificate of the computer you paired with is still accepted.
+
+### Improvements
+
+- In the activity log, actions started on this computer are now labeled "This Computer".
+
 ## 3.49.29 (2026-11-09)
 
 ### New Features

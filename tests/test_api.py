@@ -21,6 +21,17 @@ BASE = "http://127.0.0.1:%s" % HTTP_PORT
 PASS, FAIL = [0], []
 
 
+# 测的是本机上的服务（run-api.sh / run-api.ps1 / run-integration.sh 都在同一台机器上起服务再测）：Mac 专属的检查只在 Mac 上做
+IS_MAC = sys.platform == "darwin"
+SKIP = []
+
+
+def skip(name, why):
+    """这台机器上不适用的检查：不算通过也不算失败，写明原因"""
+    SKIP.append(name)
+    print("  [SKIP] %s（%s）" % (name, why))
+
+
 def check(name, cond, detail=""):
     if cond:
         PASS[0] += 1
@@ -267,16 +278,31 @@ me = body.get("me") or {}
 check("状态里带「我」：默认名字是 Mac 用户名", status == 200 and me.get("name") and "avatar" in me, str(me))
 status, prof, _ = request("/api/profile")
 groups = prof.get("groups") or []
-check("能列出 Mac 自带头像（按分类）", status == 200 and prof.get("avatar") == "mac" and sum(len(g["items"]) for g in groups) >= 20,
-      str([(g["name"], len(g["items"])) for g in groups]))
-first = groups[0]["items"][0] if groups else "Animals/Owl"
-status, body, _ = request("/api/profile", "POST", {"name": "  小洪\n ", "avatar": "system:" + first})
-check("改名字（去掉首尾空白和换行）+ 换系统头像", status == 200 and body["me"]["name"] == "小洪" and body["avatar"] == "system:" + first
-      and body["me"]["avatar"].startswith("/api/avatar?v="), str(body.get("me")))
-saved = json.load(open(os.path.join(CONFIG_DIR, "config.json"), encoding="utf-8"))
-check("写进配置文件", saved["mobile"]["myName"] == "小洪" and saved["mobile"]["avatar"] == "system:" + first)
-status, img, headers = request(body["me"]["avatar"], raw=True)
-check("头像图片是 JPEG", status == 200 and img[:2] == b"\xff\xd8", str(status))
+if IS_MAC:
+    check("能列出 Mac 自带头像（按分类）", status == 200 and prof.get("avatar") == "mac" and sum(len(g["items"]) for g in groups) >= 20,
+          str([(g["name"], len(g["items"])) for g in groups]))
+    first = groups[0]["items"][0] if groups else "Animals/Owl"
+    status, body, _ = request("/api/profile", "POST", {"name": "  小洪\n ", "avatar": "system:" + first})
+    check("改名字（去掉首尾空白和换行）+ 换系统头像", status == 200 and body["me"]["name"] == "小洪" and body["avatar"] == "system:" + first
+          and body["me"]["avatar"].startswith("/api/avatar?v="), str(body.get("me")))
+    saved = json.load(open(os.path.join(CONFIG_DIR, "config.json"), encoding="utf-8"))
+    check("写进配置文件", saved["mobile"]["myName"] == "小洪" and saved["mobile"]["avatar"] == "system:" + first)
+    status, img, headers = request(body["me"]["avatar"], raw=True)
+    check("头像图片是 JPEG", status == 200 and img[:2] == b"\xff\xd8", str(status))
+else:
+    # 电脑端没有系统自带头像：改名字 + 上传自己的图
+    png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="   # 1×1 的 PNG
+    skip("能列出 Mac 自带头像（按分类）", "Mac 专属：Windows / Linux 没有系统自带头像")
+    status, body, _ = request("/api/profile", "POST", {"name": "  小洪\n "})
+    check("改名字（去掉首尾空白和换行）", status == 200 and body["me"]["name"] == "小洪", str(body.get("me")))
+    saved = json.load(open(os.path.join(CONFIG_DIR, "config.json"), encoding="utf-8"))
+    check("写进配置文件", saved["mobile"]["myName"] == "小洪")
+    if png:
+        status, body, _ = request("/api/profile", "POST", {"image": png})
+        status, img, headers = request(body.get("me", {}).get("avatar") or "/api/avatar", raw=True)
+        check("上传的头像存成 JPEG", status == 200 and img[:2] == b"\xff\xd8", str(status))
+    else:
+        skip("上传的头像存成 JPEG", "找不到测试图片")
 status, _, _ = request("/api/avatar?preset=" + q("../../../../etc/passwd"), raw=True)
 check("系统头像只认列表里有的，不拼路径", status == 404)
 status, body, _ = request("/api/profile", "POST", {"avatar": "system:../../etc"})
@@ -990,7 +1016,11 @@ request("/api/quiet", "POST", {"start": "23:00", "end": "08:00"})
 print("== 朗读：电脑合成（Mac 自带 / 微软 / Windows 自带语音）")
 status, body, _ = request("/api/tts/voices")
 voices = body.get("voices", [])
-check("列出中文语音，最自然的在前，不列太机械的（Mac 的 Eloquence）", status == 200 and voices and body.get("best") == voices[0]["id"]
+TTS_READY = bool(voices)   # 这台机器上没有可用的语音（Linux 没装 edge-tts 时）：合成那几项跳过
+if not TTS_READY:
+    skip("列出中文语音、合成音频、缓存", "这台机器上没有可用的语音（Linux 需要 edge-tts，打包版自带）")
+else:
+  check("列出中文语音，最自然的在前，不列太机械的（Mac 的 Eloquence）", status == 200 and voices and body.get("best") == voices[0]["id"]
       and not any("eloquence" in v["id"] for v in voices) and voices[0]["quality"] >= voices[-1]["quality"], str(voices[:3])[:300])
 def tts(text, voice=""):
     req = urllib.request.Request(BASE + "/api/tts", data=json.dumps({"text": text, "voice": voice, "rate": 1}).encode(), method="POST")
@@ -1007,10 +1037,11 @@ status, audio, headers, first = tts("好的，首页卡片间距已经改好了�
 kind = headers.get("Content-Type")
 looks = {"audio/mp4": audio[4:8] == b"ftyp", "audio/mpeg": audio[:3] == b"ID3" or audio[:2] in (b"\xff\xf3", b"\xff\xfb", b"\xff\xf2"),
          "audio/wav": audio[:4] == b"RIFF" and audio[8:12] == b"WAVE"}
-check("合成出一段音频（Mac 自带 m4a / 微软 mp3 / Windows 自带 wav）", status == 200 and looks.get(kind, False) and len(audio) > 2000,
-      "%s %s %d" % (status, kind, len(audio)))
-status, again, _, second = tts("好的，首页卡片间距已经改好了，测试也全部通过。")
-check("同一段第二次直接用缓存", status == 200 and again == audio and second < max(0.3, first), "%.2fs → %.2fs" % (first, second))
+if TTS_READY:
+    check("合成出一段音频（Mac 自带 m4a / 微软 mp3 / Windows 自带 wav）", status == 200 and looks.get(kind, False) and len(audio) > 2000,
+          "%s %s %d" % (status, kind, len(audio)))
+    status, again, _, second = tts("好的，首页卡片间距已经改好了，测试也全部通过。")
+    check("同一段第二次直接用缓存", status == 200 and again == audio and second < max(0.3, first), "%.2fs → %.2fs" % (first, second))
 status, _, _, _ = tts("   ")
 check("空文字被拒绝", status == 400)
 status, _, _, _ = tts("长" * 1600)
@@ -1019,18 +1050,25 @@ check("太长的一段被拒绝（手机端会切段）", status == 400)
 print("== 就绪检查")
 status, body, _ = request("/api/readiness")
 items = {i["id"]: i for i in body.get("items", [])}
-check("Mac 这一侧的检查项都在，每项带说明和怎么补", status == 200 and {"accessibility", "https", "speech", "sources", "vscode", "login", "push"} <= set(items)
-      and all(i["level"] in ("ok", "warn", "bad") and i["fix"] for i in items.values()), str(list(items))[:200])
+expected = {"accessibility", "https", "speech", "sources", "vscode", "login", "push"} if IS_MAC else {"https", "speech", "sources", "remote", "autostart"}
+check("这台电脑的检查项都在，每项带说明和怎么补", status == 200 and expected <= set(items)
+      and all(i["level"] in ("ok", "warn", "bad") and (i["fix"] or i["level"] == "ok") for i in items.values()), str(list(items))[:200])
 check("来源在线、观察器版本一致时显示就绪", items.get("sources", {}).get("level") == "ok", str(items.get("sources")))
 check("语音识别（测试里用假转写）显示已授权", items.get("speech", {}).get("level") == "ok")
-check("用固定本机签名构建（授权跨版本保留）", items.get("signing", {}).get("level") == "ok", str(items.get("signing")))
-# 一键安装（电脑端 Linux / Windows 才有这个接口；Mac 没有，回 404 就跳过）
+if IS_MAC:
+    check("用固定本机签名构建（授权跨版本保留）", items.get("signing", {}).get("level") == "ok", str(items.get("signing")))
+else:
+    skip("用固定本机签名构建（授权跨版本保留）", "Mac 专属")
+# 一键处理（老版本没有这个接口，回 404 就跳过）：Mac 只有「防火墙放行」，电脑端还有装组件
 status, body, _ = request("/api/readiness/fix", "POST", {"action": "install-tmux; rm -rf /"})
 if status != 404:
     check("一键安装：不认识的动作一律拒绝", status == 409 and body.get("message") == "不支持的操作", str(body)[:200])
-    status, body, _ = request("/api/readiness/fix", "POST", {"action": "install-tmux"})
-    check("一键安装：测试实例里不真装（只说要执行什么，或本来就不缺）", status == 200 and
-          (body.get("message", "").startswith("（测试）") or body.get("message") == "所需组件都已安装"), str(body)[:200])
+    status, body, _ = request("/api/readiness/fix", "POST", {"action": "allow-firewall"})
+    check("防火墙一键放行：测试实例里不真改防火墙（只说要做什么）", status == 200 and body.get("message", "").startswith("（测试）"), str(body)[:200])
+    if "accessibility" not in items:   # 电脑端（Mac 没有装组件这一套）
+        status, body, _ = request("/api/readiness/fix", "POST", {"action": "install-tmux"})
+        check("一键安装：测试实例里不真装（只说要执行什么，或本来就不缺）", status == 200 and
+              (body.get("message", "").startswith("（测试）") or body.get("message") == "所需组件都已安装"), str(body)[:200])
     if "terminal" in items:
         check("Linux：终端会话那项给出在 tmux 里运行 claude 的现成命令", "tmux new -A -s claude claude" in items["terminal"]["fix"], items["terminal"]["fix"])
 
@@ -1659,5 +1697,5 @@ check("解散群", status == 200 and gid not in [g["id"] for g in body.get("item
 status, body, _ = request("/api/groups/messages?id=%s" % q(gid))
 check("解散后消息一并删除", status == 404)
 
-print("\n接口：%d 项通过，%d 项失败" % (PASS[0], len(FAIL)))
+print("\n接口：%d 项通过，%d 项失败%s" % (PASS[0], len(FAIL), "，%d 项不适用（跳过）" % len(SKIP) if SKIP else ""))
 sys.exit(1 if FAIL else 0)

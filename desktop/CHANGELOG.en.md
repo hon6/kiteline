@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.35 (2026-11-09)
+
+### New Features
+
+- **Firewall alerts and one-tap access**: If Windows Firewall (or ufw on Linux) blocks your phone or other computers from connecting, the Readiness Check now tells you. Tap Allow Now and confirm on the computer to allow only Kiteline and the ports it uses. When adding a Kiteline computer times out, you're also prompted to check that computer's firewall.
+
 ## 1.0.34 (2026-11-09)
 
 ### New Features
