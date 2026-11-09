@@ -48,6 +48,10 @@ On a Linux server without a desktop, add `--service` to run it as a systemd user
 
 **On your phone**, get Kiteline from the [App Store](https://apps.apple.com/app/id6825244029) (iPhone, iPad and Apple Watch) and scan the pairing code shown on your computer. No account to create.
 
+**On Android, or without installing an app**, scan this code with WeChat to open the Kiteline Mini Program. Demo mode lets you try it right away; pair it with your computer the same way.
+
+<img src="assets/images/miniprogram-qr.jpg" width="160" alt="Kiteline WeChat Mini Program code">
+
 Your existing agent sessions show up on the phone right away. More in the [install guide](guide/user/install.md).
 
 ## "So what's the catch?"
@@ -133,8 +137,8 @@ On the same network, no: the phone talks to your computer directly over HTTPS, p
 **Do I have to change how I work?**
 No. Keep starting sessions in VS Code or the terminal. Kiteline finds them on its own. Terminal sessions that should accept replies from the phone need to run inside tmux.
 
-**Is there an Android or web app?**
-Not yet. The phone apps are iPhone, iPad and Apple Watch for now.
+**Is there an Android app?**
+Use the Kiteline WeChat Mini Program: scan the [code under Install](#install) with WeChat. Native apps are available for iPhone, iPad and Apple Watch.
 
 **Can I use it with agents on a server?**
 Yes. Install Kiteline on the server with `--service`, or add the server as a Remote-SSH host in the desktop app and Kiteline deploys a small read-only watcher over SSH (Python 3.8+ standard library only).

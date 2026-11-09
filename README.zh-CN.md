@@ -48,6 +48,10 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 **手机上**，到 [App Store](https://apps.apple.com/app/id6825244029) 下载 Kiteline（iPhone、iPad、Apple Watch），扫电脑上显示的配对码。不用注册账号。
 
+**安卓手机，或不想装 App**，用微信扫下面的码打开 Kiteline 小程序，演示模式可直接体验；配对电脑的方法相同。
+
+<img src="assets/images/miniprogram-qr.jpg" width="160" alt="Kiteline 微信小程序码">
+
 电脑上已有的 Agent 会话会马上出现在手机上。详见[安装说明](guide/user/install.zh-CN.md)。
 
 ## 「要花钱吗？」
@@ -133,8 +137,8 @@ Kiteline 不登录任何 AI 服务，不用你订阅的 token，也不调用任�
 **要改变工作习惯吗？**
 不用。会话照样在 VS Code 或终端里开，Kiteline 自己找到它们。终端里的会话要能从手机回复，需要跑在 tmux 里。
 
-**有安卓版或网页版吗？**
-目前还没有，手机端只有 iPhone、iPad 和 Apple Watch。
+**有安卓版吗？**
+安卓手机用微信扫[安装](#安装)一节里的小程序码，打开 Kiteline 小程序即可。原生 App 支持 iPhone、iPad 和 Apple Watch。
 
 **服务器上的 Agent 能用吗？**
 能。在服务器上用 `--service` 装 Kiteline；或者在电脑端把服务器加成 Remote-SSH 远端，Kiteline 通过 SSH 部署一个只读的监听脚本（只需要 Python 3.8+ 标准库）。
