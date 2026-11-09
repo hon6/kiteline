@@ -279,10 +279,13 @@ struct MacInputField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        // 滚动条一律浮在文字上（overlay）：接了鼠标时系统默认占位式滚动条，字数卡在框高附近时它忽隐忽现，
+        // 占掉 / 还回一条宽度，文字跟着反复折行跳动（11-09）
+        let scroll = OverlayScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
         let view = InputTextView()
         view.delegate = context.coordinator
@@ -391,6 +394,14 @@ struct MacInputField: NSViewRepresentable {
             let next = min(max(parent.minHeight, ceil(content)), parent.maxHeight)
             if abs(next - parent.height) > 0.5 { parent.height = next }
         }
+    }
+}
+
+/// 滚动条永远是浮层式、不占宽度：系统切换滚动条样式（插拔鼠标、改「显示滚动条」设置）时也不改回占位式
+final class OverlayScrollView: NSScrollView {
+    override var scrollerStyle: NSScroller.Style {
+        get { .overlay }
+        set { super.scrollerStyle = .overlay }
     }
 }
 

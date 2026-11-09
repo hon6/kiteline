@@ -212,7 +212,11 @@ html, body {
   flex: 1; min-width: 0; height: 26px; max-height: 72px; resize: none; padding: 4px 6px;
   font: 12px/16px "Pixel", sans-serif; color: var(--text); background: rgba(0, 0, 0, 0.45);
   border: 2px solid var(--line); outline: none; -webkit-user-select: text; user-select: text;
+  /* 滚动条位置一直留着：接鼠标的 Mac、Windows 上滚动条占宽度，字数卡在最高高度附近时它忽隐忽现，文字反复折行跳动 */
+  overflow-y: auto; scrollbar-gutter: stable;
 }
+.chatbox textarea::-webkit-scrollbar { width: 6px; }
+.chatbox textarea::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
 .chatbox textarea:focus { border-color: var(--brand); }
 .chatbox textarea:disabled { opacity: 0.55; }
 .chatbox textarea::placeholder { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

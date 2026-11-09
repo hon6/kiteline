@@ -1,5 +1,11 @@
 # Kiteline Release Notes
 
+## 3.49.28 (2026-11-09)
+
+### Bug Fixes
+
+- **No more jumping text while typing**: With a mouse connected, the scroll bar in the message box could flicker on and off as the text neared the maximum height, making lines rewrap back and forth. The scroll bar now floats over the text and no longer takes up width. The chat box in World mode is fixed as well.
+
 ## 3.49.27 (2026-11-09)
 
 ### Improvements

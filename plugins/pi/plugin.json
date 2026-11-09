@@ -1,0 +1,98 @@
+{
+ "id": "pi",
+ "name": "pi",
+ "version": "1.0.0",
+ "summary": "开源的终端编程 agent（pi-mono）：查看会话、状态和完整对话；在 tmux 中运行时可回复和中断",
+ "summaryEn": "Open-source terminal coding agent (pi-mono): view sessions, status and full conversations; reply and interrupt when it runs in tmux",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.pi/agent"
+  ],
+  "commands": [
+   "pi"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "interrupt"
+    ],
+    "verified": false,
+    "note": "回复和中断需要 pi 在 tmux 中运行"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "从手机操作暂未开放（Windows 上还没实测），只能查看"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复和中断需要 pi 在 tmux 中运行"
+   }
+  }
+ },
+ "limitsNote": "pi 不在本机记录订阅额度，也没有提供查询接口，「今日用量」中不显示；token 和花费按 pi 自己的记录统计（花费按 pi 内置的价目表计算，自定义模型服务不计花费）",
+ "limitsNoteEn": "pi doesn't record plan quotas on your computer and offers no way to query them, so they aren't shown under Today's usage; tokens and cost come from pi's own records (cost uses pi's built-in price list; custom model providers have no cost)",
+ "mark": [
+  {
+   "d": "M4 5h16v3h-3v8.5q0 1.5 1.5 1.5H20V20h-3q-3 0-3-3V8h-4v12H7V8H4z",
+   "opacity": 1
+  }
+ ],
+ "speaker": "pi",
+ "caps": [],
+ "notes": "首个版本：查看 pi 的会话和完整对话，在 tmux 中运行时可从手机回复、中断和关闭会话。",
+ "notesEn": "First release: view pi sessions and full conversations; reply, interrupt and close sessions from your phone when pi runs in tmux.",
+ "gaps": [
+  {
+   "kind": "unsupported",
+   "text": "没有确认和回答提问：pi 本身不弹权限确认框、也没有提问工具（官方的设计，需要的话由 pi 的扩展自己实现）",
+   "textEn": "No confirming or answering questions: pi itself never asks for permission and has no question tool (by design; extensions can add them)"
+  },
+  {
+   "kind": "unsupported",
+   "text": "从手机发的图片以文件路径随消息发送，由 pi 用读文件工具查看：pi 的终端界面只能从剪贴板贴图",
+   "textEn": "Images sent from your phone go with the message as file paths for pi to open with its read tool: pi's terminal interface only accepts images pasted from the clipboard"
+  },
+  {
+   "kind": "unsupported",
+   "text": "刚启动、还没发第一句的会话先显示为「新会话」，发出第一句后显示完整记录：pi 在第一句发出后才写会话文件",
+   "textEn": "A session that hasn't received its first message shows as \"New session\" until then: pi only writes the session file after the first message"
+  },
+  {
+   "kind": "untested",
+   "text": "Windows 上从手机回复、中断还没实测，暂未开放，只能查看；Windows 上的查看也还没实测",
+   "textEn": "Replying and interrupting from your phone on Windows aren't tested yet, so they're off and sessions are view-only; viewing on Windows isn't tested yet either"
+  },
+  {
+   "kind": "untested",
+   "text": "Mac 上从手机回复、中断还没实测（Mac 上认会话已核对；Linux 上已全部实测）",
+   "textEn": "Replying and interrupting from your phone haven't been tested on Mac yet (session detection on Mac is checked; fully tested on Linux)"
+  },
+  {
+   "kind": "untested",
+   "text": "没有用真实的模型服务账号实测（用 pi 的自定义模型配置接测试服务测的）",
+   "textEn": "Not tested with a real model provider account (tested through pi's custom model setting)"
+  }
+ ]
+}

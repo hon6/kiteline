@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.33 (2026-11-09)
+
+### Bug Fixes
+
+- **No more jumping text in World mode chat**: When text in the chat box neared the maximum height, the scroll bar could flicker on and off and make lines rewrap back and forth. Space for the scroll bar is now reserved.
+
 ## 1.0.32 (2026-11-09)
 
 ### Improvements

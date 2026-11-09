@@ -30,10 +30,11 @@
 | **Kimi Code** <br><sub>[插件](plugins/kimi-code)</sub> | 命令行 | 全部 <sup>17</sup> | 只读 <sup>9</sup> | 全部 ✓ <sup>17</sup> |
 |  | 桌面版 | 只读 <sup>18</sup> | — | — |
 | **Muse Code** <br><sub>[插件](plugins/muse-code)</sub> | 命令行 | 查看 · 回复 · 中断 <sup>19</sup> | 只读 <sup>9</sup> | 查看 · 回复 · 中断 ✓ <sup>19</sup> |
-| **Qwen Code** <br><sub>[插件](plugins/qwen-code)</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>20</sup> | 只读 <sup>21</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>20</sup> |
-| **trae-agent** <br><sub>[插件](plugins/trae-agent)</sub> | 命令行 | 查看 · 回复 <sup>22</sup> | 只读 <sup>9</sup> | 查看 · 回复 ✓ <sup>22</sup> |
-| **ZCode** <br><sub>[插件](plugins/zcode)</sub> | 桌面版 | 全部 ✓ <sup>23</sup> | 全部 ✓ <sup>23</sup> | 全部 ✓ <sup>23</sup> |
-|  | 命令行 | 全部 ✓ <sup>23</sup> | 全部 ✓ <sup>23</sup> | 全部 ✓ <sup>23</sup> |
+| **pi** <br><sub>[插件](plugins/pi)，即将上线</sub> | 命令行 | 查看 · 回复 · 中断 <sup>20</sup> | 只读 <sup>9</sup> | 查看 · 回复 · 中断 ✓ <sup>20</sup> |
+| **Qwen Code** <br><sub>[插件](plugins/qwen-code)</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>21</sup> | 只读 <sup>22</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>21</sup> |
+| **trae-agent** <br><sub>[插件](plugins/trae-agent)</sub> | 命令行 | 查看 · 回复 <sup>23</sup> | 只读 <sup>9</sup> | 查看 · 回复 ✓ <sup>23</sup> |
+| **ZCode** <br><sub>[插件](plugins/zcode)</sub> | 桌面版 | 全部 ✓ <sup>24</sup> | 全部 ✓ <sup>24</sup> | 全部 ✓ <sup>24</sup> |
+|  | 命令行 | 全部 ✓ <sup>24</sup> | 全部 ✓ <sup>24</sup> | 全部 ✓ <sup>24</sup> |
 
 1. 命令行会话需要在 tmux 中运行
 2. Codex 桌面版没有 Linux 版
@@ -54,7 +55,8 @@
 17. 回复和确认需要 Kimi Code 在 tmux 中运行
 18. 桌面版的会话只能查看
 19. 回复需要 Muse Code 在 tmux 中运行；从手机确认命令暂未开放
-20. 回复和确认需要 Qwen Code 在 tmux 中运行
-21. Windows 上没有 tmux，只能查看
-22. 发任务需要 trae-agent 在 tmux 中运行
-23. 使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认
+20. 回复和中断需要 pi 在 tmux 中运行
+21. 回复和确认需要 Qwen Code 在 tmux 中运行
+22. Windows 上没有 tmux，只能查看
+23. 发任务需要 trae-agent 在 tmux 中运行
+24. 使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认

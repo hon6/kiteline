@@ -1873,6 +1873,57 @@ trow = next(r for r in W.AgentPlugins([], external=[trae], off=()).describe() if
 check("trae-agent：做不到的（审批、提问、中断、忙时插话、Trae IDE）都在 gaps 里写明原因", trow["abilities"] == ["view", "reply"]
       and sum(1 for g in trow["gaps"] if g["kind"] == "unsupported") >= 5, trow.get("gaps"))
 
+print("\n== pi 插件（plugins/pi：~/.pi/agent/sessions 的会话 jsonl + tmux；单独下发）")
+PIDIR = os.path.join(ROOT, "pi-agent")
+PICWD = "/tmp/pi-proj"
+PISESS = os.path.join(PIDIR, "sessions", "--tmp-pi-proj--")
+os.makedirs(PISESS)
+PIMSG = lambda mid, ms, **m: {"type": "message", "id": mid, "parentId": None, "timestamp": "2026-11-09T01:26:27.000Z", "message": dict(m, timestamp=ms)}
+PIUSE = {"input": 70, "output": 20, "cacheRead": 30, "cacheWrite": 5, "totalTokens": 125,
+         "cost": {"input": 0.1, "output": 0.2, "cacheRead": 0, "cacheWrite": 0, "total": 0.3}}
+PILINES = [{"type": "session", "version": 3, "id": "pi-sess-1", "timestamp": "2026-11-09T01:26:17.163Z", "cwd": PICWD},
+           {"type": "model_change", "id": "m1", "parentId": None, "timestamp": "2026-11-09T01:26:17.173Z", "provider": "anthropic", "modelId": "m-a"},
+           PIMSG("u1", 1794187587375, role="user", content=[{"type": "text", "text": "看看这张图"}, {"type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}]),
+           PIMSG("a1", 1794187587400, role="assistant", model="m-b", stopReason="toolUse", usage=PIUSE,
+                 content=[{"type": "thinking", "thinking": "想一下"}, {"type": "text", "text": "先读文件"},
+                          {"type": "toolCall", "id": "t1", "name": "read", "arguments": {"path": "a.py"}},
+                          {"type": "toolCall", "id": "t2", "name": "edit", "arguments": {"path": "a.py", "edits": [{"oldText": "x", "newText": "y"}, {"oldText": "p", "newText": "q"}]}}]),
+           PIMSG("r1", 1794187587500, role="toolResult", toolCallId="t1", toolName="read", isError=False, content=[{"type": "text", "text": "print(1)"}]),
+           PIMSG("r2", 1794187587600, role="toolResult", toolCallId="t2", toolName="edit", isError=True, content=[{"type": "text", "text": "没找到"}]),
+           PIMSG("a2", 1794187587700, role="assistant", model="m-b", stopReason="aborted", usage=dict(PIUSE, cost=dict(PIUSE["cost"], total=0)), content=[]),
+           PIMSG("b1", 1794187587800, role="bashExecution", command="ls", output="a.py", exitCode=0),
+           {"type": "compaction", "id": "c1", "parentId": None, "timestamp": "2026-11-09T01:27:00.000Z", "summary": "……", "firstKeptEntryId": "u1"},
+           {"type": "session_info", "id": "n1", "parentId": None, "timestamp": "2026-11-09T01:27:01.000Z", "name": "整理代码"},
+           PIMSG("a3", 1794187587900, role="assistant", model="m-b", stopReason="error", errorMessage="429 限流", usage=PIUSE, content=[])]
+PIPATH = os.path.join(PISESS, "2026-11-09T01-26-17-163Z_pi-sess-1.jsonl")
+with open(PIPATH, "w") as handle:
+    for entry in PILINES:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+os.environ["PI_CODING_AGENT_DIR"] = PIDIR
+pi = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "pi")
+pitems, offset = [], 0
+with open(PIPATH, "rb") as handle:
+    for raw in handle:
+        pitems += [dict(i, _off=offset) for i in pi.normalize(offset, json.loads(raw))]
+        offset += len(raw)
+check("pi：记录规整（图片引用、思考、read / edit → Read / MultiEdit 带 file_path、失败的结果、中断、! 命令、压缩、出错都出提示）",
+      [(i["t"], i.get("name")) for i in pitems] == [("user", None), ("thinking", None), ("text", None), ("tool", "Read"), ("tool", "MultiEdit"),
+                                                    ("result", None), ("result", None), ("event", None), ("tool", "Bash"), ("result", None),
+                                                    ("event", None), ("event", None)]
+      and pitems[0]["images"][0]["mime"] == "image/png" and pitems[3]["input"]["file_path"] == "a.py"
+      and pitems[4]["input"]["edits"][1]["new_string"] == "q" and pitems[6]["isError"] and pitems[7]["text"] == "已中断"
+      and "429" in pitems[11]["text"], str(pitems)[:600])
+check("pi：图片按「行偏移.序号」从记录里取出", pi.media("pi-sess-1", pitems[0]["images"][0]["ref"], PIPATH) == {"mime": "image/png", "data": "aGVsbG8="})
+puse = sorted(pi.usage(0), key=lambda r: r["requests"])
+check("pi：token 按每条回复的 usage（input 不含读缓存）、花费用 pi 记的 cost.total（记 0 的当作没有花费）",
+      len(puse) == 1 and (puse[0]["model"], puse[0]["input"], puse[0]["output"], puse[0]["cacheRead"], puse[0]["cacheWrite"], puse[0]["requests"])
+      == ("m-b", 210, 60, 90, 15, 3) and abs(puse[0]["cost"] - 0.6) < 1e-9 and puse[0]["cwd"] == PICWD and puse[0]["session"] == "pi-sess-1", puse)
+check("pi：没有 pi 进程就没有开着的会话", pi.sessions() == [])
+prow = next(r for r in W.AgentPlugins([], external=[pi], off=()).describe() if r["id"] == "pi")
+check("pi：能力是查看、回复、中断（没有确认框），做不到的写进 gaps", prow["abilities"] == ["view", "reply", "interrupt"]
+      and sum(1 for g in prow["gaps"] if g["kind"] == "unsupported") >= 2, prow.get("abilities"))
+del os.environ["PI_CODING_AGENT_DIR"]
+
 print("\n== Cursor 插件（plugins/cursor：hooks 记录 + 配套扩展 + tmux；单独下发）")
 CHOME = os.path.join(ROOT, "cursor-home")
 CSTATE = os.path.join(os.environ["CCPULSE_DATA_DIR"], "cursor")
