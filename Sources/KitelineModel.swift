@@ -110,6 +110,8 @@ struct SourceItem: Identifiable, Equatable {
     /// 那台电脑能后台运行 Claude Code（远端、watcher 支持）；开没开（按设备，见 Hosted）
     var hostedSupport = false
     var hostedOn = false
+    /// 互联的 Kiteline 电脑上的来源：是哪台电脑（PeerComputers）
+    var peerId: String? = nil
 }
 
 /// 左边会话列表显示还是收起（世界模式里能收起，世界占满整个窗口；展开时浮在世界上面）。
@@ -243,7 +245,8 @@ final class KitelineModel: ObservableObject {
             return SourceItem(id: pair.config.id, name: ServerLang.machine(pair.config.displayName), kind: pair.config.kind,
                               host: pair.config.sshHost, enabled: pair.config.enabled, online: online,
                               status: ServerLang.ui(pair.state.shortLabel), sessions: count,
-                              hostedSupport: pair.config.kind == .ssh && Hosted.supported(pair.config.id), hostedOn: pair.config.hostedOn)
+                              hostedSupport: pair.config.kind == .ssh && Hosted.supported(pair.config.id), hostedOn: pair.config.hostedOn,
+                              peerId: pair.config.peerId)
         }
         if summaries != sources { sources = summaries }
         if phoneClients != state.mobile.clientCount { phoneClients = state.mobile.clientCount }

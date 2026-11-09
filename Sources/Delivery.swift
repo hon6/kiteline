@@ -91,6 +91,11 @@ enum Delivery {
                     completion(Outcome(ok: false, submitted: false, message: "内容为空"))
                     return
                 }
+                // 互联的另一台 Kiteline 电脑上的会话：文件已经经它传到会话所在机器，文字交给那台电脑投递（VS Code 在那台上）
+                if record.kind == .kiteline {
+                    PeerComputers.shared.deliver("/api/send", record: record, body: ["text": prompt, "submit": submit], completion: completion)
+                    return
+                }
                 if viaAgent(record), !dryRun {
                     // 图片按图片给（Codex、OpenCode 都收本地图片路径），不拼进文字；文件只能写成路径交给它自己读。
                     // ui：这台 Mac 会替插件按键（插件回动作单时执行，见 runUIActions；Cursor 编辑器空闲时发消息靠它）
@@ -255,6 +260,10 @@ enum Delivery {
     static func press(key: String, times: Int = 1, record: SessionRecord, source: SourceConnection?, inFront: Bool = false,
                       completion: @escaping (Outcome) -> Void) {
         let times = max(1, min(times, 6))
+        if record.kind == .kiteline {
+            PeerComputers.shared.deliver("/api/key", record: record, body: ["key": key, "times": times], completion: completion)
+            return
+        }
         guard let (code, flags) = keyCode(key) else {
             completion(Outcome(ok: false, submitted: false, message: "不支持的按键：\(key)")); return
         }
@@ -415,6 +424,10 @@ enum Delivery {
             lastDelivered = (record.key, "<close>", false)
             Log.write("[dry-run] 关闭会话 \(record.snapshot.name)")
             completion(Outcome(ok: true, submitted: false, message: "dry-run"))
+            return
+        }
+        if record.kind == .kiteline {
+            PeerComputers.shared.deliver("/api/close", record: record, body: [:], completion: completion)
             return
         }
         if viaAgent(record) {

@@ -1002,6 +1002,8 @@ enum PhoneAccess {
 struct SourcesPane: View {
     @ObservedObject var model = KitelineModel.shared
     @State private var adding = false
+    /// 添加另一台装了 Kiteline 的电脑（PeerComputers）
+    @State private var addingPeer = false
     /// 后台运行 Claude Code 的面板（检测出口 IP、按设备开启；和手机同一个，见 KitelineKit/Views/HostedViews.swift）
     @State private var showHosted = false
     @State private var tipOff = AppState.shared.config.mobile.hostedTipOff
@@ -1012,7 +1014,7 @@ struct SourcesPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Kiteline 监听以下机器上的 Claude Code：本机，以及你在 VS Code 中通过 Remote-SSH 连接的远端主机。首次连接远端时将自动部署观察器。")
+            Text("Kiteline 监听以下机器上的 Claude Code：本机、你在 VS Code 中通过 Remote-SSH 连接的远端主机，以及添加的其他 Kiteline 电脑。首次连接远端时将自动部署观察器。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // 有能后台运行、还没开的远端设备：问一声要不要开（勾了「不再提示」就不问，各行的按钮照旧在）
@@ -1045,7 +1047,11 @@ struct SourcesPane: View {
             }
             .tarsCard(padding: 6)
 
-            if adding {
+            PeerComputersCard()
+
+            if addingPeer {
+                AddPeerCard { addingPeer = false }
+            } else if adding {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("添加 Remote-SSH 主机").font(.app(size: 13, weight: .semibold))
                     TextField("主机（与 ssh 命令中的写法一致，如 my-server 或 10.0.0.5）", text: $host)
@@ -1067,6 +1073,9 @@ struct SourcesPane: View {
                 HStack {
                     Button { adding = true } label: { Label("添加 Remote-SSH 主机", systemImage: "plus") }
                         .tarsButton()
+                    Button { addingPeer = true } label: { Label("添加 Kiteline 电脑", systemImage: "desktopcomputer") }
+                        .tarsButton()
+                        .help("添加另一台安装了 Kiteline 的电脑，在这里查看并操作它的会话")
                     Spacer()
                     Button("全部重新连接") { AppState.shared.reconnect() }.tarsButton()
                 }
@@ -1074,7 +1083,7 @@ struct SourcesPane: View {
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: SettingsWindowController.width, height: 520, alignment: .top)
+        .frame(width: SettingsWindowController.width, height: 600, alignment: .top)
         .sheetPanel(isPresented: $showHosted) { TarsHostedSetupView() }
     }
 
@@ -1108,7 +1117,7 @@ struct SourceRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: source.kind == .ssh ? "server.rack" : "laptopcomputer")
+            Image(systemName: source.kind == .ssh ? "server.rack" : (source.kind == .kiteline ? "desktopcomputer" : "laptopcomputer"))
                 .font(.app(size: 16))
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
@@ -1159,7 +1168,10 @@ struct SourceRow: View {
                     Button("重新部署观察器") { AppState.shared.redeployWatcher(on: source.id) }
                 }
                 Button(source.enabled ? "停用" : "启用") { AppState.shared.setSource(source.id, enabled: !source.enabled) }
-                if source.id != "local" {
+                if source.kind == .kiteline {
+                    Divider()
+                    Button("移除这台电脑…", role: .destructive) { PeerComputersCard.confirmRemove(source.peerId) }
+                } else if source.id != "local" {
                     Divider()
                     Button("移除", role: .destructive) { AppState.shared.removeSource(source.id) }
                 }
@@ -1188,6 +1200,143 @@ struct SourceRow: View {
         guard editing else { return }
         editing = false
         AppState.shared.renameSource(source.id, to: draft)
+    }
+}
+
+// MARK: - Kiteline 电脑（互联）
+
+/// 已添加的 Kiteline 电脑：在线状态、连不上的原因、移除（来源行在上面的列表里，按对方的来源自动增删）
+struct PeerComputersCard: View {
+    @State private var peers = PeerComputers.shared.all
+    @State private var problems = PeerComputers.shared.problems
+    private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        if !peers.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(peers) { peer in
+                    HStack(spacing: 10) {
+                        Image(systemName: "desktopcomputer").font(.app(size: 14)).frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(peer.name).font(.app(size: 12.5, weight: .semibold))
+                            HStack(spacing: 5) {
+                                Circle().fill(problems[peer.id] == nil ? Color.green : Color.red).frame(width: 6, height: 6)
+                                Text(problems[peer.id].map { ServerLang.ui($0) }
+                                     ?? L("已互联 · %@", peer.addresses.first.flatMap { URL(string: $0)?.host } ?? ""))
+                                    .lineLimit(1)
+                            }
+                            .font(.app(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("移除") { Self.confirmRemove(peer.id) }
+                            .buttonStyle(.borderless).font(.app(size: 11.5)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 7)
+                    if peer.id != peers.last?.id { Divider().padding(.leading, 46) }
+                }
+            }
+            .tarsCard(padding: 6)
+            .onReceive(timer) { _ in reload() }
+            .onAppear(perform: reload)
+        } else {
+            Color.clear.frame(height: 0).onReceive(timer) { _ in reload() }
+        }
+    }
+
+    private func reload() {
+        let list = PeerComputers.shared.all.sorted { $0.addedAt < $1.addedAt }
+        if list != peers { peers = list }
+        if PeerComputers.shared.problems != problems { problems = PeerComputers.shared.problems }
+    }
+
+    static func confirmRemove(_ id: String?) {
+        guard let peer = PeerComputers.shared.peer(id) else { return }
+        let alert = NSAlert()
+        alert.messageText = L("移除电脑「%@」？", peer.name)
+        alert.informativeText = L("移除后两台电脑互相看不到对方的会话；经这台电脑登记到「%@」上的手机也会失效。之后可以重新添加。", peer.name)
+        alert.addButton(withTitle: L("移除"))
+        alert.addButton(withTitle: L("取消"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        PeerComputers.shared.remove(peer.id)
+    }
+}
+
+/// 添加 Kiteline 电脑：列出局域网里找到的，或手输地址；再输那台电脑「手机访问」页上的 6 位验证码，那台电脑上点「允许」
+struct AddPeerCard: View {
+    var done: () -> Void
+    @StateObject private var finder = PeerFinder()
+    @State private var address = ""
+    @State private var code = ""
+    @State private var fingerprint: String?
+    @State private var picked: String?
+    @State private var busy = false
+    @State private var message = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("添加 Kiteline 电脑").font(.app(size: 13, weight: .semibold))
+            Text("在那台电脑上打开 Kiteline「设置 → 手机访问」，填入它的地址和页面上显示的 6 位验证码，再到那台电脑上点「允许」。两台电脑之间直接连接（局域网、公网 IP 或你自己的组网），不经过 Kiteline 的中继。")
+                .font(.app(size: 11.5)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !finder.found.isEmpty {
+                HStack(spacing: 6) {
+                    Text("局域网中：").font(.app(size: 11.5)).foregroundStyle(.secondary)
+                    ForEach(finder.found) { item in
+                        Button(item.name) { pick(item) }
+                            .buttonStyle(.borderless)
+                            .font(.app(size: 11.5, weight: picked == item.id ? .semibold : .regular))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(picked == item.id ? 0.14 : 0.05)))
+                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(picked == item.id ? 0.5 : 0.15), lineWidth: 0.8))
+                    }
+                }
+            }
+            TextField("地址（IP 或域名，如 192.168.1.20；端口不是 8766 时写成 IP:端口）", text: $address)
+                .onChange(of: address) { _, _ in if picked != nil, !busy { fingerprint = nil; picked = nil } }
+            TextField("6 位验证码", text: $code)
+            if !message.isEmpty {
+                Text(message).font(.app(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("取消") { finder.stop(); done() }.tarsButton()
+                Button(busy ? "等待对方电脑确认…" : "添加") { add() }
+                    .tarsButton(prominent: true)
+                    .disabled(busy || address.trimmingCharacters(in: .whitespaces).isEmpty || code.filter(\.isNumber).count != 6)
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+        .tarsCard()
+        .onAppear { finder.start() }
+        .onDisappear { finder.stop() }
+    }
+
+    private func pick(_ item: PeerFinder.Found) {
+        message = L("正在查找「%@」的地址…", item.name)
+        finder.address(of: item) { url in
+            guard let url else { message = L("找不到「%@」的地址，请手动填写", item.name); return }
+            address = url.replacingOccurrences(of: "https://", with: "")
+            fingerprint = item.fingerprint
+            picked = item.id
+            message = ""
+        }
+    }
+
+    private func add() {
+        busy = true
+        message = L("已发出请求，请在那台电脑上点「允许」（60 秒内）")
+        PeerComputers.shared.add(address: address, code: code, fingerprint: fingerprint) { result in
+            busy = false
+            switch result {
+            case .success(let peer):
+                message = ""
+                finder.stop()
+                done()
+                Log.write("来源页：已添加电脑「\(peer.name)」")
+            case .failure(let error):
+                message = L("添加失败：%@", ServerLang.ui(error.description))
+            }
+        }
     }
 }
 

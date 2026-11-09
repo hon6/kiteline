@@ -483,7 +483,7 @@ entries = body.get("entries", [])
 actions = {e["action"] for e in entries}
 check("每类写操作都有记录", {"发送消息", "按键", "回答提问", "语音", "新任务", "恢复会话", "修改快捷短语", "推送日报", "修改花费提醒 / 上限", "配对"} <= actions, str(sorted(actions)))
 sent = next((e for e in entries if e["action"] == "发送消息" and e.get("ok")), {})
-check("记下目标会话、内容和来自哪台设备", sent.get("target") and sent.get("detail") and sent.get("client") == "这台 Mac", str(sent))
+check("记下目标会话、内容和来自哪台设备", sent.get("target") and sent.get("detail") and sent.get("client") == "这台电脑", str(sent))
 pressed = next((e for e in entries if e["action"] == "按键" and e.get("ok")), {})
 check("按键记成人能看懂的名字", pressed.get("detail") in ("允许", "总是允许", "拒绝 / 中断", "确认"), str(pressed))
 failed = [e.get("message", "") for e in entries if e["action"] == "新任务" and not e["ok"]]

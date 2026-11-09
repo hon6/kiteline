@@ -506,8 +506,11 @@ else:
     stop = wait(lambda: next((r for r in fake_ipc.requests if r[0] == "thread-follower-interrupt-turn"), None), timeout=3)
     check("IPC：没有待确认时 Esc → 中断（user-stop）", stop and stop[1]["mode"] == "user-stop", str(stop))
     fake_ipc.patch([{"op": "replace", "path": ["threadRuntimeStatus"], "value": {"type": "idle"}}], base=999)
-    resync = wait(lambda: sum(1 for r in fake_ipc.requests if r[0] == "thread-stream-following-changed") >= 2, timeout=6)
-    check("IPC：补丁漏了（修订号对不上）→ 重新要快照", resync and ipc.states["c1"]["revision"] == fake_ipc.revision)
+    # 等「重新跟随」发出去、且重新拿到的快照已经处理完：对方是收到请求后才回快照，只等请求的话修订号可能还没更新（偶发失败）
+    resync = wait(lambda: sum(1 for r in fake_ipc.requests if r[0] == "thread-stream-following-changed") >= 2
+                  and ipc.states["c1"]["revision"] == fake_ipc.revision, timeout=6)
+    check("IPC：补丁漏了（修订号对不上）→ 重新要快照", resync and ipc.states["c1"]["revision"] == fake_ipc.revision,
+          (ipc.states["c1"]["revision"], fake_ipc.revision))
     fake_ipc.state["threadRuntimeStatus"] = {"type": "idle"}
     fake_ipc.snapshot()
     wait(lambda: all(s["activity"] == "idle" for s in ipc.snapshots(set())), timeout=3)
@@ -1683,7 +1686,29 @@ for rel in ("ZCode.exe", "resources/glm/zcode.cjs", "resources/config/provider/z
     open(os.path.join(zapp, rel), "w").close()
 _zold = {k: os.environ.pop(k, None) for k in ("ZCODE_BIN", "LOCALAPPDATA", "PATH")}
 os.environ["LOCALAPPDATA"], os.environ["PATH"] = os.path.join(ROOT, "zlocal"), ""
-zc_cmd, zc_env = zcmd()
+# 模拟 Windows 的安装位置：本机真装了 ZCode（/Applications/ZCode.app）时插件会先找到它，测试时把本机的位置屏蔽掉，
+# 只认测试目录里造的文件（不然在装了 ZCode 的 Mac 上这一项永远失败）
+_zisfile = os.path.isfile
+os.path.isfile = lambda path: str(path).startswith(ROOT) and _zisfile(path)
+try:
+    zc_cmd, zc_env = zcmd()
+    # Mac 版：程序在 ZCode.app/Contents/MacOS/，脚本和内置服务商配置在 Contents/Resources/ 下
+    zmac = os.path.join(ROOT, "zmac", "ZCode.app")
+    for rel in ("Contents/MacOS/ZCode", "Contents/Resources/glm/zcode.cjs", "Contents/Resources/config/provider/zcode-builtin.json"):
+        os.makedirs(os.path.dirname(os.path.join(zmac, rel)), exist_ok=True)
+        open(os.path.join(zmac, rel), "w").close()
+    os.environ["LOCALAPPDATA"] = os.path.join(ROOT, "nowhere")
+    _zps = _zcells(zcmd).get("ps_text")
+    zmac_cmd, zmac_env = None, {}
+    if _zps is not None:
+        _zcell = dict(zip(zcmd.__code__.co_freevars, zcmd.__closure__))["ps_text"]
+        _zcell.cell_contents = lambda: "4242 %s/Contents/MacOS/ZCode --type=main" % zmac
+        try:
+            zmac_cmd, zmac_env = zcmd()
+        finally:
+            _zcell.cell_contents = _zps
+finally:
+    os.path.isfile = _zisfile
 for k, v in _zold.items():
     os.environ.pop(k, None)
     if v is not None:
@@ -1693,6 +1718,10 @@ check("ZCode：用桌面版自带的命令行时指给它内置服务商配置�
       and zc_env.get("ZCODE_BIN") is None and zc_env.get("ELECTRON_RUN_AS_NODE") == "1"
       and zc_env.get("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE") == os.path.join(zapp, "resources", "config", "provider", "zcode-builtin.json"),
       (zc_cmd, zc_env))
+check("ZCode：Mac 版（ZCode.app）也找得到自带的命令行和内置服务商配置",
+      zmac_cmd == [os.path.join(zmac, "Contents", "MacOS", "ZCode"), os.path.join(zmac, "Contents", "Resources", "glm", "zcode.cjs")]
+      and zmac_env.get("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE") == os.path.join(zmac, "Contents", "Resources", "config", "provider", "zcode-builtin.json"),
+      (zmac_cmd, zmac_env))
 _zjoin, _zreq = zS.join, zS.request
 zS.join = lambda sid, cwd: None
 def _zbusy(method, params, timeout=30):
@@ -1891,6 +1920,8 @@ PILINES = [{"type": "session", "version": 3, "id": "pi-sess-1", "timestamp": "20
            PIMSG("r1", 1794187587500, role="toolResult", toolCallId="t1", toolName="read", isError=False, content=[{"type": "text", "text": "print(1)"}]),
            PIMSG("r2", 1794187587600, role="toolResult", toolCallId="t2", toolName="edit", isError=True, content=[{"type": "text", "text": "没找到"}]),
            PIMSG("a2", 1794187587700, role="assistant", model="m-b", stopReason="aborted", usage=dict(PIUSE, cost=dict(PIUSE["cost"], total=0)), content=[]),
+           PIMSG("a4", 1794187587750, role="assistant", model="m-b", stopReason="aborted", content=[],
+                 usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0, "cost": {"total": 0}}),
            PIMSG("b1", 1794187587800, role="bashExecution", command="ls", output="a.py", exitCode=0),
            {"type": "compaction", "id": "c1", "parentId": None, "timestamp": "2026-11-09T01:27:00.000Z", "summary": "……", "firstKeptEntryId": "u1"},
            {"type": "session_info", "id": "n1", "parentId": None, "timestamp": "2026-11-09T01:27:01.000Z", "name": "整理代码"},
@@ -1908,14 +1939,14 @@ with open(PIPATH, "rb") as handle:
         offset += len(raw)
 check("pi：记录规整（图片引用、思考、read / edit → Read / MultiEdit 带 file_path、失败的结果、中断、! 命令、压缩、出错都出提示）",
       [(i["t"], i.get("name")) for i in pitems] == [("user", None), ("thinking", None), ("text", None), ("tool", "Read"), ("tool", "MultiEdit"),
-                                                    ("result", None), ("result", None), ("event", None), ("tool", "Bash"), ("result", None),
+                                                    ("result", None), ("result", None), ("event", None), ("event", None), ("tool", "Bash"), ("result", None),
                                                     ("event", None), ("event", None)]
       and pitems[0]["images"][0]["mime"] == "image/png" and pitems[3]["input"]["file_path"] == "a.py"
       and pitems[4]["input"]["edits"][1]["new_string"] == "q" and pitems[6]["isError"] and pitems[7]["text"] == "已中断"
-      and "429" in pitems[11]["text"], str(pitems)[:600])
+      and "429" in pitems[12]["text"], str(pitems)[:600])
 check("pi：图片按「行偏移.序号」从记录里取出", pi.media("pi-sess-1", pitems[0]["images"][0]["ref"], PIPATH) == {"mime": "image/png", "data": "aGVsbG8="})
 puse = sorted(pi.usage(0), key=lambda r: r["requests"])
-check("pi：token 按每条回复的 usage（input 不含读缓存）、花费用 pi 记的 cost.total（记 0 的当作没有花费）",
+check("pi：token 按每条回复的 usage（input 不含读缓存）、花费用 pi 记的 cost.total（记 0 的当作没有花费）、全 0 的（没出字就中断）不算请求",
       len(puse) == 1 and (puse[0]["model"], puse[0]["input"], puse[0]["output"], puse[0]["cacheRead"], puse[0]["cacheWrite"], puse[0]["requests"])
       == ("m-b", 210, 60, 90, 15, 3) and abs(puse[0]["cost"] - 0.6) < 1e-9 and puse[0]["cwd"] == PICWD and puse[0]["session"] == "pi-sess-1", puse)
 check("pi：没有 pi 进程就没有开着的会话", pi.sessions() == [])

@@ -99,7 +99,7 @@ enum Audit {
             if request.query["via"] == "watch" { return "\(device.name)的 Apple Watch · \(address)" }
             return "\(device.name) · \(address)"
         }
-        if ["127.0.0.1", "::1", "localhost"].contains(address) { return "这台 Mac" }
+        if ["127.0.0.1", "::1", "localhost"].contains(address) { return "这台电脑" }   // App 里统一叫「电脑」（同 Windows / Linux 版）
         let agent = request.headers["user-agent"] ?? ""
         let device: String
         if agent.contains("iPhone") { device = "iPhone" }

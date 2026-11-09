@@ -83,6 +83,8 @@ final class MobileServer {
     /// 输错配对码的记录（时间、从哪来）：同一个来源 10 分钟错 8 次只锁它自己，所有来源合计 30 次才全锁——
     /// 以前是合计 8 次就全锁，局域网里谁连输 8 次错码，你自己也配不了 10 分钟
     private var failedPairings: [(at: Date, from: String)] = []
+    /// 当前这个配对码输错了几次（5 次作废，见 pair）
+    private var codeFailures = 0
     /// 二维码 / 配对链接里的一次性令牌 → 过期时间：10 分钟有效，登记一台设备就作废。
     /// 以前二维码里放的是主令牌：被人拍到 / 截到就能一直配对，直到重置。主令牌现在只留在本机（Mac 自己的窗口用）
     private var linkTokens: [String: Date] = [:]
@@ -234,6 +236,7 @@ final class MobileServer {
     func newPairingCode() -> String {
         let code = String(format: "%06d", Int.random(in: 0...999_999))
         pairLock.lock()
+        codeFailures = 0
         storedPairingCode = code
         storedPairingExpiry = Date().addingTimeInterval(600)
         pairLock.unlock()
@@ -512,6 +515,8 @@ final class MobileServer {
 
     /// 锁屏推送：中文设备收 zh，英文设备收 en（except 里的设备都不发）
     private func pushLocalized(_ zh: [String: Any], _ en: [String: Any], urgency: String = "high", except: Set<String>) {
+        // 别的电脑替手机在本机登记的：那台电脑连着本机时由它转推，本机不推（免得一条提醒手机收两遍）
+        let except = except.union(PeerComputers.shared.pushSuppressed())
         let english = MobileServer.englishDevices()
         push.send(zh, urgency: urgency, except: except.union(english))
         let targets = english.subtracting(except)
@@ -582,6 +587,37 @@ final class MobileServer {
 
         // API 都在主线程处理：会话状态归主线程所有；耗时的事都是异步回调
         DispatchQueue.main.async {
+            // 电脑互联：别的 Kiteline 电脑来取本机的会话（/api/peer/*）；手机问另一台电脑的地址（/api/computers）
+            if case .device(let device) = auth, PeerComputers.shared.handle(request, device: device, reply: reply, respond: respond) { return }
+            if request.path.hasPrefix("/api/peer/") { respond(.error("只有互联的 Kiteline 电脑能用", status: 403)); return }
+            switch (request.method, request.path) {
+            case ("GET", "/api/computers"):
+                respond(.json(PeerComputers.shared.computersPayload())); return
+            case ("POST", "/api/computers/add"), ("POST", "/api/computers/remove"):
+                // 本机界面、自测用（只认主令牌）：添加 / 移除 Kiteline 电脑
+                guard case .master = auth else { respond(.error("只有这台电脑自己能用", status: 403)); return }
+                let body = request.jsonBody ?? [:]
+                if request.path.hasSuffix("/remove") {
+                    PeerComputers.shared.remove(body["id"] as? String ?? ""); respond(.json(["ok": true])); return
+                }
+                PeerComputers.shared.add(address: body["address"] as? String ?? "", code: body["code"] as? String ?? "",
+                                         fingerprint: body["fingerprint"] as? String) { result in
+                    switch result {
+                    case .success(let peer): respond(.json(["ok": true, "id": peer.id, "name": peer.name]))
+                    case .failure(let error): respond(.error("添加失败：\(error.description)", status: 400))
+                    }
+                }
+                return
+            case ("POST", "/api/computers/enroll"):
+                guard case .device(let phone) = auth, phone.kind != "computer" else { respond(.error("只有手机能用", status: 403)); return }
+                PeerComputers.shared.enroll(phone: phone, computer: request.jsonBody?["id"] as? String ?? "", respond: respond); return
+            default: break
+            }
+            // 对互联的别的电脑上的会话的操作：整条转给那台电脑执行（VS Code 在那台上）
+            if let target = PeerComputers.shared.forwardTarget(request) {
+                if request.path == "/api/send" || request.path == "/api/resume" { IdleClose.shared.touch([request.query["key"] ?? ""]) }
+                PeerComputers.shared.forward(request, to: target, respond: respond); return
+            }
             switch (request.method, request.path) {
             case ("GET", "/api/state"):
                 // 各台机器的性能只在这里附上（刚连上时用）：之后的变化走 sys 事件，不进推送的 state
@@ -923,6 +959,7 @@ final class MobileServer {
                 // 打开了这些会话的详情（对话页打开时、开着且在前台时每 10 分钟）：{keys:[…]}；
                 // 启动时再带上本机记的最后看过 seen:{key: 毫秒}，补升级前的历史。见 IdleClose
                 IdleClose.shared.touch((request.jsonBody?["keys"] as? [String]) ?? [])
+                PeerComputers.shared.noteViewed((request.jsonBody?["keys"] as? [String]) ?? [])
                 if let seen = request.jsonBody?["seen"] as? [String: Any] {
                     IdleClose.shared.merge(history: seen.compactMapValues { ($0 as? NSNumber)?.doubleValue })
                 }
@@ -1209,6 +1246,23 @@ final class MobileServer {
         }
     }
 
+    /// 局域网 / 本机 / Tailscale 这类内网地址（不是从公网来的）
+    static func isPrivateAddress(_ raw: String) -> Bool {
+        var ip = (raw.split(separator: "%").first.map(String.init) ?? raw).lowercased()
+        if ip.hasPrefix("::ffff:") { ip = String(ip.dropFirst("::ffff:".count)) }
+        if ip.contains(":") {
+            return ip == "::1" || ip.hasPrefix("fe80") || ip.hasPrefix("fc") || ip.hasPrefix("fd") || ip.hasPrefix("fd7a:115c:a1e0")
+        }
+        let parts = ip.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        switch (parts[0], parts[1]) {
+        case (10, _), (127, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        case (100, 64...127): return true   // Tailscale / 运营商级 NAT
+        default: return false
+        }
+    }
+
     static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
         let a = Array(lhs.utf8), b = Array(rhs.utf8)
         guard a.count == b.count else { return false }
@@ -1226,19 +1280,34 @@ final class MobileServer {
     /// 用的人多了，有人输错一位碰巧撞上别人 Mac 上正显示的码，或者有人批量乱试，都配不进去
     private func pair(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
         let code = request.query["code"] ?? (request.jsonBody?["code"] as? String) ?? ""
+        // 另一台 Kiteline 电脑来互联（带着它自己的身份，见 PeerComputers）
+        let computer = request.jsonBody?["computer"] as? [String: Any]
+        let publicSource = !MobileServer.isPrivateAddress(request.remoteAddress)
         let now = Date()
         pairLock.lock()
-        failedPairings.removeAll { now.timeIntervalSince($0.at) > 600 }
-        if failedPairings.filter({ $0.from == request.remoteAddress }).count >= 8 || failedPairings.count >= 30 {
+        failedPairings.removeAll { now.timeIntervalSince($0.at) > 3600 }
+        let recent = failedPairings.filter { now.timeIntervalSince($0.at) <= 600 }
+        // 有人把端口开到公网：从公网地址来的错码一小时合计超过 10 次，公网来的配对一律先停一小时（局域网里的照常）
+        let publicFailures = failedPairings.filter { !MobileServer.isPrivateAddress($0.from) }.count
+        if recent.filter({ $0.from == request.remoteAddress }).count >= 8 || recent.count >= 30 || (publicSource && publicFailures >= 10) {
             pairLock.unlock()
-            Log.write("手机配对被拒：10 分钟内输错太多次（\(request.remoteAddress)）")
-            respond(.error("尝试次数过多，请 10 分钟后重试", status: 429))
+            Log.write("配对被拒：输错太多次（\(request.remoteAddress)）")
+            respond(.error(publicSource && publicFailures >= 10 ? "尝试次数过多，请 1 小时后重试" : "尝试次数过多，请 10 分钟后重试", status: 429))
             return
         }
         guard !storedPairingCode.isEmpty, now < storedPairingExpiry,
               MobileServer.constantTimeEquals(code, storedPairingCode) else {
             let why = storedPairingCode.isEmpty ? "这个码已经用过" : (now >= storedPairingExpiry ? "码已过期" : "码不对")
             failedPairings.append((now, request.remoteAddress))
+            // 防撞码：同一个验证码输错 5 次就作废（「手机访问」页上自动换新码），一个码最多只给猜 5 次
+            if !storedPairingCode.isEmpty, now < storedPairingExpiry {
+                codeFailures += 1
+                if codeFailures >= 5 {
+                    storedPairingCode = ""
+                    storedPairingExpiry = now
+                    Log.write("配对码连续输错 5 次，已作废，换新码")
+                }
+            }
             pairLock.unlock()
             // 失败也记一笔：之前只记成功，用户说「配对码从来没成功过」时日志里什么都查不到
             Log.write("手机配对失败：\(why)（\(request.remoteAddress)）")
@@ -1247,7 +1316,24 @@ final class MobileServer {
         }
         storedPairingCode = ""   // 一次性：等确认的这段时间里别人再拿同一个码来也不行
         pairLock.unlock()
-        guard ["127.0.0.1", "::1"].contains(request.remoteAddress) else {
+        if let computer {
+            let name = (computer["name"] as? String).map { String($0.prefix(60)) } ?? "Kiteline 电脑"
+            Log.write("电脑「\(name)」（\(request.remoteAddress)）请求互联，等待本机确认")
+            DispatchQueue.main.async {
+                if PeerPrompt.ask(name: name, address: request.remoteAddress) {
+                    respond(PeerComputers.shared.acceptPairing(request, computer: computer))
+                } else {
+                    self.pairLock.lock()
+                    self.failedPairings.append((Date(), request.remoteAddress))
+                    self.pairLock.unlock()
+                    Log.write("电脑互联未获允许（点了拒绝，或 60 秒内没有确认）")
+                    respond(.error("对方电脑上未允许这次互联。请确认输入的是那台电脑上显示的验证码，重新添加后在那台电脑上点「允许」", status: 403))
+                }
+            }
+            return
+        }
+        // 局域网里来的直接配上；经远程访问（中继，本机看来是 127.0.0.1）、从公网地址来的，要在电脑上点「允许」
+        guard DeviceStore.isLoopback(request.remoteAddress) || publicSource else {
             respond(finishPairing(request))
             return
         }

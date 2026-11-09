@@ -58,6 +58,7 @@ final class AppState {
             sources.values.forEach { $0.start() }
         }
         mobile.start()
+        PeerComputers.shared.start()   // 互联的别的 Kiteline 电脑：定时问它有哪些来源，同步成本机的来源
         PluginStore.shared.start()   // Agent 插件：定时查官方索引，自动更新在用的插件
         // 远程访问（点对点）。测试实例（dry-run、另一个配置目录）默认不开，免得自测时也去连中继；测远程访问时设 CCPULSE_P2P=1
         let env = ProcessInfo.processInfo.environment
@@ -163,6 +164,8 @@ final class AppState {
                 connection = LocalSource(config: sourceConfig)
             case .ssh:
                 connection = RemoteSession(config: sourceConfig)
+            case .kiteline:
+                connection = KitelineSource(config: sourceConfig)
             }
             connection.delegate = self
             sources[sourceConfig.id] = connection
@@ -258,6 +261,39 @@ final class AppState {
         guard next.sources[index].name != trimmed else { return }
         next.sources[index].name = trimmed
         apply(newConfig: next)
+    }
+
+    /// 互联电脑的来源（kind = .kiteline）跟上对方报的：只增删这一类，名字、停用沿用本机改过的；
+    /// 只起停增删的那几个连接，别的来源不重连（apply(newConfig:) 会全部重连）
+    func applyPeerSources(_ desired: [SourceConfig]) {
+        var next = config
+        let existing = Dictionary(next.sources.filter { $0.kind == .kiteline }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let merged = desired.map { item -> SourceConfig in
+            var item = item
+            if let old = existing[item.id] { item.name = old.name; item.enabled = old.enabled; item.pathPrefixes = old.pathPrefixes }
+            return item
+        }
+        next.sources = next.sources.filter { $0.kind != .kiteline } + merged
+        guard next.sources != config.sources else { return }
+        config = next
+        config.save()
+        store.config = next
+        store.applySourceConfigs(next.sources)
+        let wanted = Set(merged.filter { $0.enabled }.map { $0.id })
+        for (id, connection) in sources where connection is KitelineSource && !wanted.contains(id) {
+            connection.stop()
+            sources.removeValue(forKey: id)
+            updateMachineStats(id, nil)
+        }
+        for item in merged where item.enabled && sources[item.id] == nil {
+            let connection = KitelineSource(config: item)
+            connection.delegate = self
+            sources[item.id] = connection
+            store.apply(sourceConfig: item, state: .stopped)
+            connection.start()
+        }
+        onConfigChange?(next)
+        delegateRefresh()
     }
 
     func removeSource(_ id: String) {
@@ -507,6 +543,7 @@ extension AppState: SessionStoreDelegate {
 
 extension AppState: SourceConnectionDelegate {
     func source(_ source: SourceConnection, didChange state: LinkState) {
+        PeerComputers.shared.tap(sourceId: source.config.id, kind: source.config.kind, state: state)
         store.apply(sourceConfig: source.config, state: state)
         if case .failed = state {
             store.dropSessions(from: source.config.id)
@@ -522,13 +559,16 @@ extension AppState: SourceConnectionDelegate {
     }
 
     func source(_ source: SourceConnection, didReceive event: WatcherEvent) {
+        // 本机自己的来源：照抄给互联的别的 Kiteline 电脑（它们在收这台的会话）
+        PeerComputers.shared.tap(sourceId: source.config.id, kind: source.config.kind, raw: event.raw)
         switch event.kind {
         case "sys":
             var stats = event.raw
             stats.removeValue(forKey: "event")
             DispatchQueue.main.async { self.updateMachineStats(source.config.id, stats) }
         case "plugin_error", "plugin_retired":
-            // Agent 插件出错：弹窗问要不要发报告；外部插件被 watcher 停用了，本机的文件退回上一版本
+            // Agent 插件出错：弹窗问要不要发报告；外部插件被 watcher 停用了，本机的文件退回上一版本（别的电脑的插件由那台自己管）
+            guard source.config.kind != .kiteline else { return }
             DispatchQueue.main.async { PluginStore.shared.handle(event, from: source) }
         case "peers":
             // 会话之间的消息：换成会话 key 记下，转给手机（Mac 主窗口也经同一条实时连接收到）

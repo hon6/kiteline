@@ -77,6 +77,7 @@ enum WindowLocator {
     static func matches(_ folder: OpenFolder, kind: SourceKind, host: String?, port: Int? = nil) -> Bool {
         switch kind {
         case .local: return folder.authority == nil
+        case .kiteline: return false   // VS Code 在另一台电脑上
         case .ssh:
             guard let authority = folder.authority, let host = host else { return false }
             return sameHost(authority, host, port: port)

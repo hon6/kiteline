@@ -163,6 +163,18 @@ class DeviceStore:
             self.on_p2p_change()
         return removed
 
+    def set_peer(self, device_id, kind, peer, ref):
+        """电脑互联（peers.py）：标上是电脑（kind = computer、peer = 对方电脑编号），或是哪台电脑替手机登记的（peer、ref）"""
+        with self._lock:
+            for device in self._devices:
+                if device["id"] == device_id:
+                    for field, value in (("kind", kind), ("peer", peer), ("ref", ref)):
+                        if value is None:
+                            device.pop(field, None)
+                        else:
+                            device[field] = value
+        self._save()
+
     def rename(self, device_id, name):
         clean = (name or "").strip()[:40]
         if not clean:
@@ -255,11 +267,13 @@ class Pairing:
         self.expiry = 0.0
         self._failed = []
         self._links = {}
+        self._code_failures = 0   # 当前这个码输错了几次：5 次作废（防撞码）
 
     def new_code(self):
         code = "%06d" % secrets.randbelow(1_000_000)
         with self._lock:
             self.code, self.expiry = code, time.time() + 600
+            self._code_failures = 0
         return code
 
     def new_link_token(self):
@@ -287,15 +301,26 @@ class Pairing:
             return True
 
     def check_code(self, code, source="?"):
-        """返回 (ok, 原因)：同一来源 10 分钟内错 8 次只锁它自己，所有来源合计 30 次才全锁"""
+        """返回 (ok, 原因)：同一来源 10 分钟内错 8 次只锁它自己，所有来源合计 30 次才全锁；
+        有人把端口开到公网：公网地址来的错码一小时合计 10 次，公网来的配对先停一小时（locked_public）；
+        同一个码输错 5 次就作废（「手机访问」页自动换新码），一个码最多只给猜 5 次"""
+        from .peers import is_private
         stamp = time.time()
         with self._lock:
-            self._failed = [(t, s) for t, s in self._failed if stamp - t < 600]
-            if len(self._failed) >= 30 or sum(1 for _, s in self._failed if s == source) >= 8:
+            self._failed = [(t, s) for t, s in self._failed if stamp - t < 3600]
+            recent = [(t, s) for t, s in self._failed if stamp - t < 600]
+            if not is_private(source) and sum(1 for _, s in self._failed if not is_private(s)) >= 10:
+                return False, "locked_public"
+            if len(recent) >= 30 or sum(1 for _, s in recent if s == source) >= 8:
                 return False, "locked"
             if not self.code or stamp >= self.expiry or not hmac.compare_digest(code, self.code):
                 why = "这个码已经用过" if not self.code else ("码已过期" if stamp >= self.expiry else "码不对")
                 self._failed.append((stamp, source))
+                if self.code and stamp < self.expiry:
+                    self._code_failures += 1
+                    if self._code_failures >= 5:
+                        self.code, self.expiry = "", stamp
+                        log.write("配对码连续输错 5 次，已作废，换新码")
                 return False, why
             self.code = ""   # 一次性
             return True, ""

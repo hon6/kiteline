@@ -23,8 +23,8 @@ import time
 TOOLS = {"bash": "Bash", "read": "Read", "edit": "Edit", "write": "Write", "grep": "Grep", "find": "Glob", "ls": "LS"}
 TAIL_BYTES = 512 * 1024
 BUSY_MARK = "Working..."
-READ_ONLY = (("Windows 上从手机操作 pi 还没实测，暂未开放，只能查看；请在电脑上回复",
-              "Controlling pi on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply on your computer.")
+READ_ONLY = (("找不到 pi 所在的终端窗口，只能查看；请在电脑上回复",
+              "Couldn't find the terminal window pi is running in, so this session is view-only. Reply on your computer.")
              if os.name == "nt" else
              ("pi 不在 tmux 中运行，只能查看；在 tmux 中启动 pi 后即可从手机回复和中断",
               "pi isn't running in tmux, so this session is view-only. Start pi in tmux to reply and interrupt from your phone."))
@@ -47,8 +47,8 @@ def create(kl):
         return rows
 
     _term_pane = getattr(kl, "term_pane", None) or kl.find_tmux_pane
-    # Windows 控制台上的回复、中断：在 Win11 真机实测过才开放（11-05：没测过的不放出来）
-    WINDOWS_TESTED = False
+    # Windows 控制台上的回复、中断：11-09 Win11 实测通过（认会话、发消息、忙时插话、中断、关闭）
+    WINDOWS_TESTED = True
 
     def term_pane(pid):
         pane = _term_pane(pid)
@@ -118,7 +118,8 @@ def create(kl):
     def candidates(cwd):
         """这个工作目录的会话文件 → [(修改时间, 路径)]"""
         out = []
-        folders = [cwd_dir(cwd)] if cwd else []
+        # 拿不到工作目录（Windows 没有 /proc、lsof）：所有目录都算，靠启动时间挑
+        folders = [cwd_dir(cwd)] if cwd else glob.glob(os.path.join(DEFAULT_SESSIONS, "*"))
         extra = custom_dir(cwd)
         if extra:
             folders.append(extra)
@@ -315,6 +316,8 @@ def create(kl):
                 ts = message.get("timestamp") or kl.parse_ts(entry.get("timestamp")) or 0
                 total = (usage.get("cost") or {}).get("total") if isinstance(usage.get("cost"), dict) else None
                 values = (usage.get("input"), usage.get("output"), usage.get("cacheRead"), usage.get("cacheWrite"), 1)
+                if not any(values[:4]):
+                    continue   # 还没出字就被中断的那次：pi 记一条全 0 的，不算一次请求
                 # 价目表里没有的模型（自定义服务）pi 记 0：当作没有花费数据
                 kl.usage_bucket(buckets, int(ts), message.get("model") or "unknown", values,
                                 cost=total if total else None, cwd=cwd, session=sid)

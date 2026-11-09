@@ -30,6 +30,12 @@ final class DeviceStore {
         var remoteAt: Double?
         /// 微信小程序：中继给的用户编号（openid 摘要，10 位十六进制），随使用统计上报，运营后台据此对上小程序用户
         var mpUser: String?
+        /// computer = 互联的另一台 Kiteline 电脑（见 PeerComputers）；手机为空
+        var kind: String?
+        /// 电脑：对方电脑的编号；别的电脑替它的手机在本机登记的：那台电脑的编号
+        var peer: String?
+        /// 别的电脑替手机登记的：「那台电脑编号:手机在那台上的设备 id」（重新登记时换掉旧的）
+        var ref: String?
     }
 
     static let shared = DeviceStore()
@@ -158,7 +164,22 @@ final class DeviceStore {
         save()
         Log.write("停用设备「\(device.name)」")
         P2P.shared.refreshAllowlist()   // 停用的手机远程也连不进来了
+        // 电脑互联：停用的是一台电脑 → 互联一起解除；是手机 → 替它在别的电脑上的登记也作废
+        DispatchQueue.main.async {
+            if device.kind == "computer" { PeerComputers.shared.deviceRevoked(device) } else { PeerComputers.shared.phoneRevoked(device) }
+        }
         return device
+    }
+
+    /// 电脑互联：标上是电脑、是哪台电脑的（或是哪台电脑替手机登记的）
+    func setPeer(_ id: String, kind: String?, peer: String?, ref: String?) {
+        lock.lock()
+        guard let index = devices.firstIndex(where: { $0.id == id }) else { lock.unlock(); return }
+        devices[index].kind = kind
+        devices[index].peer = peer
+        devices[index].ref = ref
+        lock.unlock()
+        save()
     }
 
     /// 手机开通远程访问时报上来的点对点公钥

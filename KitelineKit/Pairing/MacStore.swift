@@ -13,6 +13,10 @@ struct PairedMac: Codable, Equatable {
     var caCertificate: Data?
     /// 远程访问：Mac 的点对点公钥和中继（Mac 没开远程访问时为空）
     var remote: RemoteInfo?
+    /// 这台电脑的编号（电脑互联用，旧版电脑端没有）
+    var computerId: String? = nil
+    /// 和这台互联的其他 Kiteline 电脑（那台电脑替这台手机登记好的令牌、地址、证书）：这台连不上时换到能连上的那台
+    var others: [PairedMac]? = nil
 }
 
 /// 存配对信息：令牌是钥匙，放钥匙串，只留在这台手机上（不进 iCloud 备份恢复到别的设备）
@@ -76,6 +80,32 @@ final class MacStore {
             ImageDisk.removeAll()
             ImageCache.shared.clearMemory()
         }
+    }
+
+    /// 现在这台被停用了（令牌失效）：同组还有别的电脑就换过去，没有才回到配对页
+    func dropCurrent() {
+        guard var list = current?.others, !list.isEmpty else { forget(); return }
+        var next = list.removeFirst()
+        next.others = list
+        save(next)
+    }
+
+    /// 换到同组的另一台电脑（这台连不上、那台连得上）：原来这台留在「其他电脑」里，之后照样能换回来
+    func switchTo(_ computerId: String) {
+        guard var mac = current, var list = mac.others, let index = list.firstIndex(where: { $0.computerId == computerId }) else { return }
+        var next = list.remove(at: index)
+        mac.others = nil
+        next.others = [mac] + list
+        save(next)
+    }
+
+    /// 电脑报来的「互联的其他电脑」：记下它们（已有的更新名字和地址，新加的放后面，不在名单里的去掉）
+    func setOthers(selfId: String?, _ list: [PairedMac]) {
+        guard var mac = current else { return }
+        if let selfId, mac.computerId != selfId { mac.computerId = selfId }
+        mac.others = list.isEmpty ? nil : list
+        guard mac != current else { return }
+        save(mac)
     }
 
     /// 老配对没记 Mac 的根证书（配对时系统已经信任它）：连上时补记（见 MacClient.onRootCaptured）

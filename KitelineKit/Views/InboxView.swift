@@ -174,6 +174,9 @@ struct NetStrip: View {
                     Image(systemName: "wifi.slash")
                     if viaTunnel {
                         Text("经 VPN 连接属于远程访问").lineLimit(1)
+                    } else if MacStore.shared.current?.others?.isEmpty == false {
+                        // 绑了互联的几台电脑：每台都试过了，局域网里一台在线的都没有
+                        Text("当前网络中没有在线的电脑").lineLimit(1)
                     } else {
                         Text("不在电脑所在的 Wi-Fi 中").lineLimit(1)
                     }

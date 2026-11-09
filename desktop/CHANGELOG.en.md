@@ -1,5 +1,16 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.34 (2026-11-09)
+
+### New Features
+
+- **Add other Kiteline computers**: In the client's Settings → Sources, click Add Kiteline Computer, enter the other computer's address (Mac, Windows or Linux) and the code shown on its Phone Access page, then click Allow on that computer. The two computers add each other as sources, and the other computer's sessions appear right in your session list, ready to view, reply to and approve, with actions carried out on the computer the session runs on. Ideal for working across home and office. The computers connect directly (local network, public address or your own mesh network), never through the Kiteline relay. Pair your phone with either one, and it can connect whenever either computer is online.
+- **pi support**: When the open-source coding agent pi is installed on your computer, Kiteline installs its plugin automatically. You can follow its sessions on your phone and in the client, including status, the full conversation, thinking and tool calls. When pi runs in tmux (Linux) or a terminal window (Windows), you can also send messages (queued automatically while it's busy), interrupt and close sessions. Today's usage and the usage report include pi's tokens and cost.
+
+### Security
+
+- **Pairing codes resist guessing**: A code is discarded and replaced after 5 wrong attempts; pairing from public addresses is paused for an hour after too many failed attempts; and pairing a phone from a public address now also requires confirmation on the computer.
+
 ## 1.0.33 (2026-11-09)
 
 ### Bug Fixes

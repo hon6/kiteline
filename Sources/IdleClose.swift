@@ -125,7 +125,8 @@ final class IdleClose {
 
     private func isDue(_ record: SessionRecord, now: Date) -> Bool {
         let snap = record.snapshot
-        guard snap.capsPayload.contains("close"), snap.canReply(local: record.kind == .local), snap.act != .busy,
+        // 互联的别的 Kiteline 电脑上的会话由那台自己判断（本机看过的经 /api/viewed 转告它，见 PeerComputers.noteViewed）
+        guard record.kind != .kiteline, snap.capsPayload.contains("close"), snap.canReply(local: record.kind == .local), snap.act != .busy,
               let idle = idle(record.key, now: now), idle >= Self.threshold else { return false }
         if let failed = failedAt[record.key], now.timeIntervalSince(failed) < 7200 { return false }
         return true

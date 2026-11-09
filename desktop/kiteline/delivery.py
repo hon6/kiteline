@@ -46,6 +46,9 @@ class Outcome(dict):
         return self["ok"]
 
 
+# 电脑互联（peers.py）：App 启动时放进来，别的 Kiteline 电脑上的会话交给它投递
+PEERS = [None]
+
 def attachments_of(body):
     """手机随消息带的图（images）和文件（files：别的 App 里「用其他应用打开」发来的 PDF、Excel……）：[{name, data(base64), file}]，图在前。
     文字发送、按住说话、新任务、恢复会话都可能带（同 Mac 版 MobileServer.attachments）"""
@@ -251,6 +254,13 @@ def send(text, attachments, record, source, submit, siblings, allow_waiting=Fals
     allow_waiting：回答提问时先按 Esc 关掉了提问框，watcher 还没来得及更新状态，不拦。
     走后台送达的会话等确认时也能发：不按回车，消息排在确认之后（后台没接上、改走前台时再拦）"""
     global last_delivered
+    if record.kind == "kiteline":
+        # 互联的别的 Kiteline 电脑上的会话：文件经它传到会话所在机器，文字交给那台电脑投递（VS Code 在那台上）
+        try:
+            paths = stage(attachments, source) if attachments else []
+        except Exception as exc:  # noqa: BLE001
+            return Outcome(False, False, "图片或文件传输到会话所在机器失败：%s" % exc)
+        return Outcome(*PEERS[0].deliver("/api/send", record, {"text": compose(text, paths, attachments), "submit": submit}))
     if not allow_waiting and not (submit and via_bridge(record)):
         problem = waiting_problem(record)
         if problem:
@@ -308,6 +318,8 @@ def press(key, times, record, source, siblings, in_front=False):
     """确认框选项 / 中断：enter / esc / 1 / 2 / 3 / shift+tab；times = 连按几次。in_front：不走后台送达"""
     global last_delivered
     times = max(1, min(int(times or 1), 6))
+    if record.kind == "kiteline":
+        return Outcome(*PEERS[0].deliver("/api/key", record, {"key": key, "times": times}))
     key = (key or "").lower()
     if key not in KEYS:
         return Outcome(False, False, "不支持的按键：%s" % key)
@@ -366,6 +378,8 @@ def close(record, source, siblings):
     关掉的会话进「历史会话」，之后可以恢复。正在开着的会话越积越多、VS Code 里标签越开越多时用（同 Mac 版 Delivery.close）"""
     global last_delivered
     snap = record.snap
+    if record.kind == "kiteline":
+        return Outcome(*PEERS[0].deliver("/api/close", record, {}))
     if DRY_RUN:
         last_delivered = (record.key, "<close>", False)
         log.write("[dry-run] 关闭会话 %s" % snap.get("name"))

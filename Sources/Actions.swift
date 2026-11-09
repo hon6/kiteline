@@ -30,6 +30,9 @@ enum Actions {
         // 没打开：以前本机会话用 file:// 打开，实际是在访达里打开了文件夹；远端链接不带参数又会替换掉最近用的 VS Code 窗口
         let host: String?
         switch record.kind {
+        case .kiteline:
+            notifyUser(title: L("会话在另一台电脑上"), body: L("「%@」运行在电脑「%@」上，请在那台电脑上查看 VS Code。", record.snapshot.displayTitle, record.sourceName))
+            return
         case .local:
             host = nil
         case .ssh:

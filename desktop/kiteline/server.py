@@ -308,6 +308,7 @@ class MobileServer:
             english = dict(data, title=en_title, body=en_body[:400])
             urgency = "normal"
         en_devices = i18n.english_devices()
+        in_app = set(in_app) | app.peers.push_suppressed()   # 别的电脑替手机登记的：那台连着本机时由它推（免得收两条）
         app.push.send(data, urgency=urgency, skip=set(in_app) | en_devices)
         targets = en_devices - set(in_app)
         if targets:
@@ -349,6 +350,7 @@ class MobileServer:
             data.update(alert=alert["id"], actions=["reconnect"])
         english = dict(data, title="%s · %s" % (title, i18n.translate(head)), body=(body_en or i18n.translate(body))[:240])
         en_devices = i18n.english_devices()
+        in_app = set(in_app) | app.peers.push_suppressed()
         app.push.send(data, skip=set(in_app) | en_devices)
         targets = en_devices - set(in_app)
         if targets:
@@ -464,6 +466,22 @@ class MobileServer:
         if request.query.get("via") == "watch" and device_id:
             self.app.devices.touch_watch(device_id)
         i18n.note_lang(device_id, i18n.lang_of(request))
+        # 电脑互联（peers.py）：别的电脑来取本机的会话；手机问另一台电脑；对别的电脑上的会话的操作整条转过去
+        if path.startswith("/api/peer/"):
+            return self.app.peers.handle(request, who if kind == "device" else None)
+        if (method, path) == ("GET", "/api/computers"):
+            return Response.json(self.app.peers.computers_payload())
+        if (method, path) == ("POST", "/api/computers/enroll"):
+            if kind != "device" or who.get("kind") == "computer":
+                return Response.error("只有手机能用", 403)
+            return self.app.peers.enroll(who, str((request.json or {}).get("id") or ""))
+        target = self.app.peers.forward_target(request)
+        if target:
+            if path in ("/api/send", "/api/resume"):
+                self.app.idle_close.touch([request.query.get("key", "")])
+            return self.app.peers.forward(request, target)
+        if (method, path) == ("POST", "/api/viewed"):
+            self.app.peers.note_viewed((request.json or {}).get("keys") or [])
         handler = ROUTES.get((method, path))
         if handler:
             return handler(self, request, kind, who, device_id)
@@ -538,13 +556,24 @@ class MobileServer:
         code = request.query.get("code") or str(body.get("code") or "")
         ok, why = self.app.pairing.check_code(code, request.remote)
         if not ok:
-            if why == "locked":
-                log.write("手机配对被拒：10 分钟内输错太多次（%s）" % request.remote)
-                return Response.error("尝试次数过多，请 10 分钟后重试", 429)
+            if why in ("locked", "locked_public"):
+                log.write("配对被拒：输错太多次（%s）" % request.remote)
+                return Response.error("尝试次数过多，请 1 小时后重试" if why == "locked_public" else "尝试次数过多，请 10 分钟后重试", 429)
             log.write("手机配对失败：%s（%s）" % (why, request.remote))
             return Response.error("配对码错误或已过期，请在电脑上的 Kiteline「手机访问」窗口中查看最新配对码", 403)
-        # 经远程访问（中继）来的在本机看来是 127.0.0.1：码对了还要在电脑上点「允许」
-        if request.remote in ("127.0.0.1", "::1"):
+        computer = body.get("computer") if isinstance(body.get("computer"), dict) else None
+        if computer:
+            # 另一台 Kiteline 电脑来互联（peers.py）：一律要在本机点「允许」
+            name = str(computer.get("name") or "Kiteline 电脑")[:60]
+            log.write("电脑「%s」（%s）请求互联，等待本机确认" % (name, request.remote))
+            if not self.app.ask_peer(name, request.remote):
+                self.app.pairing.add_failure(request.remote)
+                log.write("电脑互联未获允许（点了拒绝，或 60 秒内没有确认）")
+                return Response.error("对方电脑上未允许这次互联。请确认输入的是那台电脑上显示的验证码，重新添加后在那台电脑上点「允许」", 403)
+            return self.app.peers.accept_pairing(request, computer)
+        # 经远程访问（中继）来的在本机看来是 127.0.0.1、从公网地址来的：码对了还要在电脑上点「允许」
+        from .peers import is_private
+        if request.remote in ("127.0.0.1", "::1") or not is_private(request.remote):
             name = str(body.get("name") or "一台手机")[:60]
             log.write("手机经远程访问请求配对（%s），等待电脑上确认" % name)
             if not self.app.ask_pairing(name):
@@ -673,6 +702,7 @@ class MobileServer:
         device = self.app.devices.revoke(device_id)
         if not device:
             return None
+        self.app.peers.device_revoked(device)   # 电脑：互联一起解除；手机：它在别的电脑上的登记也作废
         with self._lock:
             victims = [s for s, d in self._streams.values() if d == device_id]
         for stream in victims:

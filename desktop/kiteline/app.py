@@ -36,7 +36,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.33"
+VERSION = "1.0.34"
 
 
 class App:
@@ -92,6 +92,10 @@ class App:
         self.updater = Updater(self)
         self.stats = UsageStats(self)
         self.plugins = PluginStore(self)   # Agent 插件：设置 → 插件；关掉的插件带进 watcher 的环境变量
+        from .peers import Peers
+        self.peers = Peers(self)
+        delivery.PEERS[0] = self.peers   # 互联的别的 Kiteline 电脑（peers.py）：它的来源同步成本机的 kind = kiteline 来源
+        self.ask_peer_handler = None   # 界面层可以换成自己的确认框
 
     # MARK: 启动
 
@@ -105,8 +109,7 @@ class App:
         for source_config in self.cfg.sources:
             if not source_config.get("enabled", True):
                 continue
-            cls = SSHSource if source_config.get("kind") == "ssh" else LocalSource
-            source = cls(source_config, self._source_event, self._source_changed)
+            source = self._make_source(source_config)
             self.store.add_source(source)
             source.start()
         m = self.cfg.mobile
@@ -124,6 +127,7 @@ class App:
         if m["enabled"] and m.get("mpEnabled", True):
             self._start_mpgate()
         threading.Thread(target=self._ticker, daemon=True).start()
+        self.peers.start()
         self.alerts.start()   # 到某台机器的连接断了：告诉手机，给「尝试重连」
         self.updater.start()
         self.stats.start()
@@ -194,15 +198,25 @@ class App:
         for entry in self.cfg.sources:
             source = live.get(entry.get("id"))
             enabled = entry.get("enabled", True)
+            default = self.peers.default_name(entry) if entry.get("kind") == "kiteline" else (entry.get("sshHost") or "本机")
             items.append({"id": entry.get("id"), "kind": entry.get("kind", "local"), "host": entry.get("sshHost"),
-                          "name": entry.get("name") or entry.get("sshHost") or "本机", "enabled": enabled,
+                          "name": entry.get("name") or default, "enabled": enabled, "peerId": entry.get("peerId"),
                           "online": bool(source and source.live),
                           "status": (source.short_label() if source else "未连接") if enabled else "已停用"})
             if source is not None and "hosted" in source.features and entry.get("kind") == "ssh":
                 items[-1]["hosted"] = "on" if entry.get("hostedOn") else "off"   # 能后台运行 Claude Code 才带（按设备开）
         added = {(entry.get("sshHost") or "").lower() for entry in self.cfg.sources}
         suggestions = [h for h in remotessh.recent_hosts() if h["host"].lower() not in added]
-        return {"sources": items, "suggestions": suggestions}
+        peers = [{"id": p["id"], "name": p.get("name"), "address": (p.get("addresses") or [""])[0].replace("https://", ""),
+                  "problem": self.peers.problems.get(p["id"])} for p in self.peers.all]
+        return {"sources": items, "suggestions": suggestions, "peers": peers}
+
+    def _make_source(self, entry):
+        if entry.get("kind") == "kiteline":
+            from .peers import PeerSource
+            return PeerSource(entry, self._source_event, self._source_changed, self.peers)
+        cls = SSHSource if entry.get("kind") == "ssh" else LocalSource
+        return cls(entry, self._source_event, self._source_changed)
 
     def _start_source(self, entry):
         old = self.store.sources.get(entry["id"])
@@ -210,10 +224,42 @@ class App:
             self._stop_source(entry["id"])
         if not entry.get("enabled", True):
             return
-        cls = SSHSource if entry.get("kind") == "ssh" else LocalSource
-        source = cls(entry, self._source_event, self._source_changed)
+        source = self._make_source(entry)
         self.store.add_source(source)
         source.start()
+
+    def apply_peer_sources(self, desired):
+        """互联电脑的来源（kind = kiteline）跟上对方报的：只增删这一类，名字、停用沿用本机改过的；只起停增删的那几个（同 Mac 版 applyPeerSources）"""
+        current = {s["id"]: s for s in self.cfg.sources if s.get("kind") == "kiteline"}
+        merged = []
+        for item in desired:
+            old = current.get(item["id"])
+            if old:
+                item = dict(item, enabled=old.get("enabled", True))
+                if old.get("name"):
+                    item["name"] = old["name"]
+            merged.append(item)
+        if [current.get(m["id"]) for m in merged] == merged and len(merged) == len(current):
+            return
+        self.cfg.update(lambda d: d.update(sources=[s for s in d["sources"] if s.get("kind") != "kiteline"] + merged))
+        wanted = {m["id"] for m in merged if m.get("enabled", True)}
+        for source_id, source in list(self.store.sources.items()):
+            if source.kind == "kiteline" and source_id not in wanted:
+                self._stop_source(source_id)
+                self._machine_stats(source_id, None)
+        for entry in merged:
+            if entry.get("enabled", True) and entry["id"] not in self.store.sources:
+                self._start_source(entry)
+        self._store_changed()
+
+    def ask_peer(self, name, address):
+        if delivery.DRY_RUN and os.environ.get("KITELINE_TEST_PEER_ALLOW") in ("0", "1"):
+            return os.environ["KITELINE_TEST_PEER_ALLOW"] == "1"   # 自测：不弹框，按环境变量答
+        if self.ask_peer_handler:
+            return self.ask_peer_handler(name, address)
+        return confirm_dialog("Kiteline 电脑互联请求",
+                              "「%s」（%s）正在用这台电脑上显示的验证码请求互联。允许后，它可以查看并操作这台电脑上的会话，"
+                              "这台电脑也会把它加为来源。\n\n如果不是你本人正在那台电脑上操作，请拒绝。" % (name, address), 60)
 
     def _stop_source(self, source_id):
         with self.store.lock:
@@ -278,6 +324,9 @@ class App:
     def remove_source(self, source_id):
         if source_id == "local":
             return False
+        entry = next((s for s in self.cfg.sources if s.get("id") == source_id), None)
+        if entry and entry.get("kind") == "kiteline":
+            return self.peers.remove(entry.get("peerId"))   # 别的电脑的来源：整台电脑移除
         self._stop_source(source_id)
         self.cfg.update(lambda d: d.update(sources=[s for s in d["sources"] if s.get("id") != source_id]))
         log.write("已移除来源：%s" % source_id)
@@ -311,6 +360,7 @@ class App:
     # MARK: 会话事件
 
     def _source_changed(self, source):
+        self.peers.tap_state(source)   # 本机来源连上 / 断开：告诉连着的别的 Kiteline 电脑
         self.store.source_changed(source)
         if not source.live:
             self._machine_stats(source.id, None)
@@ -383,6 +433,7 @@ class App:
         self.server.publish("sys", payload)
 
     def _source_event(self, source, event):
+        self.peers.tap_event(source, event)   # 本机来源的事件照抄给连着的别的 Kiteline 电脑
         kind = event["event"]
         if kind == "hello":
             self.groups.note_hello(source.id, event)
@@ -416,7 +467,7 @@ class App:
             items = event.get("items") or []
             self.server.publish("entries", {"key": key, "items": items})
             self._agent_items(key, items)
-        elif kind in ("plugin_error", "plugin_retired"):
+        elif kind in ("plugin_error", "plugin_retired") and source.kind != "kiteline":
             self.plugins.on_event(source, event)
         elif kind == "error":
             log.write("[%s] watcher 报错：%s" % (source.name, event.get("message")))

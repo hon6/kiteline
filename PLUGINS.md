@@ -30,11 +30,11 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 | **Kimi Code** <br><sub>[plugin](plugins/kimi-code)</sub> | CLI | Full <sup>17</sup> | View only <sup>9</sup> | Full ✓ <sup>17</sup> |
 |  | Desktop app | View only <sup>18</sup> | — | — |
 | **Muse Code** <br><sub>[plugin](plugins/muse-code)</sub> | CLI | View · Reply · Interrupt <sup>19</sup> | View only <sup>9</sup> | View · Reply · Interrupt ✓ <sup>19</sup> |
-| **pi** <br><sub>[plugin](plugins/pi), coming soon</sub> | CLI | View · Reply · Interrupt <sup>20</sup> | View only <sup>9</sup> | View · Reply · Interrupt ✓ <sup>20</sup> |
-| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>21</sup> | View only <sup>22</sup> | View · Reply · Approve · Interrupt ✓ <sup>21</sup> |
-| **trae-agent** <br><sub>[plugin](plugins/trae-agent)</sub> | CLI | View · Reply <sup>23</sup> | View only <sup>9</sup> | View · Reply ✓ <sup>23</sup> |
-| **ZCode** <br><sub>[plugin](plugins/zcode)</sub> | Desktop app | Full ✓ <sup>24</sup> | Full ✓ <sup>24</sup> | Full ✓ <sup>24</sup> |
-|  | CLI | Full ✓ <sup>24</sup> | Full ✓ <sup>24</sup> | Full ✓ <sup>24</sup> |
+| **pi** <br><sub>[plugin](plugins/pi)</sub> | CLI | View · Reply · Interrupt ✓ <sup>20</sup> | View · Reply · Interrupt ✓ <sup>21</sup> | View · Reply · Interrupt ✓ <sup>20</sup> |
+| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>22</sup> | View only <sup>23</sup> | View · Reply · Approve · Interrupt ✓ <sup>22</sup> |
+| **trae-agent** <br><sub>[plugin](plugins/trae-agent)</sub> | CLI | View · Reply <sup>24</sup> | View only <sup>9</sup> | View · Reply ✓ <sup>24</sup> |
+| **ZCode** <br><sub>[plugin](plugins/zcode)</sub> | Desktop app | Full ✓ <sup>25</sup> | Full ✓ <sup>25</sup> | Full ✓ <sup>25</sup> |
+|  | CLI | Full ✓ <sup>25</sup> | Full ✓ <sup>25</sup> | Full ✓ <sup>25</sup> |
 
 1. CLI sessions need to run in tmux
 2. Codex has no desktop app for Linux
@@ -56,7 +56,8 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 18. Desktop app sessions are view-only
 19. Replying needs Muse Code to run in tmux; confirming commands from your phone isn't available yet
 20. 回复和中断需要 pi 在 tmux 中运行
-21. Replying and approving need Qwen Code to run in tmux
-22. Windows has no tmux, so it's view-only
-23. Sending tasks needs trae-agent to run in tmux
-24. Controllable from your phone with models added using an API key; models from your account sign-in are view-only; confirm turns started on your computer there
+21. 在终端窗口中运行即可回复和中断
+22. Replying and approving need Qwen Code to run in tmux
+23. Windows has no tmux, so it's view-only
+24. Sending tasks needs trae-agent to run in tmux
+25. Controllable from your phone with models added using an API key; models from your account sign-in are view-only; confirm turns started on your computer there

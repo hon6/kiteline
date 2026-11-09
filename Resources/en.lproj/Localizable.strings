@@ -292,6 +292,7 @@
 "45 秒内未在 VS Code 中找到已填入内容的新标签页" = "No new tab with the filled-in content was found in VS Code within 45 seconds.";
 "45 秒内未在 VS Code 中找到已填入内容的新标签页（如果 VS Code 以受限模式打开了此项目，请点击顶部横幅中的「管理」并信任此文件夹：Claude Code 扩展只在受信任的文件夹中运行）" = "No new tab with the filled-in content was found in VS Code within 45 seconds. (If VS Code opened this project in Restricted Mode, click “Manage” in the banner at the top and trust the folder. The Claude Code extension only runs in trusted folders.)";
 "5 小时" = "5-hour";
+"6 位验证码" = "6-digit code";
 "7 天" = "7 Days";
 "7 天 %@" = "7 days · %@";
 "; echo; echo 完成后可以关闭这个窗口; read _" = "; echo; echo Finished, you can close this window; read _";
@@ -424,8 +425,11 @@
 "Kiteline 测试" = "Kiteline Test";
 "Kiteline 测试提醒" = "Kiteline Test Alert";
 "Kiteline 版本" = "Kiteline Version";
+"Kiteline 电脑" = "Kiteline Computer";
+"Kiteline 电脑互联请求" = "Kiteline Computer Link Request";
 "Kiteline 的 GNOME 扩展" = "Kiteline GNOME extension";
 "Kiteline 的 GNOME 扩展已安装，注销并重新登录一次后生效" = "The Kiteline GNOME extension is installed and takes effect after you log out and back in once";
+"Kiteline 监听以下机器上的 Claude Code：本机、你在 VS Code 中通过 Remote-SSH 连接的远端主机，以及添加的其他 Kiteline 电脑。首次连接远端时将自动部署观察器。" = "Kiteline monitors Claude Code on these machines: this computer, remote hosts you connect to from VS Code via Remote-SSH, and other Kiteline computers you add. The watcher is deployed automatically the first time a remote host connects.";
 "Kiteline 监听以下机器上的 Claude Code：本机，以及你在 VS Code 中通过 Remote-SSH 连接的远端主机。首次连接远端时将自动部署观察器。" = "Kiteline monitors Claude Code on these machines: this computer, and any remote host you connect to over Remote-SSH in VS Code. The observer is deployed automatically on first connection to a remote host.";
 "Kiteline 网络诊断 %@" = "Kiteline Network Diagnostics %@";
 "Kiteline 网页测试工作区（%@）" = "Kiteline web testing workspace (%@)";
@@ -612,11 +616,13 @@
 "「%@」的历史" = "History of “%@”";
 "「%@」请求经远程访问与这台电脑配对。\n\n确认是你自己的手机吗？" = "“%@” is requesting to pair with this computer through Remote Access.\n\nIs this your own phone?";
 "「%@」超过 25 MB，无法发送" = "“%@” is larger than 25 MB and can't be sent";
+"「%@」运行在电脑「%@」上，请在那台电脑上查看 VS Code。" = "“%@” runs on computer “%@”. Check VS Code on that computer.";
 "「%@」还有未合并到其他分支的提交，删除后这些提交将难以找回。仍要强制删除吗？" = "“%@” has commits that aren't merged into any other branch. They will be hard to recover after deleting. Force delete anyway?";
 "「%@」还没有标题（尚未发送消息，或标题正在生成），" = "\"%@\" has no title yet (no message has been sent, or the title is still being generated). ";
 "「%@」还没有标题（尚未发送消息，或标题正在生成），VS Code 中同一项目的标签页都名为「Claude Code」，暂时无法确定要关闭哪一个。" = "\"%@\" has no title yet (no message has been sent, or the title is still being generated), and all tabs for this project in VS Code are named \"Claude Code\", so Kiteline cannot tell which one to close yet.";
 "「%@」还没有标题（尚未发送消息，或标题正在生成），VS Code 中同一项目的标签页都名为「Claude Code」，暂时无法确定要关闭哪一个。为避免关错，会话未关闭。刚发过消息的请稍后再试；未使用的空白标签页可在 VS Code 中直接关闭" = "“%@” doesn’t have a title yet (no message has been sent, or the title is still being generated). All of this project’s tabs in VS Code are named “Claude Code”, so it isn’t clear which one to close. To avoid closing the wrong one, the session wasn’t closed. If you just sent a message, try again shortly. You can close unused blank tabs directly in VS Code.";
 "「%@」项目里" = "in project “%@”";
+"「%@」（%@）正在用这台电脑上显示的验证码请求互联。允许后，它可以查看并操作这台电脑上的会话，这台电脑也会把它加为来源；绑定在任意一台上的手机，两台电脑中有一台在线即可连接。\n\n如果不是你本人正在那台电脑上操作，请点「拒绝」。" = "“%@” (%@) is requesting to link using the code shown on this computer. Once allowed, it can view and operate sessions on this computer, and this computer will add it as a source; a phone paired with either computer can connect as long as one of them is online.\n\nIf you are not the one using that computer, click Deny.";
 "「与 iPhone 一致」即使用 iPhone 上 Kiteline「设置 → 外观」中的选项。手表始终使用深色外观；手表不提供宋体、楷体等中文字体，选择后中文仍显示为苹方，数字和英文使用同风格字体。" = "“Same as iPhone” uses the options in Kiteline Settings → Appearance on iPhone. The watch always uses a dark appearance. The watch does not offer Chinese fonts such as Songti and Kaiti; Chinese text still displays in PingFang, and numbers and English use a matching style.";
 "「今日用量」中显示 5 小时与本周额度（免费版为 30 天额度），取自 Codex 自己的记录，回复一次后更新" = "Shows 5-hour and weekly limits under Today's usage (a 30-day limit on the free plan), taken from Codex's own records and updated after each reply";
 "「按住说话」识别语言" = "Hold to Talk Recognition Language";
@@ -712,6 +718,7 @@
 "不能把文件夹复制到它自己里面" = "A folder can't be copied into itself";
 "不能把文件夹移到它自己里面" = "A folder can't be moved into itself";
 "不能操作项目根目录" = "The project root can't be changed";
+"不能添加本机" = "You can't add this computer itself";
 "不能直接修改 .git 目录" = "The .git folder can't be modified directly";
 "不要假装很努力，结果不会陪你撒谎" = "Don't fake hard work — results never lie for you";
 "不认识的动作" = "Unknown action";
@@ -915,6 +922,7 @@
 "会话之间的消息" = "Messages Between Sessions";
 "会话信息" = "Session Info";
 "会话列表" = "Session List";
+"会话在另一台电脑上" = "Session Is on Another Computer";
 "会话已结束" = "Session Ended";
 "会话已结束或没有工作目录" = "The session has ended or has no working directory";
 "会话已静音，未推送到锁屏" = "Session is muted and was not pushed to the Lock Screen.";
@@ -1366,7 +1374,10 @@
 "另有 %lld 项" = "%lld more items";
 "只发给 %@" = "Only to %@";
 "只支持 16 位 PCM 录音" = "Only 16-bit PCM recordings are supported";
+"只有互联的 Kiteline 电脑能用" = "Only linked Kiteline computers can use this";
+"只有手机能用" = "Only phones can use this";
 "只有这台电脑本身可以生成配对链接" = "Only this computer itself can generate a pairing link.";
+"只有这台电脑自己能用" = "Only this computer can use this";
 "只看某个项目的会话" = "Show sessions from one project";
 "只看某台设备上的会话" = "Show sessions from one device";
 "只能查看项目目录里的文件" = "Only files in the project directory can be viewed";
@@ -1597,10 +1608,13 @@
 "在访达中显示" = "Show in Finder";
 "在资源管理器中显示" = "Reveal in Explorer";
 "在这台电脑上后台运行 Claude Code：检测出口 IP、开启或关闭" = "Run Claude Code in the background on this computer: check the outbound IP, turn on or off";
+"在那台电脑上打开 Kiteline「设置 → 手机访问」，填入它的地址和页面上显示的 6 位验证码，再到那台电脑上点「允许」。两台电脑之间直接连接（局域网、公网 IP 或你自己的组网），不经过 Kiteline 的中继。" = "On that computer, open Kiteline Settings → Phone Access, enter its address and the 6-digit code shown there, then click Allow on that computer. The two computers connect directly (local network, public IP, or your own mesh network), never through the Kiteline relay.";
 "在项目目录里用这条命令启动 Claude Code：%@（已有同名的 tmux 会话会直接接回去）%@" = "In the project folder, start Claude Code with this command: %@ (an existing tmux session with the same name will be reattached directly)%@";
 "地区" = "Location";
 "地址=https://staging.example.com/admin" = "URL=https://staging.example.com/admin";
+"地址格式不对，请填 IP 或域名，例如 192.168.1.20" = "Invalid address. Enter an IP or domain, e.g. 192.168.1.20";
 "地址格式不正确，请输入电脑的 IP 地址，例如 192.168.1.10" = "The address format is invalid. Enter your computer’s IP address, for example 192.168.1.10.";
+"地址（IP 或域名，如 192.168.1.20；端口不是 8766 时写成 IP:端口）" = "Address (IP or domain, e.g. 192.168.1.20; use IP:port if the port is not 8766)";
 "均已停止" = "All Stopped";
 "均已推送到锁屏" = "All pushed to the lock screen.";
 "填入输入框编辑" = "Edit in Input Field";
@@ -1722,6 +1736,19 @@
 "对方关闭了连接" = "The other side closed the connection";
 "对方已回复" = "Replied";
 "对方已读" = "Read";
+"对方拒绝连接（Kiteline 没开，或端口不对）" = "Connection refused (Kiteline isn't running, or the port is wrong)";
+"对方没有回应，请确认地址和端口" = "No response. Check the address and port.";
+"对方电脑上未允许这次互联。请确认输入的是那台电脑上显示的验证码，重新添加后在那台电脑上点「允许」" = "The other computer didn't allow the link. Make sure you entered the code shown on that computer, then add it again and click Allow there.";
+"对方电脑上未连接" = "Not connected on the other computer";
+"对方电脑上未连接：%@" = "Not connected on the other computer: %@";
+"对方电脑已移除这台电脑，请重新添加" = "The other computer has removed this one. Add it again.";
+"对方电脑没有给出令牌" = "The other computer didn't provide a token";
+"对方电脑没有给出证书" = "The other computer didn't provide a certificate";
+"对方电脑的证书不对（可能不是原来那台电脑）" = "The other computer's certificate doesn't match (it may not be the same computer)";
+"对方电脑的证书与连接不符，已中止" = "The other computer's certificate doesn't match the connection. Stopped.";
+"对方电脑的证书指纹与局域网中宣告的不一致，已中止" = "The other computer's certificate fingerprint doesn't match what it announced on the network. Stopped.";
+"对方电脑返回 %@" = "The other computer returned %@";
+"对方的 Kiteline 版本过旧，不支持电脑互联，请先在那台电脑上更新 Kiteline" = "The other computer's Kiteline is too old for linking. Update Kiteline on that computer first.";
 "对话" = "Conversation";
 "对话中你一侧显示的头像和名字，手机与 Mac 共用。默认使用此 Mac 账户的头像和用户名；名字留空时使用 Mac 用户名。" = "The avatar and name shown for you in conversations are shared between your phone and Mac. By default, the avatar and user name of this Mac account are used. If the name is left blank, the Mac user name is used.";
 "对话中你一侧显示的头像和名字，手机与电脑共用。名字留空时使用电脑的用户名。" = "The avatar and name shown on your side of conversations, shared by your phone and computer. If the name is empty, your computer’s user name is used.";
@@ -1764,6 +1791,7 @@
 "尚未连接中继：%@" = "Not connected to the relay: %@";
 "尚未配对 Apple Watch" = "Apple Watch Not Paired";
 "尚未配对电脑" = "No computer paired yet.";
+"尝试次数过多，请 1 小时后重试" = "Too many attempts. Try again in 1 hour.";
 "尝试次数过多，请 10 分钟后重试" = "Too many attempts. Try again in 10 minutes.";
 "尝试过于频繁，请一分钟后重试。" = "Too many attempts. Try again in one minute.";
 "尝试重连" = "Try Reconnecting";
@@ -1772,6 +1800,7 @@
 "局域网 " = "Local Network ";
 "局域网中未发现电脑，且无法连接 Kiteline 服务器，请检查手机网络。" = "No computer was found on the local network, and the Kiteline server could not be reached. Check your phone’s network connection.";
 "局域网中未找到电脑（已尝试 %@）" = "No computer found on the local network (tried %@).";
+"局域网中：" = "On this network:";
 "局域网每 15 秒检测一次，中继每 30 秒检测一次。局域网可用时优先使用局域网，不可用时立即切换到中继。" = "The local network is checked every 15 seconds and the relay every 30 seconds. The local network is preferred when available, and Kiteline switches to the relay immediately when it isn’t.";
 "局域网直连" = "Direct Local Network";
 "局域网直连电脑" = "Direct Local Network Connection";
@@ -1812,6 +1841,7 @@
 "已丢弃此区块" = "Hunk discarded";
 "已中断" = "Interrupted";
 "已中断（等同于按 Esc）" = "Interrupted (same as pressing Esc).";
+"已互联 · %@" = "Linked · %@";
 "已使用传入的版本" = "Used the incoming version";
 "已使用当前分支的版本" = "Used the current branch's version";
 "已保存" = "Saved";
@@ -1838,6 +1868,7 @@
 "已关闭虚拟屏幕" = "Virtual display closed.";
 "已切换到「%@」" = "Switched to “%@”";
 "已切换到新分支「%@」" = "Switched to new branch “%@”";
+"已切换到电脑「%@」" = "Switched to computer “%@”";
 "已切换至「%@」" = "Switched to “%@”";
 "已创建副本" = "Duplicated";
 "已创建标签「%@」" = "Created tag “%@”";
@@ -1858,6 +1889,7 @@
 "已加入正在进行的这一轮" = "Added to the turn in progress";
 "已加入群：%@" = "Added to the group: %@";
 "已加载的对话中，Claude 未修改过此文件。" = "Claude has not modified this file in the loaded conversation.";
+"已发出请求，请在那台电脑上点「允许」（60 秒内）" = "Request sent. Click Allow on that computer within 60 seconds.";
 "已发到 Bark" = "Sent to Bark.";
 "已发现 %@，但无法连接。请确认电脑上的 Kiteline 正在运行，或手动输入地址。" = "Found %@, but could not connect. Make sure Kiteline is running on your computer, or enter the address manually.";
 "已发送" = "Sent";
@@ -2140,6 +2172,7 @@
 "当前版本 %@ · 新版本 %@" = "Current version %@ · New version %@";
 "当前的会话之间今天还没有消息" = "No Messages Between Current Sessions Today";
 "当前目标：%@" = "Current goal: %@";
+"当前网络中没有在线的电脑" = "No computer online on this network";
 "当前网络可能拦截了该连接（公司 Wi-Fi、部分 VPN 或热点）。请更换网络或关闭 VPN 后重试" = "The current network may be blocking this connection (a work Wi-Fi, some VPNs or a hotspot). Switch networks or turn off the VPN, then try again.";
 "当前连接正常" = "Connection is working.";
 "当网页推送被专注模式屏蔽，或因未安装证书而无法接收时，可作为备用通道：安装免费的 Bark App，并将其提供的地址填入此处。需要确认的消息以「时效性」级别推送，专注模式下同样会提醒。推送内容会经过 Bark 服务器；如需保护隐私，请在 Bark App 中开启加密，并在此填入相同的密钥。" = "If web push is blocked by Focus or cannot be received because no certificate is installed, use Bark as a backup channel: install the free Bark app and enter its address here. Messages that need approval are sent at the Time Sensitive level and still alert in Focus. Notifications pass through the Bark server. To protect privacy, enable encryption in the Bark app and enter the same key here.";
@@ -2306,9 +2339,11 @@
 "批准执行" = "Approve and Run";
 "找不到" = "not found";
 "找不到 Codex 守护进程的程序" = "Codex daemon program not found";
+"找不到「%@」的地址，请手动填写" = "Couldn't find the address of “%@”. Enter it manually.";
 "找不到这个 VS Code 窗口，请在电脑上处理" = "Couldn’t find this VS Code window. Please handle it on the computer";
 "找不到这个会话的记录" = "Record for this session not found";
 "找不到这个后台任务" = "Background task not found";
+"找不到这个地址" = "Address not found";
 "找不到这个子 agent 的记录" = "Record for this subagent not found";
 "找不到这个提交" = "Commit not found";
 "找到 %@ 个会话" = "%@ sessions found";
@@ -2724,6 +2759,7 @@
 "昨晚无动态" = "No activity last night.";
 "昨晚：" = "Last night:";
 "昨晚：%@" = "Last night: %@";
+"是否允许电脑「%@」与这台电脑互联？" = "Allow computer “%@” to link with this computer?";
 "是否允许这台手机配对？" = "Allow this phone to pair?";
 "昵称" = "Nickname";
 "显示" = "Display";
@@ -2973,6 +3009,7 @@
 "本机未检测到 %@" = "%@ not found on this computer";
 "本机权限" = "Permissions on This Device";
 "本机检测到的 Agent" = "Agents Found on This Computer";
+"本机证书尚未就绪，请确认「手机访问」已开启" = "This computer's certificate isn't ready. Make sure Phone Access is on.";
 "本机识别不可用" = "On-device recognition is unavailable.";
 "本机语音识别模型加载失败" = "Failed to load the on-device speech recognition model.";
 "本次对话中修改了 %lld 次" = "Modified %lld times in this conversation";
@@ -3151,6 +3188,7 @@
 "正在暂存" = "Staging";
 "正在更新 Kiteline，完成后会自动安装这个插件" = "Updating Kiteline. The plugin will be installed when the update finishes.";
 "正在更新（当前显示 %@ 的数据）" = "Updating (showing data for %@)";
+"正在查找「%@」的地址…" = "Looking up the address of “%@”…";
 "正在检出" = "Checking out";
 "正在检查…" = "Checking…";
 "正在检查更新…" = "Checking for Updates…";
@@ -3314,6 +3352,8 @@
 "没有符合筛选条件的会话" = "No sessions match the filters";
 "没有运行中的会话" = "No Running Sessions";
 "没有运行中的会话。在 VS Code 中打开 Claude Code，或在终端运行 claude。" = "No sessions are running. Open Claude Code in VS Code, or run claude in Terminal.";
+"没有这个来源" = "No such source";
+"没有这台电脑" = "No such computer";
 "没有进行中或待确认的会话" = "No sessions in progress or awaiting approval.";
 "没有连上 Codex" = "Not connected to Codex";
 "没有连上 Codex（Codex 没在运行？）" = "Not connected to Codex (is Codex running?)";
@@ -3371,9 +3411,12 @@
 "混合重置（保留改动，不暂存）" = "Mixed Reset (Keep Changes, Unstaged)";
 "添加" = "Add";
 "添加 %lld 个会话" = "Add %lld Sessions";
+"添加 Kiteline 电脑" = "Add Kiteline Computer";
 "添加 Remote-SSH 主机" = "Add Remote-SSH Host";
+"添加另一台安装了 Kiteline 的电脑，在这里查看并操作它的会话" = "Add another computer running Kiteline to view and operate its sessions here";
 "添加图片" = "Add Images";
 "添加图片文件" = "Add Image File";
+"添加失败：%@" = "Couldn't add: %@";
 "添加成员" = "Add Members";
 "添加截图" = "Add Screenshots";
 "添加文件" = "Add Files";
@@ -3499,6 +3542,7 @@
 "电脑上的这个对话框已经关闭" = "This dialog has already been closed on the computer";
 "电脑上的这个提示已经消失" = "This alert is no longer showing on the computer";
 "电脑不信任此手机的密钥" = "The computer does not trust this iPhone’s key.";
+"电脑互联" = "Computer Link";
 "电脑保持唤醒" = "Keep Computer Awake";
 "电脑内置语音（无需联网）" = "Built-In Computer Voice (No Internet Required)";
 "电脑可能处于睡眠或关机状态、Kiteline 未运行、远程访问已关闭，或此手机已在电脑上被停用" = "The computer may be asleep or powered off, Kiteline may not be running, remote access may be off, or this iPhone may have been revoked on the computer.";
@@ -3629,10 +3673,13 @@
 "移回" = "Move Back";
 "移回主屏幕" = "Move Back to Main Display";
 "移除" = "Remove";
+"移除后两台电脑互相看不到对方的会话；经这台电脑登记到「%@」上的手机也会失效。之后可以重新添加。" = "The two computers will no longer see each other's sessions, and phones registered to “%@” through this computer will stop working. You can add it again later.";
 "移除图片" = "Remove Image";
 "移除工作树" = "Remove Worktree";
 "移除工作树「%@」？目录会被删除（分支保留）。有未提交的更改时会拒绝。" = "Remove worktree “%@”? The folder will be deleted (the branch is kept). It will be refused if there are uncommitted changes.";
 "移除截图" = "Remove Screenshot";
+"移除电脑「%@」？" = "Remove computer “%@”?";
+"移除这台电脑…" = "Remove This Computer…";
 "移除这条未发送的消息" = "Remove this unsent message";
 "移除这条消息" = "Remove this message";
 "程序内缺少 ccpulse-watch.py" = "ccpulse-watch.py is missing from the app";
@@ -3675,6 +3722,7 @@
 "等宽" = "Monospaced";
 "等待" = "Waiting";
 "等待你回答" = "Waiting for your answer";
+"等待对方电脑确认…" = "Waiting for the other computer…";
 "等待手机配对…" = "Waiting for your phone to pair…";
 "等待批准" = "Awaiting Approval";
 "等待批准修改文件" = "Waiting for approval to edit files";
@@ -3734,6 +3782,7 @@
 "经 VPN 连接属于远程访问" = "VPN counts as remote access";
 "经中继" = "Via relay";
 "经典" = "Classic";
+"经电脑「%@」" = "Via computer “%@”";
 "结束录音并转写为文字" = "End Recording and Transcribe";
 "结束时的页面" = "Page at the end";
 "结束此会话，之后可在历史会话中恢复" = "Ends this session. You can resume it later from History.";
@@ -3775,6 +3824,7 @@
 "缺少文件" = "No files specified";
 "网址、步骤；拿到后把 AppID 发给我" = "URL and steps; send me the AppID once you have it";
 "网络" = "Network";
+"网络不通" = "Network unreachable";
 "网络设置" = "Network Settings";
 "网络诊断" = "Network Diagnostics";
 "网络较差" = "Poor Network";
@@ -4006,6 +4056,7 @@
 "请确认电脑已开机且未睡眠、Kiteline 正在运行，且手机与电脑连接同一 Wi-Fi；" = "Make sure the computer is on and awake, Kiteline is running, and this iPhone and the computer are on the same Wi-Fi network;";
 "请稍候；如仍未恢复，请将 Kiteline 切换到后台后再返回" = "Please wait. If it still has not recovered, switch Kiteline to the background, then return to it.";
 "请至少选择一项" = "Select at least one item.";
+"请输入对方电脑上显示的 6 位验证码" = "Enter the 6-digit code shown on the other computer";
 "请选择要添加的会话" = "Select Sessions to Add";
 "读" = "Read";
 "读不了文件：%@" = "Can't read file: %@";
@@ -4192,6 +4243,7 @@
 "这台电脑不提供朗读语音，朗读时使用 iPhone 内置语音" = "This computer doesn’t provide read-aloud voices, so the built-in iPhone voice is used when reading aloud.";
 "这台电脑不支持伪终端（需要 Windows 10 1809 或更新）：%@" = "This computer does not support pseudo terminals (Windows 10 version 1809 or later is required): %@";
 "这台电脑不能在本机翻译" = "This computer cannot translate locally";
+"这台电脑已移除" = "This computer has been removed";
 "这台电脑暂不支持在后台运行 Claude Code" = "This computer doesn't support running Claude Code in the background yet";
 "这台电脑没有图形界面（DISPLAY 为空），无法操作 VS Code。可在 tmux 中运行 claude" = "This computer has no graphical interface (DISPLAY is empty), so VS Code can't be controlled. You can run claude in tmux instead.";
 "这台电脑没有图形界面，无法操作 VS Code；终端里的会话放在 tmux 中运行即可从手机发送" = "This computer has no graphical interface, so VS Code can't be controlled. Run terminal sessions in tmux to send messages from your phone.";
@@ -4235,9 +4287,11 @@
 "连不上 Google 翻译" = "Could not reach Google Translate";
 "连不上 MyMemory" = "Could not reach MyMemory";
 "连不上 X11 显示" = "Can't connect to the X11 display";
+"连不上「%@」" = "Can't reach “%@”";
 "连不上插件服务器" = "Can't reach the plugin server";
 "连不上本机服务" = "Can't reach the service on this computer.";
 "连不上电脑" = "Cannot reach the computer";
+"连不上电脑「%@」：%@" = "Can't reach computer “%@”: %@";
 "连接" = "Connect";
 "连接中" = "Connecting";
 "连接中…" = "Connecting…";
@@ -4250,6 +4304,7 @@
 "连接状态" = "Connection";
 "连接电脑" = "Connect to Computer";
 "连接电脑上的 Kiteline，以查看和回复编程会话。" = "Connect to Kiteline on your computer to view and reply to coding sessions.";
+"连接超时" = "Connection timed out";
 "退出" = "Quit";
 "退出 Kiteline" = "Quit Kiteline";
 "退出 Kiteline 时窗口自动回到原处；可随时在「设置 → 通用」或主窗口左下角的显示器按钮中开关。" = "Windows return to their original place when Kiteline quits. Turn this on or off anytime in Settings → General or with the display button at the bottom left of the main window.";

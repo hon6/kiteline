@@ -843,7 +843,7 @@ struct SessionRow: View {
                         .lineLimit(2)
                 }
                 HStack(spacing: 4) {
-                    Image(systemName: item.kind == .ssh ? "server.rack" : "laptopcomputer")
+                    Image(systemName: item.kind == .ssh ? "server.rack" : (item.kind == .kiteline ? "desktopcomputer" : "laptopcomputer"))
                     Text("\(item.sourceName) · \(item.folder)").lineLimit(1)
                     if let usage = item.usage, usage.percent >= 70 {
                         Spacer(minLength: 4)

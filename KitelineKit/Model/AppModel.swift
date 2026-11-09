@@ -372,6 +372,7 @@ final class AppModel {
     private func connect() {
         streamTask = Task { [weak self] in
             var delay = 1.0
+            var misses = 0
             while !Task.isCancelled {
                 guard let api = self?.api else { return }
                 do {
@@ -390,8 +391,8 @@ final class AppModel {
                     NetLog.note("stream_end", ["err": "eof", "via": "\(api.routeKind)"])
                     NetLog.saveP2PLogs()
                 } catch let error as APIError where error.unauthorized {
-                    // 这台手机在 Mac 上被停用了，或者 Mac 重置了配对
-                    MacStore.shared.forget()
+                    // 这台手机在 Mac 上被停用了，或者 Mac 重置了配对（同组还有别的电脑就换过去）
+                    MacStore.shared.dropCurrent()
                     return
                 } catch {
                     NetLog.note("stream_end", ["err": "\(error)", "cancelled": Task.isCancelled, "via": "\(api.routeKind)"])
@@ -402,7 +403,14 @@ final class AppModel {
                 self.connected = false
                 self.needResync = true
                 // 几个地址一起探路：哪个通就先用哪个（Wi-Fi 断了就走远程访问）
-                if await api.probe() { delay = min(delay, 1) }
+                if await api.probe() {
+                    delay = min(delay, 1)
+                    misses = 0
+                } else {
+                    misses += 1
+                    // 这台电脑连续连不上：和它互联的电脑里有连得上的就换过去（两台里有一台在线就能用）
+                    if misses >= 2, !self.embedded, await self.switchToReachableComputer() { return }
+                }
                 try? await Task.sleep(for: .seconds(delay))
                 delay = min(max(delay * 2, 1), 15)
             }
@@ -429,6 +437,7 @@ final class AppModel {
             await refreshFavorites()
             await peers.load(api)
             await groups.load(api)   // 老版本电脑端没有这个接口：取不到就是空的
+            if !embedded { await syncComputers() }
         }
         if needResync {
             needResync = false
@@ -1065,7 +1074,7 @@ final class AppModel {
 
     func show(_ error: Error) {
         if (error as? APIError)?.unauthorized == true {
-            MacStore.shared.forget()
+            MacStore.shared.dropCurrent()
             return
         }
         flash(error.localizedDescription)
@@ -1074,4 +1083,65 @@ final class AppModel {
 
 extension PendingSend {
     var isFailed: Bool { if case .failed = state { return true } else { return false } }
+}
+
+// MARK: - 电脑互联：同组的其他 Kiteline 电脑
+
+/// GET /api/computers 的回答（旧版电脑端没有这个接口）
+private struct ComputersReply: Decodable {
+    struct Computer: Decodable {
+        var id: String
+        var name: String
+        var addresses: [String]?
+    }
+    var selfId: String?
+    var computers: [Computer]
+    private enum CodingKeys: String, CodingKey { case selfId = "self", computers }
+}
+
+extension AppModel {
+    /// 连上后问这台电脑「还和哪些电脑互联」：没有令牌的请这台电脑替手机在那台上登记，记进 MacStore（这台连不上时换过去）
+    func syncComputers() async {
+        guard let reply = try? await api.get(ComputersReply.self, "/api/computers") else { return }
+        let known = MacStore.shared.current?.others ?? []
+        var list: [PairedMac] = []
+        for computer in reply.computers {
+            if var mac = known.first(where: { $0.computerId == computer.id }) {
+                mac.name = computer.name
+                for raw in computer.addresses ?? [] {
+                    if let url = URL(string: raw), !mac.addresses.contains(url) { mac.addresses.append(url) }
+                }
+                list.append(mac)
+                continue
+            }
+            guard let answer = try? await api.post("/api/computers/enroll", body: ["id": computer.id]),
+                  let token = answer["token"] as? String, !token.isEmpty else { continue }
+            let addresses = (answer["addresses"] as? [String] ?? computer.addresses ?? []).compactMap(URL.init(string:))
+            guard !addresses.isEmpty else { continue }
+            let ca = (answer["ca"] as? String).flatMap { Data(base64Encoded: $0) }
+            // 自动登记的不算新配对：换过去时不再弹「还差几步」（MainView.firstReadiness 按令牌记）
+            UserDefaults.standard.set(true, forKey: "readinessShown:\(token.prefix(12))")
+            list.append(PairedMac(name: answer["name"] as? String ?? computer.name, addresses: addresses, token: token,
+                                  caCertificate: ca, remote: nil, computerId: computer.id))
+        }
+        await MainActor.run { MacStore.shared.setOthers(selfId: reply.selfId, list) }
+    }
+
+    /// 现在这台连不上：挨个试同组的其他电脑，有连得上的就换过去（MainView 按令牌重建，列表、对话都从那台取）
+    func switchToReachableComputer() async -> Bool {
+        let others = await MainActor.run { MacStore.shared.current?.others ?? [] }
+        for mac in others {
+            guard let id = mac.computerId else { continue }
+            let probe = MacAPI(mac: mac)
+            if await probe.probe() {
+                NetLog.note("computer_switch", ["to": mac.name])
+                await MainActor.run {
+                    MacStore.shared.switchTo(id)
+                    flash(L("已切换到电脑「%@」", mac.name))
+                }
+                return true
+            }
+        }
+        return false
+    }
 }

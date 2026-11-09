@@ -1,5 +1,17 @@
 # Kiteline Release Notes
 
+## 3.49.29 (2026-11-09)
+
+### New Features
+
+- **Add other Kiteline computers** (Mac, iPhone, iPad): In Settings → Sources, click Add Kiteline Computer, enter the other computer's address and the code shown on its Phone Access page, then click Allow on that computer. The two computers add each other as sources, and the other computer's sessions appear right in your session list, ready to view, reply to and approve, with actions carried out on the computer the session runs on. Ideal for working across home and office. The computers connect directly (local network, public address or your own mesh network), never through the Kiteline relay. Kiteline computers on your local network are listed automatically; click one to fill in its address.
+- **Your phone connects as long as either computer is online** (iPhone, iPad): After pairing with one computer, your phone automatically gets access to the other. If the current computer can't be reached but the other one is online on the same network, the app switches over automatically and still shows every session from both computers. If neither can be reached, it suggests subscribing to Remote Access.
+- **pi support** (Mac, iPhone, iPad): When the open-source coding agent pi is installed on your computer, Kiteline installs its plugin automatically. You can follow its sessions on your phone, including status, the full conversation, thinking and tool calls. When pi runs in tmux, you can also send messages (queued automatically while it's busy), interrupt and close sessions. Today's usage and the usage report include pi's tokens and cost. pi never asks for permission itself, so there's nothing to allow or deny.
+
+### Security
+
+- **Pairing codes resist guessing**: A code is discarded and replaced after 5 wrong attempts; pairing from public addresses is paused for an hour after too many failed attempts; and pairing a phone from a public address now also requires confirmation on the computer.
+
 ## 3.49.28 (2026-11-09)
 
 ### Bug Fixes

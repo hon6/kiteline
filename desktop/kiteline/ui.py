@@ -331,6 +331,14 @@ class Console:
             if problem:
                 return Response.error(i18n.tr("无法连接：%s。需确保可在终端中免密 ssh 登录（BatchMode）。" % problem), 400)
             return Response.json({"ok": True})
+        if action == "/peer/add":
+            # 添加 Kiteline 电脑（peers.py）：要等对方点允许，最多约 90 秒
+            peer, problem = app.peers.add(str(body.get("address") or ""), str(body.get("code") or ""), body.get("fingerprint") or None)
+            if problem:
+                return Response.error(i18n.tr("添加失败：%s" % problem), 400)
+            return Response.json({"ok": True, "name": peer.get("name")})
+        if action == "/peer/remove":
+            return Response.json({"ok": app.peers.remove(str(body.get("id") or ""))})
         if action == "/update":
             ok = app.update_source(str(body.get("id") or ""), name=body.get("name"), enabled=body.get("enabled"))
             return Response.json({"ok": ok})

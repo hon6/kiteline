@@ -784,7 +784,7 @@ public sealed class SettingsWindow : Window
     {
         var reply = await Api.Get("/api/desktop/sources");
         var page = Form.Page();
-        page.Children.Add(Ui.Text(L("Kiteline 监听以下机器上的 Claude Code：本机，以及你在 VS Code 中通过 Remote-SSH 连接的远端主机。首次连接远端时将自动部署观察器。"), 12, color: "Text2", lines: 0).Wrap().Margin(0, 12, 0, 10));
+        page.Children.Add(Ui.Text(L("Kiteline 监听以下机器上的 Claude Code：本机、你在 VS Code 中通过 Remote-SSH 连接的远端主机，以及添加的其他 Kiteline 电脑。首次连接远端时将自动部署观察器。"), 12, color: "Text2", lines: 0).Wrap().Margin(0, 12, 0, 10));
         void Reload() => Select("sources");
         var list = new StackPanel();
         var rows = reply.Arr("sources").Items().ToList();
@@ -806,6 +806,28 @@ public sealed class SettingsWindow : Window
             if (i < rows.Count - 1) list.Children.Add(Ui.Rule("Separator", 0.5).Margin(46, 0, 0, 0));
         }
         page.Children.Add(Card.Make(list, 6, 6));
+
+        // 已添加的 Kiteline 电脑（互联，同 Mac 版 PeerComputersCard）：在线状态、连不上的原因、移除
+        var peers = reply.Arr("peers").Items().ToList();
+        if (peers.Count > 0)
+        {
+            var box = new StackPanel();
+            for (var i = 0; i < peers.Count; i++)
+            {
+                var peer = peers[i];
+                var peerId = peer.Str("id") ?? "";
+                var problem = peer.Str("problem");
+                var remove = new Tap(Ui.Text(L("移除"), 11.5, color: "Text2").Pad(6, 3), () => RemovePeer(peerId, peer.Str("name") ?? "", Reload), 6).Keys("Transparent", "Fill08");
+                box.Children.Add(Ui.H(10, new Border { Width = 28, Child = Ui.Sym("desktopcomputer", 14, "Text") },
+                    new StackPanel { Spacing = 2, Children = {
+                        Ui.Text(peer.Str("name") ?? "", 12.5, FontWeight.SemiBold).Trim(),
+                        Ui.H(5, Ui.Dot(6, problem is null ? "Green" : "Red"),
+                             Ui.Text(problem is null ? L("已互联 · %@", (peer.Str("address") ?? "").Split(':')[0]) : problem, 11, color: "Text2").Trim().Shrink()) } }.Grow(),
+                    remove).Pad(8, 7));
+                if (i < peers.Count - 1) box.Children.Add(Ui.Rule("Separator", 0.5).Margin(46, 0, 0, 0));
+            }
+            page.Children.Add(Card.Make(box, 6, 6).Margin(0, 12, 0, 0));
+        }
 
         // VS Code 里连过的 Remote-SSH 主机（正开着的在前）：一键添加
         var suggestions = reply.Arr("suggestions").Items().ToList();
@@ -846,7 +868,46 @@ public sealed class SettingsWindow : Window
         var confirm = Form.Button(L("添加"), () => { }, prominent: true);
         var openForm = new Tap(Ui.H(6, Ui.Sym("plus", 12, "Text"), Ui.Text(L("添加 Remote-SSH 主机"), 13)).Pad(12, 0), null, 6) { Height = 28 }.Keys("Fill10", "Fill15");
         var reconnect = Form.Button(L("全部重新连接"), () => Post("/api/desktop/sources/reconnect", new JsonObject(), _ => { AppModel.Shared.Flash(L("正在重新连接")); Reload(); }));
-        var bottom = Ui.H(10, openForm, new Spacer(), reconnect);
+        // 添加 Kiteline 电脑：输那台电脑的地址和它「手机访问」页上的 6 位验证码，那台电脑上点「允许」（同 Mac 版 AddPeerCard）
+        var peerForm = new StackPanel { Spacing = 10, IsVisible = false };
+        var addressBox = Form.Field("", L("地址（IP 或域名，如 192.168.1.20；端口不是 8766 时写成 IP:端口）"), 460);
+        var codeBox = Form.Field("", L("6 位验证码"), 460);
+        var peerConfirm = Form.Button(L("添加"), () => { }, prominent: true);
+        var openPeer = new Tap(Ui.H(6, Ui.Sym("desktopcomputer", 12, "Text"), Ui.Text(L("添加 Kiteline 电脑"), 13)).Pad(12, 0), null, 6) { Height = 28 }.Keys("Fill10", "Fill15")
+            .Tip(L("添加另一台安装了 Kiteline 的电脑，在这里查看并操作它的会话"));
+        var bottom = Ui.H(10, openForm, openPeer, new Spacer(), reconnect);
+        peerConfirm.Click = async () =>
+        {
+            var address = (addressBox.Text ?? "").Trim();
+            var code = new string((codeBox.Text ?? "").Where(char.IsDigit).ToArray());
+            if (address.Length == 0 || code.Length != 6) { message.IsVisible = true; message.Text = L("请输入对方电脑上显示的 6 位验证码"); return; }
+            peerConfirm.IsEnabled = false;
+            if (peerConfirm.Child is TextBlock t) t.Text = L("等待对方电脑确认…");
+            message.IsVisible = true;
+            message.Text = L("已发出请求，请在那台电脑上点「允许」（60 秒内）");
+            try
+            {
+                await Api.Post("/api/desktop/sources/peer/add", new JsonObject { ["address"] = address, ["code"] = code });
+                Reload();
+            }
+            catch (Exception e)
+            {
+                message.Text = e.Message;
+                peerConfirm.IsEnabled = true;
+                if (peerConfirm.Child is TextBlock t2) t2.Text = L("添加");
+            }
+        };
+        codeBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) peerConfirm.Click?.Invoke(); };
+        peerForm.Children.Add(Ui.Text(L("添加 Kiteline 电脑"), 13, FontWeight.SemiBold));
+        peerForm.Children.Add(Ui.Text(L("在那台电脑上打开 Kiteline「设置 → 手机访问」，填入它的地址和页面上显示的 6 位验证码，再到那台电脑上点「允许」。两台电脑之间直接连接（局域网、公网 IP 或你自己的组网），不经过 Kiteline 的中继。"), 11.5, color: "Text2", lines: 0).Wrap());
+        peerForm.Children.Add(addressBox);
+        peerForm.Children.Add(codeBox);
+        peerForm.Children.Add(Ui.H(10, new Spacer(), Form.Button(L("取消"), () => { peerForm.IsVisible = false; bottom.IsVisible = true; message.IsVisible = false; }), peerConfirm));
+        openPeer.Click = () => { peerForm.IsVisible = true; bottom.IsVisible = false; addressBox.Focus(); };
+        var peerCard = Card.Make(peerForm, 14, 12);
+        peerCard.Margin = new Thickness(0, 12, 0, 0);
+        peerCard.Bind(IsVisibleProperty, peerForm.GetObservable(IsVisibleProperty));
+        page.Children.Add(peerCard);
         confirm.Click = () =>
         {
             var host = (hostBox.Text ?? "").Trim();
@@ -872,11 +933,24 @@ public sealed class SettingsWindow : Window
         return page;
     });
 
+    /// 移除 Kiteline 电脑：两台互相看不到对方的会话，经这台登记到对方的手机也失效
+    void RemovePeer(string peerId, string name, Action reload)
+    {
+        _ = Ask();
+        async Task Ask()
+        {
+            if (await Dialogs.Confirm(L("移除后两台电脑互相看不到对方的会话；经这台电脑登记到「%@」上的手机也会失效。之后可以重新添加。", name), L("移除"),
+                                      destructive: true, title: L("移除电脑「%@」？", name)))
+                Post("/api/desktop/sources/peer/remove", new JsonObject { ["id"] = peerId }, _ => reload());
+        }
+    }
+
     /// 一个来源：图标、名字（双击改名）、主机、状态；右边「⋯」菜单
     Control SourceRow(JsonNode source, Action reload)
     {
         var id = source.Str("id") ?? "";
         var ssh = source.Str("kind") == "ssh";
+        var peerSource = source.Str("kind") == "kiteline";
         var enabled = source.Truthy("enabled") || source["enabled"] is null;
         var online = source.Truthy("online");
         var name = Lang.Machine(source.Str("name") ?? "");
@@ -909,14 +983,19 @@ public sealed class SettingsWindow : Window
             menu.Items.Add(Ui.Item(L("重新连接"), () => Post("/api/desktop/sources/reconnect", new JsonObject { ["id"] = id }, _ => reload())));
             if (ssh) menu.Items.Add(Ui.Item(L("重新部署观察器"), () => Post("/api/desktop/sources/reconnect", new JsonObject { ["id"] = id }, _ => reload())));
             menu.Items.Add(Ui.Item(enabled ? L("停用") : L("启用"), () => Post("/api/desktop/sources/update", new JsonObject { ["id"] = id, ["enabled"] = !enabled }, _ => reload())));
-            if (id != "local")
+            if (peerSource)
+            {
+                menu.Items.Add(new Separator());
+                menu.Items.Add(Ui.Item(L("移除这台电脑…"), () => RemovePeer(source.Str("peerId") ?? "", name, reload)));
+            }
+            else if (id != "local")
             {
                 menu.Items.Add(new Separator());
                 menu.Items.Add(Ui.Item(L("移除"), () => Post("/api/desktop/sources/remove", new JsonObject { ["id"] = id }, _ => reload())));
             }
             menu.ShowAt(more);
         };
-        var icon = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(8), Child = Ui.Sym(ssh ? "server.rack" : "laptopcomputer", 16, "Text").HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center) }
+        var icon = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(8), Child = Ui.Sym(ssh ? "server.rack" : peerSource ? "desktopcomputer" : "laptopcomputer", 16, "Text").HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center) }
             .Res(Border.BackgroundProperty, "Fill06");
         // ⓘ：设备详情（IP、系统、处理器、内存、装了哪些 agent）
         var details = new Tap(Ui.Sym("info.circle", 15, "Text2").Pad(4), () => AgentDetails.OpenMachine(id, name), 6).Keys("Transparent", "Fill08").Tip(L("设备详情"));

@@ -153,6 +153,8 @@ class IdleClose:
 
     def _due(self, record, now):
         snap = record.snap
+        if record.kind == "kiteline":
+            return False   # 别的 Kiteline 电脑上的会话由那台自己判断（本机看过的经 /api/viewed 转告它）
         can_reply = not snap.get("readOnly") and (is_vscode(snap) or bool(snap.get("tmuxPane") or snap.get("hosted")) or record.kind == "local"
                                                   or delivery.via_agent(snap))
         if "close" not in caps_payload(snap) or not can_reply or record.activity == "busy":

@@ -7,6 +7,7 @@ import KitelineKit
 enum SourceKind: String, Codable {
     case local   // 本机上的 Claude Code（菜单栏 App 直接起 watcher 子进程）
     case ssh     // Remote-SSH 远端机器（通过 ssh 长连接读取事件流）
+    case kiteline   // 互联的另一台 Kiteline 电脑上的一个来源（经那台电脑转过来，见 PeerComputers.swift）
 }
 
 /// 一个被监听的来源。可以是本机，也可以是一台远端主机。
@@ -30,6 +31,10 @@ struct SourceConfig: Codable, Equatable, Identifiable {
     /// 这台远端电脑上的新任务、恢复会话不开 VS Code，在那台电脑上后台运行 Claude Code（见 Hosted.swift）。
     /// 按设备开，默认关：用户检测过这台的出口、看过结果点确认才开
     var hostedOn: Bool = false
+
+    // kiteline 专用：哪台电脑（PeerComputer.id）、那台电脑上的哪个来源（来源列表由 PeerComputers 按对方报的自动增删）
+    var peerId: String?
+    var peerSource: String?
 
     init(id: String, name: String, kind: SourceKind) {
         self.id = id
@@ -55,6 +60,8 @@ struct SourceConfig: Codable, Equatable, Identifiable {
         pathPrefixes = ((try? c.decodeIfPresent([String].self, forKey: .pathPrefixes)) ?? nil) ?? []
         enabled = ((try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? nil) ?? true
         hostedOn = ((try? c.decodeIfPresent(Bool.self, forKey: .hostedOn)) ?? nil) ?? false
+        peerId = (try? c.decodeIfPresent(String.self, forKey: .peerId)) ?? nil
+        peerSource = (try? c.decodeIfPresent(String.self, forKey: .peerSource)) ?? nil
     }
 
     static func local() -> SourceConfig {
@@ -71,6 +78,7 @@ struct SourceConfig: Codable, Equatable, Identifiable {
         switch kind {
         case .local: return name.isEmpty ? "本机" : name
         case .ssh: return name.isEmpty ? (sshHost ?? "远端") : name
+        case .kiteline: return name.isEmpty ? PeerComputers.shared.defaultName(self) : name
         }
     }
 }
@@ -84,7 +92,7 @@ enum ConfigKey: String, CodingKey {
     case conclusionCooldownSeconds, attentionCooldownSeconds, connectOnLaunch, jumpBackURI
     // 来源
     case id, name, kind, enabled, pathPrefixes, hostedOn
-    case sshHost, sshPort, sshIdentityFile, remotePython, remoteWatcherPath
+    case sshHost, sshPort, sshIdentityFile, remotePython, remoteWatcherPath, peerId, peerSource
     // 手机访问
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget

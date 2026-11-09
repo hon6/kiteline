@@ -28,6 +28,7 @@ import Translation
 ///   route <IP>...（以数字开头或带冒号）= 每个地址走哪张网卡、算不算直连 / 走隧道（记进 remote-notes.txt）；free on|off = 模拟免费版开 / 关
 ///   translated = 每条翻译的状态、试过的服务和失败原因、语言包状态记进 remote-notes.txt
 ///   tap <按钮上的字> = 点一下这个按钮（同 VoiceOver 双击，走无障碍的「激活」；先找字完全一样的，没有再找以它开头的）；
+///   pair <配对链接> = 照扫码配对；mac = 现在连的电脑和同组的其他电脑记进 remote-notes.txt（电脑互联）
 ///   labels = 屏幕上能点的东西的字记进 remote-notes.txt（tap 找不到时看看叫什么）；type <文字> = 往第一个输入框里打字（筛选框、搜索框）
 private extension UIView {
     func superview<T: UIView>(of type: T.Type) -> T? {
@@ -240,6 +241,22 @@ enum DebugRemote {
                 // route 后面跟地址才是这条；route usage 之类的页面名转给 MainView
                 // 每个地址走哪张网卡（免费版不经 VPN 隧道连局域网的判断，见 LocalRoute），写进 remote-notes.txt
                 note("route " + LocalRoute.explain(Array(parts.dropFirst())))
+            } else if parts.first == "pair", parts.count >= 2 {
+                // pair <配对链接>：照扫码配对（模拟器里点不了屏幕；测电脑互联、换电脑用）
+                Task {
+                    guard let link = PairingLink(parts[1]) else { note("pair：链接解析不了"); return }
+                    do {
+                        let mac = try await Pairing.pair(link)
+                        UserDefaults.standard.set(true, forKey: "onboarded")
+                        MacStore.shared.save(mac)
+                        note("pair：已配对「\(mac.name)」")
+                    } catch { note("pair 失败：\(error.localizedDescription)") }
+                }
+            } else if parts.first == "mac" {
+                // mac：现在连的是哪台电脑、同组的其他电脑（电脑互联，见 MacStore.others）
+                let mac = MacStore.shared.current
+                note("mac 当前「\(mac?.name ?? "无")」\(mac?.computerId ?? "-") \(mac?.addresses.map(\.absoluteString).joined(separator: ",") ?? "")；其他："
+                     + (mac?.others ?? []).map { "「\($0.name)」\($0.computerId ?? "-") \($0.addresses.first?.absoluteString ?? "")" }.joined(separator: "，"))
             } else if parts.first == "trhost" {
                 // trhost [local] <英文>：直接交给连着的电脑翻，看结果（不受当前翻译服务设置影响）
                 let local = parts.count > 1 && parts[1] == "local"
