@@ -27,7 +27,7 @@ from .live import LiveActivities
 from .guest import GuestLinks
 from .groups import Groups
 from .idleclose import IdleClose
-from .records import Audit, Favorites, Inbox, MediaCache, Todos, VoiceStore
+from .records import Audit, Favorites, Inbox, MediaCache, TabGroupStore, Todos, VoiceStore
 from .schedules import Schedules
 from .server import MobileServer
 from .stats import UsageStats
@@ -36,7 +36,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.35"
+VERSION = "1.0.36"
 
 
 class App:
@@ -73,6 +73,7 @@ class App:
         self.todos = Todos(self.store, self.server.publish)
         self.todos.push_agents = self._push_agent_todos
         self.favorites = Favorites(self.store, self.server.publish)
+        self.tab_groups = TabGroupStore(self.server.publish)
         self.groups = Groups(self)   # 会话群：跨设备、跨项目的会话互相发消息
         self.schedules = Schedules(self)
         self.stuck = reminders.StuckWatch(self)
@@ -657,14 +658,14 @@ class App:
             return "我"
 
     def state_payload(self):
-        payload = self.store.state_payload(self.host, VERSION, self.me())
+        payload = self.store.state_payload(self.host, VERSION, self.me(), viewed_at=self.idle_close.viewed_at)
         payload["platform"] = config.PLATFORM
         payload["agents"] = self.plugins.agent_cards()   # 插件给的 agent 名称和标志：手机内置表里没有的 agent 靠它画
         payload["alerts"] = self.alerts.payload()        # 要人处理的状况（见 alerts.py）
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
         # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate"]
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups"]
         payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff"))}
         return payload
 

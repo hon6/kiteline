@@ -378,15 +378,24 @@ public sealed class OnboardingWindow : Window
             Ui.HTop(14, QrCard(qr), Ui.VFill(10, Ui.Text(detail, 12, color: "Text2", lines: 0).Wrap(), extra).Shrink())), 16);
 
         var cards = new Grid { ColumnDefinitions = new ColumnDefinitions("*,16,*") };
-        var download = StepCard(1, L("下载 iPhone App"), new SettingsWindow.QrView(AppStore),
-            L("用 iPhone 相机扫描二维码，或在 App Store 中搜索「Kiteline」。"), null);
+        // 第 1 步：iPhone 扫 App Store 的码，安卓用微信扫小程序码（11-10 起：安卓用户用小程序）
+        Control Code(Control qr, string caption) => Ui.VFill(8,
+            new Border { Width = 112, Height = 112, CornerRadius = new CornerRadius(12), Background = Brushes.White, Padding = new Thickness(5), Child = qr },
+            Ui.Text(caption, 11, color: "Text2", lines: 0).Wrap().Size(112, double.NaN));
+        var mpCode = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://KitelineApp/Assets/miniprogram-code.jpg"))) };
+        var download = Card.Make(Ui.VFill(12,
+            Ui.H(8, Ui.Box(Ui.Text("1", 11, FontWeight.Bold, "Accent").HAlign(HorizontalAlignment.Center), new Thickness(0, 1), null, 10, "AccentEdge40", 1).Size(20, 20),
+                Ui.Text(L("安装手机端"), 14, FontWeight.SemiBold)),
+            Ui.HTop(14,
+                Code(new SettingsWindow.QrView(AppStore), L("iPhone：相机扫码，或在 App Store 中搜索「Kiteline」")),
+                Code(mpCode, L("安卓：微信扫码，打开 Kiteline 小程序")))), 16);
         var pair = StepCard(2, L("扫码或输入配对码"), pairQr,
-            L("打开 App，扫描此二维码，或输入下方的 6 位配对码。首次配对时手机与电脑需连接同一网络。"), Ui.VFill(2, codeText, expiryText));
+            L("打开 App 或小程序，扫描此二维码，或输入下方的 6 位配对码。首次配对时手机与电脑需连接同一网络。"), Ui.VFill(2, codeText, expiryText));
         Grid.SetColumn(pair, 2);
         cards.Children.Add(download);
         cards.Children.Add(pair);
         return Ui.VFill(18,
-            Header(L("在手机上使用 Kiteline"), L("在 iPhone 上安装 Kiteline App 并与这台电脑配对后，即可在手机上查看会话、回复消息和处理确认请求。Apple Watch App 随 iPhone 自动安装。")),
+            Header(L("在手机上使用 Kiteline"), L("iPhone 安装 Kiteline App，安卓手机使用 Kiteline 微信小程序；与这台电脑配对后，即可在手机上查看会话、回复消息和处理确认请求。Apple Watch App 随 iPhone 自动安装。")),
             cards,
             Card.Make(Ui.H(8, pairedIcon, pairedText, new Spacer(), Form.Button(L("更多选项"), () => SettingsWindow.Open("phone"))), 12),
             Ui.Text(L("在外部网络（如 5G、其他 Wi-Fi）中使用：在设置的「远程访问」中开启，需订阅 Kiteline Pro。"), 11.5, color: "Text2", lines: 0).Wrap());

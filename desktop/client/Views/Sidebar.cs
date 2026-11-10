@@ -24,6 +24,9 @@ public sealed class SidebarView : Panel
     readonly TextBox search;
     readonly Dictionary<string, SessionRowView> rows = new();
     readonly PeerOverlay peers = new();
+    readonly TabGroupSidebar tabGroups = new();
+    /// 「设备 · 项目」那一行展开着（选完自动收起，不存）
+    bool scopeOpen;
     bool pending;
 
     public static readonly double Width0 = 300;
@@ -63,7 +66,8 @@ public sealed class SidebarView : Panel
         tiles.Changed += Schedule;
         Look.Changed += Schedule;
         FavoriteState.Shared.PropertyChanged += (_, _) => Dispatcher.UIThread.Post(Schedule);   // 「收藏」格子的条数
-        GroupState.Shared.PropertyChanged += (_, _) => Dispatcher.UIThread.Post(Schedule);      // 会话群那一节
+        GroupState.Shared.PropertyChanged += (_, _) => Dispatcher.UIThread.Post(Schedule);      // 「群」页签
+        TabGroupState.Shared.PropertyChanged += (_, _) => Dispatcher.UIThread.Post(Schedule);   // 「会话组」页签
         Rebuild();
         tiles.Start();
     }
@@ -135,26 +139,51 @@ public sealed class SidebarView : Panel
         _ => true,
     };
 
+    /// 当前页签（电脑不支持的回到会话）
+    string CurrentTab => main.ListTab switch
+    {
+        "groups" when GroupState.Shared.Supported => "groups",
+        "tabgroups" when TabGroupState.Shared.Supported => "tabgroups",
+        _ => "sessions",
+    };
+
     void Rebuild()
     {
+        var searching = main.Query.Trim().Length > 0;
+        var tab = searching ? "sessions" : CurrentTab;
         var filtered = main.Filtered(model.Sessions).ToList();
         var sorted = model.SortedSessions(main.Sorting, filtered);
-        // 先按设备、项目，再按状态筛（搜索词上面已经筛过），最后分组
+        // 先按设备、项目，再按状态筛（搜索词上面已经筛过）
         var sourceId = ActiveSource?.Id;
         var project = ActiveProject;
         var baseList = sorted.Where(s => (sourceId is null || s.SourceId == sourceId) && (project is null || s.Folder == project)).ToList();
         var shown = baseList.Where(s => Matches(s, Status)).ToList();
         content.Children.Clear();
-        if (main.Query.Trim().Length == 0) content.Children.Add(Tiles().Margin(0, 15, 0, 0));
-        // 会话群：会话列表里单独一组（同「标记」），排在会话前面，跟着筛选、搜索走；点了同会话一样开在右边分屏的标签里
-        var searching = main.Query.Trim().Length > 0;
-        var groupsShown = GroupSidebar.Shown(IsFiltering || searching ? shown.Select(s => s.Key).ToHashSet() : null, Status == "marked", main.Query, out var pastGroups);
-        var groupSection = GroupSidebar.Section(main, groupsShown, pastGroups);
+        if (TipVisible) content.Children.Add(TipCard().Margin(0, 12, 0, 0));
+        if (!searching) content.Children.Add(Tiles().Margin(0, TipVisible ? 10 : 15, 0, 0));
+        content.Children.Add(TabRow(tab, searching, shown.Count).Margin(0, 12, 0, 0));
+        if (tab == "groups")
+        {
+            GroupsTab();
+            return;
+        }
+        if (tab == "tabgroups")
+        {
+            foreach (var row in tabGroups.Build(main)) content.Children.Add(row);
+            return;
+        }
+        // 会话群只在搜索时跟着会话列（对得上的群一起列）；平时群在「群」页签里
+        Control? groupSection = null;
+        if (searching)
+        {
+            var keys = shown.Select(s => s.Key).ToHashSet();
+            var groupsShown = GroupSidebar.Shown(keys, Status == "marked", main.Query, out var pastGroups);
+            groupSection = GroupSidebar.Section(main, groupsShown, pastGroups);
+        }
         if (model.Sessions.Count == 0)
         {
-            content.Children.Add(Ui.Text(L("会话"), 11, FontWeight.SemiBold, "Text2").Margin(4, 16, 0, 6));
             content.Children.Add(Ui.H(6, Ui.Sym("moon.stars", 11.5, "Text2"),
-                Ui.Text(L("没有运行中的会话。在 VS Code 中打开 Claude Code，或在终端运行 claude。"), 11.5, color: "Text2", lines: 3).Wrap().Shrink()).Margin(4, 0, 0, 0));
+                Ui.Text(L("没有运行中的会话。在 VS Code 中打开 Claude Code，或在终端运行 claude。"), 11.5, color: "Text2", lines: 3).Wrap().Shrink()).Margin(4, 14, 0, 0));
             if (groupSection is not null) content.Children.Add(groupSection);
             return;
         }
@@ -163,12 +192,12 @@ public sealed class SidebarView : Panel
             content.Children.Add(Empty.State("magnifyingglass", L("没有匹配的会话")).Margin(0, 60, 0, 0));
             return;
         }
-        content.Children.Add(Controls(baseList, shown.Count, sorted));
+        content.Children.Add(Controls(baseList, sorted));
         if (groupSection is not null) content.Children.Add(groupSection);
         var used = new HashSet<string>();
         foreach (var group in Groups(shown))
         {
-            // 不分组时会话没有组头：上面有「会话群」一组时写个「会话」，免得看着像群里的
+            // 不分组时会话没有组头：上面有会话群一组时写个「会话」，免得看着像群里的
             if ((group.Name ?? (groupSection is not null ? L("会话") : null)) is string name) content.Children.Add(GroupHeader(group, name));
             foreach (var s in group.Items)
             {
@@ -181,6 +210,77 @@ public sealed class SidebarView : Panel
         foreach (var gone in rows.Keys.Where(k => !used.Contains(k)).ToList()) rows.Remove(gone);
         if (shown.Count == 0) content.Children.Add(EmptyFilter());
         Dispatcher.UIThread.Post(peers.Refresh, DispatcherPriority.Render);
+    }
+
+    /// 「会话 N | 群 N | 会话组 N」三个页签（同 Mac 版 SidebarTabs）：选中的字加粗、下面一条主题色短线；右边是这个页签自己的按钮。
+    /// 搜索时不分页签，只写「会话 N」
+    Control TabRow(string tab, bool searching, int count)
+    {
+        if (searching) return Ui.H(6, Ui.Text(L("会话"), 13, FontWeight.SemiBold), Ui.Text(count.ToString(), 12, color: "Text3").Digits());
+        var tabs = new List<Control> { TabButton("sessions", L("会话"), count, tab) };
+        if (GroupState.Shared.Supported) tabs.Add(TabButton("groups", L("群"), GroupState.Shared.Items.Count(g => g.Live), tab));
+        if (TabGroupState.Shared.Supported)
+            tabs.Add(TabButton("tabgroups", L("会话组"), TabGroupState.Shared.Items.Count, tab, TabGroupDigest.WaitingElsewhere()));
+        Control? action = tab switch
+        {
+            "tabgroups" => SmallButton("plus", L("新建"), () => TabGroupPicker.Open(null, [])),
+            "groups" when model.Sessions.Count > 1 => NewGroupButton(),
+            _ => null,
+        };
+        return Ui.H(6, Ui.H(14, tabs.ToArray()), new Border().Grow(), action);
+    }
+
+    Control TabButton(string id, string title, int count, string current, bool alert = false)
+    {
+        var on = id == current;
+        var label = Ui.H(4,
+            Ui.Text(title, 13, on ? FontWeight.SemiBold : FontWeight.Medium, on ? "Text" : "Text2"),
+            Ui.Text(count.ToString(), 12, color: "Text3").Digits(),
+            alert ? Ui.Dot(6, "Orange").VAlign(VerticalAlignment.Top).Margin(-2, -2, 0, 0) : null);
+        var underline = new Border { Height = 2, CornerRadius = new CornerRadius(1), Margin = new Thickness(0, 4, 0, 0) };
+        underline.Res(Border.BackgroundProperty, on ? "Accent" : "Transparent");
+        return new Tap(Ui.VFill(0, label, underline), () => main.ListTab = id, 6) { Padding = new Thickness(2, 3, 2, 0) }.Keys("Transparent", "Fill05");
+    }
+
+    /// 页签那一行右边的小按钮（同「建群」样子，小一点）
+    static Control SmallButton(string symbol, string title, Action action)
+    {
+        var button = new Tap(Ui.H(4, Ui.Sym(symbol, 11, "Text2"), Ui.Text(title, 12, FontWeight.Medium, "Text2")), action, 15) { Height = 26, Padding = new Thickness(9, 0) };
+        return button.Keys("Fill06", "Fill10");
+    }
+
+    /// 「群」页签：只列群（没有任何筛选）；历史群收成一行
+    void GroupsTab()
+    {
+        var live = GroupState.Shared.Items.Where(g => g.Live).ToList();
+        var past = GroupState.Shared.Items.Count - live.Count;
+        if (live.Count == 0)
+            content.Children.Add(Ui.Text(L("还没有会话群。点「建群」，或把一个会话拖到另一个会话上，让它们互相沟通。"), 11.5, color: "Text2", lines: 0).Wrap().Margin(4, 14, 4, 0));
+        foreach (var group in live) content.Children.Add(new GroupRowView(group, main));
+        if (past > 0)
+            content.Children.Add(new Tap(Ui.H(6, Ui.Sym("clock.arrow.circlepath", 11, "Text2"), Ui.Text(L("历史群 %@ 个", past), 11.5, color: "Text2")).Pad(7, 4),
+                () => main.Selection = MainModel.GroupsId, 6).Keys("Transparent", "Fill05").Tip(L("成员会话都已关闭的群。在群里发消息，会在原来的项目里恢复它们接着协作。")));
+    }
+
+    /// 第一次看到会话组、群这几页时的提示卡（关了记住，不再出）
+    bool TipVisible => !Prefs.Bool("sidebarTipDone");
+
+    Control TipCard()
+    {
+        void Dismiss()
+        {
+            Prefs.Set("sidebarTipDone", true);
+            Schedule();
+        }
+        var stack = Ui.VFill(5,
+            Ui.Text(L("会话列表有新的排法"), 12.5, FontWeight.SemiBold),
+            Ui.Text(L("会话：所有运行中的会话，筛选和显示方式都在这里；设备、项目收成一行，点开再选。"), 11.5, color: "Text2", lines: 0).Wrap(),
+            Ui.Text(L("群：把几个会话拉到一起互相沟通，建群在这里。"), 11.5, color: "Text2", lines: 0).Wrap(),
+            Ui.Text(L("会话组：把同一阶段的相关会话放一组，切到哪组右边就多列显示哪组；组名和颜色可以改，还能一键把组里的会话拉成群，手机上也能看到。"), 11.5, color: "Text2", lines: 0).Wrap(),
+            Ui.H(6,
+                new GlassButton(L("知道了"), null, Dismiss, height: 26),
+                new GlassButton(L("看看会话组"), null, () => { Dismiss(); main.ListTab = "tabgroups"; }, prominent: true, height: 26)).Margin(0, 0, 0, 0));
+        return Ui.Box(stack, new Thickness(10, 9, 10, 10), "Fill06", 12);
     }
 
     Control Tiles()
@@ -218,17 +318,11 @@ public sealed class SidebarView : Panel
                 new SidebarTile(MainModel.FavoritesId, "star.fill", L("收藏"), favorites > 0 ? favorites.ToString() : "", "", 0, null, main, compact: true)));
     }
 
-    /// 「会话 4　　显示方式 ⌄」，下面一排状态筛选：全部 · 工作中 · 待确认 常驻，出错有的时候才出现；数字跟着设备、项目筛选走。
-    /// 再下面是设备、项目两排胶囊，直接点选（不止一台设备、不止一个项目时才有）
-    Control Controls(List<SessionInfo> baseList, int count, List<SessionInfo> sorted)
+    /// 「会话」页签下面（同 Mac 版 controls）：状态筛选胶囊（全部 · 标记 · 工作中 · 待确认 常驻，出错有的时候才出现；数字跟着设备、项目筛选走）；
+    /// 再下面一行：设备、项目收成一行（只写着选的是哪个，点开才是两排胶囊，选完自动收起），右边「显示方式」
+    Control Controls(List<SessionInfo> baseList, List<SessionInfo> sorted)
     {
-        var header = Ui.H(6,
-            Ui.Text(L("会话"), 13, FontWeight.SemiBold),
-            Ui.Text(count.ToString(), 12, color: "Text3").Digits(),
-            new Spacer(6),
-            GroupState.Shared.Supported && model.Sessions.Count > 1 ? NewGroupButton() : null,
-            model.Sessions.Count > 1 || !IsDefaultView ? ViewMenu() : null);
-        var stack = Ui.VFill(8, header);
+        var stack = Ui.VFill(8);
         if (model.Sessions.Count > 1 || IsFiltering)
         {
             var chips = new List<Control>();
@@ -254,11 +348,40 @@ public sealed class SidebarView : Panel
         var inProject = sorted.Where(s => project is null || s.Folder == project).ToList();
         var sources = model.Sources.Where(src => busy.Contains(src.Id) || src.Id == sourceId)
             .Select(src => (src.Id, src.Name, inProject.Count(s => s.SourceId == src.Id))).ToList();
-        if (sources.Count > 1 || sourceId is not null)
-            stack.Children.Add(ScopeBar.Build("desktopcomputer", L("全部设备"), sources, sourceId ?? "", id => main.SourceFilter = id));
-        if (projects.Count > 1 || project is not null)
-            stack.Children.Add(ScopeBar.Build("folder", L("全部项目"), projects, project ?? "", name => main.ProjectFilter = name));
+        var bySource = sources.Count > 1 || sourceId is not null;
+        var byProject = projects.Count > 1 || project is not null;
+        var showsView = model.Sessions.Count > 1 || !IsDefaultView;
+        if (bySource || byProject || showsView)
+            stack.Children.Add(Ui.H(6, bySource || byProject ? ScopeSummary(bySource, byProject) : null, new Border().Grow(), showsView ? ViewMenu() : null));
+        if (scopeOpen && bySource)
+            stack.Children.Add(ScopeBar.Build("desktopcomputer", L("全部设备"), sources, sourceId ?? "", id => { scopeOpen = false; main.SourceFilter = id; }));
+        if (scopeOpen && byProject)
+            stack.Children.Add(ScopeBar.Build("folder", L("全部项目"), projects, project ?? "", name => { scopeOpen = false; main.ProjectFilter = name; }));
         return stack.Margin(0, 10, 0, 2);
+    }
+
+    /// 收起时的一行：「🖥 全部设备 · 📁 项目 ⌄」，筛着的那项用主题色；点一下展开 / 收起两排胶囊
+    Control ScopeSummary(bool bySource, bool byProject)
+    {
+        var parts = new List<Control>();
+        if (bySource)
+        {
+            var on = ActiveSource is not null;
+            parts.Add(Ui.Sym("desktopcomputer", 11, on ? "Accent" : "Text"));
+            parts.Add(Ui.Text(ActiveSource?.Name ?? L("全部设备"), 12, FontWeight.Medium, on ? "Accent" : "Text").Shrink());
+        }
+        if (bySource && byProject) parts.Add(Ui.Text("·", 12, color: "Text3"));
+        if (byProject)
+        {
+            var on = ActiveProject is not null;
+            parts.Add(Ui.Sym("folder", 11, on ? "Accent" : "Text"));
+            parts.Add(Ui.Text(ActiveProject ?? L("全部项目"), 12, FontWeight.Medium, on ? "Accent" : "Text").Shrink());
+        }
+        parts.Add(Ui.Sym(scopeOpen ? "chevron.up" : "chevron.down", 9, "Text3"));
+        var button = new Tap(Ui.H(5, parts.ToArray()), () => { scopeOpen = !scopeOpen; Schedule(); }, 15) { Height = 30, Padding = new Thickness(11, 0) };
+        button.Keys("Fill06", "Fill10");
+        button.Tip(L("按设备、项目筛选"));
+        return button;
     }
 
     /// 「建群」（「显示方式」左边，样子同它）：弹面板勾选要拉进来的会话（至少两个）
@@ -457,7 +580,7 @@ public sealed class SessionRowView : Tap
             Ui.Text($"{s.SourceName} · {s.Folder}", 10.5, color: "Text3").Shrink(),
             s.Usage?.Percent is int pct && pct >= 70 ? new Spacer(4) : null,
             s.Usage?.Percent is int p2 && p2 >= 70 ? Ui.Text(L("上下文 %@%", p2), 10.5, color: p2 >= 90 ? "Red" : "Orange") : null);
-        Control lineView = Ui.Text(line.Length == 0 ? " " : line, 11.5, color: lineColor, lines: 2);
+        Control lineView = Ui.Text(line, 11.5, color: lineColor, lines: 1).Tip(SessionLine.Detail(s));
         // 正在做的会话：这一轮做到第几步（主题色小标识，几个会话各到哪一步一眼看清）
         if (s.LiveStage is StageInfo stage) lineView = Ui.HTop(5, StageBadge.Make(stage, 10.5).Margin(0, 1, 0, 0), lineView.Shrink());
         // 设了目标的：目标到哪了（鼠标停上去看目标原文）
@@ -508,23 +631,40 @@ public sealed class SessionRowView : Tap
     LookSize? lastSize;
 }
 
-/// 会话那行的小字（同 Mac 版 SessionItem.line）：等确认的原因、正在做什么、出错原因、最后一句
+/// 会话那行的小字（同 Mac 版 SessionItem.status）：只说状态——待确认什么工具、正在运行什么工具、可能停滞、出错、空闲；
+/// 不放回复内容（截短的两行看了也看不全，11-10 用户），进度由前面的「2/4 开发中」标识说
 public static class SessionLine
 {
+    /// 「Bash: S=/tmp/…」只取冒号前的工具名（太长就不要）
+    static string? Tool(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var head = text.Split(':', 2)[0].Trim();
+        return head.Length == 0 || head.Length > 24 ? null : head;
+    }
+
     public static (string Text, string Color) Of(SessionInfo s)
+    {
+        if (s.Error is string) return (L("出错已停止"), "Red");
+        if (s.IsWaiting) return (Tool(s.PendingTool) is string t ? L("待确认 · %@", t) : L("待确认"), "Orange");
+        if (s.IsBusy)
+        {
+            if (s.UpdatedAt is double updated && (int)((Format.NowMs - updated) / 60000) is var minutes && minutes >= 20)
+                return (L("可能停滞：%@ 分钟无进展", minutes), "Orange");
+            return (Tool(s.ActivityText) is string a ? L("正在运行 %@", a) : L("正在工作…"), "Accent");
+        }
+        return (L("空闲"), "Text2");
+    }
+
+    /// 指着状态看的完整说明（原来那行小字：等确认的原因、正在做什么、出错原因、最后一句）
+    public static string Detail(SessionInfo s)
     {
         string text;
         if (s.IsWaiting) text = s.Blocking ?? s.Reason ?? L("需要确认");
-        else if (s.IsBusy)
-        {
-            text = s.ActivityText is string a ? L("正在 %@", a) : s.Reason ?? L("正在工作…");
-            if (s.UpdatedAt is double updated && (int)((Format.NowMs - updated) / 60000) is var minutes && minutes >= 20)
-                text = L("可能停滞：%@ 分钟无进展 · %@", minutes, text);
-        }
+        else if (s.IsBusy) text = s.ActivityText is string a ? L("正在 %@", a) : s.Reason ?? L("正在工作…");
         else if (s.Error is string error) text = L("出错已停止：%@", error);
         else text = (s.Preview ?? s.Reason ?? "").Replace("\n", " ");
-        text = text.Replace("**", "").Replace("`", "");
-        return (text, s.IsWaiting ? "Orange" : s.IsBusy ? "Accent" : "Text2");
+        return text.Replace("**", "").Replace("`", "");
     }
 }
 

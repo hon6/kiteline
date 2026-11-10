@@ -48,6 +48,12 @@ static class SelfTest
             {
                 case "wait": Pump(double.Parse(arg)); break;
                 case "select": main.Selection = arg.Length == 0 ? null : arg; break;
+                case "tab": main.ListTab = arg; break;                                                          // 左边栏页签：sessions / groups / tabgroups
+                case "tabgroup": if (TabGroupState.Shared.Items.FirstOrDefault(x => x.Name == arg) is { } tg) TabGroupState.Shared.Activate(tg.Id); break;   // 切到这组（按名字）
+                case "tabcolor": { var parts2 = arg.Split(':'); if (TabGroupState.Shared.Items.FirstOrDefault(x => x.Name == parts2[0]) is { } tc) TabGroupState.Shared.Update(tc.Id, tc.Name, parts2[1]); break; }   // 改组的颜色（组名:颜色id）
+                case "tabedit": if (TabGroupState.Shared.Items.FirstOrDefault(x => x.Name == arg) is { } tEd) TabGroupEdit.Open(tEd.Id); break;   // 打开编辑弹窗
+                case "tabpicker": TabGroupPicker.Open(null, []); break;   // 打开「新建会话组」选会话弹窗
+                case "tabexpand": if (TabGroupState.Shared.Items.FirstOrDefault(x => x.Name == arg) is { } te) TabGroupState.Shared.ToggleExpanded(te.Id); break;   // 展开 / 收起这组
                 case "groupmembers": Views.GroupChatPage.StartWithMembers = true; break;   // 之后打开的群聊页直接展开成员面板
                 case "grouppick": Views.GroupPicker.Open([], null); break;                  // 点「建群」：拉群面板（什么都没勾）
                 // 第一个群的输入栏（同会话的输入栏）：groupattach:<图片路径>[*张数] = 附图（同粘贴截图）；groupsend:<文字> = 打字后点发送
@@ -252,6 +258,16 @@ static class SelfTest
                     window.KeyRelease(Enum.Parse<Avalonia.Input.Key>(keyParts[0], true), mods, Avalonia.Input.PhysicalKey.None, null);
                     break;
                 case "tree": Tree(window, arg); break;
+                case "scrollpos":   // 对话区滚在哪：scrollpos:<标签>
+                    foreach (var view in window.GetVisualDescendants().OfType<Views.ChatView>()) Console.Error.WriteLine($"[selftest] 滚动位置 {arg}：{view.SelfTestScroll()}");
+                    break;
+                case "scrollto":    // scrollto:<top|bottom|离顶多少>[,user]：带 user 当成人在滚，不带等于系统挪的位置
+                    var scrollArgs = arg.Split(',');
+                    foreach (var view in window.GetVisualDescendants().OfType<Views.ChatView>()) view.SelfTestScrollTo(scrollArgs[0], scrollArgs.Contains("user"));
+                    break;
+                case "sh":          // 跑一条测试命令（比如往合成会话里追加消息）
+                    System.Diagnostics.Process.Start("/bin/sh", ["-c", arg])?.WaitForExit();
+                    break;
                 case "hoverdivider":
                     // 分隔条当作指针停在上面（看拖动把手）：arg = 沿线的位置
                     foreach (var divider in window.GetVisualDescendants().OfType<Views.ChatPanesView.PaneDivider>()) divider.DebugHover(double.Parse(arg));

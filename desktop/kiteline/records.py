@@ -566,6 +566,65 @@ class Favorites:
         self.publish("favorites", self.payload())
 
 
+# MARK: - 标签组
+
+class TabGroupStore:
+    """标签组（同 Mac 版 TabGroupStore.swift）：同一阶段的几个相关会话放一组；组名、颜色、有哪些会话、先后存这台电脑上
+    （数据目录 tabgroups.json），连这台电脑的各端看到同一套。分屏布局各端自己存。有变化推 tabgroups 事件（整份）
+      GET  /api/tabgroups       {ok, rev, groups:[{id, name, color, keys}]}
+      POST /api/tabgroups/set   {groups:[…]}：整份换掉（谁后改听谁的）"""
+    GROUP_LIMIT, KEY_LIMIT = 200, 100
+
+    def __init__(self, publish):
+        self.publish = publish
+        self._lock = threading.RLock()
+        self._file = config.path("tabgroups.json")
+        saved = config.read_json(self._file, {})
+        self._rev = int(saved.get("rev") or 0)
+        self._groups = saved.get("groups") or []
+
+    def payload(self):
+        with self._lock:
+            return {"ok": True, "rev": self._rev, "groups": [dict(g) for g in self._groups]}
+
+    def handle(self, method, path, body):
+        body = body or {}
+        if method == "GET" and path == "/api/tabgroups":
+            return 200, self.payload()
+        if method == "POST" and path == "/api/tabgroups/set":
+            raw = body.get("groups")
+            if not isinstance(raw, list):
+                return 400, {"ok": False, "error": "缺少 groups"}
+            groups, seen = [], set()
+            for row in raw[:self.GROUP_LIMIT]:
+                if not isinstance(row, dict):
+                    continue
+                gid = row.get("id")
+                if not isinstance(gid, str) or not gid or gid in seen:
+                    continue
+                seen.add(gid)
+                name = str(row.get("name") or "").strip()[:60] or "会话组"
+                keys = []
+                for key in row.get("keys") or []:
+                    if isinstance(key, str) and key and key not in keys:
+                        keys.append(key)
+                group = {"id": gid, "name": name, "keys": keys[:self.KEY_LIMIT]}
+                if isinstance(row.get("color"), str):
+                    group["color"] = row["color"]
+                groups.append(group)
+            with self._lock:
+                changed = groups != self._groups
+                if changed:
+                    self._groups = groups
+                    self._rev += 1
+                    text = json.dumps({"rev": self._rev, "groups": self._groups}, ensure_ascii=False)
+            if changed:
+                config.write_private(self._file, text)
+                self.publish("tabgroups", self.payload())
+            return 200, self.payload()
+        return 404, {"ok": False, "error": "接口不存在"}
+
+
 # MARK: - 通知收件箱
 
 class Inbox:

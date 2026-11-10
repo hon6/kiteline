@@ -453,6 +453,39 @@ public sealed class ChatPanes
 
     // MARK: 记住分屏（关掉 App 再打开、重装之后还是原来那样，同 Mac 版 remember）
 
+    /// 当前布局的存档（同 Remember 的格式）：会话组切走时记下来，切回来用 Restore 摆回去
+    public JsonObject Snapshot() => new() { ["root"] = Stored(Root), ["focus"] = FocusId.ToString() };
+
+    /// 按存档摆回布局（读不懂就不动）
+    public void Restore(JsonObject snapshot)
+    {
+        if (Restored(snapshot.Get("root")) is not Node node) return;
+        Root = node;
+        var ids = Panes.Select(p => p.Id).ToList();
+        FocusId = Guid.TryParse(snapshot.Str("focus"), out var focus) && ids.Contains(focus) ? focus : ids[0];
+        Sizes.Clear();
+        Commit();
+    }
+
+    /// 每个会话一列（同 Mac 版 arrange）：从左到右等宽的存档，只生成数据，不碰正显示的布局
+    public static JsonObject Columns(IReadOnlyList<string> keys)
+    {
+        var list = keys.Where(k => !string.IsNullOrEmpty(k)).Distinct().ToList();
+        static JsonObject Pane(string? key)
+        {
+            var tabs = new JsonArray();
+            if (key is not null) tabs.Add(JsonValue.Create(key));
+            return new JsonObject { ["id"] = Guid.NewGuid().ToString(), ["key"] = key, ["tabs"] = tabs };
+        }
+        if (list.Count <= 1) return new JsonObject { ["root"] = Pane(list.FirstOrDefault()) };
+        var items = new JsonArray(list.Select(k => (JsonNode?)Pane(k)).ToArray());
+        var fractions = new JsonArray(list.Select(_ => (JsonNode?)JsonValue.Create(1.0 / list.Count)).ToArray());
+        return new JsonObject
+        {
+            ["root"] = new JsonObject { ["id"] = Guid.NewGuid().ToString(), ["vertical"] = false, ["items"] = items, ["fractions"] = fractions },
+        };
+    }
+
     bool remembering;
 
     public void Remember()

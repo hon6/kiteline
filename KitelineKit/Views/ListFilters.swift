@@ -272,6 +272,27 @@ public struct NewGroupLabel: View {
     }
 }
 
+/// 「+ 新建」：标签组页签那一行右边，样子同「建群」
+public struct TabPlusLabel: View {
+    let title: String
+
+    public init(title: String) { self.title = title }
+
+    public var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "plus").font(.app(size: 12, weight: .semibold))
+            Text(title).lineLimit(1)
+        }
+        .font(.ui(.footnote).weight(.medium))
+        .foregroundStyle(Color.secondary)
+        .padding(.horizontal, 11)
+        .frame(height: 30)
+        .background(Color.primary.opacity(0.06), in: Capsule())
+        .contentShape(Capsule())
+        .fixedSize()
+    }
+}
+
 public struct ViewMenuLabel: View {
     let summary: String
     let isDefault: Bool

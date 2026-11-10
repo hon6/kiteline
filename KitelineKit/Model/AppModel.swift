@@ -72,6 +72,8 @@ final class AppModel {
     var todos = TodoState()
     /// 我的收藏（Model/Favorites.swift）
     var favorites = FavoriteState()
+    /// 标签组：相关会话放一组，存在电脑上、各端同一套（SharedTabGroups.swift）
+    let tabGroupShared = SharedTabGroups()
     /// 新建任务后等新会话出现，出现了就自动打开（MainView 看到 pendingOpen 就推进去）
     var pendingOpen: String?
     /// 已经结束的会话的标题、目录（打开它时标题栏用）
@@ -121,6 +123,8 @@ final class AppModel {
         if let cached = Offline.loadState() { apply(cached) }
         loadCachedTodos()
         loadCachedFavorites()
+        tabGroupShared.api = api
+        tabGroupShared.loadCached()
         terminals.model = self
     }
 
@@ -147,10 +151,21 @@ final class AppModel {
         fileprivate(set) var agent: String
         /// 用户设的头像、昵称（会话自己的，没有就是这家 agent 默认的；都没设为 nil）：同样单独拆出来，很少变
         fileprivate(set) var face: AgentFace?
-        init(_ info: SessionInfo?) { self.info = info; activity = info?.activity; agent = info?.agent ?? Agents.defaultID }
+        /// 标签、标签组那一行只要这三样（标题、状态、出错没）：只在它们变了时才通知。读 info 的话会话每换一个工具、用量一变都要重画，
+        /// 标签一多（几个标签组几十个标签）每秒的状态推送就要把所有标签重排一遍（11-10 反馈：标签多了卡）
+        struct TabFace: Equatable {
+            var title: String
+            var activity: String
+            var failed: Bool
+        }
+        fileprivate(set) var tab: TabFace?
+        init(_ info: SessionInfo?) { self.info = info; activity = info?.activity; agent = info?.agent ?? Agents.defaultID; tab = info.map(Self.tabFace) }
+        private static func tabFace(_ info: SessionInfo) -> TabFace { TabFace(title: info.title, activity: info.activity, failed: info.error != nil) }
         fileprivate func set(_ new: SessionInfo?) {
             if info != new { info = new }
             if activity != new?.activity { activity = new?.activity }
+            let face = new.map(Self.tabFace)
+            if tab != face { tab = face }
             if let agent = new?.agent, agent != self.agent { self.agent = agent }
         }
         fileprivate func setFace(_ new: AgentFace?) { if face != new { face = new } }
@@ -159,6 +174,9 @@ final class AppModel {
     @ObservationIgnored private var sessionSlots: [String: SessionSlot] = [:]
     /// sessions 按 key 的副本（不触发观察），给 sessionSlot 初始化用
     @ObservationIgnored private var latestSessions: [String: SessionInfo] = [:]
+
+    /// 最新收到的这个会话的状态，不登记观察（菜单、提示文字这种点开 / 指着才看的用，读了不会跟着每次推送重画）
+    func sessionSnapshot(_ key: String) -> SessionInfo? { latestSessions[key] }
 
     func sessionSlot(_ key: String) -> SessionSlot {
         if let slot = sessionSlots[key] { return slot }
@@ -211,8 +229,10 @@ final class AppModel {
         }
     }
 
+    /// 有给你的新消息：不在屏幕上、没在干活、最近一轮不是别的会话来信引起的（会话之间的往来回给发信的会话就行，11-10 反馈：
+    /// 会话间的消息它有时候顺带回你一句，又冒出来新消息），而且在任何一端看过之后又有了动静（手机上看过，Mac 上就不再标）
     func isUnread(_ s: SessionInfo) -> Bool {
-        !isOpen(s.key) && (s.updatedAt ?? 0) > (seen[s.key] ?? 0) && !s.isBusy
+        !isOpen(s.key) && !s.isBusy && !s.fromPeer && (s.updatedAt ?? 0) > max(seen[s.key] ?? 0, s.viewedAt ?? 0)
     }
 
     /// 这个会话正开在屏幕上（分列里的任一列）
@@ -435,6 +455,7 @@ final class AppModel {
             await refreshInbox()
             await refreshTodos()
             await refreshFavorites()
+            await tabGroupShared.load()   // 老版本电脑端没有这个接口：取不到就当不支持
             await peers.load(api)
             await groups.load(api)   // 老版本电脑端没有这个接口：取不到就是空的
             if !embedded { await syncComputers() }
@@ -614,7 +635,9 @@ final class AppModel {
             handleEvent("state", full)
         case "entries":
             if let entries = try? decoder.decode(EntriesEvent.self, from: data) {
-                let chat = chat(entries.key)
+                // 电脑把所有会话的新消息都推过来：没打开过、或打开过但已经休眠（见 close）的会话不收，打开时再按页取。
+                // 以前每个会话都建一份、一直往里攒，会话多、开一整天内存一路涨（11-10 反馈：标签多了卡、要省资源）
+                guard let chat = chats[entries.key], chat.loaded || chat.loading || isOpen(entries.key) else { break }
                 // 朗读模式：正在看的会话里 Claude 新说的话自动读（刚到的，不是翻出来的旧记录）
                 if Speaker.shared.autoRead, entries.key == current {
                     let fresh = Date().timeIntervalSince1970 * 1000 - 120_000
@@ -646,6 +669,8 @@ final class AppModel {
             receiveTodos(data)
         case "favorites":
             applyFavorites(data)
+        case "tabgroups":
+            tabGroupShared.apply(data)
         case "groups":
             groups.apply(data)
         case "group_msg":
@@ -803,6 +828,8 @@ final class AppModel {
 
     /// 打开一个会话：离开超过 10 分钟的，标出「以下是新消息」。分列里不是当前列的（focus = false）不抢朗读
     func open(_ key: String, focus: Bool = true) {
+        sleepTasks[key]?.cancel()
+        sleepTasks[key] = nil
         openCounts[key, default: 0] += 1
         if focus || current == nil { current = key }
         let chat = chat(key)
@@ -842,6 +869,34 @@ final class AppModel {
         openCounts[key] = left > 0 ? left : nil
         if current == key, left <= 0 { current = openCounts.keys.first }
         markSeen(key)
+        if left <= 0 {
+            scheduleSleep(key)
+            reportViewed([key])   // 看完离开：电脑记下最后看过的时间，别的设备上这个会话就不再标新消息
+        }
+    }
+
+    /// 不在屏幕上的对话过多久放掉消息（同浏览器把后台标签休眠、Zen 的标签卸载）
+    static var sleepAfter: Duration = .seconds(600)
+    @ObservationIgnored private var sleepTasks: [String: Task<Void, Never>] = [:]
+
+    /// 对话页关了（切到别的标签、切走标签组、关了标签）：10 分钟内没再打开，就把这个会话已加载的消息放掉，也不再收它的新消息；
+    /// 草稿、没发出去的消息、附件、展开过的步骤都留着。再打开时先放离线缓存（最近 80 条）、再从电脑取最新一页，看起来和没休眠一样。
+    /// 正在发、排队、发送失败的消息还在的不休眠（要等它回显）
+    private func scheduleSleep(_ key: String) {
+        sleepTasks[key]?.cancel()
+        sleepTasks[key] = Task { [weak self] in
+            try? await Task.sleep(for: Self.sleepAfter)
+            guard !Task.isCancelled, let self else { return }
+            self.sleepTasks[key] = nil
+            guard !self.isOpen(key), let chat = self.chats[key], chat.loaded, chat.pending.isEmpty, !chat.loading else { return }
+            chat.reset()
+        }
+    }
+
+    /// 自测用：开着的、已加载消息的、休眠中的会话各几个，消息一共多少条
+    var chatMemory: String {
+        let loaded = chats.values.filter(\.loaded)
+        return "open=\(openCounts.count) loaded=\(loaded.count) stores=\(chats.count) items=\(chats.values.reduce(0) { $0 + $1.items.count }) sleeping=\(sleepTasks.count)"
     }
 
     // MARK: 操作

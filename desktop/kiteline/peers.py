@@ -29,7 +29,7 @@ PREFIX = "kl:"
 OWNED_BY_PEER = {"skills", "todos", "groups"}   # 那台电脑自己管它的 watcher：这些不转过去
 LOCAL_PATHS = {"/api/pin", "/api/mark", "/api/mute", "/api/viewed", "/api/quiet", "/api/share", "/api/share/stop", "/api/inbox",
                "/api/state", "/api/events", "/api/computers", "/api/computers/enroll"}
-LOCAL_PREFIXES = ("/api/todos", "/api/favorites", "/api/groups", "/api/peer/", "/api/devices", "/api/push", "/api/live", "/api/desktop")
+LOCAL_PREFIXES = ("/api/todos", "/api/favorites", "/api/tabgroups", "/api/groups", "/api/peer/", "/api/devices", "/api/push", "/api/live", "/api/desktop")
 KEY_FIELDS = ("key", "k", "source", "sourceId", "sessionKey")
 # 加电脑时连不上：多半是对方的防火墙拦着（Windows 第一次运行时关掉了系统的提示框）
 FIREWALL_HINT = "。请确认那台电脑上 Kiteline 正在运行；若那台电脑开着防火墙，在它的「就绪检查」里点「防火墙放行 → 一键放行」"

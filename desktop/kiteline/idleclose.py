@@ -129,6 +129,11 @@ class IdleClose:
         with self._lock:
             return list(self._viewed)
 
+    def viewed_at(self, key):
+        """最后一次在任何一端打开过这个会话的详情（毫秒，没有是 None）：随会话状态给各端算「新消息」（同 Mac IdleClose.viewedAt）"""
+        with self._lock:
+            return self._viewed.get(key)
+
     def idle(self, key, now=None):
         """多久没打开了（秒）；没记录的返回 None"""
         with self._lock:

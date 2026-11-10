@@ -62,6 +62,10 @@ public sealed record SessionInfo
     public GoalInfo? Goal { get; init; }
     /// 远端电脑上、在 VS Code 里跑的 Claude Code，能转到后台运行（对话页提示「支持后台托管」，见 Views/HostedSetup.cs）
     public bool Hostable { get; init; }
+    /// 最后一次在任何一端看过这个会话的时间（毫秒，同 iOS 版 viewedAt）：「新消息」按它和本机记的取较晚的算
+    public double? ViewedAt { get; init; }
+    /// 最近一轮是别的会话来信引起的（会话之间的往来、群消息）：不算给你的新消息
+    public bool FromPeer { get; init; }
     /// 列表里显示的目标：还在做的一直显示；结束了的（达成、做不到）一小时内还显示
     public GoalInfo? ListGoal => Goal is { } g && (g.Running || g.At is double at && Format.NowMs - at < 3_600_000) ? g : null;
 
@@ -123,6 +127,8 @@ public sealed record SessionInfo
             Stage = StageInfo.Parse(n.Get("stage")),
             Goal = GoalInfo.Parse(n.Get("goal")),
             Hostable = n.Bool("hostable") ?? false,
+            ViewedAt = n.Num("viewedAt"),
+            FromPeer = n.Bool("fromPeer") ?? false,
         };
     }
 }

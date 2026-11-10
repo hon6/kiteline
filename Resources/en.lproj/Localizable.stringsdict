@@ -80,6 +80,28 @@
 <key>other</key><string>%lld sessions on this branch</string>
 </dict>
 </dict>
+<key>%lld 个会话有新消息</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session has new messages</string>
+<key>other</key><string>%lld sessions have new messages</string>
+</dict>
+</dict>
+<key>%lld 个会话等你确认</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld session needs your approval</string>
+<key>other</key><string>%lld sessions need your approval</string>
+</dict>
+</dict>
 <key>%lld 个会话运行中</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -102,6 +124,17 @@
 <key>other</key><string>%lld sessions, all idle</string>
 </dict>
 </dict>
+<key>%lld 个出错</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld error</string>
+<key>other</key><string>%lld errors</string>
+</dict>
+</dict>
 <key>%lld 个后台任务</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -113,6 +146,17 @@
 <key>other</key><string>%lld background tasks</string>
 </dict>
 </dict>
+<key>%lld 个在工作</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld working</string>
+<key>other</key><string>%lld working</string>
+</dict>
+</dict>
 <key>%lld 个工作中</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -122,6 +166,17 @@
 <key>NSStringFormatValueTypeKey</key><string>lld</string>
 <key>one</key><string>%lld session working</string>
 <key>other</key><string>%lld sessions working</string>
+</dict>
+</dict>
+<key>%lld 个成员</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld member</string>
+<key>other</key><string>%lld members</string>
 </dict>
 </dict>
 <key>%lld 个改动</key>
@@ -795,6 +850,17 @@
 <key>other</key><string>Found %lld sessions</string>
 </dict>
 </dict>
+<key>新建标签组（%lld 列）</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Create Tab Group (%lld Column)</string>
+<key>other</key><string>Create Tab Group (%lld Columns)</string>
+</dict>
+</dict>
 <key>早安 · %lld 个会话待确认</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -936,6 +1002,17 @@
 <key>NSStringFormatValueTypeKey</key><string>lld</string>
 <key>one</key><string>Tap to start recording, then tap again when you finish to transcribe to text (up to %lld second).</string>
 <key>other</key><string>Tap to start recording, then tap again when you finish to transcribe to text (up to %lld seconds).</string>
+</dict>
+</dict>
+<key>用当前 %lld 个标签页新建标签组</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>New Tab Group with %lld Current Tab</string>
+<key>other</key><string>New Tab Group with %lld Current Tabs</string>
 </dict>
 </dict>
 <key>留空时使用「快捷短语」（%lld 条）。手表屏幕较小，可单独设置简短回复：最多 8 条，每条不超过 40 字。也可在手表上直接语音回复。</key>

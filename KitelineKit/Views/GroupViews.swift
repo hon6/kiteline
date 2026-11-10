@@ -95,6 +95,8 @@ struct GroupRow: View {
     }
 
     private func preview(_ live: Bool) -> Text {
+        // 列表里的一行（compact）只说状态：成员在干什么，不放最后一条群消息（截短了看不全，11-10 用户）
+        if compact { return status(live) }
         if group.paused {
             return Text("\(Text("[已暂停转发]").foregroundStyle(.orange)) \(Text("轻点查看").foregroundStyle(.secondary))")
         }
@@ -105,6 +107,24 @@ struct GroupRow: View {
         let who = last.mine ? L("我") : (group.member(last.from).map { model.title(of: $0) } ?? last.fromTitle)
         let text = last.text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         return Text("\(who)：\(text)").foregroundStyle(.secondary)
+    }
+}
+
+extension GroupRow {
+    /// 「3 个成员 · 1 个待确认 · 2 个在工作」；转发暂停了说暂停；成员都关了说已结束
+    func status(_ live: Bool) -> Text {
+        if group.paused { return Text("已暂停转发").foregroundStyle(.orange) }
+        guard live else { return Text("成员会话都已结束").foregroundStyle(.secondary) }
+        let faces = group.members.compactMap { model.sessionSlot($0.key).tab }
+        let waiting = faces.filter { $0.activity == "waiting" }.count
+        let busy = faces.filter { $0.activity == "busy" }.count
+        let failed = faces.filter(\.failed).count
+        var parts = [L("%lld 个成员", count: group.members.count)]
+        if waiting > 0 { parts.append(L("%lld 个待确认", count: waiting)) }
+        if failed > 0 { parts.append(L("%lld 个出错", count: failed)) }
+        if busy > 0 { parts.append(L("%lld 个在工作", count: busy)) }
+        if waiting + busy + failed == 0 { parts.append(L("空闲")) }
+        return Text(parts.joined(separator: " · ")).foregroundStyle(waiting > 0 ? Color.orange : (busy > 0 ? Theme.claude : Color.secondary))
     }
 }
 
@@ -1085,7 +1105,7 @@ extension SessionCard {
     /// 拖着群走的卡片：群名、几个成员、最后一句
     init(group: GroupInfo, model: AppModel) {
         let line = group.last.map { $0.text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) } ?? ""
-        self.init(title: group.name, status: L("%lld 个成员", group.members.count), line: line,
+        self.init(title: group.name, status: L("%lld 个成员", count: group.members.count), line: line,
                   detail: group.members.map { model.title(of: $0) }.joined(separator: L("、")), dot: Theme.claude)
     }
 }

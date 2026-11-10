@@ -565,7 +565,7 @@ class Groups:
             for other in group["members"]:
                 lines.append("· %s%s" % ("你：" if other["key"] == member["key"] else "", self._label(other)))
             lines.append("发群消息（成员会收到，用户在群里也看得到）：%s group say \"内容\"；只发给某一个加 --to 名字；看成员和最近的群消息：%s group info。" % (command, command))
-            lines.append("需要对方知道或配合的事（进度、结果、请求、回答对方的问题）再发，不用客套回复；用户在群里说的话也用 group say 回复；群里的往来只在群里回，不用另外向用户汇报。")
+            lines.append("群里平时少说话（每条群消息都会让收到的会话带着整段上下文跑一轮）：只在遇到问题要别人帮忙、要别人配合或交接（你的结果别人要接着用）、或别人直接问你时才发；收到、谢谢、进度播报、做完汇报都不用发。用户在群里说的话用 group say 回复；群里的往来只在群里回，不用另外向用户汇报。")
             if group.get("autoName"):
                 lines.append("这个群还没有正式名字：你第一次发群消息时加上 --name \"群名\"（概括这次协作的事，12 个字以内）。")
             lines.append("")
@@ -585,7 +585,7 @@ class Groups:
                 parts = (["附图 %d 张" % images] if images else []) + (["附件 " + "、".join(files)] if files else [])
                 lines.append("（%s，路径在本条消息末尾）" % "，".join(parts))
         if member.get("briefed"):
-            lines.append("（回复群里：%s group say \"内容\"；不需要回复就不用回）" % command)
+            lines.append("（回复群里：%s group say \"内容\"；只是通知、不用你配合的就不用回，也别回「收到」）" % command)
         return "\n".join(lines)
 
     @staticmethod

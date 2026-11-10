@@ -490,6 +490,9 @@ class MobileServer:
             if isinstance(result, tuple):
                 return thumb_reply(result[0], result[1], request, "todo|%s" % request.query.get("ref", ""))
             return Response.json(result, status)
+        if path == "/api/tabgroups" or path.startswith("/api/tabgroups/"):
+            status, result = self.app.tab_groups.handle(method, path, request.json)
+            return Response.json(result, status)
         if path == "/api/favorites" or path.startswith("/api/favorites/"):
             status, result = self.app.favorites.handle(method, path, request.json, request.query)
             if isinstance(result, tuple):

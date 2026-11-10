@@ -285,7 +285,7 @@ class Store:
         with self.lock:
             return self.sources.get(source_id)
 
-    def state_payload(self, host, version, me):
+    def state_payload(self, host, version, me, viewed_at=None):
         m = self.cfg.mobile
         with self.lock:
             records = list(self.records)
@@ -334,6 +334,12 @@ class Store:
                 item["hostable"] = True   # 能转到后台运行（会话页提示「支持后台托管」）
             if snap.get("terminals"):
                 item["terminals"] = snap["terminals"]
+            # 新消息怎么算（各端，同 Mac）：最后一次在任何一端看过的时间；最近一轮是别的会话来信引起的不算给你的新消息
+            seen = viewed_at(record.key) if viewed_at else None
+            if seen is not None:
+                item["viewedAt"] = seen
+            if snap.get("turnFrom") == "peer":
+                item["fromPeer"] = True
             if snap.get("pendingOptions") and record.activity == "waiting":
                 item["pendingOptions"] = [dict({"key": str(o.get("key")), "label": str(o.get("label")), "style": o.get("style") or "normal"},
                                                **({"labelEn": str(o["labelEn"])} if o.get("labelEn") else {}))

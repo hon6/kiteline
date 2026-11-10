@@ -1,6 +1,8 @@
 import SwiftUI
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 /// 一个会话的对话页
@@ -18,6 +20,10 @@ struct ChatView: View {
     /// 新建的对话页没有排版缓存，一页 60 条一次排完要 0.3 秒左右，切过去要等这么久才出来（10-26 Mac 切到长会话的标签）。
     /// 往上补行时贴底的照样贴底（Mac 的 follow、iPhone 的 defaultScrollAnchor）
     @State private var revealed = 12
+    /// 最多画最后多少行（Int.max = 全画）。会话开着一直往下聊，行只增不减，几百上千行的 VStack 每来一点内容都要整列重排，
+    /// 越聊越卡（11-10）。平时只画最后 shownRows 行，更早的点「查看更早的消息」再展开；回到底部来了新消息时收回
+    @State private var limit = ChatView.shownRows
+    static let shownRows = 100
     @State private var showInfo = false
     /// Agent 详情（点助手头像、标题栏的 agent 标志、会话菜单）
     @State private var showAgentInfo = false
@@ -78,7 +84,8 @@ struct ChatView: View {
         let activity = slot.activity
         let all = rows(chat, activity)
         // 刚打开只画最后一截，更早的分几轮补上（见 revealed）；要跳到某条消息时全画
-        let rows = jumpTarget == nil && revealed < all.count ? Array(all.suffix(revealed)) : all
+        let shown = min(revealed, limit)
+        let rows = jumpTarget == nil && shown < all.count ? Array(all.suffix(shown)) : all
         ScrollViewReader { proxy in
             ScrollView {
                 // 不用 LazyVStack：懒加载的行高是估算的，Claude 的回复边写边变长时，后面的行没跟着重排，
@@ -90,9 +97,23 @@ struct ChatView: View {
                             // 加载更早的消息：加载完停在原来看的那条上，不跳走
                             let anchor = rows.first?.id
                             scroll.stick = false
+                            limit = .max
+                            revealed = .max
                             await model.loadHistory(key, older: true)
                             if let anchor { proxy.scrollTo(anchor, anchor: .top) }
                         }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.headerHeight = $0 }
+                    } else if revealed >= limit {
+                        // 只画着最后 limit 行（见 limit）：先在本地展开更早的一截，展开完停在原来看的那条上
+                        Button("查看更早的消息") {
+                            let anchor = rows.first?.id
+                            scroll.stick = false
+                            limit = limit > Int.max - Self.shownRows ? .max : limit + Self.shownRows
+                            revealed = limit
+                            if let anchor { DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) } }
+                        }
+                        .font(.ui(.footnote)).padding(10)
+                        .frame(maxWidth: .infinity)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.headerHeight = $0 }
                     }
                     // 消息行单独成一个视图、按值比较：会话状态变了（正在执行哪个工具、用量……）但行没变时整段跳过，
@@ -179,6 +200,8 @@ struct ChatView: View {
                 try? await Task.sleep(for: .seconds(1))
                 for _ in 0..<Snapshot.benchPages where model.chat(key).hasMore {
                     scroll.stick = false
+                    limit = .max
+                    revealed = .max
                     await model.loadHistory(key, older: true)
                 }
                 Snapshot.benchReady = true
@@ -193,6 +216,8 @@ struct ChatView: View {
                 try? await Task.sleep(for: .seconds(1))
                 for _ in 0..<DeviceBench.pages where model.chat(key).hasMore {
                     scroll.stick = false
+                    limit = .max
+                    revealed = .max
                     await model.loadHistory(key, older: true)
                 }
                 DeviceBench.ready = true
@@ -236,6 +261,8 @@ struct ChatView: View {
                 if scroll.stick || rows.last.map(isPending) == true {
                     scroll.stick = true
                     newPill = false
+                    // 看过更早的消息又回到底部了：收回只画最后 shownRows 行（见 limit）
+                    if limit > Self.shownRows, jumpTarget == nil { limit = Self.shownRows }
                     withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
                 } else {
                     newPill = true
@@ -258,7 +285,10 @@ struct ChatView: View {
                         }) {
                             catchupDismissed = true
                             scroll.stick = false
-                            withAnimation { proxy.scrollTo("new-marker", anchor: .top) }
+                            // 「以下是新消息」可能在只画的最后 limit 行之前：先全画出来再滚过去
+                            limit = .max
+                            revealed = .max
+                            DispatchQueue.main.async { withAnimation { proxy.scrollTo("new-marker", anchor: .top) } }
                         }
                         .transition(.opacity)
                     }
@@ -281,15 +311,16 @@ struct ChatView: View {
             .animation(.snappy, value: newPill)
             .task {
                 // 先画的那一截上屏以后，每轮补 16 行更早的（见 revealed）
-                while revealed != .max {
+                while revealed < limit {
                     try? await Task.sleep(for: .milliseconds(16))
                     if Task.isCancelled { return }
-                    revealed = revealed >= 100 ? .max : revealed + 16
+                    revealed = min(revealed + 16, limit)
                 }
             }
             .task(id: jumpTarget) {
                 guard let target = jumpTarget else { return }
-                revealed = .max   // 跳到某条消息要全画（跳完也不再收回）
+                revealed = .max   // 跳到某条消息要全画（跳完回到底部、来新消息时再收回，见 limit）
+                limit = .max
                 scroll.stick = false
                 for _ in 0..<12 {
                     if let row = model.chat(key).rows(session: model.session(key)).first(where: { $0.contains(target) }) {
@@ -497,6 +528,12 @@ struct ChatView: View {
             scroll.contentHeight = metrics.height
             if scroll.stick, distance > 1 { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
         } else {
+            guard MacScrollInput.recent else {
+                // 不是你在翻：显示器关了再开、窗口被系统挪到别的屏幕又挪回来时，窗口高度、滚动位置会被系统改动，
+                // 以前一律当成「你往上翻了」，从此不再贴底，停在半截甚至最上面（11-10）。贴着底的拉回底部
+                if scroll.stick, distance > 1 { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
+                return
+            }
             scroll.stick = distance < 160
             if scroll.stick, newPill { newPill = false }
         }
@@ -1154,7 +1191,16 @@ private struct ChatScrollFollow: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(macOS)
-        content.defaultScrollAnchor(.bottom)
+        if #available(macOS 15.0, *) {
+            // 告诉 RowWindow 可视区在哪：离得远的行设透明、不再画（以前 Mac 上没接，长会话几百行全画着，
+            // 息屏再亮屏时整页几千处文字一起重画）
+            content.defaultScrollAnchor(.bottom)
+                .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in
+                    window.scrolled(top: rect.minY, height: rect.height)
+                }
+        } else {
+            content.defaultScrollAnchor(.bottom)
+        }
         #else
         if #available(iOS 18.0, *) {
             content
@@ -1292,6 +1338,34 @@ struct VerticalOnlyScroll: UIViewRepresentable {
             DebugRemote.note("横向偏移 \(Int(scroll.contentOffset.x))（应为 \(Int(left))），内容宽 \(Int(scroll.contentSize.width))，可视宽 \(Int(scroll.bounds.width))，已拉回")
             #endif
             scroll.contentOffset = CGPoint(x: left, y: scroll.contentOffset.y)
+        }
+    }
+}
+#endif
+
+#if os(macOS)
+/// Mac：最近有没有「人在滚对话」的操作（滚轮 / 触控板、拖滚动条、翻页键）。对话页靠位置变化判断贴不贴底，
+/// 系统自己挪了位置（息屏亮屏、窗口换屏改了大小）不能算成你往上翻了（见 ChatView.follow）
+@MainActor
+enum MacScrollInput {
+    private static var last: TimeInterval = 0
+    private static var monitor: Any?
+
+    /// 0.8 秒内有过滚动操作（触控板的惯性滚动会一直发滚轮事件）
+    static var recent: Bool {
+        install()
+        return ProcessInfo.processInfo.systemUptime - last < 0.8
+    }
+
+    static func note() { last = ProcessInfo.processInfo.systemUptime }
+
+    private static func install() {
+        guard monitor == nil else { return }
+        // 翻页键：Page Up / Down、Home / End、上下方向键、空格（在输入框里打字也会算上，只是让这段时间照旧按位置判断，没有坏处）
+        let keys: Set<UInt16> = [116, 121, 115, 119, 126, 125, 49]
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown, .leftMouseDragged, .keyDown]) { event in
+            if event.type != .keyDown || keys.contains(event.keyCode) { last = ProcessInfo.processInfo.systemUptime }
+            return event
         }
     }
 }

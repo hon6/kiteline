@@ -82,6 +82,8 @@ struct MainView: View {
         .sheetPanel(isPresented: Binding(get: { model.groupSeed != nil }, set: { if !$0 { model.groupSeed = nil } })) {
             if let keys = model.groupSeed { TarsGroupPicker(keys: keys) { id in model.selection = KitelineModel.groupID(id) } }
         }
+        // 新建标签组面板（⌃⌘N、会话右键「新建标签组」）
+        .modifier(TarsTabGroupPickerHost())
         .tint(.tarsBrand)   // 选中、开关、链接都用品牌橙，不跟系统的强调色（默认蓝）
     }
 }
@@ -97,6 +99,21 @@ struct SidebarView: View {
     @AppStorage("listFilter") private var statusFilter = "all"
     @AppStorage("listSource") private var sourceFilter = ""
     @AppStorage("listProject") private var projectFilter = ""
+    /// 左边栏现在看的页签：sessions 会话 / groups 群
+    @AppStorage("listTab") private var listTab = "sessions"
+    /// 设备、项目两排胶囊展开着（平时收成一行，只写着选的是哪个）
+    @State private var scopeOpen = false
+
+    /// 这台电脑支持会话群，才有「群」页签
+    private var groupsOn: Bool { KitelineKit.groupsSupported }
+
+    /// 现在看的页签（存的是「群」但这台电脑不支持群时回到「会话」）
+    private var currentTab: String {
+        switch listTab {
+        case "groups" where groupsOn, "tabgroups": return listTab
+        default: return "sessions"
+        }
+    }
 
     var body: some View {
         // 先按设备、项目，再按状态筛（搜索词在 model.filtered 里已经筛过），最后分组
@@ -107,19 +124,40 @@ struct SidebarView: View {
             if model.query.isEmpty {
                 SidebarTiles(model: model).selectionDisabled()
             }
-            if model.sessions.isEmpty {
-                Section("会话") {
-                    Label("没有运行中的会话。在 VS Code 中打开 Claude Code，或在终端运行 claude。", systemImage: "moon.stars")
+            // 「会话」「群」「标签组」三个页签（11-10 起分开）：状态 / 设备 / 项目筛选和「显示方式」只在「会话」里，
+            // 「建群」在「群」里，「新建标签组」在「标签组」里。搜索时不分页签：会话和名字对得上的群一起列，免得搜群名还要先切过去
+            let searching = !model.query.isEmpty
+            let tab = searching ? "sessions" : currentTab
+            let groupsTab = tab == "groups"
+            let allGroups = TarsGroupFilter(keys: nil, markedOnly: false, query: "")
+            // 改版说明（看过一次就不再出）：会话列表去哪了、会话 / 群 / 会话组有什么不同
+            if !searching {
+                ListTabsGuide(groups: groupsOn) { withAnimation(.snappy) { listTab = "tabgroups" } }
+                    .padding(.top, 8)
+                    .selectionDisabled()
+            }
+            controls(base, count: shown.count, tab: tab).selectionDisabled()
+            if tab == "tabgroups" {
+                // 标签组：一个阶段的几个会话一组，切到哪组右边就多列显示哪组（KitelineKit/Views/TabGroups.swift）
+                TarsTabGroupSection(headerless: true).selectionDisabled()
+            } else if groupsTab {
+                if !KitelineKit.groupSectionShown(allGroups) {
+                    Label("还没有会话群。点「建群」，或把一个会话拖到另一个会话上，让它们互相沟通。", systemImage: "person.2")
                         .font(.app(size: 11.5)).foregroundStyle(.secondary)
                         .selectionDisabled()
                 }
-                TarsGroupSidebarSection(selection: $model.selection, filter: groupFilter(shown)).selectionDisabled()
+                TarsGroupSidebarSection(selection: $model.selection, filter: allGroups, headerless: true).selectionDisabled()
+            } else if model.sessions.isEmpty {
+                Label("没有运行中的会话。在 VS Code 中打开 Claude Code，或在终端运行 claude。", systemImage: "moon.stars")
+                    .font(.app(size: 11.5)).foregroundStyle(.secondary)
+                    .selectionDisabled()
+                if searching { TarsGroupSidebarSection(selection: $model.selection, filter: groupFilter(shown)).selectionDisabled() }
             } else {
-                controls(base, count: shown.count).selectionDisabled()
-                // 会话群：会话列表里单独一组（同「标记」），排在会话前面；点了同会话一样开在右边分屏的标签里
+                // 搜索时（或这台电脑不支持群、没有「群」页签时）群还列在会话前面
                 let groupScope = groupFilter(shown)
-                TarsGroupSidebarSection(selection: $model.selection, filter: groupScope).selectionDisabled()
-                let headed = KitelineKit.groupSectionShown(groupScope)
+                let mixed = searching || !groupsOn
+                if mixed { TarsGroupSidebarSection(selection: $model.selection, filter: groupScope).selectionDisabled() }
+                let headed = mixed && KitelineKit.groupSectionShown(groupScope)
                 ForEach(groups(shown), id: \.key) { group in
                     if let name = group.name ?? (headed ? L("会话") : nil) {
                         Section {
@@ -295,49 +333,119 @@ struct SidebarView: View {
         return order.map { ScopeBar.Option(id: $0, title: $0, count: counts[$0] ?? 0) }
     }
 
-    /// 「会话 4　　显示方式 ⌄」，下面一排状态筛选：全部 · 工作中 · 待确认 常驻，出错有的时候才出现；数字跟着设备、项目筛选走。
-    /// 再下面是设备、项目两排胶囊（不止一台设备、不止一个项目时才有）
-    private func controls(_ base: [SessionItem], count: Int) -> some View {
+    /// 最上面一行「会话 9 | 群 1 | 标签组 2」三个页签，右边是这个页签自己的按钮（会话：显示方式；群：建群；标签组：新建）。
+    /// 「会话」页签下面一排状态筛选：全部 · 标记 · 工作中 · 待确认 常驻，出错有的时候才出现；数字跟着设备、项目筛选走。
+    /// 再下面设备、项目收成一行（只写着选的是哪个），点开才是两排胶囊，选完自动收起
+    private func controls(_ base: [SessionItem], count: Int, tab: String) -> some View {
         let projects = projectOptions
         let sources = sourceOptions
         let bySource = sources.count > 1 || activeSource != nil
+        let byProject = projects.count > 1 || activeProject != nil
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("会话").font(.app(size: 13, weight: .semibold))
-                Text("\(count)").font(.app(size: 12).monospacedDigit()).foregroundStyle(.tertiary)
-                Spacer(minLength: 6)
-                // 建群：弹面板勾选要拉进来的会话（至少两个）
-                if model.sessions.count > 1 {
-                    Button { model.groupSeed = [] } label: { NewGroupLabel() }
-                        .buttonStyle(.plain)
-                        .help("把几个会话拉进一个群，让它们互相沟通")
+                if model.query.isEmpty {
+                    SidebarTabs(selection: Binding(get: { tab }, set: { new in withAnimation(.snappy) { listTab = new } }), tabs: [
+                        SidebarTabs.Tab(id: "sessions", title: L("会话"), count: count),
+                    ] + (groupsOn ? [SidebarTabs.Tab(id: "groups", title: L("群"), count: KitelineKit.liveGroupCount)] : []) + [
+                        SidebarTabs.Tab(id: "tabgroups", title: L("会话组"), count: KitelineKit.tabGroupCount, alert: KitelineKit.tabGroupsWaiting),
+                    ])
+                } else {
+                    Text("会话").font(.app(size: 13, weight: .semibold))
+                    Text("\(count)").font(.app(size: 12).monospacedDigit()).foregroundStyle(.tertiary)
                 }
-                if model.sessions.count > 1 || !isDefaultView { viewMenu }
+                Spacer(minLength: 6)
+                if tab == "tabgroups" {
+                    TarsTabGroupNewButton { SidebarTabButton(symbol: "plus", title: L("新建")) }
+                } else if tab == "groups" {
+                    // 建群：弹面板勾选要拉进来的会话（至少两个）
+                    if model.sessions.count > 1 {
+                        Button { model.groupSeed = [] } label: { SidebarTabButton(symbol: "person.2.badge.plus", title: L("建群")) }
+                            .buttonStyle(.plain)
+                            .help("把几个会话拉进一个群，让它们互相沟通")
+                    }
+                }
             }
-            if model.sessions.count > 1 || isFiltering {
-                FilterBar(bleed: 0) {
-                    ForEach(Self.statusOptions, id: \.id) { option in
-                        let n = base.filter { matches($0, option.id) }.count
-                        if option.id != "error" || n > 0 || status == option.id {
-                            FilterChip(title: option.title, count: n, dot: option.color, symbol: option.id == "marked" ? "star.fill" : nil,
-                                       selected: status == option.id) {
-                                withAnimation(.snappy) { statusFilter = status == option.id && option.id != "all" ? "all" : option.id }
+            if tab == "sessions" {
+                if model.sessions.count > 1 || isFiltering {
+                    FilterBar(bleed: 0) {
+                        ForEach(Self.statusOptions, id: \.id) { option in
+                            let n = base.filter { matches($0, option.id) }.count
+                            if option.id != "error" || n > 0 || status == option.id {
+                                FilterChip(title: option.title, count: n, dot: option.color, symbol: option.id == "marked" ? "star.fill" : nil,
+                                           selected: status == option.id) {
+                                    withAnimation(.snappy) { statusFilter = status == option.id && option.id != "all" ? "all" : option.id }
+                                }
                             }
                         }
                     }
                 }
-            }
-            if bySource {
-                ScopeBar(symbol: "desktopcomputer", allTitle: L("全部设备"), options: sources,
-                         selection: Binding(get: { activeSource?.id ?? "" }, set: { sourceFilter = $0 }), bleed: 0)
-            }
-            if projects.count > 1 || activeProject != nil {
-                ScopeBar(symbol: "folder", allTitle: L("全部项目"), options: projects,
-                         selection: Binding(get: { activeProject ?? "" }, set: { projectFilter = $0 }), bleed: 0)
+                // 设备 · 项目那一行（收起的），右边「显示方式」（分组、排序）：都只管会话，所以放在「会话」页签里（11-10）
+                let showsView = model.sessions.count > 1 || !isDefaultView
+                if bySource || byProject || showsView {
+                    HStack(spacing: 6) {
+                        if bySource || byProject {
+                            // 先让这一行写得下选的设备、项目，「显示方式」放不下时自己截短
+                            scopeSummary(bySource: bySource, byProject: byProject).layoutPriority(1)
+                        }
+                        Spacer(minLength: 0)
+                        if showsView { viewMenu }
+                    }
+                }
+                if bySource || byProject {
+                    if scopeOpen {
+                        if bySource {
+                            ScopeBar(symbol: "desktopcomputer", allTitle: L("全部设备"), options: sources,
+                                     selection: Binding(get: { activeSource?.id ?? "" }, set: { sourceFilter = $0; collapseScope() }), bleed: 0)
+                        }
+                        if byProject {
+                            ScopeBar(symbol: "folder", allTitle: L("全部项目"), options: projects,
+                                     selection: Binding(get: { activeProject ?? "" }, set: { projectFilter = $0; collapseScope() }), bleed: 0)
+                        }
+                    }
+                }
             }
         }
         .padding(.top, 10)
         .padding(.bottom, 2)
+    }
+
+    /// 收起时的一行：「🖥 全部设备 · 📁 ccpulse ⌄」；筛着的那项用品牌色。点一下展开 / 收起两排胶囊
+    private func scopeSummary(bySource: Bool, byProject: Bool) -> some View {
+        let narrowed = activeSource != nil || activeProject != nil
+        return Button {
+            withAnimation(.snappy) { scopeOpen.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                if bySource {
+                    Image(systemName: "desktopcomputer").font(.app(size: 11, weight: .semibold))
+                    Text(activeSource?.name ?? L("全部设备")).lineLimit(1)
+                        .foregroundStyle(activeSource == nil ? Color.primary : Color.tarsBrand)
+                }
+                if bySource && byProject { Text("·").foregroundStyle(.tertiary) }
+                if byProject {
+                    Image(systemName: "folder").font(.app(size: 11, weight: .semibold))
+                    Text(activeProject ?? L("全部项目")).lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(activeProject == nil ? Color.primary : Color.tarsBrand)
+                }
+                Image(systemName: scopeOpen ? "chevron.up" : "chevron.down").font(.app(size: 9, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .font(.app(size: 12, weight: .medium))
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(narrowed ? Color.tarsBrand.opacity(0.10) : Color.primary.opacity(0.05), in: Capsule(style: .circular))
+            .overlay { if narrowed { Capsule(style: .circular).hairlineBorder(Color.tarsBrand.opacity(0.28), width: 1) } }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(scopeOpen ? L("收起设备、项目筛选") : L("按设备、项目筛选会话"))
+    }
+
+    /// 在展开的胶囊里选好了：稍等一下再收起（让选中的样子先闪一下）
+    private func collapseScope() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            withAnimation(.snappy) { scopeOpen = false }
+        }
     }
 
     /// 「显示方式」：分组、排序放在一个菜单里；按钮上写着现在怎么分、怎么排，改过默认的用品牌色。
@@ -366,7 +474,7 @@ struct SidebarView: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
         .help("会话的分组与排序")
     }
 
@@ -440,6 +548,66 @@ struct SidebarView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .selectionDisabled()
+    }
+}
+
+/// 左边栏顶上「会话 9 | 群 1 | 标签组 2」三个页签：选中的那个字重、下面一条品牌色短线，没选中的淡字；同一行右边放这个页签的按钮
+private struct SidebarTabs: View {
+    struct Tab {
+        let id: String
+        let title: String
+        let count: Int
+        /// 右上角橙点：这个页签里有等你确认的
+        var alert = false
+    }
+
+    @Binding var selection: String
+    let tabs: [Tab]
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(tabs, id: \.id) { tab in
+                let on = selection == tab.id
+                Button { selection = tab.id } label: {
+                    HStack(spacing: 4) {
+                        Text(tab.title).font(.app(size: 13, weight: on ? .semibold : .medium))
+                            .foregroundStyle(on ? Color.primary : Color.secondary)
+                        Text("\(tab.count)").font(.app(size: 12).monospacedDigit()).foregroundStyle(.tertiary)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if tab.alert { Circle().fill(Color.tarsOrange).frame(width: 6, height: 6).offset(x: 5, y: 1) }
+                    }
+                    .padding(.vertical, 4)
+                    .overlay(alignment: .bottom) {
+                        Capsule().fill(on ? Color.tarsBrand : .clear).frame(height: 2).offset(y: 3)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .fixedSize()
+    }
+}
+
+/// 页签那一行右边的小按钮（建群、新建标签组）：图标 + 两个字，样子同「显示方式」默认态但更紧凑，三个页签放下了也不挤
+private struct SidebarTabButton: View {
+    let symbol: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).font(.app(size: 11, weight: .semibold))
+            Text(title).lineLimit(1)
+        }
+        .font(.app(size: 12, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .frame(height: 26)
+        .background(Color.primary.opacity(0.06), in: Capsule())
+        .contentShape(Capsule())
+        .fixedSize()
     }
 }
 
@@ -837,10 +1005,12 @@ struct SessionRow: View {
                         StageBadge(step: stage.step, total: stage.total, label: stage.label, part: stage.part, dots: stage.dots, size: 10.5)
                             .hoverTip(stage.tip)
                     }
-                    Text(item.line.isEmpty ? " " : item.line)
+                    // 只说状态（回复内容点开会话看；截短的两行看了也看不全，11-10 用户）
+                    Text(item.status)
                         .font(.app(size: 11.5))
                         .foregroundStyle(lineColor)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .help(item.line)
                 }
                 HStack(spacing: 4) {
                     Image(systemName: item.kind == .ssh ? "server.rack" : (item.kind == .kiteline ? "desktopcomputer" : "laptopcomputer"))
@@ -863,6 +1033,7 @@ struct SessionRow: View {
     private var showsMark: Bool { onMark != nil && !marked && (hovering || Self.captureHover == item.title) }
 
     private var lineColor: Color {
+        if item.failed { return .red }
         switch item.activity {
         case .waiting: return .tarsOrange
         case .busy: return .tarsBrand
@@ -895,6 +1066,7 @@ struct SessionMenu: View {
         Button(model.isMarked(item.id) ? "取消标记" : "标记") { withAnimation(.snappy) { model.toggleMark(item.id) } }
         Button(AppState.shared.config.mobile.pinnedSessions.contains(item.id) ? "取消置顶" : "置顶") { model.togglePin(item.id) }
         Button("在此项目中新建会话…") { model.newTask(in: item) }
+        TarsTabGroupMenu(key: item.id)
         if KitelineKit.groupsSupported, item.canReply {
             Button("拉群协作…") { model.groupSeed = [item.id] }
         }

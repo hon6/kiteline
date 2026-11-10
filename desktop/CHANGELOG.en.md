@@ -1,5 +1,25 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.36 (2026-11-11)
+
+### New Features
+
+- **Session groups**: Put related sessions from the same stage of work into a session group. Group names, colors and members sync between your computer and phone. Switching to a group shows each of its sessions side by side in its own column; the far left of the tab bar shows the current group's color and name, and clicking it lets you switch. Each group shows badges for approvals and new messages plus the most urgent item, and when expanded, sessions that are working have a blinking status dot. Rename and recolor groups at any time (nine colors), or turn a group's sessions into a group chat in one step.
+- **Session list split into Sessions, Groups and Session Groups tabs**: Status filters and view options live in the Sessions tab; device and project filters collapse into one line showing the current choice and expand when you want to change it. The Groups tab lists group chats on their own, with the Create Group button. A short explanation appears the first time.
+- **WeChat Mini Program code in onboarding**: The Connect Your Phone step now shows QR codes for both the iPhone app and the WeChat Mini Program, so Android users can use the Kiteline WeChat Mini Program.
+
+### Improvements
+
+- **Cleaner session list**: The second line of each session now shows only its status (the tool awaiting approval, the tool running, possibly stalled, error or idle) and task progress instead of a truncated reply. Hover to see the full details.
+- **More accurate new-message indicators**: Sessions you've viewed on any device no longer show as new on your other devices, and replies triggered by messages between sessions no longer count as new.
+- **Session groups use fewer tokens**: Sessions in a group now speak up only when they hit a problem, need help or a handoff, or are asked directly, instead of sending acknowledgments, thanks or progress updates.
+- **Smoother long conversations**: A conversation now shows only its recent messages. Tap View Earlier Messages to expand older ones, and they collapse again once you're back at the bottom, so scrolling and new messages stay smooth as the history grows.
+
+### Bug Fixes
+
+- Fixed conversations stopping in the middle or at the top, and no longer following new messages, after the display was turned off and on again or the system moved or resized the window.
+
+
 ## 1.0.35 (2026-11-09)
 
 ### New Features

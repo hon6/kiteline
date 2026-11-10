@@ -164,7 +164,9 @@ public sealed partial class AppModel : ObservableObject
         return list;
     }
 
-    public bool IsUnread(SessionInfo s) => !IsOpen(s.Key) && (s.UpdatedAt ?? 0) > (seen.TryGetValue(s.Key, out var v) ? v : 0) && !s.IsBusy;
+    /// 有给你的新消息（同 iOS 版 isUnread）：不在屏幕上、没在干活、最近一轮不是别的会话来信引起的，而且在任何一端看过之后又有了动静
+    public bool IsUnread(SessionInfo s) => !IsOpen(s.Key) && !s.IsBusy && !s.FromPeer
+        && (s.UpdatedAt ?? 0) > Math.Max(seen.TryGetValue(s.Key, out var v) ? v : 0, s.ViewedAt ?? 0);
 
     /// 这个会话正开在屏幕上（分屏里的任一块）
     public bool IsOpen(string key) => openCounts.TryGetValue(key, out var n) && n > 0;
@@ -314,6 +316,9 @@ public sealed partial class AppModel : ObservableObject
             case "favorites":
                 FavoritesEvent?.Invoke(name, json);
                 break;
+            case "tabgroups":
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => TabGroupState.Shared.Apply(json));
+                break;
             case "peers":
                 PeerBoard.Shared.Receive(json);
                 break;
@@ -366,6 +371,7 @@ public sealed partial class AppModel : ObservableObject
         if (state.Features is { } features)
         {
             Features = features;
+            if (TabGroupState.Shared.Supported && !TabGroupState.Shared.Loaded) _ = TabGroupState.Shared.Load();
             // 消息翻译先交给这台电脑（见 Translator.HostTranslate）
             Translator.HostTranslate = features.Contains("translate") ? async (text, source, target, cancel) =>
             {

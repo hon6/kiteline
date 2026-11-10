@@ -21,6 +21,7 @@ public enum KitelineKit {
         if let model, model.api.token == token, model.api.base == baseURL { return }
         let next = AppModel(mac: PairedMac(name: L("本机"), addresses: [baseURL], token: token, caCertificate: nil, remote: nil), embedded: true)
         model = next
+        tabGroups.attach(next.tabGroupShared)   // 标签组和电脑上存的那份同步
         next.start()
     }
 
@@ -130,6 +131,8 @@ public enum KitelineKit {
 
     /// 自测用：弹一条底部小提示
     public static func flash(_ text: String) { model?.flash(text) }
+    /// 自测用：模拟的滑动直接交给滚动视图、不经过事件队列，先记成「人在滚」（见 MacScrollInput）
+    public static func noteScrollInput() { MacScrollInput.note() }
     /// 自测截图用：正显示着的底部小提示
     public static var toastView: NSView? { MacToast.view }
 
@@ -325,15 +328,18 @@ extension KitelineKit {
 public struct TarsGroupSidebarSection: View {
     @Binding var selection: String?
     let filter: TarsGroupFilter
+    /// 「群」页签里：不要「会话群」组头（页签已经写着了）
+    let headerless: Bool
 
-    public init(selection: Binding<String?>, filter: TarsGroupFilter) {
+    public init(selection: Binding<String?>, filter: TarsGroupFilter, headerless: Bool = false) {
         _selection = selection
         self.filter = filter
+        self.headerless = headerless
     }
 
     public var body: some View {
         if let model = KitelineKit.model {
-            GroupSidebarRows(selection: $selection, filter: filter).environment(model)
+            GroupSidebarRows(selection: $selection, filter: filter, headerless: headerless).environment(model)
         }
     }
 }
@@ -362,6 +368,12 @@ public struct TarsGroupFilter: Equatable {
 
 extension KitelineKit {
     /// 左边栏这样筛时「会话群」一组有没有东西（有的话下面不分组的会话也写个「会话」组头，免得看着像群里的）
+    /// 进行中的群有几个（「群」页签上的数字）
+    public static var liveGroupCount: Int {
+        guard let model else { return 0 }
+        return model.groups.items.filter { model.isLive($0) }.count
+    }
+
     public static func groupSectionShown(_ filter: TarsGroupFilter) -> Bool {
         guard let model, model.supportsGroups else { return false }
         return model.groups.items.contains { filter.active ? model.isLive($0) && filter.keeps($0) : true }
@@ -380,6 +392,7 @@ private struct GroupSidebarRows: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: String?
     let filter: TarsGroupFilter
+    var headerless = false
     /// 右键点了「解散群」、等确认的那个
     @State private var disbanding: String?
 
@@ -406,11 +419,13 @@ private struct GroupSidebarRows: View {
                     }
                 } header: {
                     // 同别的组头（「标记」、按项目分的组）：图标、组名，右边个数
-                    HStack(spacing: 6) {
-                        Image(systemName: "person.2.fill")
-                        Text("会话群").lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text("\(live.count)").monospacedDigit().foregroundStyle(.tertiary)
+                    if !headerless {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.2.fill")
+                            Text("会话群").lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text("\(live.count)").monospacedDigit().foregroundStyle(.tertiary)
+                        }
                     }
                 }
             }

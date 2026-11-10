@@ -417,6 +417,9 @@ final class AppState {
             if let value = snap.pendingTool { item["pendingTool"] = value }
             if let value = snap.transcriptUpdatedAt ?? snap.statusUpdatedAt ?? snap.updatedAt { item["updatedAt"] = value }
             if let value = snap.startedAt { item["startedAt"] = value }
+            // 新消息怎么算（各端）：最后一次在任何一端看过的时间；最近一轮是别的会话来信引起的（会话之间的往来，不算给你的新消息）
+            if let value = IdleClose.shared.viewedAt(record.key) { item["viewedAt"] = value }
+            if snap.fromPeer { item["fromPeer"] = true }
             if let usage = snap.usage { item["usage"] = usage.payload }
             if Hosted.hostable(record) { item["hostable"] = true }   // 能转到后台运行（会话页提示「支持后台托管」）
             return item
@@ -451,7 +454,7 @@ final class AppState {
             // hostUpdate = 手机上能看这台电脑的新版本、让它下载安装和重启（/api/host-update）
             // hostedSetup = 远端电脑上后台运行 Claude Code：按设备检测出口、开关，把会话转到后台（/api/hosted/*）
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate"]
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups"]
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
             "hosted": ["tipOff": config.mobile.hostedTipOff],
         ]

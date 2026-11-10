@@ -6,7 +6,7 @@ import KitelineKit
 /// 第一次打开 Kiteline 的引导（11-02 起：装好之后不知道怎么用、电脑上没有任何 Agent 的大有人在）。四步：
 /// 第一步 了解 Kiteline：它是编程 Agent 的辅助工具，检测本机装了哪些 Agent；一个都没有时醒目提醒，列表外的 Agent 可以填写提交（存到统计后台）
 /// 第二步 授予权限（同设置 → 权限）+ 登录时自动启动
-/// 第三步 连接手机：下载 iPhone App 的二维码 + 配对二维码和配对码
+/// 第三步 连接手机：下载 iPhone App 的二维码、安卓用的微信小程序码 + 配对二维码和配对码
 /// 第四步 虚拟屏幕：为什么要开、开关
 /// 第一次启动、还没配过手机时自动弹；菜单「Kiteline → 新手引导…」、主窗口欢迎页随时能再打开。测试实例不自动弹（CCPULSE_ONBOARDING=1 才弹）
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
@@ -511,12 +511,11 @@ private struct PhoneStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             StepHeader(title: L("在手机上使用 Kiteline"),
-                       detail: L("在 iPhone 上安装 Kiteline App 并与这台电脑配对后，即可在手机上查看会话、回复消息和处理确认请求。Apple Watch App 随 iPhone 自动安装。"))
+                       detail: L("iPhone 安装 Kiteline App，安卓手机使用 Kiteline 微信小程序；与这台电脑配对后，即可在手机上查看会话、回复消息和处理确认请求。Apple Watch App 随 iPhone 自动安装。"))
             HStack(alignment: .top, spacing: 16) {
-                card(number: 1, title: L("下载 iPhone App"), qr: Self.appStore,
-                     detail: L("用 iPhone 相机扫描二维码，或在 App Store 中搜索「Kiteline」。")) { EmptyView() }
+                downloadCard
                 card(number: 2, title: L("扫码或输入配对码"), qr: link,
-                     detail: L("打开 App，扫描此二维码，或输入下方的 6 位配对码。首次配对时手机与电脑需连接同一网络。")) {
+                     detail: L("打开 App 或小程序，扫描此二维码，或输入下方的 6 位配对码。首次配对时手机与电脑需连接同一网络。")) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(code.isEmpty ? "------" : "\(code.prefix(3)) \(code.suffix(3))")
                             .font(.app(size: 26, weight: .semibold, design: .monospaced)).tracking(2)
@@ -555,6 +554,37 @@ private struct PhoneStep: View {
                 }
                 paired = DeviceStore.shared.all.count
             }
+        }
+    }
+
+    /// 第 1 步：iPhone 扫 App Store 的码，安卓用微信扫小程序码（11-10 起：安卓用户用小程序）
+    private var downloadCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("1").font(.appFixed(size: 11, weight: .bold)).foregroundStyle(Color.tarsBrand)
+                    .frame(width: 20, height: 20)
+                    .overlay(Circle().hairlineBorder(Color.tarsBrand.opacity(0.6)))
+                Text("安装手机端").font(.app(size: 14, weight: .semibold))
+            }
+            HStack(alignment: .top, spacing: 14) {
+                code(PhoneAccess.qrImage(for: Self.appStore), interpolate: false, caption: L("iPhone：相机扫码，或在 App Store 中搜索「Kiteline」"))
+                code(NSImage(named: "MiniProgramCode"), interpolate: true, caption: L("安卓：微信扫码，打开 Kiteline 小程序"))
+            }
+        }
+        .tarsCard(padding: 16)
+    }
+
+    private func code(_ image: NSImage?, interpolate: Bool, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white)
+                if let image {
+                    Image(nsImage: image).interpolation(interpolate ? .high : .none).resizable().padding(interpolate ? 4 : 8)
+                }
+            }
+            .frame(width: 112, height: 112)
+            Text(caption).font(.app(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .frame(width: 112, alignment: .leading)
         }
     }
 

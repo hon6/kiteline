@@ -651,6 +651,26 @@ extension SelfTest {
                 KitelineKit.previewDrop(item?.id, zone: bits.count > 1 ? bits[1] : "")
             }
         case "cols": Log.write("[capture] 分屏：\(KitelineKit.panes.summary)；左边栏选中 \(KitelineModel.shared.selection ?? "-")")
+        case "tabgroup":
+            // 标签组（KitelineKit/Views/TabGroups.swift）：tabgroup:new:组名:标题1,标题2（每个一列）/ tabgroup:save:组名（当前分屏收成一组）/
+            // tabgroup:go:组名（空 = 未分组）/ tabgroup:next / tabgroup:jump（⇧⌘U）/ tabgroup:expand:组名 / tabgroup:sleep:秒（对话休眠等多久）/ tabgroup:dump /
+            // tabgroup:edit:组名 / tabgroup:color:组名:颜色 / tabgroup:tab:页签
+            let bits = arg.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            let keys = { (titles: String) in titles.split(separator: ",").compactMap { t in KitelineModel.shared.sessions.first { $0.title == String(t) }?.id } }
+            switch bits.first ?? "" {
+            case "new": Log.write("[capture] 新建会话组「\(KitelineKit.createTabGroup(name: bits.count > 1 && !bits[1].isEmpty ? bits[1] : nil, keys: keys(bits.count > 2 ? bits[2] : "")))」")
+            case "save": KitelineKit.createTabGroup(name: bits.count > 1 && !bits[1].isEmpty ? bits[1] : nil, keys: [], fromCurrent: true)
+            case "go": if !KitelineKit.activateTabGroup(named: bits.count > 1 ? bits[1] : "") { Log.write("[capture] 没有会话组「\(bits.count > 1 ? bits[1] : "")」") }
+            case "next": KitelineKit.stepTabGroup(1)
+            case "jump": KitelineKit.jumpToAttention()
+            case "expand": KitelineKit.toggleTabGroup(named: bits.count > 1 ? bits[1] : "")
+            case "sleep": KitelineKit.setChatSleep(seconds: Double(bits.count > 1 ? bits[1] : "") ?? 600)
+            case "edit": KitelineKit.editTabGroup(named: bits.count > 1 ? bits[1] : "")   // 弹「编辑标签组」（组名、颜色）
+            case "color": KitelineKit.recolorTabGroup(named: bits.count > 1 ? bits[1] : "", bits.count > 2 ? bits[2] : "")   // tabgroup:color:组名:red
+            case "tab": UserDefaults.standard.set(bits.count > 1 ? bits[1] : "sessions", forKey: "listTab")   // 左边栏页签 sessions / groups / tabgroups
+            default: break
+            }
+            Log.write("[capture] 会话组：\(KitelineKit.tabGroupSummary)；左边栏选中 \(KitelineModel.shared.selection ?? "-")")
         case "ropes": Log.write("[capture] 信绳：\(KitelineKit.ropeReport())")   // 分屏里连着两张信件的绳子在哪（拖它用）
         case "ropehover": KitelineKit.hoverRope(arg != "off")   // 当成鼠标停在第一根绳子那封信上：ropehover / ropehover:off
         case "effort":
@@ -1032,12 +1052,48 @@ extension SelfTest {
             Log.write("[capture] 重画 \(count) 个 CGDrawingLayer，用时 \(Int(Date().timeIntervalSince(start) * 1000)) 毫秒")
         case "scrollto":
             // 直接把对话区滚到顶 / 底（top / bottom / 数字 = 离顶多少点）
+            // 带 ,user（scrollto:300,user）= 当成人在滚（先记一次滚动操作，见 MacScrollInput）；不带 = 程序 / 系统挪的位置
+            let parts = arg.split(separator: ",").map(String.init)
+            let arg = parts.first ?? ""
+            if parts.contains("user") { KitelineKit.noteScrollInput() }
             if let view = chatScrollView(in: window.contentView), let document = view.documentView {
                 let maxY = max(0, document.frame.height - view.contentView.bounds.height)
                 let y: CGFloat = arg == "top" ? 0 : (arg == "bottom" ? maxY : CGFloat(Double(arg) ?? 0))
                 view.contentView.scroll(to: NSPoint(x: 0, y: document.isFlipped ? y : maxY - y))
                 view.reflectScrolledClipView(view.contentView)
                 Log.write("[capture] 滚到 \(arg)：可见区域 y=\(Int(view.contentView.bounds.origin.y))，内容高 \(Int(document.frame.height))")
+            }
+        case "scrollpos":
+            // 对话区现在滚在哪：离底部多远（贴底时约为 0）
+            if let view = chatScrollView(in: window.contentView), let document = view.documentView {
+                let visible = view.contentView.bounds, height = document.frame.height
+                let top = document.isFlipped ? visible.minY : height - visible.maxY
+                Log.write("[capture] 滚动位置 \(arg)：离顶 \(Int(top))，离底 \(Int(height - top - visible.height))，内容高 \(Int(height))，可视高 \(Int(visible.height))")
+            }
+        case "wheel":
+            // 和 scroll 一样模拟触控板滑动，但事件走本 App 的事件队列（NSApp.postEvent）：和真人滑动一样经过事件监听（见 MacScrollInput）
+            if let view = chatScrollView(in: window.contentView) {
+                let distance = Double(arg) ?? 600, moves = 10
+                let center = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+                let screenTop = (NSScreen.screens.first?.frame.maxY ?? 0)
+                let global = window.convertPoint(toScreen: center)
+                for index in 0...(moves + 1) {
+                    let delta = index == 0 || index == moves + 1 ? 0 : distance / Double(moves)
+                    guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(delta), wheel2: 0, wheel3: 0) else { continue }
+                    event.location = CGPoint(x: global.x, y: screenTop - global.y)
+                    event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+                    event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
+                    event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                    event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(delta))
+                    event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: delta)
+                    event.setIntegerValueField(.scrollWheelEventScrollPhase, value: index == 0 ? 1 : (index == moves + 1 ? 4 : 2))
+                    if let ns = NSEvent(cgEvent: event) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * Double(index)) { NSApp.postEvent(ns, atStart: false) }
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    Log.write("[capture] 队列滑动 \(Int(distance))：可见区域 y=\(Int(view.contentView.bounds.origin.y))")
+                }
             }
         case "scroll":
             // 在对话区模拟一次触控板滑动：正数往上翻（看更早的），负数往下
@@ -1346,6 +1402,7 @@ extension SelfTest {
     /// 一次完整的两指滑动：开始 → 若干次移动 → 结束（和真的触控板一样带手势阶段）
     private static func swipe(_ view: NSScrollView, by distance: Double) {
         let moves = 10
+        MainActor.assumeIsolated { KitelineKit.noteScrollInput() }
         for index in 0...(moves + 1) {
             let delta = index == 0 || index == moves + 1 ? 0 : distance / Double(moves)
             guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(delta), wheel2: 0, wheel3: 0) else { continue }

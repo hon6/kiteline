@@ -1,5 +1,26 @@
 # Kiteline Release Notes
 
+## 3.49.31 (2026-11-11)
+
+### New Features
+
+- **Session groups** (Mac, iPhone, iPad): Put related sessions from the same stage of work into a session group. Group names, colors and members sync between your computer and phone. On Mac, switching to a group shows each of its sessions side by side in its own column, and the group remembers its splits, tabs and widths; the far left of the tab bar shows the current group's color and name, and clicking it lets you switch. On iPhone and iPad, open a group to see its sessions and view them one at a time. Each group shows badges for approvals and new messages plus the most urgent item, and when expanded, sessions that are working have a blinking status dot. Rename and recolor groups at any time (nine colors), or turn a group's sessions into a group chat in one step. Shortcuts (Mac): ⌃⌘N new session group, ⌃⌘[ / ⌃⌘] previous / next group, ⌃⌘1–9 go to a group, ⇧⌘U jump to a session that needs approval or has new messages.
+- **Session list split into Sessions, Groups and Session Groups tabs** (Mac, iPhone, iPad): Status filters and view options live in the Sessions tab; device and project filters collapse into one line showing the current choice and expand when you want to change it. The Groups tab lists group chats on their own, with the Create Group button. A short explanation appears the first time.
+- **WeChat Mini Program code in onboarding** (Mac): The Connect Your Phone step now shows QR codes for both the iPhone app and the WeChat Mini Program, so Android users can use the Kiteline WeChat Mini Program.
+
+### Improvements
+
+- **Smoother and lighter with many tabs** (Mac): Only the current session group is shown, and conversations that have been off screen for 10 minutes release their loaded messages and come back instantly when you return. Tasks keep running on the computer, and status, alerts and approvals are unaffected.
+- **Cleaner session list** (Mac): The second line of each session now shows only its status (the tool awaiting approval, the tool running, possibly stalled, error or idle) and task progress instead of a truncated reply. Session group rows show their members' status.
+- **More accurate new-message indicators** (Mac, iPhone, iPad): Sessions you've viewed on any device no longer show as new on your other devices, and replies triggered by messages between sessions no longer count as new.
+- **Session groups use fewer tokens**: Sessions in a group now speak up only when they hit a problem, need help or a handoff, or are asked directly, instead of sending acknowledgments, thanks or progress updates.
+- **Smoother long conversations** (Mac, iPhone, iPad): A conversation now shows only its recent messages. Tap View Earlier Messages to expand older ones, and they collapse again once you're back at the bottom. On Mac, messages far from the visible area are no longer drawn, so scrolling and new messages stay smooth as the history grows.
+
+### Bug Fixes
+
+- Fixed conversations stopping in the middle or at the top, and no longer following new messages, after the display was turned off and on again (Mac).
+
+
 ## 3.49.30 (2026-11-09)
 
 ### New Features

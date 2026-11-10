@@ -11,6 +11,9 @@ struct SessionItem: Identifiable, Equatable {
     var activity: Activity
     /// 列表第二行：等你确认的原因 / 正在执行的工具 / 最后一句结论
     var line: String
+    /// 左边栏第二行：只说状态（待确认什么工具、正在用什么工具、可能停滞、出错、空闲），不放回复内容——
+    /// 截短的两行回复看了等于没看（11-10），进度由前面的「2/4 开发中」标识说
+    var status: String
     /// 这一轮任务做到第几步（忙、等确认时才有）：第二行前面挂「2/4 开发中」
     var stage: StageSnapshot?
     /// 目标（/goal）：在做的、结束不久的，第二行前面挂「◎ 目标 · 第 3 轮」
@@ -58,6 +61,24 @@ struct SessionItem: Identifiable, Equatable {
         return family.prefix(1).uppercased() + family.dropFirst() + (version.isEmpty ? "" : " " + version)
     }
 
+    /// 状态短语：「待确认 · Bash」「正在运行 Bash」「可能停滞 12 分钟」「出错已停止」「空闲」
+    private static func status(_ s: SessionSnapshot) -> String {
+        if s.error != nil { return L("出错已停止") }
+        /// 「Bash: S=/tmp/…」只取冒号前的工具名（太长就不要）
+        func tool(_ text: String?) -> String? {
+            guard let text else { return nil }
+            let head = text.split(separator: ":", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+            return head.isEmpty || head.count > 24 ? nil : head
+        }
+        switch s.act {
+        case .waiting: return tool(s.pendingTool).map { L("待确认 · %@", $0) } ?? L("待确认")
+        case .busy:
+            if let minutes = StuckWatch.quietMinutes(s, now: Date()) { return L("可能停滞：%@ 分钟无进展", "\(minutes)") }
+            return tool(s.activityText).map { L("正在运行 %@", $0) } ?? L("正在工作…")
+        default: return L("空闲")
+        }
+    }
+
     init(record: SessionRecord) {
         let s = record.snapshot
         id = record.key
@@ -75,6 +96,7 @@ struct SessionItem: Identifiable, Equatable {
         default: line = s.error.map { L("出错已停止：%@", ServerLang.ui($0.display)) } ?? (s.message ?? s.reason ?? "").replacingOccurrences(of: "\n", with: " ")
         }
         line = line.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+        status = Self.status(s)
         failed = s.error != nil
         sourceId = record.sourceId
         sourceName = ServerLang.machine(record.sourceName)

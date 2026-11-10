@@ -89,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 测试实例不记（几个会话的截图会互相带上），要测这个功能时另加 CCPULSE_KEEP_PANES=1
         if !AppConfig.isolated || ProcessInfo.processInfo.environment["CCPULSE_KEEP_PANES"] == "1" {
             KitelineKit.panes.remember(in: AppConfig.defaults, key: "chatPanes")
+            KitelineKit.rememberTabGroups(in: AppConfig.defaults, key: "tabGroups")   // 标签组（正显示那组的分屏就是上面读回的这套）
             if let focused = KitelineKit.panes.focused { model.selection = focused }
         }
 
@@ -307,6 +308,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for number in 1...9 {
             tabItem(number == 9 ? L("显示最后一个标签页") : L("显示第 %@ 个标签页", "\(number)"), #selector(menuSelectTab(_:)), "\(number)", .command, hidden: true, number: number)
         }
+        // 标签组（同 cmux / Safari）：⌃⌘] / ⌃⌘[ 下一组 / 上一组，⌃⌘1…9 第几组（1 = 未分组），⇧⌘U 跳到待确认 / 有新消息的会话，⌃⌘N 新建
+        window.addItem(.separator())
+        func groupItem(_ title: String, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags, hidden: Bool = false, number: Int = 0) {
+            let item = window.addItem(withTitle: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            item.tag = TabNeed.groups.rawValue
+            item.representedObject = number
+            if hidden {
+                item.isHidden = true
+                item.allowsKeyEquivalentWhenHidden = true
+            }
+        }
+        groupItem(L("新建会话组…"), #selector(menuNewTabGroup), "n", [.control, .command])
+        groupItem(L("上一个会话组"), #selector(menuPreviousTabGroup), "[", [.control, .command])
+        groupItem(L("下一个会话组"), #selector(menuNextTabGroup), "]", [.control, .command])
+        groupItem(L("跳到待确认或有新消息的会话"), #selector(menuJumpAttention), "U", .command)
+        for number in 1...9 {
+            groupItem(L("显示第 %@ 个会话组", "\(number)"), #selector(menuSelectTabGroup(_:)), "\(number)", [.control, .command], hidden: true, number: number)
+        }
         let windowItem = NSMenuItem()
         windowItem.submenu = window
         main.addItem(windowItem)
@@ -323,7 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 「会话」菜单里的一项要什么条件才能点
     enum SessionNeed: Int { case conversation = 1, live, reply, busy }
     /// 标签页那几项：conversation = 主窗口在前、右边是会话；switching = 还要当前块有两个以上标签
-    enum TabNeed: Int { case conversation = 101, switching }
+    enum TabNeed: Int { case conversation = 101, switching, groups }
 
     /// 主窗口在前、右边显示的是会话（不是今日动态、历史这些页）
     private var showingConversation: Bool {
@@ -386,6 +406,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.keyWindow?.performClose(nil)
     }
 
+    // 标签组：主窗口没开时先打开
+    @objc private func menuNewTabGroup() { MainWindowController.shared.show(); MainActor.assumeIsolated { KitelineKit.newTabGroup() } }
+    @objc private func menuNextTabGroup() { MainWindowController.shared.show(); MainActor.assumeIsolated { KitelineKit.stepTabGroup(1) } }
+    @objc private func menuPreviousTabGroup() { MainWindowController.shared.show(); MainActor.assumeIsolated { KitelineKit.stepTabGroup(-1) } }
+    @objc private func menuJumpAttention() { MainWindowController.shared.show(); MainActor.assumeIsolated { _ = KitelineKit.jumpToAttention() } }
+    @objc private func menuSelectTabGroup(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? Int else { return }
+        MainWindowController.shared.show()
+        MainActor.assumeIsolated { _ = KitelineKit.selectTabGroup(number) }
+    }
+
     @objc private func menuOpenMain() { MainWindowController.shared.show() }
     @objc private func menuPhone() { SettingsWindowController.shared.show(tab: .phone) }
     @objc private func menuSettings() { SettingsWindowController.shared.show(tab: .general) }
@@ -412,6 +443,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuItemValidation {
     /// 「会话」菜单：没选会话、会话已结束、不能回复、没在干活时对应的项变灰
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.tag == TabNeed.groups.rawValue {
+            // 换组要有别的组可换；新建、跳到该看的随时可点
+            if [#selector(menuNextTabGroup), #selector(menuPreviousTabGroup)].contains(menuItem.action) {
+                return MainActor.assumeIsolated { KitelineKit.tabGroupCount > 0 }
+            }
+            return true
+        }
         if let need = TabNeed(rawValue: menuItem.tag) {
             guard showingConversation else { return false }
             return need == .conversation || MainActor.assumeIsolated { KitelineKit.tabCount > 1 }

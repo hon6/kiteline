@@ -178,6 +178,7 @@ public final class ChatPanes {
 
     /// 左边栏点了某个会话：已经开着就切到那块的那个标签，没开着就在当前块新开一个标签（iPad：换掉当前块的）
     public func show(_ key: String) {
+        guard !key.isEmpty else { return }   // 空的不是会话（别开出一个空标签）
         if let open = pane(holding: key) {
             activate(open.id, key)
         } else {
@@ -648,7 +649,11 @@ public final class ChatPanes {
         saving = nil
         guard let store, let data = try? JSONEncoder().encode(Saved(root: Self.stored(root), focus: focusID)) else { return }
         store.defaults.set(data, forKey: store.key)
+        onSave?()
     }
+
+    /// 存完以后（Mac 标签组跟着给正显示的那组存一份副本）
+    @ObservationIgnored var onSave: (() -> Void)?
 
     /// 拖分隔条时每一帧都在变：停下半秒再存
     private func scheduleSave() {
@@ -683,13 +688,88 @@ public final class ChatPanes {
                 return .split(Split(id: item.id, axis: item.vertical == true ? .vertical : .horizontal, items: children, fractions: fractions.map { $0 / total }))
             }
             var pane = Pane(id: item.id, key: nil)
-            pane.tabs = Array((item.tabs ?? item.key.map { [$0] } ?? []).filter { seen.insert($0).inserted }.prefix(tabbed ? .max : 1))
+            pane.tabs = Array((item.tabs ?? item.key.map { [$0] } ?? []).filter { !$0.isEmpty && seen.insert($0).inserted }.prefix(tabbed ? .max : 1))
             pane.key = item.key.flatMap { pane.tabs.contains($0) ? $0 : nil } ?? pane.tabs.first
             return .pane(pane)
         }
         // 横着的 iPhone 存下的三列：竖着打开时也接着留着（竖着不分屏，再转横就回来）
         guard let root = node(saved), leaves(root).count <= (tabbed ? maxPanes : 3) else { return nil }
         return normalized(root)
+    }
+
+    // MARK: 标签组（整套分屏换一套，Mac）
+
+    /// 现在的分屏（怎么分、每块开着哪些标签、比例、当前块）存成一份：切到别的标签组前存下
+    func layout() -> Data? { try? JSONEncoder().encode(Saved(root: Self.stored(root), focus: focusID)) }
+
+    /// 整套换成另一份（nil、存坏了 = 一块空白）。各块按存着的 id 认：切回来时 SwiftUI 认得出是同一批块。
+    /// 量过的位置、大小都是旧那套的，清掉（标签多、组多时别越攒越多）
+    func load(_ data: Data?) {
+        if let data, let saved = try? JSONDecoder().decode(Saved.self, from: data), let node = Self.restored(saved.root) {
+            root = node
+            let ids = panes.map(\.id)
+            focusID = ids.contains(saved.focus) ? saved.focus : ids[0]
+        } else {
+            let pane = Pane(id: UUID(), key: nil)
+            root = .pane(pane)
+            focusID = pane.id
+        }
+        let alive = Set(panes.map(\.id))
+        sizes = sizes.filter { alive.contains($0.key) }
+        contentFrames = contentFrames.filter { alive.contains($0.key) }
+        stripFrames = stripFrames.filter { alive.contains($0.key) }
+        bodyFrames = bodyFrames.filter { alive.contains($0.key) }
+        composerTops = composerTops.filter { alive.contains($0.key) }
+        tabFrames = tabFrames.filter { alive.contains($0.key) }
+        #if os(macOS)
+        truncated = truncated.filter { alive.contains($0.key) }
+        tabWidths = tabWidths.filter { alive.contains($0.key) }
+        peekWork?.cancel()
+        hoveredStrips = []
+        hoveredTabs = []
+        if peek != nil { peek = nil }
+        #endif
+    }
+
+    /// 在最右边加一列放这个会话（标签组里加会话 = 多一列，11-10：组里的会话多列摆出来）；已经开着就切过去，空白时直接放进去
+    func appendColumn(_ key: String) {
+        if let open = pane(holding: key) { activate(open.id, key); return }
+        if isPristine { setKey(focusID, key); return }
+        let new = Pane(id: UUID(), key: key)
+        if case .split(var split) = root, split.axis == .horizontal {
+            let n = CGFloat(split.items.count)
+            split.fractions = split.fractions.map { $0 * n / (n + 1) }
+            split.items.append(.pane(new))
+            split.fractions.append(1 / (n + 1))
+            root = .split(split)
+        } else {
+            root = .split(Split(id: UUID(), axis: .horizontal, items: [root, .pane(new)], fractions: [0.5, 0.5]))
+        }
+        focusID = new.id
+    }
+
+    /// 每个标签各占一列、平分（标签组右键「每个会话一列」）：按现在的先后（从左上到右下、块里从左到右），当前会话还是当前块
+    func arrangeColumns() {
+        guard keys.count > 1 else { return }
+        let current = focused
+        // 每块正显示的那个留在原来的块里（块 id 不变，SwiftUI 不用重建它的对话），别的标签各开一块新的
+        let items: [Node] = panes.flatMap { pane in pane.tabs.map { key in Node.pane(Pane(id: key == pane.key ? pane.id : UUID(), key: key)) } }
+        root = .split(Split(id: UUID(), axis: .horizontal, items: items, fractions: Array(repeating: 1 / CGFloat(items.count), count: items.count)))
+        focusID = items.first { if case .pane(let p) = $0 { return p.key == current } else { return false } }?.id ?? items[0].id
+    }
+
+    /// 改一份存着的分屏（不是正显示的那套）：读进一份不画的分屏里改完再存回去
+    static func edited(_ data: Data?, _ change: (ChatPanes) -> Void) -> Data? {
+        let scratch = ChatPanes()
+        scratch.load(data)
+        change(scratch)
+        return scratch.layout()
+    }
+
+    /// 存着的那份里开着哪些会话（从左上到右下）
+    static func keys(in data: Data?) -> [String] {
+        guard let data, let saved = try? JSONDecoder().decode(Saved.self, from: data), let node = restored(saved.root) else { return [] }
+        return leaves(node).flatMap(\.tabs)
     }
 
     // MARK: 树的操作
@@ -1471,7 +1551,7 @@ private struct PaneHeader: View {
             if let barless, atTop, panes.panes.first?.id == pane.id {
                 SidebarHandle(action: barless.showList).padding(.trailing, 2)
             }
-            PaneMark(key: pane.key, session: session, size: 6)
+            PaneMark(key: pane.key, size: 6)
             Text(title(session))
                 .font(.ui(.subheadline).weight(focused && several ? .semibold : .regular))
                 .foregroundStyle(focused || !several ? .primary : .secondary)
@@ -1568,6 +1648,9 @@ private struct PaneHeader: View {
         // 指着展开了一个标签：会话和分屏的按钮先收进「更多」、「+」也收起，地方让给它（标签按平时的档算宽度，展开的时候不跟着变）
         let expand = panes.peek.flatMap { $0.pane == pane.id ? entries.firstIndex(of: $0.key.isEmpty ? nil : $0.key) : nil }
         return HStack(alignment: .bottom, spacing: 4) {
+            #if KITELINE_MAC
+            if showsGroupChip { TarsTabGroupChip().frame(height: Self.tabRow) }
+            #endif
             // 标签占按钮剩下的地方（靠左）；按钮保持完整
             tabs(several: several, level: level, expand: expand)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -1597,8 +1680,12 @@ private struct PaneHeader: View {
             ZStack(alignment: .bottom) {
                 Theme.chatBackground
                 MacPalette.tabStrip
-                // 标签栏底边一道细线，正显示的标签盖住自己那一段（和下面的对话连成一片）
-                Rectangle().fill(MacPalette.separator).frame(height: 0.5)
+                // 标签栏底边一道细线，正显示的标签盖住自己那一段（和下面的对话连成一片）；正显示标签组时是组的颜色
+                if let groupTint {
+                    Rectangle().fill(groupTint).frame(height: 2)
+                } else {
+                    Rectangle().fill(MacPalette.separator).frame(height: 0.5)
+                }
             }
             // 空白处：按住拖窗口、双击缩放（工具栏那一带被标签栏占了）
             .modifier(WindowDragArea())
@@ -1623,7 +1710,18 @@ private struct PaneHeader: View {
     private var entries: [String?] { pane.tabs.map(Optional.some) + (pane.key == nil ? [nil] : []) }
 
     /// 按钮放到第 level 档时，标签一共能有多宽
-    private func tabRoom(_ level: Int) -> CGFloat { max(0, width - 12 - lightsInset - actionsWidth(level) - 30) }
+    private func tabRoom(_ level: Int) -> CGFloat { max(0, width - 12 - lightsInset - actionsWidth(level) - 30 - groupChipWidth) }
+
+    #if KITELINE_MAC
+    /// 主窗口最左上那一块：标签栏最前面放标签组的色块组名（同 Edge 标签栏上的组名），点开切组、改名改色
+    private var showsGroupChip: Bool { panes === KitelineKit.panes && KitelineKit.tabGroupCount > 0 && panes.panes.first?.id == pane.id }
+    private var groupChipWidth: CGFloat { showsGroupChip ? 112 : 0 }
+    /// 正显示某个标签组时，标签栏底边那道线用组的颜色（同 Edge 组里标签下面的色线）
+    private var groupTint: Color? { panes === KitelineKit.panes ? KitelineKit.activeTabGroupTint : nil }
+    #else
+    private var groupChipWidth: CGFloat { 0 }
+    private var groupTint: Color? { nil }
+    #endif
 
     /// 一排标签 + 「+」。标签按标题的宽度来（最宽 240），放不下时一起变窄，窄到 96 还放不下就横着滚。
     /// expand：指着展开的是第几个（它按完整标题变宽，见 TabsLayout）
@@ -1780,13 +1878,12 @@ private struct PaneTab: View {
     private static let foot: CGFloat = 7
 
     var body: some View {
-        let session = key.flatMap(model.session)
         let active = key == pane.key
         let lit = active && (focused || !several)
         let shape = PaneTabShape(foot: Self.foot)
         HStack(spacing: 7) {
-            PaneMark(key: key, session: session, size: 7)
-            Text(title(session))
+            PaneMark(key: key, size: 7)
+            Text(title)
                 .font(.ui(.subheadline).weight(lit ? .semibold : .medium))
                 .foregroundStyle(lit ? .primary : .secondary)
                 .lineLimit(1)
@@ -1850,7 +1947,7 @@ private struct PaneTab: View {
         .onTapGesture {
             if let key { panes.activate(pane.id, key) } else { panes.focus(pane.id) }
         }
-        .help(help(session))
+        .help(help)
         .contextMenu { menu }
         .modifier(TabDragGesture(key: key, pane: pane, panes: panes))
         // 会话拖到这个标签上：落在左半边插到它前面，右半边插到后面（同浏览器排标签顺序）
@@ -1873,13 +1970,15 @@ private struct PaneTab: View {
     /// 能关：会话的标签都能关（最后一个关了这块变空 / 关掉）；「选择会话」新标签要有别的标签可回、或者还有别的块
     private var closable: Bool { key != nil || !pane.tabs.isEmpty || several }
 
-    private func title(_ session: SessionInfo?) -> String {
+    private var title: String {
         guard let key else { return L("选择会话") }
         return model.paneTitle(key)
     }
 
-    /// 指着看：状态 · 机器 · 项目（原来窗口标题下面那行小字）；群：群名 · 几个成员 · 成员都有谁
-    private func help(_ session: SessionInfo?) -> String {
+    /// 指着看：状态 · 机器 · 项目（原来窗口标题下面那行小字）；群：群名 · 几个成员 · 成员都有谁。
+    /// 读不登记观察的快照：提示文字不值得让标签跟着这个会话的每次推送重画
+    private var help: String {
+        let session = key.flatMap(model.sessionSnapshot)
         guard let key else { return L("选择要在此打开的会话，或从左侧拖入") }
         if let id = GroupKey.id(key) {
             guard let group = model.groups.group(id) else { return L("群已解散") }
@@ -1887,7 +1986,7 @@ private struct PaneTab: View {
                 .filter { !$0.isEmpty }.joined(separator: " · ")
         }
         if let session {
-            return [title(session), SessionCard(session).status, session.sourceName, session.cwd.map { ($0 as NSString).lastPathComponent } ?? ""]
+            return [title, SessionCard(session).status, session.sourceName, session.cwd.map { ($0 as NSString).lastPathComponent } ?? ""]
                 .filter { !$0.isEmpty }.joined(separator: " · ")
         }
         return [model.pastMeta[key]?.title ?? "", L("已结束")].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -1906,6 +2005,10 @@ private struct PaneTab: View {
                 Button(L("移到右侧分屏")) { panes.drop(key, from: pane.id, on: pane.id, zone: .trailing) }
                 Button(L("移到下方分屏")) { panes.drop(key, from: pane.id, on: pane.id, zone: .bottom) }
             }
+            #if KITELINE_MAC
+            // 主窗口的分屏才有标签组（世界模式里浮着的那张卡片不是）
+            if panes === KitelineKit.panes { TarsTabGroupMenu(key: key, moving: true) }
+            #endif
             if let id = GroupKey.id(key) {
                 Divider()
                 GroupPaneMenu(id: id, folded: false)
@@ -2248,10 +2351,9 @@ private struct TabDragGhost: View {
 
     var body: some View {
         if let drag = panes.tabDrag {
-            let session = model.session(drag.key)
             let width = max(80, drag.size.width - 14), height = max(24, drag.size.height)
             HStack(spacing: 7) {
-                PaneMark(key: drag.key, session: session, size: 7)
+                PaneMark(key: drag.key, size: 7)
                 Text(model.paneTitle(drag.key))
                     .font(.ui(.subheadline).weight(.semibold))
                     .lineLimit(1)
@@ -2420,31 +2522,40 @@ private struct PickerRowStyle: ViewModifier {
 }
 
 /// 标签、标题条最前面的小记号：会话是状态点；群是双人图标（成员有在工作的就是强调色）
+/// 标签、标题条前面的状态点（群是两个人的小图标）。只读这个会话自己的 SessionSlot.tab（标题、状态、出错），
+/// 别的会话有动静、这个会话换了个工具都不重画（标签多了每秒的推送会把所有标签重排一遍）
 struct PaneMark: View {
     let key: String?
-    let session: SessionInfo?
     var size: CGFloat = 7
     @Environment(AppModel.self) private var model
 
     var body: some View {
         if let id = GroupKey.id(key) {
-            let busy = model.groups.group(id)?.members.contains { model.session($0.key)?.isBusy == true } ?? false
+            let busy = model.groups.group(id)?.members.contains { model.sessionSlot($0.key).tab?.activity == "busy" } ?? false
             Image(systemName: "person.2.fill")
                 .font(.system(size: size + 3, weight: .semibold))
                 .foregroundStyle(busy ? Theme.claude : Color.secondary)
         } else {
             Circle()
-                .fill(session.map(StatusColor.of) ?? Color.secondary.opacity(0.4))
+                .fill(key.flatMap { model.sessionSlot($0).tab }?.color ?? Color.secondary.opacity(0.4))
                 .frame(width: size, height: size)
         }
     }
 }
 
+extension AppModel.SessionSlot.TabFace {
+    /// 同 StatusColor.of：出错红、等确认橙、在工作主题色、空闲绿
+    var color: Color {
+        if failed { return Theme.removed }
+        return ["waiting": Color.orange, "busy": Theme.claude, "idle": Theme.added][activity] ?? .secondary
+    }
+}
+
 extension AppModel {
-    /// 分屏标签、标题条上写的：会话标题（已结束的用历史里的）；群写群名
+    /// 分屏标签、标题条上写的：会话标题（已结束的用历史里的）；群写群名。只读这个会话的 SessionSlot.tab（见 PaneMark）
     func paneTitle(_ key: String) -> String {
         if let id = GroupKey.id(key) { return groups.group(id)?.name ?? L("群已解散") }
-        return session(key)?.title ?? pastMeta[key]?.title ?? L("会话已结束")
+        return sessionSlot(key).tab?.title ?? pastMeta[key]?.title ?? L("会话已结束")
     }
 
     /// 拖着走的卡片（会话 / 群）

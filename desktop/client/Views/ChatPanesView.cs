@@ -340,6 +340,9 @@ public sealed class PaneHeader : Panel
         this.pane = pane;
         this.atTop = atTop;
         this.atRight = atRight;
+        // 组的名字、颜色变了：标签栏重排一次（色块和底线）
+        AttachedToVisualTree += (_, _) => TabGroupState.Shared.PropertyChanged += OnGroupsChanged;
+        DetachedFromVisualTree += (_, _) => TabGroupState.Shared.PropertyChanged -= OnGroupsChanged;
         // 最上面一排：标签栏往上长到窗口顶（标题栏那一带），标签贴着底边
         rise = atTop ? Math.Max(0, MainWindow.TitlebarHeight - TabRow) : 0;
         Height = TabRow + rise;
@@ -348,6 +351,12 @@ public sealed class PaneHeader : Panel
     }
 
     double lastWidth = -1;
+
+    void OnGroupsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        lastWidth = -1;
+        InvalidateMeasure();
+    }
 
     protected override Size MeasureOverride(Size available)
     {
@@ -368,7 +377,11 @@ public sealed class PaneHeader : Panel
         // 底色：对话底色上压一层暗色；底边一道细线（正显示的标签盖住自己那一段）
         Children.Add(new Border().Res(Border.BackgroundProperty, "ChatBackground"));
         Children.Add(new Border().Res(Border.BackgroundProperty, "TabStrip"));
-        Children.Add(new Border { Height = 0.5, VerticalAlignment = VerticalAlignment.Bottom }.Res(Border.BackgroundProperty, "Separator"));
+        // 有会话组正显示时底边那道线换成组的颜色（同 Mac 版）
+        var line = new Border { Height = 0.5, VerticalAlignment = VerticalAlignment.Bottom };
+        if (TabGroupState.Shared.Group(TabGroupState.Shared.Active) is not null) line.Background = TabGroupState.Shared.ColorOf(TabGroupState.Shared.Active).Brush;
+        else line.Res(Border.BackgroundProperty, "Separator");
+        Children.Add(line);
         var drag = new Border { Background = Brushes.Transparent };
         drag.PointerPressed += WindowDrag;
         Children.Add(drag);
@@ -377,7 +390,9 @@ public sealed class PaneHeader : Panel
         var entries = Entries;
         var count = Math.Max(1, entries.Count);
         // 群在块窄时还多留一个成员按钮
-        double Room(int level) => Math.Max(0, width - 12 - caption - ActionsWidth(level) - (level < 2 && MainModel.GroupIdOf(pane.Key) is not null ? 48 : 0) - 30);
+        // 会话组的色块 + 组名放在最左边（只在最左上角的那块的标签栏上）
+        var chip = TabGroupState.Shared.Active is not null && ChatPanes.Shared.Panes.Count > 0 && ChatPanes.Shared.Panes[0].Id == pane.Id ? TabGroupChip.Make() : null;
+        double Room(int level) => Math.Max(0, width - 12 - caption - ActionsWidth(level) - (chip is null ? 0 : 130) - (level < 2 && MainModel.GroupIdOf(pane.Key) is not null ? 48 : 0) - 30);
         var level = new[] { 2, 1 }.FirstOrDefault(l => Room(l) / count >= 120, 0);
         var room = Room(level);
         var cap = Math.Min(MaxTab, Math.Max(MinTab, room / count));
@@ -399,6 +414,12 @@ public sealed class PaneHeader : Panel
         var row = new DockPanel { Margin = new Thickness(6, rise, 6 + caption, 0), Height = TabRow, VerticalAlignment = VerticalAlignment.Bottom };
         DockPanel.SetDock(actions, Dock.Right);
         row.Children.Add(actions);
+        if (chip is not null)
+        {
+            DockPanel.SetDock(chip, Dock.Left);
+            chip.VerticalAlignment = VerticalAlignment.Bottom;
+            row.Children.Add(chip);
+        }
         row.Children.Add(tabArea);
         Children.Add(row);
     }

@@ -105,6 +105,10 @@ final class IdleClose {
         if changed { save() }
     }
 
+    /// 最后一次在任何一端打开过这个会话的详情（毫秒；没打开过是 nil）：会话状态里带给各端，各端的「新消息」按它算——
+    /// 在手机上看过了，Mac 侧栏、标签组上就不再标新消息（11-10 反馈：看过的别再显示）
+    func viewedAt(_ key: String) -> Double? { viewed[key] }
+
     /// 有打开记录的会话（自测用：其余的只记了第一次见到）
     var openedKeys: [String] { Array(viewed.keys) }
 

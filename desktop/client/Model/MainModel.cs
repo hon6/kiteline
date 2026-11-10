@@ -94,6 +94,8 @@ public sealed partial class MainModel : ObservableObject
     public string StatusFilter { get => Prefs.String("listFilter") ?? "all"; set { Prefs.Set("listFilter", value); OnPropertyChanged(); } }
     public string SourceFilter { get => Prefs.String("listSource") ?? ""; set { Prefs.Set("listSource", value); OnPropertyChanged(); } }
     public string ProjectFilter { get => Prefs.String("listProject") ?? ""; set { Prefs.Set("listProject", value); OnPropertyChanged(); } }
+    /// 左边栏现在看的页签（同 Mac 版 listTab）：sessions 会话 / groups 群 / tabgroups 会话组；没有的（电脑不支持）回到会话
+    public string ListTab { get => Prefs.String("listTab") ?? "sessions"; set { Prefs.Set("listTab", value); OnPropertyChanged(); } }
 
     /// 搜索过的会话
     public IEnumerable<SessionInfo> Filtered(IEnumerable<SessionInfo> sessions)

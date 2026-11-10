@@ -2,6 +2,8 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -42,6 +44,12 @@ public sealed class ChatView : Grid
     bool pending;
     double lastExtent;
     string? lastRowId;
+    /// 最多显示最后多少行（int.MaxValue = 全显示）。会话开着一直往下聊，行只增不减，几百上千行每来一点内容都要整列重排，
+    /// 越聊越卡（11-10 反馈，同 Mac 版）。更早的点「查看更早的消息」先在本地展开；回到底部来了新消息时收回
+    const int ShownRows = 100;
+    int limit = ShownRows;
+    /// 最近一次「人在滚对话」的时间（滚轮 / 触控板、按住拖动、翻页键）：位置变了但没人在滚，是系统挪的（见 Scrolled）
+    long lastInput;
 
     public ChatView(string key)
     {
@@ -62,6 +70,14 @@ public sealed class ChatView : Grid
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
         scroll.ScrollChanged += Scrolled;
+        // 记下真人的滚动操作（事件先经过这里再交给滚动条、内容，已处理的也要）
+        scroll.AddHandler(PointerWheelChangedEvent, (_, _) => NoteInput(), RoutingStrategies.Tunnel, true);
+        scroll.AddHandler(PointerPressedEvent, (_, _) => NoteInput(), RoutingStrategies.Tunnel, true);
+        scroll.AddHandler(PointerMovedEvent, (_, e) => { if (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) NoteInput(); }, RoutingStrategies.Tunnel, true);
+        scroll.AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key is Avalonia.Input.Key.PageUp or Avalonia.Input.Key.PageDown or Avalonia.Input.Key.Home or Avalonia.Input.Key.End or Avalonia.Input.Key.Up or Avalonia.Input.Key.Down or Avalonia.Input.Key.Space) NoteInput();
+        }, RoutingStrategies.Tunnel, true);
         scroll.SizeChanged += (_, _) => { content.MinHeight = scroll.Viewport.Height; if (stick) ScrollToEnd(); };
         var area = new Panel { Children = { scroll } };
         newPill = new Border
@@ -161,9 +177,12 @@ public sealed class ChatView : Grid
     {
         var session = Session;
         var activity = session?.Activity;
-        var rows = chat.Rows(activity);
-        // 上面：加载中 / 查看更早的消息 / 已是最早的消息
-        header.Child = chat.Loading ? new Spinner(16).Pad(10).HAlign(HorizontalAlignment.Center)
+        var all = chat.Rows(activity);
+        // 只显示最后 limit 行（见 limit）
+        var rows = all.Count > limit ? all.GetRange(all.Count - limit, limit) : all;
+        // 上面：（本地还有没显示的）查看更早的消息 / 加载中 / 查看更早的消息 / 已是最早的消息
+        header.Child = rows.Count < all.Count ? new Tap(Ui.Text(L("查看更早的消息"), 12, color: "Accent").Pad(10), ShowEarlier, 6).HAlign(HorizontalAlignment.Center)
+            : chat.Loading ? new Spinner(16).Pad(10).HAlign(HorizontalAlignment.Center)
             : chat.HasMore && chat.Loaded ? new Tap(Ui.Text(L("查看更早的消息"), 12, color: "Accent").Pad(10), LoadOlder, 6).HAlign(HorizontalAlignment.Center)
             : chat.Loaded && chat.Items.Count > 0 ? Ui.Text(L("— 已是最早的消息 —"), 11.5, color: "Text2").Pad(10).HAlign(HorizontalAlignment.Center)
             : null;
@@ -194,7 +213,12 @@ public sealed class ChatView : Grid
         if (last != lastRowId)
         {
             var mine = rows.LastOrDefault() is PendingRow;
-            if (stick || mine) { stick = true; newPill.IsVisible = false; ScrollToEnd(); }
+            if (stick || mine)
+            {
+                stick = true; newPill.IsVisible = false; ScrollToEnd();
+                // 看过更早的消息又回到底部了：收回只显示最后 ShownRows 行
+                if (limit > ShownRows) { limit = ShownRows; Schedule(); }
+            }
             else if (lastRowId is not null) newPill.IsVisible = true;
             lastRowId = last;
         }
@@ -282,12 +306,42 @@ public sealed class ChatView : Grid
             lastExtent = scroll.Extent.Height;
             if (stick && distance > 1) ScrollToEnd();
         }
-        else
+        else if (Environment.TickCount64 - lastInput < 800)
         {
-            // 位置变了 = 你在翻：离底部 160 以内算贴底
+            // 位置变了、刚有人在滚 = 你在翻：离底部 160 以内算贴底
             stick = distance < 160;
             if (stick) newPill.IsVisible = false;
         }
+        else if (stick && distance > 1)
+        {
+            // 位置变了但没人在滚：显示器关了再开、窗口被系统挪屏改了大小。以前一律当成你往上翻了，
+            // 从此不再贴底、停在半截甚至最上面（11-10 在 Mac 上遇到，同一套写法）。贴着底的拉回底部
+            ScrollToEnd();
+        }
+    }
+
+    void NoteInput() => lastInput = Environment.TickCount64;
+
+    /// 自测：对话区离顶 / 离底多远、显示了几行
+    internal string SelfTestScroll() =>
+        $"离顶 {(int)scroll.Offset.Y}，离底 {(int)(scroll.Extent.Height - scroll.Offset.Y - scroll.Viewport.Height)}，内容高 {(int)scroll.Extent.Height}，可视高 {(int)scroll.Viewport.Height}，显示 {list.Children.Count} 行";
+
+    /// 自测：把对话区滚到某处（top / bottom / 离顶多少）；user = 当成人在滚，不带 = 系统挪的位置
+    internal void SelfTestScrollTo(string where, bool user)
+    {
+        if (user) NoteInput();
+        var max = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
+        scroll.Offset = new Vector(0, where == "top" ? 0 : where == "bottom" ? max : Math.Min(max, double.Parse(where)));
+    }
+
+    /// 本地展开更早的一截（见 limit）：展开完停在原来看的那条上，不跳走
+    void ShowEarlier()
+    {
+        stick = false;
+        var before = scroll.Extent.Height - scroll.Offset.Y;
+        limit = limit > int.MaxValue - ShownRows ? int.MaxValue : limit + ShownRows;
+        Rebuild();
+        Dispatcher.UIThread.Post(() => scroll.Offset = new Vector(0, Math.Max(0, scroll.Extent.Height - before)), DispatcherPriority.Background);
     }
 
     void ScrollToEnd() => Dispatcher.UIThread.Post(() => scroll.Offset = new Vector(0, Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height)), DispatcherPriority.Background);
@@ -296,6 +350,7 @@ public sealed class ChatView : Grid
     {
         // 加载更早的消息：加载完停在原来看的那条上，不跳走
         stick = false;
+        limit = int.MaxValue;
         var before = scroll.Extent.Height - scroll.Offset.Y;
         await model.LoadHistory(Key, older: true);
         Dispatcher.UIThread.Post(() => scroll.Offset = new Vector(0, Math.Max(0, scroll.Extent.Height - before)), DispatcherPriority.Background);
@@ -305,6 +360,7 @@ public sealed class ChatView : Grid
     async void JumpTo(string target)
     {
         stick = false;
+        if (limit != int.MaxValue) { limit = int.MaxValue; Rebuild(); }   // 要找的那条可能在只显示的最后 limit 行之前
         for (var i = 0; i < 12; i++)
         {
             var row = chat.Rows(Session?.Activity).FirstOrDefault(r => r.Contains(target));

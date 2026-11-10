@@ -565,7 +565,7 @@ final class PeerComputers {
     /// 留在本机处理的接口：置顶、标记、静音、看过、待办、收藏、群、游客链接……都是本机自己的状态
     private static let localPaths: Set<String> = ["/api/pin", "/api/mark", "/api/mute", "/api/viewed", "/api/quiet", "/api/share", "/api/share/stop",
                                                   "/api/inbox", "/api/state", "/api/events", "/api/computers", "/api/computers/enroll"]
-    private static let localPrefixes = ["/api/todos", "/api/favorites", "/api/groups", "/api/peer/", "/api/devices", "/api/push", "/api/live"]
+    private static let localPrefixes = ["/api/todos", "/api/favorites", "/api/tabgroups", "/api/groups", "/api/peer/", "/api/devices", "/api/push", "/api/live"]
     private static let keyFields = ["key", "k", "source", "sourceId", "sessionKey"]
 
     /// 本机自己发起的投递（会话群的消息、定时任务、闲置自动关闭……）落到对方电脑的会话上：交给那台电脑执行

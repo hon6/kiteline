@@ -39,6 +39,8 @@ public static class SessionMenu
         yield return Ui.Item(L("在此项目中新建会话…"), () => main.NewTask(item));
         // 会话群：和别的设备、别的项目里的会话互相发消息（后台支持才有）
         if (GroupState.Shared.Supported && item.CanReply) yield return Ui.Item(L("拉群协作…"), () => GroupPicker.Open([key], null));
+        // 会话组：加进某一组（同 Mac 版「添加到会话组」）；已经在的那组打勾，再点就拿掉
+        if (TabGroupState.Shared.Supported) yield return Ui.Submenu(L("添加到会话组"), TabGroupMenus.For(key));
         var muted = model.IsMuted(key);
         yield return Ui.Item(muted ? L("取消静音") : L("静音（仅在需要确认时提醒）"), () => model.SetMuted(key, !muted));
         // 权限模式、换模型、压缩：后台说这个 agent 有才给（caps）

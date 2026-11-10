@@ -36,6 +36,7 @@ import KitelineKit
 ///   GET  /api/tests?key=         测试报告：这个会话跑过的测试和结果
 ///   GET  /api/todos              我的待办（Claude 说要你做的事）；POST /api/todos/add|update|delete|dismiss|clear-done（见 Todos.swift）
 ///   GET  /api/favorites          我的收藏（收藏的消息）；POST /api/favorites/add|delete，GET /api/favorites/media（见 Favorites.swift）
+///   GET  /api/tabgroups          标签组（相关会话放一组，各端同一套）；POST /api/tabgroups/set 整份换掉（见 TabGroupStore.swift）
 ///   GET  /api/groups             会话群（跨设备、跨项目的会话互相发消息）；GET /api/groups/messages，POST /api/groups/create|add|remove|rename|send|pause|delete（见 Groups.swift）
 ///   GET  /ca.mobileconfig        本机根证书描述文件（装上后 https 地址受信任，推送才能用）
 ///
@@ -1118,6 +1119,8 @@ final class MobileServer {
                 respond(Todos.shared.handle(request))
             case (_, let path) where path == "/api/favorites" || path.hasPrefix("/api/favorites/"):
                 respond(Favorites.shared.handle(request))
+            case (_, let path) where path == "/api/tabgroups" || path.hasPrefix("/api/tabgroups/"):
+                respond(TabGroupStore.shared.handle(request))
             case (_, let path) where path == "/api/groups" || path.hasPrefix("/api/groups/"):
                 Groups.shared.handle(request, respond: respond)
             default:

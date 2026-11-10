@@ -60,6 +60,10 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     var goal: GoalInfo?
     /// 远端电脑上、在 VS Code 里跑的 Claude Code，能转到后台运行（会话页提示「支持后台托管」，见 HostedViews.swift）
     var hostable: Bool
+    /// 最后一次在任何一端（这台手机、Mac、别的手机）看过这个会话的时间（毫秒）：「新消息」按它和本机记的取较晚的算；老版本电脑端没有
+    var viewedAt: Double?
+    /// 最近一轮是别的会话来信引起的（会话之间的往来、群消息）：不算给你的新消息
+    var fromPeer: Bool
 
     var id: String { key }
     var isWaiting: Bool { activity == "waiting" }
@@ -78,7 +82,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case key, title, name, sourceId, sourceName, sourceKind, activity, activityText, blocking, reason, preview
         case pendingTool, canReply, cwd, updatedAt, startedAt, usage, error, effort, ultracode, permissionMode, cwdShort, subagents, terminals
-        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable
+        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable, viewedAt, fromPeer
     }
 
     init(from decoder: Decoder) throws {
@@ -118,6 +122,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         stage = ((try? c.decodeIfPresent(StageInfo.self, forKey: .stage)) ?? nil).flatMap { $0.valid ? $0 : nil }
         goal = ((try? c.decodeIfPresent(GoalInfo.self, forKey: .goal)) ?? nil).flatMap { $0.valid ? $0 : nil }
         hostable = ((try? c.decodeIfPresent(Bool.self, forKey: .hostable)) ?? nil) ?? false
+        viewedAt = try? c.decodeIfPresent(Double.self, forKey: .viewedAt)
+        fromPeer = ((try? c.decodeIfPresent(Bool.self, forKey: .fromPeer)) ?? nil) ?? false
     }
 }
 

@@ -30,6 +30,8 @@ enum Route: Hashable {
     /// 会话群：全部群（进行中 + 历史群）、某个群的群聊页
     case groups
     case group(String)
+    /// 标签组：组里的会话（iPhone / iPad 一次看一个）
+    case tabGroup(String)
     case schedules
     case project(ProjectInfo)
     /// 改动报告 / 测试报告 / 项目文件：key 是哪个会话（取它的工作目录）
