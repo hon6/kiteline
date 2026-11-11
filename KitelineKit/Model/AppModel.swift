@@ -974,7 +974,11 @@ final class AppModel {
                                            body: ["text": p.text, "images": p.payload, "files": p.filePayload, "override": p.override, "cid": p.id])
             }
             let submitted = reply["submitted"] as? Bool ?? false
-            chat.update(id) { $0.state = submitted ? .sent : .filled }
+            let later = submitted && reply["later"] as? Bool ?? false
+            chat.update(id) {
+                $0.state = submitted ? (later ? .later : .sent) : .filled
+                if later { $0.qid = reply["qid"] as? String }
+            }
             if !submitted { flash(reply["message"] as? String ?? L("已填入 VS Code 输入框，未提交")) }
             // 发给空闲的会话：15 秒后 Claude 还没动、对话里也没出现这条，多半没提交上（10-25 用户遇到过：回车被输入法拿去上屏拼音），
             // 标出来，别让它两分钟后悄悄消失。斜杠命令不回显成消息，不算
@@ -987,11 +991,7 @@ final class AppModel {
                     chat.update(id) { $0.state = .unconfirmed }
                 }
             }
-            // 等对话记录回显来撤掉占位；万一没回显，两分钟后也撤掉（没提交上的留着，等用户自己移除）
-            Task { [weak chat] in
-                try? await Task.sleep(for: .seconds(120))
-                chat?.pending.removeAll { $0.id == id && !$0.isFailed && $0.state != .unconfirmed }
-            }
+            if later { trackQueued(key, id) } else { expirePending(key, id) }
         } catch is OfflineError {
             chat.update(id) { $0.state = .queued }   // 网络不通：排队，连上后自动发
         } catch let error as APIError {
@@ -999,6 +999,97 @@ final class AppModel {
             if error.data["capExceeded"] as? Bool == true { capPrompt = (key, id, error.message) }
         } catch {
             chat.update(id) { $0.state = .failed(error.localizedDescription) }
+        }
+    }
+
+    /// 等对话记录回显来撤掉占位；万一没回显，两分钟后也撤掉（没提交上的留着，等用户自己移除）。
+    /// Claude 还在忙就一直留着：忙时发的消息要等正在跑的工具做完才进对话（11-11 用户遇到一条命令跑了 20 分钟，消息先「消失」了）。
+    /// 会话连着两次（约 20 秒）都空闲了还没回显：排队的标成「未出现」，其余照旧撤掉
+    private func expirePending(_ key: String, _ id: String) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(120))
+            var idle = 0
+            while true {
+                guard let self, let chat = self.chats[key], let p = chat.pending.first(where: { $0.id == id }),
+                      !p.isFailed, p.state != .unconfirmed, p.state != .queued else { return }
+                let busy = self.session(key).map { $0.isBusy || $0.isWaiting } ?? false
+                idle = busy ? 0 : idle + 1
+                if idle >= 2 {
+                    if p.state == .later { chat.update(id) { $0.state = .unconfirmed } } else { chat.pending.removeAll { $0.id == id } }
+                    return
+                }
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    /// 排队的消息（Claude 忙时发的）：电脑给了队列就对着它，出现过又不在了 = 已交给 Claude（对话里会出现）或在别处删了，撤掉；
+    /// 15 秒还没出现在队列里也撤掉（多半已经交了）。老版本（没有队列）等会话空闲约 20 秒还没回显，标成「未出现」
+    private func trackQueued(_ key: String, _ id: String) {
+        Task { [weak self] in
+            var waited = 0.0
+            var idle = 0
+            while true {
+                try? await Task.sleep(for: .seconds(2))
+                waited += 2
+                guard let self, let chat = self.chats[key], let p = chat.pending.first(where: { $0.id == id }), p.state == .later else { return }
+                let session = self.session(key)
+                if let queue = session?.queue {
+                    if queue.contains(where: { $0.id == p.qid }) {
+                        if !p.seen { chat.update(id) { $0.seen = true } }
+                    } else if p.seen || waited > 15 {
+                        chat.pending.removeAll { $0.id == id }
+                        return
+                    }
+                    continue
+                }
+                let busy = session.map { $0.isBusy || $0.isWaiting } ?? false
+                idle = busy ? 0 : idle + 1
+                if idle >= 10 {
+                    chat.update(id) { $0.state = .unconfirmed }
+                    return
+                }
+            }
+        }
+    }
+
+    /// 调整排队的消息：move（dir -1 上移 / 1 下移）、edit（text）、delete、now（强插：中断 Claude 当前这一步，排队的消息马上发送）
+    @discardableResult
+    func queueAction(_ key: String, _ qid: String, _ action: String, text: String? = nil, dir: Int? = nil) async -> Bool {
+        let chat = chat(key)
+        // 先按调过的显示（电脑的新队列一两秒后才传回来）
+        if action != "now" {
+            var items = chat.queueRows(session(key)).filter(\.editable).map { QueuedItem(id: $0.id, text: $0.text) }
+            if let at = items.firstIndex(where: { $0.id == qid }) {
+                switch action {
+                case "move":
+                    let to = at + ((dir ?? 1) < 0 ? -1 : 1)
+                    if items.indices.contains(to) { items.swapAt(at, to) }
+                case "edit": if let text { items[at].text = text }
+                default: items.remove(at: at)
+                }
+                chat.queueDraft = (items, Date())
+            }
+        }
+        var body: [String: Any] = ["action": action, "id": qid]
+        if let text { body["text"] = text }
+        if let dir { body["dir"] = dir }
+        do {
+            let reply = try await api.post("/api/queue", ["key": key], body: body)
+            if action == "now" {
+                chat.queueDraft = nil   // 刚调过的临时队列作废：排队的都交出去了
+                // 强插：本机记下的排队消息改成普通的「已发送」，等对话里回显
+                for p in chat.pending where p.state == .later {
+                    chat.update(p.id) { $0.state = .sent }
+                    expirePending(key, p.id)
+                }
+                flash(reply["message"] as? String ?? L("已中断当前这一步，排队的消息马上发送"))
+            }
+            return true
+        } catch {
+            chat.queueDraft = nil
+            show(error)
+            return false
         }
     }
 

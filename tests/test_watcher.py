@@ -1377,7 +1377,7 @@ try:
     check("不带参数：测试 watcher（没有 CCPULSE_SKILLS）不往真实的 ~/.claude 里装、也不抛", "CCPULSE_SKILLS" in os.environ or W.sync_bridge_mod() is False)
     mod_ts = W.BRIDGE_MOD_FILES["hooks/register.ts"]
     check("mod：斜杠命令走 $.command.run，以「/」开头的普通话垫零宽空格（源码里是转义写法）",
-          "$.command.run(" in mod_ts and "`\\u200b${item.text}`" in mod_ts and "\u200b" not in mod_ts)
+          "$.command.run(" in mod_ts and "`\\u200b${text}` : text" in mod_ts and "submit($, item.text)" in mod_ts and "\u200b" not in mod_ts)
     check("读记录时去掉垫的零宽空格：手机上显示、核对送达都照原话", W.user_string_item("\u200b/Users/x 看看", {"id": "1"})["text"] == "/Users/x 看看")
     check("手机经 mod 发来、排队进来的话算你说的；别的插件的不算",
           W.normalize_line(0, {"type": "attachment", "timestamp": ts(1), "attachment": {
@@ -1387,7 +1387,24 @@ try:
     check("mod：Claude 忙时发的话留着，下一批工具跑完插进这一轮（session.append），没赶上的这一轮完了再提交",
           "classic.PostToolBatch" in mod_ts and "$.session.append(" in mod_ts and "result = 'later'" in mod_ts
           and "later.splice(0)" in mod_ts.split("on('turn.complete'")[1].split("on('classic.PostToolBatch'")[0])
-    check("mod：插进去的话开头垫零宽空格（watcher 靠它认）", "text: `\\u200b${text}`" in mod_ts.split("on('classic.PostToolBatch'")[1].split("on('tool.call'")[0])
+    check("mod：插进去的话开头垫零宽空格（watcher 靠它认）", "text: `\\u200b${q.text}`" in mod_ts.split("on('classic.PostToolBatch'")[1].split("on('tool.call'")[0])
+    check("mod：排队的话写进 <会话>.queue.json，认 queue 指令（move / edit / delete / now），alive 标 v2",
+          "queue.json" in mod_ts and "item.op === 'queue'" in mod_ts and all("item.action === '%s'" % a in mod_ts for a in ("move", "edit", "delete", "now"))
+          and "v: 2" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now"} and "queue" in W.BRIDGE_OPS)
+    q_dir = W.bridge_dir()
+    os.makedirs(q_dir, exist_ok=True)
+    q_started = int(time.time() * 1000) - 5000
+    with open(os.path.join(q_dir, "q-v1.alive"), "w") as handle:
+        json.dump({"at": q_started + 1000, "v": 1}, handle)
+    with open(os.path.join(q_dir, "q-v2.alive"), "w") as handle:
+        json.dump({"at": q_started + 1000, "v": 2}, handle)
+    with open(os.path.join(q_dir, "q-v2.queue.json"), "w") as handle:
+        json.dump({"items": [{"id": "a1", "text": "先这个"}, {"id": "b2", "text": "再这个"}, {"bad": 1}]}, handle)
+    check("排队列表：v2 的 mod 读出队列（坏条目跳过），v1（老 mod）回 None，快照 bridge 仍是真",
+          W.bridge_queue("q-v2", q_started) == [{"id": "a1", "text": "先这个"}, {"id": "b2", "text": "再这个"}]
+          and W.bridge_queue("q-v1", q_started) is None and W.bridge_alive("q-v1", q_started) == 1 and W.bridge_alive("q-v2", q_started) == 2)
+    for name in ("q-v1.alive", "q-v2.alive", "q-v2.queue.json"):
+        os.remove(os.path.join(q_dir, name))
     meta_row = {"type": "user", "isMeta": True, "timestamp": ts(1), "uuid": "m1",
                 "message": {"role": "user", "content": [{"type": "text", "text": "\u200b顺便看看 README"}]}}
     got_said = W.normalize_line(0, dict(meta_row, origin={"kind": "plugin", "name": "kiteline"}))

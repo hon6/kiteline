@@ -252,6 +252,10 @@ enum DebugRemote {
                         note("pair：已配对「\(mac.name)」")
                     } catch { note("pair 失败：\(error.localizedDescription)") }
                 }
+            } else if parts.first == "demo" {
+                // demo / demo off：进出演示模式（模拟器里点不了「体验演示模式」；测演示提示条用）
+                if parts.count > 1, parts[1] == "off" { MacStore.shared.forget() } else { UserDefaults.standard.set(true, forKey: "onboarded"); MacStore.shared.enterDemo() }
+                note("demo：\(MacStore.shared.isDemo ? "演示中" : "已退出")")
             } else if parts.first == "mac" {
                 // mac：现在连的是哪台电脑、同组的其他电脑（电脑互联，见 MacStore.others）
                 let mac = MacStore.shared.current

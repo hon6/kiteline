@@ -897,6 +897,13 @@ struct PendingMessage: View {
         case .sent: EmptyView()
         case .filled: Text("已填入 VS Code 输入框，未提交").font(.ui(.caption2)).foregroundStyle(.orange)
         case .queued: Text("离线，连接后自动发送").font(.ui(.caption2)).foregroundStyle(.orange)
+        case .later:
+            HStack(spacing: 4) {
+                Image(systemName: "clock")
+                Text("排队中，Claude 完成当前这一步后会读到").multilineTextAlignment(.trailing)
+            }
+            .font(.ui(.caption2))
+            .foregroundStyle(.secondary)
         case .unconfirmed:
             // 电脑报了已提交，对话里却一直没出现。不给「重新发送」：老版本电脑端不核对输入框，文字可能还留在里面，再发一次会和它拼在一起
             // （新版粘贴落空、回车没提交上会直接报出来，走 failed / filled）

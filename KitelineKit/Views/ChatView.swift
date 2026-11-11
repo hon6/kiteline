@@ -547,6 +547,11 @@ struct ChatView: View {
                 GoalStrip(key: key, goal: goal)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            // 排队的消息在任务进展上面（两块都在时：排队 → 进展 → 输入框）
+            if model.connected {
+                QueueStrip(key: key, session: session, chat: chat)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if model.connected, let stage = session?.liveStage {
                 StageStrip(stage: stage, available: chatHeight)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1198,6 +1203,9 @@ private struct ChatScrollFollow: ViewModifier {
                 .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in
                     window.scrolled(top: rect.minY, height: rect.height)
                 }
+                // 滚动条自己画（见 ChatScrollBar）：系统的滑块在底部有大块输入区 / 确认卡片（safeAreaInset）时位置、长短都算错，
+                // 内容其实在最底下、滑块却停在上面（11-11 反馈：切会话组再切回来滚动条位置不对）
+                .modifier(ChatScrollBar())
         } else {
             content.defaultScrollAnchor(.bottom)
         }
@@ -1370,3 +1378,77 @@ enum MacScrollInput {
     }
 }
 #endif
+
+#if os(macOS)
+/// Mac 对话页的滚动条：按 SwiftUI 报的滚动几何（内容高、可视高、偏移、上下留白）自己画，只画在输入区上面那一段里。
+/// 系统的滑块碰上底部 safeAreaInset（输入栏、待确认卡片）时位置、长短都不对，内容贴底了滑块还在上半截（11-11 截图）。
+/// 平时细细一条，指着这一列或拖着时变粗变深；拖滑块、点轨道都能滚（ScrollPosition，macOS 15 起）
+@available(macOS 15.0, *)
+private struct ChatScrollBar: ViewModifier {
+    private struct Metrics: Equatable {
+        var content: CGFloat = 0
+        var container: CGFloat = 0
+        var offset: CGFloat = 0
+        var top: CGFloat = 0
+        var bottom: CGFloat = 0
+        var range: CGFloat { max(0, content - container) }
+    }
+
+    @State private var metrics = Metrics()
+    @State private var position = ScrollPosition()
+    @State private var hovering = false
+    @State private var dragStart: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .scrollIndicators(.never)
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: Metrics.self) { geo in
+                Metrics(content: geo.contentSize.height, container: geo.containerSize.height, offset: geo.contentOffset.y,
+                        top: geo.contentInsets.top, bottom: geo.contentInsets.bottom)
+            } action: { _, new in metrics = new }
+            .overlay(alignment: .topTrailing) { bar }
+            .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder private var bar: some View {
+        let m = metrics
+        if m.range > 1, m.container > 40 {
+            let track = m.container - 6
+            let length = max(28, track * m.container / max(m.content, 1))
+            let progress = min(1, max(0, m.offset / m.range))
+            let active = hovering || dragStart != nil
+            ZStack(alignment: .top) {
+                // 轨道：点一下翻到那一页附近
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture(coordinateSpace: .local) { point in
+                        MacScrollInput.note()
+                        let target = (point.y - length / 2) / max(1, track - length) * m.range
+                        withAnimation(.snappy) { position.scrollTo(y: min(m.range, max(0, target))) }
+                    }
+                Capsule(style: .circular)
+                    .fill(Color.primary.opacity(active ? 0.38 : 0.22))
+                    .frame(width: active ? 7 : 5, height: length)
+                    .padding(.top, (track - length) * progress)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { drag in
+                                // 记成「你在翻」：不然贴底的逻辑把它当成系统挪的位置，又拽回底部（见 MacScrollInput）
+                                MacScrollInput.note()
+                                let start = dragStart ?? m.offset
+                                if dragStart == nil { dragStart = start }
+                                let target = start + drag.translation.height / max(1, track - length) * m.range
+                                position.scrollTo(y: min(m.range, max(0, target)))
+                            }
+                            .onEnded { _ in dragStart = nil }
+                    )
+            }
+            .frame(width: 12, height: track, alignment: .top)
+            .padding(.top, m.top + 3)
+            .padding(.trailing, 2)
+            .animation(.easeOut(duration: 0.15), value: active)
+        }
+    }
+}
+#endif
+

@@ -117,7 +117,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.34.0"
+WATCHER_VERSION = "2.35.0"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -1293,7 +1293,9 @@ def snapshot_session(payload):
         "transcriptPath": transcript,
         "transcriptUpdatedAt": int(updated * 1000) if updated else None,
         # 这个 claude 进程加载了后台送达 mod：发消息、中断、确认、回答提问不用切到 VS Code（见 bridge_send）
-        "bridge": bridge_alive(session_id, payload.get("startedAt")),
+        "bridge": bool(bridge_alive(session_id, payload.get("startedAt"))),
+        # 排队等 Claude 读的话（见 bridge_queue）；None = mod 是老版本、改不了
+        "queue": bridge_queue(session_id, payload.get("startedAt")),
     }
 
 
@@ -1308,7 +1310,7 @@ def signature(snap):
         (snap.get("stage") or {}).get("total"), (snap.get("stage") or {}).get("note"),
         (snap.get("goal") or {}).get("text"), (snap.get("goal") or {}).get("state"), (snap.get("goal") or {}).get("checks"),
         (snap.get("goal") or {}).get("note"), (snap.get("goal") or {}).get("tokens"),
-        snap.get("bridge"),
+        snap.get("bridge"), json.dumps(snap.get("queue"), ensure_ascii=False),
     ))
 
 
@@ -4195,7 +4197,9 @@ import type { Register } from 'claude-code'
 // 手机上发的消息、中断、确认、回答提问直接交给会话，不切窗口、不模拟按键：用户在电脑上做别的事不受打扰。
 // Kiteline 把指令写进 <Claude 配置目录>/kiteline/inbox/<会话>.json（{items: [{id, op, …, expires}]}），这里每 0.4 秒看一眼，
 // 照做后写 <会话>.ack-<id>.json；<会话>.alive 记下这个进程什么时候装上的，Kiteline 据此知道这个会话能走这条路
-type Item = { id: string; op: string; text?: string; decision?: string; answers?: Record<string, string>; tool?: string; expires?: number }
+type Item = { id: string; op: string; text?: string; decision?: string; answers?: Record<string, string>; tool?: string; expires?: number;
+  action?: string; qid?: string; dir?: number }
+type Queued = { id: string; text: string }
 type Waiter = { agent: string; tool: string; key: string; wake: (item: Item | null) => void; input: unknown; id: string; at: number }
 
 let dir = ''
@@ -4205,7 +4209,15 @@ let ticking = false
 let windows = false
 const done = new Set<string>()
 const waiters: Waiter[] = []
-const later: string[] = []
+// Claude 正忙时发来、还没交给它的话（排队）：每条带 Kiteline 那边的编号，手机、电脑上能调顺序、改、删、强插；
+// 有变化就写进 <会话>.queue.json，Kiteline 据此在输入框上方列出来
+const later: Queued[] = []
+const publishQueue = ($: any) => {
+  if (!dir || !sid) return
+  void Promise.resolve($.fs.write(`${dir}/${sid}.queue.json`, JSON.stringify({ items: later }))).catch(() => undefined)
+}
+const submit = ($: any, text: string) =>
+  void $.prompt.submit({ text: text.startsWith('/') ? `\\u200b${text}` : text, asUser: true })
 
 // 正在等的确认（命令、提问、计划）写进 <会话>.asks.json：新版 Claude Code 答完之前不把这次工具调用写进对话记录，
 // Kiteline 靠这份在手机、电脑上画出问题和选项
@@ -4229,7 +4241,10 @@ export const register: Register = on => {
     if (e.turnId === turn) {
       turn = undefined
       // 这一轮后面没再调用工具（在写最后的回复，或被中断了）：没赶上的话作为下一句提交
-      for (const text of later.splice(0)) void $.prompt.submit({ text: text.startsWith('/') ? `\\u200b${text}` : text, asUser: true })
+      if (later.length) {
+        for (const q of later.splice(0)) submit($, q.text)
+        publishQueue($)
+      }
     }
     return result
   })
@@ -4239,11 +4254,13 @@ export const register: Register = on => {
   on('classic.PostToolBatch', async ($, e, next) => {
     const result = await next(e)
     if (e.agent_id !== undefined) return result
-    for (const text of later.splice(0)) {
+    if (!later.length) return result
+    for (const q of later.splice(0)) {
       // 开头垫零宽空格：watcher 据此认出是你的话（替插件执行命令时 Claude Code 写的说明行也是 isMeta、kiteline 来源，不能显示）
-      const added = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: `\\u200b${text}` }] } }).catch(() => undefined)
-      if (!added || added.deny !== undefined) later.push(text)
+      const added = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: `\\u200b${q.text}` }] } }).catch(() => undefined)
+      if (!added || added.deny !== undefined) later.push(q)
     }
+    publishQueue($)
     return result
   })
 
@@ -4299,7 +4316,9 @@ export const register: Register = on => {
     windows = (await $.env.get('OS')) === 'Windows_NT'
     dir = `${root}/kiteline/inbox`
     sid = await $.session.id()
-    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: await $.clock.now(), v: 1 }))
+    // v2：会写 <会话>.queue.json、认 queue 指令（排队的话能调顺序、改、删、强插）
+    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: await $.clock.now(), v: 2 }))
+    publishQueue($)
     if (ticking) return started
     ticking = true
     let busy = false
@@ -4322,12 +4341,34 @@ export const register: Register = on => {
             if (slash && (await $.command.list()).some(c => c.name === slash[1])) {
               void $.command.run({ command: slash[1], args: slash[2] ?? '' })
             } else if (turn) {
-              later.push(item.text)
+              later.push({ id: item.id, text: item.text })
+              publishQueue($)
               result = 'later'
             } else {
               // 以「/」开头却不是命令（比如开头是个路径）：引擎不让插件这样提交，前面垫一个零宽空格，模型看到的内容不变
-              void $.prompt.submit({ text: item.text.startsWith('/') ? `\\u200b${item.text}` : item.text, asUser: true })
+              submit($, item.text)
             }
+          } else if (item.op === 'queue') {
+            // 排队的话：move（dir -1 上移 / 1 下移）、edit（text）、delete；now = 强插：挪到最前，中断这一轮，
+            // turn.complete 里按顺序全部提交（正在跑的工具不跑完插不进去）；这时已经空闲就直接提交
+            const at = later.findIndex(q => q.id === item.qid)
+            if (at < 0) {
+              result = 'none'
+            } else if (item.action === 'move') {
+              const to = at + ((item.dir ?? 1) < 0 ? -1 : 1)
+              if (to >= 0 && to < later.length) [later[at], later[to]] = [later[to], later[at]]
+            } else if (item.action === 'edit' && typeof item.text === 'string' && item.text.trim()) {
+              later[at] = { id: later[at].id, text: item.text }
+            } else if (item.action === 'delete') {
+              later.splice(at, 1)
+            } else if (item.action === 'now') {
+              later.unshift(...later.splice(at, 1))
+              if (turn) await $.turn.abort({ turnId: turn })
+              else for (const q of later.splice(0)) submit($, q.text)
+            } else {
+              result = 'unknown'
+            }
+            publishQueue($)
           } else if (item.op === 'abort') {
             if (turn) await $.turn.abort({ turnId: turn })
             else result = 'idle'
@@ -4356,7 +4397,8 @@ export const register: Register = on => {
 }
 """ % BRIDGE_MOD_MARKER,
 }
-BRIDGE_OPS = ("send", "abort", "perm", "answer")
+BRIDGE_OPS = ("send", "abort", "perm", "answer", "queue")
+BRIDGE_QUEUE_ACTIONS = ("move", "edit", "delete", "now")
 BRIDGE_WAIT = 2.5     # 等 mod 回执的秒数（它 0.4 秒看一次收件箱）；过了就撤下，电脑端改走前台
 BRIDGE_GRACE = 0.8    # 撤下后再等一会儿：正好在撤之前被 mod 拿走的也认回执，免得电脑端再从前台发一遍
 BRIDGE_TIDY_SECONDS = 3600
@@ -4417,12 +4459,30 @@ def bridge_alive(session_id, started_at):
     if cached is None or cached[0] != mtime:
         try:
             with open(path, encoding="utf-8") as handle:
-                at = int(json.load(handle).get("at") or 0)
+                data = json.load(handle)
+            at, version = int(data.get("at") or 0), int(data.get("v") or 1)
         except (OSError, ValueError, TypeError, AttributeError):
-            at = 0
-        cached = _BRIDGE_ALIVE[session_id] = (mtime, at)
+            at, version = 0, 1
+        cached = _BRIDGE_ALIVE[session_id] = (mtime, at, version)
     started = started_at if isinstance(started_at, (int, float)) and not isinstance(started_at, bool) else 0
-    return cached[1] > 0 and cached[1] >= started
+    return cached[2] if cached[1] > 0 and cached[1] >= started else False
+
+
+def bridge_queue(session_id, started_at):
+    """Claude 正忙时手机发来、还排在 mod 里没交给它的话：[{id, text}]（mod 写的 <会话>.queue.json）。
+    mod 是老版本（v1，不写队列、不认 queue 指令；mod 只在会话启动时加载）回 None，客户端只能看本地记下的、不能改"""
+    if not session_id or (bridge_alive(session_id, started_at) or 0) < 2:
+        return None
+    path = os.path.join(bridge_dir(), "%s.queue.json" % session_id)
+    try:
+        if isinstance(started_at, (int, float)) and os.path.getmtime(path) * 1000 < started_at:
+            return []
+        with open(path, encoding="utf-8") as handle:
+            items = json.load(handle).get("items")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [{"id": x["id"], "text": x["text"]} for x in items or []
+            if isinstance(x, dict) and isinstance(x.get("id"), str) and isinstance(x.get("text"), str)]
 
 
 _ASK_ITEMS = {}    # 会话 → 从 mod 那里补出来的待确认工具调用（对话项，见 bridge_ask）
@@ -4529,7 +4589,10 @@ def bridge_send(session_id, op, wait=BRIDGE_WAIT, **fields):
         os.remove(ack)
     except OSError:
         pass
-    return {"bridged": False} if result is None else {"bridged": True, "result": result}
+    if result is None:
+        return {"bridged": False}
+    # 排队了：编号（= 这条指令的 id，mod 的队列用它）回给电脑端，客户端拿它对上输入框上方的排队列表
+    return {"bridged": True, "result": result, "qid": item_id} if result == "later" else {"bridged": True, "result": result}
 
 
 def _iso_ms(value):
@@ -15885,7 +15948,9 @@ class Watcher:
         snap = self.sessions.get(sid) or {}
         if op not in BRIDGE_OPS or sid not in self.live or not bridge_alive(sid, snap.get("startedAt")):
             return {"bridged": False}
-        fields = {key: request[key] for key in ("text", "decision", "answers", "tool") if request.get(key) is not None}
+        if op == "queue" and (request.get("action") not in BRIDGE_QUEUE_ACTIONS or (bridge_alive(sid, snap.get("startedAt")) or 0) < 2):
+            return {"bridged": False}
+        fields = {key: request[key] for key in ("text", "decision", "answers", "tool", "action", "qid", "dir") if request.get(key) is not None}
         rid = request.get("id")
 
         def work():

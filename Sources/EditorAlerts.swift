@@ -20,7 +20,7 @@ final class EditorAlerts {
         /// dialog = VS Code 的对话框；link = Kiteline 到某台机器的连接
         let kind: String
         let id: String
-        /// 哪个窗口（「ccpulse [SSH: 10.168.1.10]」）或哪台机器
+        /// 哪个窗口（「ccpulse [SSH: 192.168.1.10]」）或哪台机器
         let title: String
         let text: String
         let canReconnect: Bool
@@ -466,7 +466,7 @@ final class EditorAlerts {
         attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
     }
 
-    /// 窗口标题里「—」后面那段：「Playwright 截图 — ccpulse [SSH: 10.168.1.10]」→「ccpulse [SSH: 10.168.1.10]」
+    /// 窗口标题里「—」后面那段：「Playwright 截图 — ccpulse [SSH: 192.168.1.10]」→「ccpulse [SSH: 192.168.1.10]」
     private static func windowPlace(_ window: AXUIElement?) -> String {
         guard let window, let title = attribute(window, kAXTitleAttribute) as? String else { return "" }
         return title.components(separatedBy: " — ").last?.trimmingCharacters(in: .whitespaces) ?? title

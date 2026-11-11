@@ -1089,6 +1089,105 @@ public struct TarsTabGroupChip: View {
     }
 }
 
+/// 窗口最上沿一排会话组「倒挂标签」（11-11）：贴着窗口顶边，上面两个角是直的、和顶边连成一片，下面两个角圆，
+/// 像标签页倒过来吸在顶上；点了切到这一组。最前面「未分组」，最后「+」新建；右键改名改色、添加会话、每个会话一列、拉成群、删除。
+/// 放在最左上那一块标签栏上面那一带（标签栏往上长到窗口顶的那段，见 ChatPanes.macBody 的 rise）
+public struct TarsTabGroupStrip: View {
+    let height: CGFloat
+    public init(height: CGFloat) { self.height = height }
+
+    public var body: some View {
+        if let model = KitelineKit.model { TabGroupStrip(groups: KitelineKit.tabGroups, height: height).environment(model) }
+    }
+}
+
+private struct TabGroupStrip: View {
+    let groups: TabGroups
+    let height: CGFloat
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 3) {
+                HangingGroupTab(title: L("未分组"), tint: nil, active: groups.active == nil, height: height,
+                                digest: TabGroupDigest(keys: groups.keys(nil), model: model)) { groups.activate(nil) }
+                    .contextMenu {
+                        if groups.active == nil, !groups.panes.isPristine {
+                            Button(L("用这些标签页新建会话组")) { groups.create(name: nil, keys: [], fromCurrent: true) }
+                        }
+                        Button(L("新建会话组…")) { TabGroupRequest.shared.picking = .create([]) }
+                    }
+                ForEach(groups.groups) { group in
+                    HangingGroupTab(title: group.name, tint: groups.color(of: group.id).color, active: groups.active == group.id, height: height,
+                                    digest: TabGroupDigest(keys: groups.keys(group.id), model: model)) { groups.activate(group.id) }
+                        .contextMenu {
+                            Button(L("重命名和颜色…")) { TabGroupRequest.shared.renaming = group.id }
+                            Button(L("添加会话…")) { TabGroupRequest.shared.picking = .add(group.id) }
+                            Button(L("每个会话一列")) { groups.arrange(group.id) }
+                            if model.supportsGroups {
+                                Button(L("把组里的会话拉成群")) { KitelineKit.groupChat(from: group.id) }
+                            }
+                            Divider()
+                            Button(L("删除会话组…"), role: .destructive) { TabGroupRequest.shared.deleting = group.id }
+                        }
+                }
+                Button { TabGroupRequest.shared.picking = .create([]) } label: {
+                    Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                        .frame(width: 24, height: height - 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L("新建会话组…"))
+            }
+        }
+        .scrollClipDisabled(false)
+        .frame(height: height, alignment: .top)
+    }
+}
+
+/// 一个倒挂的组标签：上沿贴窗口顶（直角），下面两角圆；正显示的那组用组色铺底、字是组色，别的淡淡一层；
+/// 右边小角标：橙 = 待确认数，主题色 = 有新消息数
+private struct HangingGroupTab: View {
+    let title: String
+    let tint: Color?
+    let active: Bool
+    let height: CGFloat
+    let digest: TabGroupDigest
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 7, bottomTrailingRadius: 7, topTrailingRadius: 0, style: .continuous)
+        let color = tint ?? Color.secondary
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let tint {
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous).fill(tint).frame(width: 8, height: 8)
+                } else {
+                    Image(systemName: "square.stack").font(.system(size: 9.5, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                Text(title).font(.app(size: 11.5, weight: active ? .semibold : .medium)).lineLimit(1)
+                    .foregroundStyle(active ? (tint ?? Color.primary) : Color.secondary)
+                    .frame(maxWidth: 130, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+                if !active { TabGroupBadges(digest: digest) }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: height - 3)
+            .background(color.opacity(active ? 0.24 : (hovering ? 0.14 : 0.07)), in: shape)
+            .overlay(alignment: .top) {
+                // 正显示的那组：顶上一道组色，和窗口顶边连起来
+                if active { Rectangle().fill(color).frame(height: 2) }
+            }
+            .clipShape(shape)
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(active ? L("正在显示「%@」", title) : L("切到「%@」", title))
+    }
+}
+
 private struct TabGroupChip: View {
     let groups: TabGroups
     @Environment(AppModel.self) private var model

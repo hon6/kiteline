@@ -149,13 +149,19 @@ def bridge_answers(answers):
 def _bridge(fields, record, source):
     """交给 mod 做一件事。返回 mod 的结果：ok / idle（要中断时本来就空闲）/ none（没有在等的确认框）；
     没接上（mod 没加载、会话卡住、远端还是老 watcher）返回 None，调用方照旧走前台"""
+    response = _bridge_reply(fields, record, source)
+    return None if response is None else (response.get("result") or "ok")
+
+
+def _bridge_reply(fields, record, source):
+    """同 _bridge，回 watcher 的整份回执（排队时带 qid）"""
     try:
         response = source.request(dict(fields, cmd="bridge", sessionId=record.snap.get("sessionId")), timeout=10)
     except Exception as exc:  # noqa: BLE001
         log.write("后台送达失败（%s）：%s，改走前台" % (record.snap.get("name"), exc))
         return None
     if response.get("bridged") is True:
-        return response.get("result") or "ok"
+        return response
     log.write("后台送达没接上（%s），改走前台" % record.snap.get("name"))
     return None
 
@@ -285,8 +291,17 @@ def send(text, attachments, record, source, submit, siblings, allow_waiting=Fals
                                "ui": ["keys"]}, record, source, True)
     # 只填不提交（submit = False）要把字留在 VS Code 输入框里，后台做不到，照旧走前台
     if submit and via_bridge(record):
-        if _bridge({"op": "send", "text": prompt}, record, source) is not None:
-            log.write("后台送达 %s：%s" % (snap.get("name"), prompt[:60]))
+        reply = _bridge_reply({"op": "send", "text": prompt}, record, source)
+        if reply is not None:
+            result = reply.get("result") or "ok"
+            log.write("后台送达 %s（%s）：%s" % (snap.get("name"), result, prompt[:60]))
+            if result == "later":
+                # Claude 正在做这一轮：排在当前这批工具跑完后读到。各端在输入框上方的排队列表里显示（qid 对上会话快照 queue）
+                outcome = Outcome(True, True, "已排队，Claude 完成当前这一步后会读到")
+                outcome["later"] = True
+                if reply.get("qid"):
+                    outcome["qid"] = reply["qid"]
+                return outcome
             return Outcome(True, True, "已提交")
         problem = None if allow_waiting else waiting_problem(record)
         if problem:
@@ -373,6 +388,40 @@ UNTITLED_CLOSE = ("「%s」还没有标题（尚未发送消息，或标题正�
                   "为避免关错，会话未关闭。刚发过消息的请稍后再试；未使用的空白标签页可在 VS Code 中直接关闭")
 
 
+QUEUE_ACTIONS = ("move", "edit", "delete", "now")
+
+
+def queue(action, qid, text, direction, record, source):
+    """排队的消息（Claude 忙时发的、还在 mod 里等着）：move（dir -1 / 1）、edit（text）、delete、now（强插：中断当前这一步，
+    排队的马上进会话）。会话的 mod 是老版本（只在会话启动时加载，快照里没有 queue）时只有强插能做（等同按 Esc）。同 Mac 版 Delivery.queue"""
+    if record.kind == "kiteline":
+        body = {"action": action, "id": qid}
+        if text is not None:
+            body["text"] = text
+        if direction is not None:
+            body["dir"] = direction
+        return Outcome(*PEERS[0].deliver("/api/queue", record, body))
+    if not via_bridge(record):
+        return Outcome(False, False, "这个会话不支持排队消息")
+    if record.snap.get("queue") is None:
+        if action != "now":
+            return Outcome(False, False, "重新打开这个会话后才能调整排队的消息")
+        if _bridge({"op": "abort"}, record, source) is None:
+            return Outcome(False, False, "未能中断，请在电脑上查看")
+        return Outcome(True, True, "已中断当前这一步，排队的消息马上发送")
+    fields = {"op": "queue", "action": action, "qid": qid}
+    if text is not None:
+        fields["text"] = text
+    if direction is not None:
+        fields["dir"] = direction
+    result = _bridge(fields, record, source)
+    if result is None:
+        return Outcome(False, False, "未能连接会话，请稍后再试")
+    if result == "none":
+        return Outcome(False, False, "这条消息已发给 Claude")
+    return Outcome(True, action == "now", "已中断当前这一步，排队的消息马上发送" if action == "now" else "已更新")
+
+
 def close(record, source, siblings):
     """关闭会话：VS Code 里关掉它的标签页（Ctrl+W = 关闭编辑器，Claude Code 随之结束这个会话）；终端里的 CLI 发 /exit。
     关掉的会话进「历史会话」，之后可以恢复。正在开着的会话越积越多、VS Code 里标签越开越多时用（同 Mac 版 Delivery.close）"""
@@ -454,7 +503,7 @@ def tab_matches(tab, title):
 
 def split_title(full):
     """VS Code 窗口标题拆成（当前标签名, 项目名）：
-    「● 首页卡片间距 - ccpulse [SSH: 10.168.1.10] - Visual Studio Code」→（首页卡片间距, ccpulse）"""
+    「● 首页卡片间距 - ccpulse [SSH: 192.168.1.10] - Visual Studio Code」→（首页卡片间距, ccpulse）"""
     sep = " — " if " — " in full else " - "
     parts = [p.strip() for p in full.split(sep)]
     tab = parts[0].replace("● ", "").strip() if parts else full
@@ -463,7 +512,7 @@ def split_title(full):
 
 
 def title_place(title):
-    """窗口标题里项目那段：「文件 - ccpulse [SSH: 10.168.1.10] - Visual Studio Code」→「ccpulse [SSH: 10.168.1.10]」"""
+    """窗口标题里项目那段：「文件 - ccpulse [SSH: 192.168.1.10] - Visual Studio Code」→「ccpulse [SSH: 192.168.1.10]」"""
     sep = " — " if " — " in title else " - "
     parts = [p.strip() for p in title.split(sep) if p.strip()]
     if parts and parts[-1] in ("Visual Studio Code", "Visual Studio Code - Insiders", "VSCodium", "Cursor"):

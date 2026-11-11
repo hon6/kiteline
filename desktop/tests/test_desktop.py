@@ -57,7 +57,9 @@ pairing.new_code()
 for _ in range(8):
     pairing.check_code("000000", "10.0.0.9")
 check("同一来源错 8 次被锁", pairing.check_code(pairing.code, "10.0.0.9") == (False, "locked"))
-check("别的来源不受影响", pairing.check_code(pairing.code, "10.0.0.8")[0] is True)
+check("同一个码输错 5 次就作废（之后「手机访问」页换新码）", pairing.code == "")
+pairing.new_code()
+check("别的来源不受影响（用换出来的新码）", pairing.check_code(pairing.code, "10.0.0.8")[0] is True)
 
 print("== 技能（交给 watcher 装，这里只带开关）")
 os.environ["KITELINE_SKILL_TEST"] = "1"
@@ -378,9 +380,9 @@ from kiteline import remotessh  # noqa: E402
 # 期望值由 Remote-SSH 0.128 的 HostInfo.toAuthorityString 原样算出（和 Mac 版 WindowLocator.sshAuthority 同一组）
 for (_host, _port), _want in {
     ("vm", None): "vm",
-    ("10.168.1.10", None): "10.168.1.10",
+    ("192.168.1.10", None): "192.168.1.10",
     ("MyServer", None): "7b22686f73744e616d65223a224d79536572766572227d",
-    ("kite@10.168.1.166", None): "7b22686f73744e616d65223a2231302e3136382e312e313636222c2275736572223a226b697465227d",
+    ("kite@192.168.1.166", None): "7b22686f73744e616d65223a223139322e3136382e312e313636222c2275736572223a226b697465227d",
     ("build-01", 2222): "7b22686f73744e616d65223a226275696c642d3031222c22706f7274223a323232327d",
     ("a+b", None): "7b22686f73744e616d65223a22612b62227d",
 }.items():
@@ -394,9 +396,9 @@ _orig_path, _orig_win = remotessh._settings_path, remotessh.config.IS_WINDOWS
 remotessh._settings_path = lambda: _settings
 remotessh.config.IS_WINDOWS = True
 try:
-    remotessh.ensure_platform("kite@10.168.1.166", "linux")
+    remotessh.ensure_platform("kite@192.168.1.166", "linux")
     check("没有设置文件：新建并写上这台主机", remotessh._parse_jsonc(open(_settings, encoding="utf-8").read())
-          == {"remote.SSH.remotePlatform": {"10.168.1.166": "linux"}})
+          == {"remote.SSH.remotePlatform": {"192.168.1.166": "linux"}})
     with open(_settings, "w", encoding="utf-8") as _f:
         _f.write('{\n  // 用户自己的注释\n  "editor.fontSize": 14, /* 块注释 */\n  "remote.SSH.remotePlatform": {\n    "old": "windows"\n  },\n}\n')
     remotessh.ensure_platform("build-01", "darwin")

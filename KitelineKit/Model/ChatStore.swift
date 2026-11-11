@@ -43,7 +43,31 @@ final class ChatStore {
     var quickRepliesShown = false
     /// 目标面板开着（输入框下面的「目标」、目标条、会话菜单都能打开，对话页统一弹）
     var goalSheet = false
+    /// 刚在这台设备上调过排队消息（上移 / 下移 / 改 / 删）：电脑的新队列传回来之前按调过的显示，别让列表跳回去
+    var queueDraft: (items: [QueuedItem], at: Date)?
+    /// 排队列表收起了
+    var queueCollapsed = false
     private(set) var revision = 0
+
+    /// 输入框上方排队列表的一行：电脑队列里的（能改）或这台设备刚发、还没在队列里出现的
+    struct QueueRow: Identifiable, Hashable {
+        var id: String
+        var text: String
+        /// 能上移、下移、编辑、删除（电脑队列里的）；否则只能强插
+        var editable: Bool
+    }
+
+    /// 排队列表：电脑给了队列就按它（加上刚发、还没出现在里面的）；老版本（没有队列）列这台设备记下的排队消息
+    func queueRows(_ session: SessionInfo?) -> [QueueRow] {
+        let mine = pending.filter { $0.state == .later }
+        guard let session, var queue = session.queue else {
+            return mine.map { QueueRow(id: $0.qid ?? $0.id, text: $0.text, editable: false) }
+        }
+        if let draft = queueDraft, Date().timeIntervalSince(draft.at) < 4 { queue = draft.items }
+        let known = Set(queue.map(\.id))
+        return queue.map { QueueRow(id: $0.id, text: $0.text, editable: true) }
+            + mine.filter { !$0.seen && !known.contains($0.qid ?? "") }.map { QueueRow(id: $0.qid ?? $0.id, text: $0.text, editable: false) }
+    }
 
     init(key: String) { self.key = key }
 

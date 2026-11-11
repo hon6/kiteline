@@ -9,7 +9,8 @@ public sealed record Step(ChatItem Item, ChatItem? Result, StepState State)
 }
 
 /// Unconfirmed：空闲的会话发出去好一会儿，Claude 没动、对话里也没出现这条（多半没提交上）
-public enum SendState { Sending, Sent, Filled, Queued, Failed, Unconfirmed }
+/// Later：Claude 正在做这一轮，消息排在当前这一步（正在跑的工具）做完后读到，回显可能要等很久，不按时撤掉（同 iOS）
+public enum SendState { Sending, Sent, Filled, Queued, Failed, Unconfirmed, Later }
 
 /// 发出去、还没在对话记录里回显的消息
 public sealed record PendingSend
@@ -25,6 +26,9 @@ public sealed record PendingSend
     /// 语音：时长（秒）和录音（失败重发要用）；文字是转写回来以后才有
     public double? Voice { get; init; }
     public byte[]? Audio { get; init; }
+    /// 排队（Later）时电脑给的编号，对上会话的 Queue；Seen = 已经在队列里出现过（之后不在了 = 已交给 Claude 或在别处删了）
+    public string? Qid { get; init; }
+    public bool Seen { get; init; }
 
     public bool IsFailed => State == SendState.Failed;
 }
@@ -162,8 +166,10 @@ public static class ChatLayout
         }
         // 最后一组步骤：Claude 还在忙就别折叠
         FlushSteps(activity is not null && activity != "idle");
-        for (var i = 0; i < pending.Count; i++)
-            rows.Add(new PendingRow(pending[i], i == 0 && prevSide != "me"));
+        // 排队的（Later）不在对话里画，在输入框上方的排队列表里（QueueStrip）
+        var shown = pending.Where(p => p.State != SendState.Later).ToList();
+        for (var i = 0; i < shown.Count; i++)
+            rows.Add(new PendingRow(shown[i], i == 0 && prevSide != "me"));
         return rows;
     }
 

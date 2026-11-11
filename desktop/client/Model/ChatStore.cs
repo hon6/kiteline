@@ -124,6 +124,25 @@ public sealed partial class ChatStore : ObservableObject
 
     public void Touch() => Revision++;
 
+    /// 刚在这台设备上调过排队消息（上移 / 下移 / 改 / 删）：电脑的新队列传回来之前按调过的显示，别让列表跳回去
+    public (List<QueuedItem> Items, DateTime At)? QueueDraft { get; set; }
+    /// 排队列表收起了
+    public bool QueueCollapsed { get; set; }
+
+    /// 输入框上方排队列表的一行：电脑队列里的（Editable，能上移、下移、编辑、删除）或这台设备刚发、还没在队列里出现的（只能强插）
+    public sealed record QueueRow(string Id, string Text, bool Editable);
+
+    /// 排队列表：电脑给了队列就按它（加上刚发、还没出现在里面的）；老版本（没有队列）列这台设备记下的排队消息（同 iOS）
+    public List<QueueRow> QueueRows(SessionInfo? session)
+    {
+        var mine = pending.Where(p => p.State == SendState.Later).ToList();
+        if (session?.Queue is not { } queue) return mine.Select(p => new QueueRow(p.Qid ?? p.Id, p.Text, false)).ToList();
+        if (QueueDraft is { } draft && DateTime.Now - draft.At < TimeSpan.FromSeconds(4)) queue = draft.Items;
+        var known = queue.Select(q => q.Id).ToHashSet();
+        return queue.Select(q => new QueueRow(q.Id, q.Text, true))
+            .Concat(mine.Where(p => !p.Seen && !known.Contains(p.Qid ?? "")).Select(p => new QueueRow(p.Qid ?? p.Id, p.Text, false))).ToList();
+    }
+
     /// 往前翻页的位置
     public long? OldestOffset => items.Values.Where(i => !i.Id.StartsWith('o')).Select(i => (long?)i.Offset).Min();
     public double? OldestTs => items.Values.Select(i => i.Ts).Where(t => t is not null).Min();

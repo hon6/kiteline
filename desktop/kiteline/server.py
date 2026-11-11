@@ -929,6 +929,24 @@ def r_hosted_move(s, request, *_):
     return Response.json({"ok": ok, "message": message}, 200 if ok else 409)
 
 
+def r_queue(s, request, *_):
+    """排队的消息：{action: move | edit | delete | now, id, text?, dir?}（见 delivery.queue）"""
+    record, source = s.resolve(request)
+    if not record:
+        return Response.error("会话不存在或已结束", 404)
+    body = request.json if isinstance(request.json, dict) else {}
+    action, qid = body.get("action"), body.get("id")
+    if action not in delivery.QUEUE_ACTIONS or not isinstance(qid, str):
+        return Response.error("请求格式无效", 400)
+    text = body.get("text") if isinstance(body.get("text"), str) and body["text"].strip() else None
+    if action == "edit" and text is None:
+        return Response.error("内容为空", 400)
+    direction = body.get("dir") if isinstance(body.get("dir"), int) and not isinstance(body.get("dir"), bool) else None
+    log.write("手机调整「%s」的排队消息：%s" % (record.snap.get("name"), action))
+    outcome = delivery.queue(action, qid, text, direction, record, source)
+    return Response.json({"ok": outcome.ok, "message": outcome["message"]}, 200 if outcome.ok else 409)
+
+
 def r_close(s, request, *_):
     """关闭会话（VS Code 里关掉它的标签页，终端里 /exit）：?key="""
     record, source = s.resolve(request)
@@ -999,6 +1017,10 @@ def r_voice(s, request, *_):
         return Response.json({"ok": True, "text": text})
     outcome = delivery.send(text, attachments, record, source, s.app.cfg.mobile["submitOnSend"], s.siblings(record))
     payload = {"ok": outcome.ok, "text": text, "submitted": outcome["submitted"], "message": outcome["message"]}
+    if outcome.get("later"):
+        payload["later"] = True
+        if outcome.get("qid"):
+            payload["qid"] = outcome["qid"]
     if outcome.ok:
         payload["voiceId"] = s.app.voices.record(record.key, text, duration, path, mime)["id"]
     else:
@@ -1137,10 +1159,24 @@ def r_download(s, request, *_):
     record = s.app.store.record(key)
     cwd = (record.snap.get("cwd") if record else None) or request.query.get("cwd", "")
     log.write("手机取文件：%s" % path[:120])
+    payload = {"cmd": "get_file", "path": path, "cwd": cwd, "reveal": request.query.get("reveal") == "1"}
     try:
-        response = source.request({"cmd": "get_file", "path": path, "cwd": cwd, "reveal": request.query.get("reveal") == "1"}, timeout=120)
+        response = source.request(payload, timeout=120)
     except Exception as exc:  # noqa: BLE001
-        return Response.error(str(exc), 404)
+        # 会话在别的机器上、那边没有这个文件时，再到本机找一次：远端的 agent 常把文件拷到用户这台电脑上
+        # （经挂载目录、scp），回复里写的却是本机路径，远端自然找不到。相对路径只按会话目录算，不兜底（同 Mac 版）
+        local = None
+        absolute = path.startswith(("/", "~/", "~\\")) or re.match(r"^[A-Za-z]:[\\/]", path)
+        if getattr(source, "kind", "") != "local" and absolute and str(exc).startswith("文件不存在"):
+            with s.app.store.lock:
+                local = next((x for x in s.app.store.sources.values() if getattr(x, "kind", "") == "local" and x.live), None)
+        if not local:
+            return Response.error(str(exc), 404)
+        log.write("会话所在机器没有这个文件，改在本机找")
+        try:
+            response = local.request(payload, timeout=120)
+        except Exception:  # noqa: BLE001
+            return Response.error(str(exc), 404)
     if response.get("secret"):
         return Response.json({"ok": False, "secret": True, "error": "此文件可能包含密钥或密码，默认不传到手机"}, 403)
     try:
@@ -1835,7 +1871,7 @@ def r_schedules_tick(s, request, *_):
 ROUTES = {
     ("GET", "/api/state"): r_state, ("GET", "/api/events"): r_events, ("GET", "/api/history"): r_history,
     ("GET", "/api/agents"): r_agents, ("GET", "/api/trace"): r_trace, ("GET", "/api/peers"): r_peers, ("GET", "/api/task-output"): r_task_output, ("GET", "/api/media"): r_media,
-    ("GET", "/api/digest/media"): r_digest_media, ("POST", "/api/send"): r_send, ("POST", "/api/key"): r_key, ("POST", "/api/close"): r_close,
+    ("GET", "/api/digest/media"): r_digest_media, ("POST", "/api/send"): r_send, ("POST", "/api/key"): r_key, ("POST", "/api/close"): r_close, ("POST", "/api/queue"): r_queue,
     ("POST", "/api/hosted/probe"): r_hosted_probe, ("POST", "/api/hosted/settings"): r_hosted_settings,
     ("POST", "/api/hosted/move"): r_hosted_move,
     ("POST", "/api/answer"): r_answer, ("POST", "/api/voice"): r_voice, ("GET", "/api/voices"): r_voices,

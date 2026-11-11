@@ -31,7 +31,7 @@ enum FileLink {
     static let documentExtensions: Set<String> = [
         "pdf", "xlsx", "xls", "xlsm", "csv", "numbers", "docx", "doc", "pages", "rtf", "pptx", "ppt", "key", "epub",
         "png", "jpg", "jpeg", "gif", "heic", "webp", "bmp", "tif", "tiff",
-        "mp4", "mov", "m4v", "mp3", "m4a", "wav", "aac", "zip", "rar", "7z", "gz", "tgz", "dmg", "apk", "ipa",
+        "mp4", "mov", "m4v", "avi", "mkv", "webm", "3gp", "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "aiff", "amr", "zip", "rar", "7z", "gz", "tgz", "dmg", "apk", "ipa",
     ]
 
     /// 「Sources/App.swift:42」这类带的行号

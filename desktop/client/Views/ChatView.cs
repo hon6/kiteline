@@ -32,6 +32,8 @@ public sealed class ChatView : Grid
     /// 输入框上方的任务进展条（见 StageStrip）、它上面的目标条（见 GoalStrip）
     readonly StageStrip stageStrip = new();
     readonly GoalStrip goalStrip = new();
+    /// 排队的消息（见 QueueStrip）：在任务进展条上面
+    readonly QueueStrip queueStrip = new();
     /// 顶上浮着的提示「当前会话支持后台托管 Claude」（见 HostedSetup.Tip）
     readonly Border hostedTip = new() { VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(14, 8, 14, 0) };
     string? hostedSignature;
@@ -98,6 +100,7 @@ public sealed class ChatView : Grid
             OnTodos = () => Sheets.Show(L("任务清单"), TodoCard.Make(chat.Todos), 420, 480), OnAgents = () => Perform(SessionAction.Agents),
         };
         deck.Children.Add(goalStrip);
+        deck.Children.Add(queueStrip);
         deck.Children.Add(stageStrip);
         deck.Children.Add(composer);
         var deckBox = new Border { Child = deck, Padding = new Thickness(0, 8, 0, 0) };
@@ -127,6 +130,7 @@ public sealed class ChatView : Grid
     void ChatChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ChatStore.Revision) or nameof(ChatStore.Loading) or nameof(ChatStore.HasMore) or nameof(ChatStore.Loaded)) Schedule();
+        if (e.PropertyName == nameof(ChatStore.Revision)) UpdateQueue();
         if (e.PropertyName == nameof(ChatStore.TerminalOpen)) UpdateTerminal();
     }
 
@@ -279,6 +283,12 @@ public sealed class ChatView : Grid
         working.Children.Add(new WorkingView(since, session));
     }
 
+    void UpdateQueue()
+    {
+        if (model.Connected) queueStrip.Update(Key, chat, Session);
+        else queueStrip.IsVisible = false;
+    }
+
     /// 会话状态变了：确认卡片、输入区
     void UpdateSession()
     {
@@ -286,6 +296,7 @@ public sealed class ChatView : Grid
         composer.Update(session);
         goalStrip.Update(Key, model.Connected ? session?.Goal : null);
         stageStrip.Update(model.Connected ? session?.LiveStage : null, Bounds.Height);
+        UpdateQueue();
         UpdateHostedTip();
         var signature = session is null ? null : PromptCard.Current(Key, chat) + "|" + session.IsWaiting + session.CanReply + chat.AnsweredPrompt + session.Activity;
         if (signature == promptSignature && promptCard is not null == (session?.IsWaiting ?? false)) { UpdateWorking(session); return; }

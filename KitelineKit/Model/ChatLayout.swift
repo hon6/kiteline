@@ -13,7 +13,8 @@ struct Step: Identifiable, Hashable {
 /// 发出去、还没在对话记录里回显的消息
 struct PendingSend: Identifiable, Hashable {
     /// unconfirmed：空闲的会话发出去好一会儿，Claude 没动、对话里也没出现这条（多半没提交上）
-    enum State: Hashable { case sending, sent, filled, queued, failed(String), unconfirmed }
+    /// later：Claude 正在做这一轮，消息排在当前这一步（正在跑的工具）做完后读到；工具跑得久时要等很久才回显，不能按时撤掉
+    enum State: Hashable { case sending, sent, filled, queued, failed(String), unconfirmed, later }
     let id: String
     var text: String
     var previews: [Data]
@@ -26,6 +27,9 @@ struct PendingSend: Identifiable, Hashable {
     /// 语音：时长（秒）和录音（失败重发要用）；文字是 Mac 转写回来以后才有
     var voice: Double?
     var audio: Data?
+    /// 排队（later）时电脑给的编号，对上会话的 queue；seen = 已经在 queue 里出现过（之后不在了 = 已交给 Claude 或在别处删了）
+    var qid: String?
+    var seen = false
 }
 
 struct PendingFile: Hashable {
@@ -147,7 +151,8 @@ enum ChatLayout {
         }
         // 最后一组步骤：Claude 还在忙就别折叠
         flushSteps(live: activity.map { $0 != "idle" } ?? false)
-        for (index, p) in pending.enumerated() {
+        // 排队的（later）不在对话里画，在输入框上方的排队列表里（QueueStrip）
+        for (index, p) in pending.filter({ $0.state != .later }).enumerated() {
             rows.append(.pending(p, first: index == 0 && prevSide != "me"))
         }
         return rows

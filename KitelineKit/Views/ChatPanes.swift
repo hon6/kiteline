@@ -1641,7 +1641,7 @@ private struct PaneHeader: View {
         let several = panes.count > 1
         // 最上面一排：标签栏往上长到窗口顶（工具栏那一带），标签贴着底边。多出 1 点：对话的滚动视图贴着工具栏底边时会往上伸到工具栏底下，
         // 盖住标签栏（点不着标签、按钮），隔开一点就不会
-        let rise = atTop && paneBand > 0 ? max(0, paneBand - Self.tabRow) + 1 : 0
+        let rise = self.rise
         // 按钮放几个：先保证每个标签至少 120 宽（标题看得清），放不下时会话的按钮先折进「更多」，再不够连分屏按钮也折进去
         let count = CGFloat(max(1, entries.count))
         let level = [2, 1].first { tabRoom($0) / count >= 120 } ?? 0
@@ -1649,7 +1649,8 @@ private struct PaneHeader: View {
         let expand = panes.peek.flatMap { $0.pane == pane.id ? entries.firstIndex(of: $0.key.isEmpty ? nil : $0.key) : nil }
         return HStack(alignment: .bottom, spacing: 4) {
             #if KITELINE_MAC
-            if showsGroupChip { TarsTabGroupChip().frame(height: Self.tabRow) }
+            // 顶上放不下倒挂的组标签（工具栏那一带太矮）时，退回标签栏最前面的色块菜单
+            if showsGroupChip, !showsGroupStrip { TarsTabGroupChip().frame(height: Self.tabRow) }
             #endif
             // 标签占按钮剩下的地方（靠左）；按钮保持完整
             tabs(several: several, level: level, expand: expand)
@@ -1661,6 +1662,15 @@ private struct PaneHeader: View {
         .padding(.leading, 6 + lightsInset).padding(.trailing, 6)
         .padding(.top, rise)
         .frame(height: Self.tabRow + rise, alignment: .bottom)
+        #if KITELINE_MAC
+        // 会话组：一排倒挂在窗口顶边的组标签（标签栏往上长到窗口顶的那一段里），点了切组
+        .overlay(alignment: .topLeading) {
+            if showsGroupStrip {
+                TarsTabGroupStrip(height: rise - 1)
+                    .padding(.leading, 6 + lightsInset).padding(.trailing, 6)
+            }
+        }
+        #endif
         // 块被挤得比这一条还窄时：不往外撑，多出来的按钮裁掉（拖宽就回来）
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.stripFrames[pane.id] = $0 }
@@ -1706,6 +1716,19 @@ private struct PaneHeader: View {
         .animation(.snappy(duration: 0.18), value: focused)
     }
 
+    /// 最上面一排往上长到窗口顶（工具栏那一带）多出来的高；多 1 点：对话的滚动视图贴着工具栏底边时会往上伸到工具栏底下，盖住标签栏
+    private var rise: CGFloat {
+        guard atTop, paneBand > 0 else { return 0 }
+        let base = max(0, paneBand - Self.tabRow) + 1
+        #if KITELINE_MAC
+        // 有会话组时顶上留够一排倒挂组标签的高（最上面一排的各块一起加高，标签栏照样齐平）
+        if panes === KitelineKit.panes, KitelineKit.tabGroupCount > 0 { return max(base, Self.groupStrip + 1) }
+        #endif
+        return base
+    }
+    /// 倒挂在窗口顶边的会话组标签那一排的高
+    static let groupStrip: CGFloat = 24
+
     /// 标签：开着的会话，再加上 nil = 「选择会话」新标签（点了「+」、或空的一块）
     private var entries: [String?] { pane.tabs.map(Optional.some) + (pane.key == nil ? [nil] : []) }
 
@@ -1715,7 +1738,9 @@ private struct PaneHeader: View {
     #if KITELINE_MAC
     /// 主窗口最左上那一块：标签栏最前面放标签组的色块组名（同 Edge 标签栏上的组名），点开切组、改名改色
     private var showsGroupChip: Bool { panes === KitelineKit.panes && KitelineKit.tabGroupCount > 0 && panes.panes.first?.id == pane.id }
-    private var groupChipWidth: CGFloat { showsGroupChip ? 112 : 0 }
+    /// 标签栏上面那一带够高（≥ 20）就把组画成一排倒挂在窗口顶边的标签；不够高退回色块菜单
+    private var showsGroupStrip: Bool { showsGroupChip && rise >= Self.groupStrip }
+    private var groupChipWidth: CGFloat { showsGroupChip && !showsGroupStrip ? 112 : 0 }
     /// 正显示某个标签组时，标签栏底边那道线用组的颜色（同 Edge 组里标签下面的色线）
     private var groupTint: Color? { panes === KitelineKit.panes ? KitelineKit.activeTabGroupTint : nil }
     #else

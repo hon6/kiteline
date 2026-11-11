@@ -666,6 +666,8 @@ final class MobileServer {
                 self.key(request, respond: respond)
             case ("POST", "/api/close"):
                 self.close(request, respond: respond)
+            case ("POST", "/api/queue"):
+                self.queue(request, respond: respond)
             case ("POST", "/api/hosted/probe"):
                 let sourceId = request.jsonBody?["sourceId"] as? String
                 DispatchQueue.main.async { Hosted.probe(sourceId: sourceId) { respond(.json(["ok": true, "machines": $0])) } }
@@ -1595,7 +1597,7 @@ final class MobileServer {
         let cwd = AppState.shared.store.record(withKey: target.key)?.snapshot.cwd ?? request.query["cwd"] ?? ""
         Log.write("手机取文件：\(path.prefix(120))")
         let payload: [String: Any] = ["cmd": "get_file", "path": path, "cwd": cwd, "reveal": request.query["reveal"] == "1"]
-        target.connection.request(payload, timeout: 120) { result in
+        func finish(_ result: Result<[String: Any], RemoteError>) {
             switch result {
             case .success(let response):
                 if response["secret"] as? Bool == true {
@@ -1609,6 +1611,20 @@ final class MobileServer {
                                                             "Content-Security-Policy": "sandbox; default-src 'none'"], body: data))
             case .failure(let error):
                 respond(.error(error.description, status: 404))
+            }
+        }
+        // 会话在别的机器上、那边没有这个文件时，再到本机找一次：远端的 agent 常把文件拷到用户这台电脑上
+        // （经挂载目录、scp），回复里写的却是本机路径（如 ~/Downloads/a.pdf），远端自然找不到。相对路径只按会话目录算，不兜底
+        let local = target.connection.config.kind == .local ? nil
+            : AppState.shared.liveSources.first { $0.config.kind == .local }
+        let absolute = path.hasPrefix("/") || path.hasPrefix("~/")
+        target.connection.request(payload, timeout: 120) { result in
+            guard case .failure(let error) = result, let local = local, absolute, error.description.hasPrefix("文件不存在") else {
+                finish(result); return
+            }
+            Log.write("会话所在机器没有这个文件，改在本机找")
+            local.request(payload, timeout: 120) { second in
+                if case .failure = second { finish(result) } else { finish(second) }
             }
         }
     }
@@ -1633,7 +1649,9 @@ final class MobileServer {
         }
         Log.write("手机发往「\(record.snapshot.name)」：\(text.prefix(60))（图 \(attachments.count) 张）")
         Delivery.send(text: text, attachments: attachments, to: record, source: source, submit: submit) { outcome in
-            let payload: [String: Any] = ["ok": outcome.ok, "submitted": outcome.submitted, "message": outcome.message]
+            var payload: [String: Any] = ["ok": outcome.ok, "submitted": outcome.submitted, "message": outcome.message]
+            if outcome.later { payload["later"] = true }
+            if let qid = outcome.qid { payload["qid"] = qid }
             if outcome.ok, let cid = cid { self.recentSends[cid] = (Date(), payload) }
             respond(.json(payload, status: outcome.ok ? 200 : 409))
         }
@@ -2010,6 +2028,8 @@ final class MobileServer {
                               submit: self.config.submitOnSend) { outcome in
                     var payload: [String: Any] = ["ok": outcome.ok, "text": text, "submitted": outcome.submitted,
                                                   "message": outcome.message]
+                    if outcome.later { payload["later"] = true }
+                    if let qid = outcome.qid { payload["qid"] = qid }
                     if outcome.ok {
                         let entry = self.voices.record(key: record.key, text: text, duration: duration,
                                                        file: file, mime: mime)
@@ -2031,6 +2051,24 @@ final class MobileServer {
         let times = request.jsonBody?["times"] as? Int ?? 1
         Log.write("手机在「\(record.snapshot.name)」按键 \(key)\(times > 1 ? " ×\(times)" : "")")
         Delivery.press(key: key, times: times, record: record, source: source) { outcome in
+            respond(.json(["ok": outcome.ok, "message": outcome.message], status: outcome.ok ? 200 : 409))
+        }
+    }
+
+    /// 排队的消息：{action: move | edit | delete | now, id, text?, dir?}（见 Delivery.queue）
+    private func queue(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        guard let (record, source) = resolve(request) else {
+            respond(.error("会话不存在或已结束", status: 404)); return
+        }
+        let body = request.jsonBody ?? [:]
+        let action = body["action"] as? String ?? ""
+        guard ["move", "edit", "delete", "now"].contains(action), let qid = body["id"] as? String else {
+            respond(.error("请求格式无效", status: 400)); return
+        }
+        let text = (body["text"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        if action == "edit", text == nil { respond(.error("内容为空", status: 400)); return }
+        Log.write("手机调整「\(record.snapshot.name)」的排队消息：\(action)")
+        Delivery.queue(action: action, qid: qid, text: text, dir: body["dir"] as? Int, record: record, source: source) { outcome in
             respond(.json(["ok": outcome.ok, "message": outcome.message], status: outcome.ok ? 200 : 409))
         }
     }

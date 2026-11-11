@@ -12,6 +12,9 @@ public sealed record Usage(int? Context, int? Window, string? Model, int? Percen
     public static Usage? Parse(JsonNode? n) => n is JsonObject ? new Usage(n.Int("context"), n.Int("window"), n.Str("model"), n.Int("percent")) : null;
 }
 
+/// 排队等 Claude 读的一条消息（Id 是电脑上排队用的编号）
+public sealed record QueuedItem(string Id, string Text);
+
 public sealed record SessionInfo
 {
     public string Key { get; init; } = "";
@@ -77,6 +80,11 @@ public sealed record SessionInfo
     public bool IsClaude => Agent == Agents.DefaultId;
     public bool Can(string cap) => Caps.Split(',').Contains(cap);
     public IReadOnlyList<PendingOption>? PendingOptions => PendingOption.ParseList(PendingOptionsJson);
+    /// Claude 忙时发的、排队等它读的消息（原样存 JSON，记录相等比较才不会每次都算变了）；null = 电脑端或会话里的插件是老版本，只能强插、改不了
+    public string? QueueJson { get; init; }
+    public IReadOnlyList<QueuedItem>? Queue => QueueJson is null ? null
+        : (JsonNode.Parse(QueueJson) as JsonArray ?? []).Select(n => n.Str("id") is { } id && n.Str("text") is { } text ? new QueuedItem(id, text) : null)
+            .OfType<QueuedItem>().ToList();
     /// 不能回复时输入框里的说明：插件给的优先
     public string ReadOnlyNote => ReadOnlyReason ?? (IsClaude ? L("终端会话需在 tmux 中运行才能回复") : L("仅可查看，请在 %@ 中回复", Speaker));
     public const string ClaudeCaps = "mode,model,compact,subagents,tests";
@@ -121,6 +129,7 @@ public sealed record SessionInfo
             Agent = string.IsNullOrEmpty(agent) ? Agents.DefaultId : agent,
             Caps = n.Get("caps") is JsonArray ? string.Join(",", n.Strings("caps").Order()) : claude ? ClaudeCaps : "",
             PendingOptionsJson = options is { Count: > 0 } ? options.ToJsonString() : null,
+            QueueJson = n.Get("queue") is JsonArray queue ? queue.ToJsonString() : null,
             SessionId = n.Str("sessionId"),
             Branch = n.Str("branch") is { Length: > 0 } branch ? branch : null,
             Worktree = n.Str("worktree") is { Length: > 0 } tree ? tree : null,

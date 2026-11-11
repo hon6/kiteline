@@ -304,7 +304,7 @@ if config.IS_WINDOWS:
         return [(hwnd, title) for hwnd, title, _ in _win.editor_windows() if not _user32.GetWindow(hwnd, 4)]   # GW_OWNER
 
     def _key(title):
-        """窗口标题里的项目部分：「● 首页卡片 - ccpulse [SSH: 10.168.1.10] - Visual Studio Code」→「ccpulse [SSH: 10.168.1.10]」"""
+        """窗口标题里的项目部分：「● 首页卡片 - ccpulse [SSH: 192.168.1.10] - Visual Studio Code」→「ccpulse [SSH: 192.168.1.10]」"""
         sep = " — " if " — " in title else " - "
         parts = [p.strip() for p in title.split(sep)]
         return parts[-2] if len(parts) >= 2 else title

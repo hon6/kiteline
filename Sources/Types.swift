@@ -73,6 +73,8 @@ struct SessionSnapshot: Codable, Equatable {
     var tmuxPane: String?
     /// 会话的 claude 进程加载了 Kiteline 的 mod：消息、确认、中断直接交给会话，不切前台（见 Delivery.viaBridge；老 watcher 不带）
     var bridge: Bool?
+    /// Claude 忙时发的、还在 mod 里排队等它读的消息（watcher 给）；nil = mod 是老版本或老 watcher，排队的改不了
+    var queue: [QueuedMessage]?
     /// 托管会话的编号：Kiteline 不开 VS Code、在那台电脑上后台跑的 claude（watcher 的 hosted_start）；发字、按键经 tmux_send 写进它的伪终端
     var hosted: String?
     /// 用量（watcher 统计，与 VS Code 面板同样的算法）
@@ -176,6 +178,11 @@ struct PendingOption: Codable, Equatable {
 
 /// 任务做到第几步（watcher 按工具调用推断，或 agent 用 stage 命令报的）：列表里「正在工作」前的「2/4 开发中」、对话页的任务进展。
 /// 只在忙、等确认时带。字段缺了、类型不对都不抛错：多一个少一个字段不能让整个会话解析失败（见 SessionSnapshot.liveStage）
+struct QueuedMessage: Codable, Equatable {
+    var id: String
+    var text: String
+}
+
 struct StageSnapshot: Codable, Equatable {
     var step = 0
     var total = 0

@@ -9,7 +9,7 @@ import Foundation
 /// Remote-SSH 是 vscode-remote://ssh-remote+<主机>/路径）。会话的 cwd 是某个窗口工作区根目录
 /// 或它的子目录，取最长的那个前缀就是会话所在窗口。
 ///
-/// 远端主机的写法可能对不上：Kiteline 里叫 vm，VS Code 里填的是 10.168.1.10。
+/// 远端主机的写法可能对不上：Kiteline 里叫 vm，VS Code 里填的是 192.168.1.10。
 /// 所以两边都用 `ssh -G` 解析成最终的 hostname/port/user 再比。
 enum WindowLocator {
     struct OpenFolder {

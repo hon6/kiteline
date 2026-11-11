@@ -82,7 +82,7 @@ enum LocalRoute {
     }
 
     #if DEBUG || SNAPSHOT
-    /// 调试：「10.168.1.190→en0 直连」这样一个个列出来，后面附上本机的隧道网卡地址（DebugRemote 的 route 命令用）
+    /// 调试：「192.168.1.190→en0 直连」这样一个个列出来，后面附上本机的隧道网卡地址（DebugRemote 的 route 命令用）
     static func explain(_ hosts: [String]) -> String {
         let names = interfaceNames()
         let lines = hosts.map { host -> String in

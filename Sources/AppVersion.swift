@@ -7,5 +7,5 @@ import Foundation
 enum AppVersion {
     /// App 版本只认 Info.plist（CFBundleShortVersionString）：以前这里另写一份，改版本时漏改，「关于」页和手机上显示的版本落后一版
     static let app = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
-    static let watcherScriptVersion = "2.34.0"
+    static let watcherScriptVersion = "2.35.0"
 }

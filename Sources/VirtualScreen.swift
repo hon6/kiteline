@@ -574,7 +574,7 @@ final class VirtualScreen: ObservableObject {
 
     // MARK: - 窗口
 
-    /// 每个项目窗口原来的位置（键是窗口标题里的项目部分，如「ccpulse [SSH: 10.168.1.10]」）
+    /// 每个项目窗口原来的位置（键是窗口标题里的项目部分，如「ccpulse [SSH: 192.168.1.10]」）
     private var savedFrames: [String: CGRect] {
         get {
             let raw = AppConfig.defaults.dictionary(forKey: Self.framesKey) as? [String: String] ?? [:]
@@ -677,7 +677,7 @@ final class VirtualScreen: ObservableObject {
         return count
     }
 
-    /// 窗口标题里的项目部分：「● 首页卡片 — ccpulse [SSH: 10.168.1.10]」→「ccpulse [SSH: 10.168.1.10]」
+    /// 窗口标题里的项目部分：「● 首页卡片 — ccpulse [SSH: 192.168.1.10]」→「ccpulse [SSH: 192.168.1.10]」
     private static func projectKey(_ title: String) -> String {
         title.components(separatedBy: " — ").last?.trimmingCharacters(in: .whitespaces) ?? title
     }

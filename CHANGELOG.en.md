@@ -1,5 +1,23 @@
 # Kiteline Release Notes
 
+## 3.49.33 (2026-11-11)
+
+### New Features
+
+- **Session group tabs along the top of the window** (Mac): Session groups now hang from the top edge of the window like upside-down tabs. The current group is shown in its color, other groups show how many sessions need approval or have new messages, and a click switches groups. Right-click to rename or recolor a group, add sessions, show one column per session, turn it into a group chat, or delete it.
+
+### Improvements
+
+- **Message queue** (Mac, iPhone, iPad): Messages you send while Claude is working no longer wait in the conversation and disappear after a few minutes. They now line up in a "Queued" list above the message box, and Claude reads them in order after finishing its current step. You can move each message up or down, edit it, or delete it; tap "Send now" on the right to interrupt Claude's current step and send the queued messages right away. When a task progress bar is shown, the queue appears above it. Reordering, editing and deleting work in sessions started (or reopened) after updating the computer app.
+- **Clearer demo mode** (iPhone, iPad): In demo mode, every screen now shows an orange banner saying you're in demo mode with sample data for preview only. Tap it to see how to install Kiteline on your computer, or exit the demo and connect your own computer. Demo mode no longer shows the readiness checklist or computer update prompts.
+
+### Bug Fixes
+
+- Fixed the conversation scroll bar showing the wrong position and size after switching to another session group and back (Mac).
+- **Open local files mentioned by sessions on other computers** (Mac, iPhone, iPad): When Claude works on another computer (such as a virtual machine or server) and saves a file to this computer, tapping the path in its reply used to say "File not found". Kiteline now looks for the file on this computer and opens it.
+- **More audio and video formats open with a tap** (iPhone, iPad): AVI, MKV, WebM, 3GP, FLAC, OGG, Opus, AIFF and AMR file names in messages are now shown as tappable file links.
+
+
 ## 3.49.32 (2026-11-11)
 
 ### Bug Fixes

@@ -22,6 +22,10 @@ enum Delivery {
         var ok: Bool
         var submitted: Bool
         var message: String
+        /// Claude 正在做这一轮：消息已交给 mod，排在当前这批工具跑完后读到（mod 回执 later）。各端据此标「排队中」、不按时撤掉
+        var later = false
+        /// 排队那条在 mod 队列里的编号：客户端拿它对上输入框上方的排队列表（会话快照 queue）
+        var qid: String? = nil
     }
 
     struct Attachment {
@@ -180,10 +184,13 @@ enum Delivery {
         }
         // 只填不提交（submit = false）要把字留在 VS Code 输入框里，后台做不到，照旧走前台
         if submit, !inFront, viaBridge(record) {
-            bridgeRequest(["op": "send", "text": prompt], record: record, source: source) { result in
-                if result != nil {
-                    Log.write("后台送达 \(record.snapshot.name)：\(prompt.prefix(60))")
-                    completion(Outcome(ok: true, submitted: true, message: "已提交"))
+            bridgeReply(["op": "send", "text": prompt], record: record, source: source) { reply in
+                if let reply {
+                    let result = reply["result"] as? String ?? "ok"
+                    Log.write("后台送达 \(record.snapshot.name)（\(result)）：\(prompt.prefix(60))")
+                    completion(result == "later"
+                               ? Outcome(ok: true, submitted: true, message: "已排队，Claude 完成当前这一步后会读到", later: true, qid: reply["qid"] as? String)
+                               : Outcome(ok: true, submitted: true, message: "已提交"))
                 } else if checkWaiting, let problem = waitingProblem(record) {
                     completion(Outcome(ok: false, submitted: false, message: problem))
                 } else {
@@ -520,6 +527,12 @@ enum Delivery {
     /// 否则是 mod 的结果：ok / idle（要中断时本来就空闲）/ none（没有在等的确认框）
     private static func bridgeRequest(_ fields: [String: Any], record: SessionRecord, source: SourceConnection?,
                                       result: @escaping (String?) -> Void) {
+        bridgeReply(fields, record: record, source: source) { result($0?["result"] as? String ?? $0.map { _ in "ok" }) }
+    }
+
+    /// 同 bridgeRequest，回 watcher 的整份回执（排队时带 qid）
+    private static func bridgeReply(_ fields: [String: Any], record: SessionRecord, source: SourceConnection?,
+                                    result: @escaping ([String: Any]?) -> Void) {
         guard let source else { result(nil); return }
         var body = fields
         body["cmd"] = "bridge"
@@ -528,7 +541,7 @@ enum Delivery {
             DispatchQueue.main.async {
                 switch response {
                 case .success(let json) where json["bridged"] as? Bool == true:
-                    result(json["result"] as? String ?? "ok")
+                    result(json)
                 case .success:
                     Log.write("后台送达没接上（\(record.snapshot.name)），改走前台")
                     result(nil)
@@ -536,6 +549,44 @@ enum Delivery {
                     Log.write("后台送达失败（\(record.snapshot.name)）：\(error)，改走前台")
                     result(nil)
                 }
+            }
+        }
+    }
+
+    /// 排队的消息（Claude 忙时发的、还在 mod 里等着）：move（dir -1 / 1）、edit（text）、delete、now（强插：中断当前这一步，排队的马上进会话）。
+    /// 会话的 mod 是老版本（只在会话启动时加载）时只有强插能做（等同按 Esc）
+    static func queue(action: String, qid: String, text: String?, dir: Int?, record: SessionRecord, source: SourceConnection?,
+                      completion: @escaping (Outcome) -> Void) {
+        if record.kind == .kiteline {
+            var body: [String: Any] = ["action": action, "id": qid]
+            if let text { body["text"] = text }
+            if let dir { body["dir"] = dir }
+            PeerComputers.shared.deliver("/api/queue", record: record, body: body, completion: completion)
+            return
+        }
+        guard viaBridge(record) else {
+            completion(Outcome(ok: false, submitted: false, message: "这个会话不支持排队消息")); return
+        }
+        if record.snapshot.queue == nil {
+            guard action == "now" else {
+                completion(Outcome(ok: false, submitted: false, message: "重新打开这个会话后才能调整排队的消息")); return
+            }
+            bridgeRequest(["op": "abort"], record: record, source: source) { result in
+                completion(result == nil ? Outcome(ok: false, submitted: false, message: "未能中断，请在电脑上查看")
+                                         : Outcome(ok: true, submitted: true, message: "已中断当前这一步，排队的消息马上发送"))
+            }
+            return
+        }
+        var fields: [String: Any] = ["op": "queue", "action": action, "qid": qid]
+        if let text { fields["text"] = text }
+        if let dir { fields["dir"] = dir }
+        bridgeRequest(fields, record: record, source: source) { result in
+            switch result {
+            case nil: completion(Outcome(ok: false, submitted: false, message: "未能连接会话，请稍后再试"))
+            case "none": completion(Outcome(ok: false, submitted: false, message: "这条消息已发给 Claude"))
+            default:
+                completion(Outcome(ok: true, submitted: action == "now",
+                                   message: action == "now" ? "已中断当前这一步，排队的消息马上发送" : "已更新"))
             }
         }
     }
@@ -887,7 +938,7 @@ enum Delivery {
             + "请先在 VS Code 中发送第一条消息；如不再使用，关闭该空白标签页即可"
     }
 
-    /// VS Code 前台窗口标题拆成（当前标签名, 项目名）：「● 首页卡片间距 — ccpulse [SSH: 10.168.1.10]」→（首页卡片间距, ccpulse）
+    /// VS Code 前台窗口标题拆成（当前标签名, 项目名）：「● 首页卡片间距 — ccpulse [SSH: 192.168.1.10]」→（首页卡片间距, ccpulse）
     static func frontTab(_ app: NSRunningApplication) -> (String, String)? {
         guard let full = frontWindowTitle(app) else { return nil }
         let parts = full.components(separatedBy: " — ")

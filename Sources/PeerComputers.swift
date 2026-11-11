@@ -585,7 +585,8 @@ final class PeerComputers {
                 let answer = (try? JSONSerialization.jsonObject(with: reply.body)) as? [String: Any] ?? [:]
                 let ok = answer["ok"] as? Bool ?? (reply.status == 200)
                 finish(Delivery.Outcome(ok: ok, submitted: answer["submitted"] as? Bool ?? false,
-                                        message: answer["message"] as? String ?? answer["error"] as? String ?? ""))
+                                        message: answer["message"] as? String ?? answer["error"] as? String ?? "",
+                                        later: answer["later"] as? Bool ?? false, qid: answer["qid"] as? String))
             }
         }
     }

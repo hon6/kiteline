@@ -748,6 +748,24 @@ extension SelfTest {
                                             context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53) {
                 NSApp.postEvent(event, atStart: false)
             }
+        case "scrollers":
+            // 排查用：窗口里每个竖着滚的 NSScrollView：内容高、可视高、离底部多远、滚动条位置和长短（切会话组后滚动条位置不对）
+            func walk(_ view: NSView, _ out: inout [NSScrollView]) {
+                if let scroll = view as? NSScrollView { out.append(scroll) }
+                for child in view.subviews { walk(child, &out) }
+            }
+            var found: [NSScrollView] = []
+            if let root = window.contentView?.superview { walk(root, &found) }
+            for scroll in found where scroll.frame.height > 300 {
+                let doc = scroll.documentView?.frame.height ?? 0
+                let clip = scroll.contentView.bounds
+                let flipped = scroll.documentView?.isFlipped ?? true
+                let fromTop = flipped ? clip.minY : doc - clip.maxY
+                let expected = doc > clip.height ? fromTop / (doc - clip.height) : 0
+                let bar = scroll.verticalScroller
+                Log.write("[capture] 滚动区 x=\(Int(scroll.convert(scroll.bounds, to: nil).minX)) \(type(of: scroll)) 高 \(Int(scroll.frame.height)) 隐藏 \(scroll.isHiddenOrHasHiddenAncestor) 窗口 \(scroll.window === window) 内容 \(Int(doc)) 可视 \(Int(clip.height)) 离顶 \(Int(fromTop)) 应在 \(String(format: "%.2f", expected)) "
+                          + "滚动条 \(String(format: "%.2f", bar?.doubleValue ?? -1)) 长 \(String(format: "%.2f", bar?.knobProportion ?? -1))")
+            }
         case "hit":
             // 排查用：窗口里这一点（从窗口左上角算）按下去落在哪个视图上：hit:x,y（工具栏那一带有没有挡住下面的标签栏）
             let n = arg.split(separator: ",").compactMap { Double($0) }

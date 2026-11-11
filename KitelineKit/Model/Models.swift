@@ -10,6 +10,12 @@ struct Usage: Decodable, Hashable {
     var percent: Int?
 }
 
+/// 排队等 Claude 读的一条消息（id 是电脑上排队用的编号）
+struct QueuedItem: Decodable, Hashable, Identifiable {
+    var id: String
+    var text: String
+}
+
 struct SessionInfo: Decodable, Identifiable, Hashable {
     var key: String
     var title: String
@@ -58,6 +64,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     var stage: StageInfo?
     /// 目标（/goal，见 GoalViews.swift）：agent 围着它跨多轮一直做；没设目标、老版本电脑端没有
     var goal: GoalInfo?
+    /// Claude 忙时发的、排队等它读的消息（输入框上方的排队列表，见 QueueStrip）；nil = 电脑端或会话里的插件是老版本，只能强插、改不了
+    var queue: [QueuedItem]? = nil
     /// 远端电脑上、在 VS Code 里跑的 Claude Code，能转到后台运行（会话页提示「支持后台托管」，见 HostedViews.swift）
     var hostable: Bool
     /// 最后一次在任何一端（这台手机、Mac、别的手机）看过这个会话的时间（毫秒）：「新消息」按它和本机记的取较晚的算；老版本电脑端没有
@@ -82,7 +90,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case key, title, name, sourceId, sourceName, sourceKind, activity, activityText, blocking, reason, preview
         case pendingTool, canReply, cwd, updatedAt, startedAt, usage, error, effort, ultracode, permissionMode, cwdShort, subagents, terminals
-        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable, viewedAt, fromPeer
+        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable, viewedAt, fromPeer, queue
     }
 
     init(from decoder: Decoder) throws {
@@ -117,6 +125,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         caps = ((try? c.decodeIfPresent([String].self, forKey: .caps)) ?? nil).map(Set.init) ?? (agent == Agents.defaultID ? Self.claudeCaps : [])
         pendingOptions = ((try? c.decodeIfPresent([PendingOption].self, forKey: .pendingOptions)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         sessionId = try? c.decodeIfPresent(String.self, forKey: .sessionId)
+        queue = (try? c.decodeIfPresent([QueuedItem].self, forKey: .queue)) ?? nil
         branch = ((try? c.decodeIfPresent(String.self, forKey: .branch)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         worktree = ((try? c.decodeIfPresent(String.self, forKey: .worktree)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         stage = ((try? c.decodeIfPresent(StageInfo.self, forKey: .stage)) ?? nil).flatMap { $0.valid ? $0 : nil }

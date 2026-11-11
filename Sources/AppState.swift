@@ -393,6 +393,8 @@ final class AppState {
             if let value = snap.activityText { item["activityText"] = value }
             if let stage = snap.liveStage { item["stage"] = stage.payload }   // 任务做到第几步（忙、等确认时才有）
             if let goal = snap.goal, goal.valid { item["goal"] = goal.payload }   // 目标（/goal）：在做的、结束不久的
+            // 排队等 Claude 读的消息（输入框上方的排队列表）；没有这个字段 = 改不了（老 mod），客户端只看本地记下的
+            if let queue = snap.queue { item["queue"] = queue.map { ["id": $0.id, "text": $0.text] } }
             if let value = snap.message { item["preview"] = value }
             if let effort = snap.effort {
                 if let level = effort.effort { item["effort"] = level }

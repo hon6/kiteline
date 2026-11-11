@@ -320,6 +320,8 @@ class Store:
                 item["stage"] = stage   # 这一轮任务做到第几步（「2/4 开发中」，watcher 推断或 agent 报的）
             if snap_goal(snap):
                 item["goal"] = snap["goal"]   # 目标（/goal）：在做的、结束不久的（watcher 给）
+            if isinstance(snap.get("queue"), list):
+                item["queue"] = snap["queue"]   # 排队等 Claude 读的消息（输入框上方的排队列表）；没有 = 老 mod，改不了
             if snap.get("subagents"):
                 item["subagents"] = snap["subagents"]
             if snap.get("readOnly"):   # 只能看、不能远程操作（Proma 这类）

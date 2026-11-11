@@ -288,7 +288,7 @@ struct MobileConfig: Codable, Equatable {
 struct AppConfig: Codable {
     /// 被监听的来源列表。
     /// 默认只监听本机——不要内置任何远端主机名：那既是别人的机器地址，
-    /// 也会让新用户一启动就去 SSH 一台不存在的机器（早期版本写死过 10.168.1.11）。
+    /// 也会让新用户一启动就去 SSH 一台不存在的机器（早期版本写死过 192.168.1.11）。
     var sources: [SourceConfig] = [.local()]
 
     /// 手机访问

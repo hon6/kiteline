@@ -201,6 +201,12 @@ final class AppUpdates {
     /// 连上电脑（或重连）时问一次：新版电脑端问它自己（顺带拿到下载、安装进度），旧版的看官网 latest.json
     func connect(_ model: AppModel) async {
         self.model = model
+        // 演示模式：「演示 Mac」的版本是示例数据里写死的，不提示它更新（列表里的卡片、弹窗都不出）
+        if MacStore.shared.isDemo {
+            hostOffer = nil
+            hostState = nil
+            return
+        }
         guard model.connected, let current = VersionNumber(model.version) else { return }
         let platform = Self.family(HostPlatform.current)
         let name = model.host

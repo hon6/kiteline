@@ -551,6 +551,101 @@ public sealed partial class AppModel : ObservableObject
         _ = Deliver(key, id);
     }
 
+
+    /// 排队的消息（Claude 忙时发的）：电脑给了队列就对着它，出现过又不在了 = 已交给 Claude（对话里会出现）或在别处删了，撤掉；
+    /// 15 秒还没出现在队列里也撤掉（多半已经交了）。老版本（没有队列）等会话空闲约 20 秒还没回显，标成「未出现」（同 iOS）
+    async void TrackQueued(string key, ChatStore chat, string id)
+    {
+        var waited = 0.0;
+        var idle = 0;
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            waited += 2;
+            var p = chat.Pending.FirstOrDefault(x => x.Id == id);
+            if (p is null || p.State != SendState.Later) return;
+            var session = Session(key);
+            if (session?.Queue is { } queue)
+            {
+                if (queue.Any(q => q.Id == p.Qid)) { if (!p.Seen) chat.Update(id, x => x with { Seen = true }); }
+                else if (p.Seen || waited > 15) { chat.RemovePending(x => x.Id == id); return; }
+                continue;
+            }
+            idle = session is { } s && (s.IsBusy || s.IsWaiting) ? 0 : idle + 1;
+            if (idle >= 10) { chat.Update(id, x => x with { State = SendState.Unconfirmed }); return; }
+        }
+    }
+
+    /// 调整排队的消息：move（dir -1 上移 / 1 下移）、edit（text）、delete、now（强插：中断 Claude 当前这一步，排队的消息马上发送）
+    public async Task<bool> QueueAction(string key, string qid, string action, string? text = null, int? dir = null)
+    {
+        var chat = Chat(key);
+        // 先按调过的显示（电脑的新队列一两秒后才传回来）
+        if (action != "now")
+        {
+            var items = chat.QueueRows(Session(key)).Where(r => r.Editable).Select(r => new QueuedItem(r.Id, r.Text)).ToList();
+            var at = items.FindIndex(q => q.Id == qid);
+            if (at >= 0)
+            {
+                if (action == "move") { var to = at + ((dir ?? 1) < 0 ? -1 : 1); if (to >= 0 && to < items.Count) (items[at], items[to]) = (items[to], items[at]); }
+                else if (action == "edit" && text is not null) items[at] = items[at] with { Text = text };
+                else items.RemoveAt(at);
+                chat.QueueDraft = (items, DateTime.Now);
+                chat.Touch();
+            }
+        }
+        var body = new Dictionary<string, object> { ["action"] = action, ["id"] = qid };
+        if (text is not null) body["text"] = text;
+        if (dir is not null) body["dir"] = dir.Value;
+        try
+        {
+            var reply = await Api.Post("/api/queue", body, new Dictionary<string, string> { ["key"] = key });
+            if (action == "now")
+            {
+                chat.QueueDraft = null;   // 刚调过的临时队列作废：排队的都交出去了
+                chat.Touch();
+                // 强插：本机记下的排队消息改成普通的「已发送」，等对话里回显
+                foreach (var p in chat.Pending.Where(p => p.State == SendState.Later).ToList())
+                {
+                    chat.Update(p.Id, x => x with { State = SendState.Sent });
+                    ExpirePending(key, chat, p.Id);
+                }
+                Flash(reply.Str("message") ?? L("已中断当前这一步，排队的消息马上发送"));
+            }
+            return true;
+        }
+        catch (Exception e)
+        {
+            chat.QueueDraft = null;
+            chat.Touch();
+            Show(e);
+            return false;
+        }
+    }
+
+    /// 等对话记录回显来撤掉占位；万一没回显，两分钟后也撤掉（没提交上的留着，等用户自己移除）。
+    /// Claude 还在忙就一直留着：忙时发的消息要等正在跑的工具做完才进对话（同 iOS）。
+    /// 会话连着两次（约 20 秒）都空闲了还没回显：排队的标成「未出现」，其余照旧撤掉
+    async void ExpirePending(string key, ChatStore chat, string id)
+    {
+        await Task.Delay(TimeSpan.FromMinutes(2));
+        var idle = 0;
+        while (true)
+        {
+            var p = chat.Pending.FirstOrDefault(x => x.Id == id);
+            if (p is null || p.IsFailed || p.State is SendState.Unconfirmed or SendState.Queued) return;
+            var busy = Session(key) is { } s && (s.IsBusy || s.IsWaiting);
+            idle = busy ? 0 : idle + 1;
+            if (idle >= 2)
+            {
+                if (p.State == SendState.Later) chat.Update(id, x => x with { State = SendState.Unconfirmed });
+                else chat.RemovePending(x => x.Id == id);
+                return;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(10));
+        }
+    }
+
     async Task Deliver(string key, string id)
     {
         var chat = Chat(key);
@@ -581,7 +676,8 @@ public sealed partial class AppModel : ObservableObject
                 }, new Dictionary<string, string> { ["key"] = key });
             }
             var submitted = reply.Bool("submitted") ?? false;
-            chat.Update(id, x => x with { State = submitted ? SendState.Sent : SendState.Filled });
+            var later = submitted && (reply.Bool("later") ?? false);
+            chat.Update(id, x => x with { State = submitted ? (later ? SendState.Later : SendState.Sent) : SendState.Filled, Qid = later ? reply.Str("qid") : x.Qid });
             if (!submitted) Flash(reply.Str("message") ?? L("已填入 VS Code 输入框，未提交"));
             // 发给空闲的会话：15 秒后 Claude 还没动、对话里也没出现这条，多半没提交上（回车被输入法拿去上屏拼音之类），
             // 标出来，别让它两分钟后悄悄消失（同 Mac 版）。斜杠命令不回显成消息，不算
@@ -594,9 +690,8 @@ public sealed partial class AppModel : ObservableObject
                         chat.Update(id, x => x with { State = SendState.Unconfirmed });
                 }, TaskScheduler.FromCurrentSynchronizationContext());
             }
-            // 等对话记录回显来撤掉占位；万一没回显，两分钟后也撤掉（没提交上的留着，等用户自己移除）
-            _ = Task.Delay(TimeSpan.FromMinutes(2)).ContinueWith(_ => chat.RemovePending(x => x.Id == id && !x.IsFailed && x.State != SendState.Unconfirmed),
-                TaskScheduler.FromCurrentSynchronizationContext());
+            if (later) TrackQueued(key, chat, id);
+            else ExpirePending(key, chat, id);
         }
         catch (OfflineError)
         {

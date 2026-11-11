@@ -1,5 +1,19 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.39 (2026-11-11)
+
+
+## 1.0.38 (2026-11-11)
+
+### Improvements
+
+- **Message queue**: Messages you send while Claude is working no longer wait in the conversation and disappear after a few minutes. They now line up in a "Queued" list above the message box, and Claude reads them in order after finishing its current step. You can move each message up or down, edit it, or delete it; tap "Send now" on the right to interrupt Claude's current step and send the queued messages right away. When a task progress bar is shown, the queue appears above it. Reordering, editing and deleting work in sessions started (or reopened) after updating the computer app.
+
+### Bug Fixes
+
+- **Open local files mentioned by sessions on other computers**: When Claude works on another computer (such as a virtual machine or server) and saves a file to this computer, tapping the path on your phone used to say "File not found". Kiteline now looks for the file on this computer and opens it. AVI, MKV, WebM, FLAC, OGG and other audio and video file names in messages are now shown as tappable file links.
+
+
 ## 1.0.37 (2026-11-11)
 
 ### Improvements

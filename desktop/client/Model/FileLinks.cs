@@ -19,7 +19,7 @@ public static partial class FileLinks
     [
         "pdf", "xlsx", "xls", "xlsm", "csv", "numbers", "docx", "doc", "pages", "rtf", "pptx", "ppt", "key", "epub",
         "png", "jpg", "jpeg", "gif", "heic", "webp", "bmp", "tif", "tiff",
-        "mp4", "mov", "m4v", "mp3", "m4a", "wav", "aac", "zip", "rar", "7z", "gz", "tgz", "dmg", "apk", "ipa",
+        "mp4", "mov", "m4v", "avi", "mkv", "webm", "3gp", "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "aiff", "amr", "zip", "rar", "7z", "gz", "tgz", "dmg", "apk", "ipa",
     ];
 
     [GeneratedRegex(@":\d+(-\d+)?$")] private static partial Regex LineSuffix();
