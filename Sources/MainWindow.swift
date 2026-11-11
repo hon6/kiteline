@@ -144,6 +144,7 @@ struct SidebarView: View {
                 if !KitelineKit.groupSectionShown(allGroups) {
                     Label("还没有会话群。点「建群」，或把一个会话拖到另一个会话上，让它们互相沟通。", systemImage: "person.2")
                         .font(.app(size: 11.5)).foregroundStyle(.secondary)
+                        .lineLimit(nil).fixedSize(horizontal: false, vertical: true)   // 侧栏列表默认只排一行，这里要看全
                         .selectionDisabled()
                 }
                 TarsGroupSidebarSection(selection: $model.selection, filter: allGroups, headerless: true).selectionDisabled()

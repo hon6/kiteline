@@ -48,6 +48,12 @@ final class TabGroupStore {
         }]
     }
 
+    /// 有没有叫这个名字、装着这些会话的组（会话群建群时认老版本手机传来的组名）
+    func holds(name: String, keys: [String]) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return store.groups.contains { $0.name == name && Set(keys).isSubset(of: $0.keys) }
+    }
+
     /// /api/tabgroups…（MobileServer 转过来）
     func handle(_ request: HTTPRequest) -> HTTPResponse {
         switch (request.method, request.path) {

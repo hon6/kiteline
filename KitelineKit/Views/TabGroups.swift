@@ -428,7 +428,7 @@ private struct TabGroupRows: View {
     private var emptyHint: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("把同一阶段的几个会话放成一组，切换时整组多列显示。")
-                .font(.app(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(.app(size: 11.5)).foregroundStyle(.secondary).lineLimit(nil).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
                 Button(L("新建会话组…")) { picking = .create([]) }
                 if !groups.panes.isPristine {
@@ -1047,6 +1047,11 @@ extension KitelineKit {
     /// 自测用：给某组换颜色
     public static func recolorTabGroup(named name: String, _ color: String) {
         if let group = tabGroups.groups.first(where: { $0.name == name }) { tabGroups.recolor(group.id, color) }
+    }
+
+    /// 自测用：某组一键建群
+    public static func groupChatTabGroup(named name: String) {
+        if let group = tabGroups.groups.first(where: { $0.name == name }) { groupChat(from: group.id) }
     }
 
     /// 自测用：展开 / 收起某组

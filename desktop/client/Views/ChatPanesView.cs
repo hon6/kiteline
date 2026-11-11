@@ -408,7 +408,24 @@ public sealed class PaneHeader : Panel
             tabs.Children.Add(PaneButton("plus", L("新标签页：选择要在此打开的会话"), () => { panes.NewTab(pane.Id); MainModel.Shared.Selection = null; }).Margin(2, 0, 0, 5).VAlign(VerticalAlignment.Bottom));
         Control tabArea = tabs;
         if (entries.Count * MinTab > room)
-            tabArea = new ScrollViewer { Content = tabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        {
+            var scroller = new ScrollViewer { Content = tabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            tabArea = scroller;
+            // 放不下要横着滚时，正显示的那个标签滚进来（不然块窄、左边又有会话组色块时，刚打开的群聊标签被挤到看不见的地方）
+            var index = entries.ToList().IndexOf(pane.Key);
+            if (index > 0)
+            {
+                void Reveal(object? sender, EventArgs e)
+                {
+                    if (tabs.Children.Count <= index || tabs.Children[index].Bounds.Width <= 0) return;
+                    scroller.LayoutUpdated -= Reveal;
+                    var tab = tabs.Children[index].Bounds;
+                    var view = scroller.Viewport.Width;
+                    if (tab.Right > scroller.Offset.X + view) scroller.Offset = new Vector(Math.Max(0, tab.Right - view), 0);
+                }
+                scroller.LayoutUpdated += Reveal;
+            }
+        }
 
         var actions = Actions(several, focused, level);
         var row = new DockPanel { Margin = new Thickness(6, rise, 6 + caption, 0), Height = TabRow, VerticalAlignment = VerticalAlignment.Bottom };
@@ -806,6 +823,9 @@ public sealed class PaneTab : Control
 /// 还没选会话的一块：列出没打开的会话让你选（同 Mac 版 PanePicker）
 public sealed class PanePicker : ScrollViewer
 {
+    // 继承的控件要指明用 ScrollViewer 的模板，不然会话多了只是被裁掉、划不动
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     public PanePicker(Guid paneId)
     {
         var model = AppModel.Shared;

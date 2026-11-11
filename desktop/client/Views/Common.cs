@@ -187,12 +187,24 @@ public sealed class ScopeChip : Tap
 /// 一排筛选胶囊：放不下时横着划
 public sealed class FilterBar : ScrollViewer
 {
+    // 继承的控件要指明用 ScrollViewer 的模板，不然套不上、只是裁掉放不下的部分，根本划不动
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     public FilterBar(IEnumerable<Control> chips)
     {
         HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Hidden;
         VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
         Content = Ui.Stack(Orientation.Horizontal, 6, Align.Center, chips).Pad(0, 1);
+        // 放不下时用普通鼠标的上下滚轮也能横着滚（滚动条藏着，大多数鼠标没有横向滚轮）；先截住，免得被外层列表吃掉
+        AddHandler(PointerWheelChangedEvent, (_, e) =>
+        {
+            var room = Extent.Width - Viewport.Width;
+            if (room <= 0 || e.Delta.X != 0 || e.Delta.Y == 0) return;
+            Offset = new Avalonia.Vector(Math.Clamp(Offset.X - e.Delta.Y * 40, 0, room), 0);
+            e.Handled = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
     }
+
 }
 
 /// 读取失败：图标 + 原因 + 「重试」

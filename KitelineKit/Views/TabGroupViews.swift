@@ -264,7 +264,10 @@ public struct ListTabsGuide: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: symbol).font(.app(size: 11, weight: .semibold)).foregroundStyle(.secondary).frame(width: 16)
             (Text(title).fontWeight(.semibold) + Text("　") + Text(text).foregroundStyle(.secondary))
-                .font(.app(size: 12.5)).fixedSize(horizontal: false, vertical: true)
+                // Mac 侧栏列表里的文字默认只排一行（后面省略号），这里要整段换行看全
+                .font(.app(size: 12.5)).lineLimit(nil).multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

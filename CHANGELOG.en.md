@@ -1,5 +1,13 @@
 # Kiteline Release Notes
 
+## 3.49.32 (2026-11-11)
+
+### Bug Fixes
+
+- Fixed turning a session group into a group chat sending the group name to every member as the first group message and asking the sessions to name the group. The group chat now uses the session group's name and no longer interrupts its sessions (Mac, iPhone, iPad).
+- Fixed the session list explanation and the empty-state hints in the Groups and Session Groups tabs being cut off in the sidebar (Mac).
+
+
 ## 3.49.31 (2026-11-11)
 
 ### New Features

@@ -185,11 +185,13 @@ public sealed partial class GroupState : ObservableObject
     // MARK: 操作
 
     /// 建群，返回群 id
-    public async Task<string?> Create(IEnumerable<string> keys, string topic)
+    public async Task<string?> Create(IEnumerable<string> keys, string topic, string? name = null)
     {
         try
         {
-            var reply = await AppModel.Shared.Api.Post("/api/groups/create", new JsonObject { ["keys"] = new JsonArray(keys.Select(k => (JsonNode)k).ToArray()), ["topic"] = topic });
+            var body = new JsonObject { ["keys"] = new JsonArray(keys.Select(k => (JsonNode)k).ToArray()), ["topic"] = topic };
+            if (!string.IsNullOrEmpty(name)) body["name"] = name;
+            var reply = await AppModel.Shared.Api.Post("/api/groups/create", body);
             await Load();
             return reply.Get("group").Str("id");
         }

@@ -269,9 +269,11 @@ extension AppModel {
     func title(of member: GroupMember) -> String { session(member.key)?.title ?? member.title }
 
     /// 建群，返回群 id
-    func createGroup(keys: [String], topic: String) async -> String? {
+    func createGroup(keys: [String], topic: String, name: String? = nil) async -> String? {
         do {
-            let data = try await api.postData("/api/groups/create", body: ["keys": keys, "topic": topic])
+            var body: [String: Any] = ["keys": keys, "topic": topic]
+            if let name { body["name"] = name }
+            let data = try await api.postData("/api/groups/create", body: body)
             let reply = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             await groups.load(api)
             return (reply?["group"] as? [String: Any])?["id"] as? String

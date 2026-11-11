@@ -169,8 +169,12 @@ final class Groups {
         case ("POST", "/api/groups/create"):
             let keys = Self.keys(body["keys"])
             guard keys.count >= 2 else { respond(.error("至少选两个会话", status: 400)); return }
-            let topic = (body["topic"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let group = create(keys: keys, topic: topic)
+            var topic = (body["topic"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            // name：建群时就定好的群名（会话组一键建群用组名），不再让 agent 起名；不当作群消息发出去
+            var name = (body["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            // 老版本手机（iPhone 1.14）会话组一键建群把组名当 topic 传：正好是装着这些会话的会话组的名字，就当群名、不当群消息发
+            if name.isEmpty, !topic.isEmpty, TabGroupStore.shared.holds(name: topic, keys: keys) { (name, topic) = (topic, "") }
+            let group = create(keys: keys, topic: topic, name: name.isEmpty ? nil : String(name.prefix(40)))
             respond(.json(["ok": true, "group": summary(group)]))
         case ("POST", "/api/groups/add"):
             guard group(id) != nil else { respond(.error("会话群不存在", status: 404)); return }
@@ -283,10 +287,10 @@ final class Groups {
 
     // MARK: - 建群、加人、改名
 
-    private func create(keys: [String], topic: String) -> Group {
+    private func create(keys: [String], topic: String, name: String? = nil) -> Group {
         let members = keys.map(member)
         let at = Self.now
-        var group = Group(id: Self.newId("g-"), name: Self.provisionalName(members: members, topic: topic), autoName: true,
+        var group = Group(id: Self.newId("g-"), name: name ?? Self.provisionalName(members: members, topic: topic), autoName: name == nil,
                           topic: topic.isEmpty ? nil : String(topic.prefix(2000)), createdAt: at, updatedAt: at, members: members, messages: [])
         group.messages.append(event("建群：" + members.map(\.title).joined(separator: "、"), "created", members.map(\.title)))
         mutate { store in

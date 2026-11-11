@@ -120,7 +120,10 @@ public sealed class TabGroupSidebar
         foreach (var color in TabGroupColor.All)
         {
             var option = color;
-            yield return Ui.Item(option.Name, () => state.Update(id, state.Group(id)?.Name ?? "", option.Id), check: state.ColorOf(id).Id == option.Id ? "" : null);
+            // 每项前面画这个颜色（同 Mac 版菜单里的色块），选中的描一圈
+            var item = Ui.Item(option.Name, () => state.Update(id, state.Group(id)?.Name ?? "", option.Id));
+            item.Icon = new TabGroupSwatch(option, state.ColorOf(id).Id == option.Id, () => { }) { Width = 18, Height = 18, IsHitTestVisible = false };
+            yield return item;
         }
     }
 
@@ -153,7 +156,7 @@ public sealed class TabGroupSwatch : Control
     public override void Render(DrawingContext context)
     {
         var center = new Point(Bounds.Width / 2, Bounds.Height / 2);
-        const double r = 9;
+        var r = Math.Min(Bounds.Width, Bounds.Height) / 2 - 3;
         context.DrawEllipse(Palette.Brush(color.Light), null, center, r, r);
         var half = new StreamGeometry();
         using (var g = half.Open())
@@ -429,6 +432,19 @@ public static class TabGroupPicker
             IsVisible = groupId is null,
         };
         var search = new TextBox { Watermark = L("搜索会话"), FontSize = Look.Pt(13), Padding = new Thickness(10, 6) };
+        // 新建时一排九个颜色（同 Mac 版 TabGroupPicker、Edge 新建标签组），默认给还没人用的
+        var picked = state.NextColor();
+        var swatches = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, IsVisible = groupId is null };
+        void DrawSwatches()
+        {
+            swatches.Children.Clear();
+            foreach (var color in TabGroupColor.All)
+            {
+                var option = color;
+                swatches.Children.Add(new TabGroupSwatch(option, option.Id == picked, () => { picked = option.Id; DrawSwatches(); }));
+            }
+        }
+        DrawSwatches();
         var list = new StackPanel { Spacing = 2 };
         var scroll = new ScrollViewer { Content = list, MaxHeight = 330, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         var confirm = PromptCard.CardButton("", true, () => Confirm());
@@ -438,7 +454,7 @@ public static class TabGroupPicker
         {
             if (groupId is null)
             {
-                state.Create(nameBox.Text, order);
+                state.Create(nameBox.Text, order, color: picked);
             }
             else
             {
@@ -497,6 +513,8 @@ public static class TabGroupPicker
         {
             stack.Children.Add(Ui.Text(L("名称"), 11.5, FontWeight.SemiBold, "Text2"));
             stack.Children.Add(nameBox);
+            stack.Children.Add(Ui.Text(L("颜色"), 11.5, FontWeight.SemiBold, "Text2"));
+            stack.Children.Add(swatches);
         }
         stack.Children.Add(Ui.Text(L("选择会话，勾的先后就是从左到右的列。"), 11.5, color: "Text2", lines: 0).Wrap());
         stack.Children.Add(search);

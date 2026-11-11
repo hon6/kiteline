@@ -36,7 +36,7 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.36"
+VERSION = "1.0.37"
 
 
 class App:

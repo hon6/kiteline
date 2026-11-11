@@ -1,5 +1,19 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.37 (2026-11-11)
+
+### Improvements
+
+- **Choose a color when creating a session group**: The New Session Group panel now has a row of nine colors, and each option in the Color menu shows its swatch.
+
+### Bug Fixes
+
+- Fixed turning a session group into a group chat sending the group name to every member as the first group message and asking the sessions to name the group. The group chat now uses the session group's name and no longer interrupts its sessions.
+- Fixed the All, Marked, Working and Needs Approval filter buttons being cut off with no way to scroll when they don't fit. You can now scroll them sideways with the mouse wheel.
+- Fixed the session list in a new tab not scrolling when it is long.
+- Fixed a newly opened group chat tab being pushed out of sight in the tab bar when a split pane is narrow.
+
+
 ## 1.0.36 (2026-11-11)
 
 ### New Features

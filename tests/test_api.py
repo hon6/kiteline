@@ -1672,6 +1672,36 @@ check("agent 在群里发言推一条提醒（点开进群聊页，老版本进�
       and notes[0].get("body", "").startswith("订单导出功能：导出接口改好了"), str(notes)[:400])
 status, body, _ = request("/api/groups/create", "POST", {"keys": [busy["key"], plan["key"]], "topic": "第二个群"})
 gid2 = body.get("group", {}).get("id", "")
+status, body, _ = request("/api/groups/create", "POST", {"keys": [busy["key"], plan["key"]], "topic": "", "name": "订单联调组"})
+named = body.get("group", {})
+check("会话组一键建群：带 name 直接定群名、不让 agent 起名", status == 200 and named.get("name") == "订单联调组" and named.get("autoName") is False, str(body)[:300])
+time.sleep(1)
+check("会话组一键建群：组名不当群消息发给成员", not any(x.get("from") == "me" for x in group_messages(named.get("id", ""))))
+request("/api/groups/delete", "POST", {"id": named.get("id", "")})
+
+# 会话组（/api/tabgroups）：整份换掉、rev 加一、去重、空名补默认
+status, body, _ = request("/api/tabgroups")
+rev0 = body.get("rev", -1)
+check("会话组：取列表", status == 200 and body.get("ok") is True and isinstance(body.get("groups"), list), str(body)[:200])
+status, body, _ = request("/api/tabgroups/set", "POST", {"groups": [
+    {"id": "tg-a", "name": " 导出 ", "color": "green", "keys": [busy["key"], busy["key"], plan["key"]]},
+    {"id": "tg-a", "name": "重复的", "keys": []},
+    {"id": "tg-b", "name": "", "keys": [plan["key"]]}]})
+groups = body.get("groups", [])
+check("会话组：整份换掉，去掉重复的组和会话、空名补「会话组」", status == 200 and body.get("rev") == rev0 + 1
+      and [(g["id"], g["name"], g.get("color"), g["keys"]) for g in groups]
+      == [("tg-a", "导出", "green", [busy["key"], plan["key"]]), ("tg-b", "会话组", None, [plan["key"]])], str(body)[:400])
+status, body, _ = request("/api/tabgroups/set", "POST", {"groups": groups})
+check("会话组：没变化不加版本号", body.get("rev") == rev0 + 1, str(body)[:200])
+status, body, _ = request("/api/tabgroups/set", "POST", {})
+check("会话组：缺 groups 报错", status == 400)
+request("/api/tabgroups/set", "POST", {"groups": [{"id": "tg-old", "name": "老手机的组", "keys": [busy["key"], plan["key"]]}]})
+status, body, _ = request("/api/groups/create", "POST", {"keys": [busy["key"], plan["key"]], "topic": "老手机的组"})
+old = body.get("group", {})
+check("会话组一键建群（老版本手机把组名当 topic 传）：认成群名、不发群消息", status == 200 and old.get("name") == "老手机的组" and old.get("autoName") is False
+      and not any(x.get("from") == "me" for x in group_messages(old.get("id", ""))), str(body)[:300])
+request("/api/groups/delete", "POST", {"id": old.get("id", "")})
+request("/api/tabgroups/set", "POST", {"groups": []})
 status, body, _ = request("/api/groups")
 check("群列表按最近动静排", [g["id"] for g in body.get("items", [])][:2] == [gid2, gid], str([g["id"] for g in body.get("items", [])]))
 status, body, _ = request("/api/groups/mark", "POST", {"id": gid, "marked": True})

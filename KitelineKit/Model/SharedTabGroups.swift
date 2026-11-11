@@ -139,8 +139,9 @@ extension AppModel {
             flash(L("会话组里至少要有两个运行中的会话才能建群"))
             return nil
         }
-        guard let id = await createGroup(keys: live, topic: name) else { return nil }
-        await renameGroup(id, name)
+        // 组名直接当群名（不当第一条群消息发给成员，免得每个会话白跑一轮）；老电脑不认 name，再改一次名兜底
+        guard let id = await createGroup(keys: live, topic: "", name: name) else { return nil }
+        if groups.group(id)?.name != name { await renameGroup(id, name) }
         return id
     }
 }

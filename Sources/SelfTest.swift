@@ -654,7 +654,7 @@ extension SelfTest {
         case "tabgroup":
             // 标签组（KitelineKit/Views/TabGroups.swift）：tabgroup:new:组名:标题1,标题2（每个一列）/ tabgroup:save:组名（当前分屏收成一组）/
             // tabgroup:go:组名（空 = 未分组）/ tabgroup:next / tabgroup:jump（⇧⌘U）/ tabgroup:expand:组名 / tabgroup:sleep:秒（对话休眠等多久）/ tabgroup:dump /
-            // tabgroup:edit:组名 / tabgroup:color:组名:颜色 / tabgroup:tab:页签
+            // tabgroup:edit:组名 / tabgroup:color:组名:颜色 / tabgroup:tab:页签 / tabgroup:chat:组名
             let bits = arg.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
             let keys = { (titles: String) in titles.split(separator: ",").compactMap { t in KitelineModel.shared.sessions.first { $0.title == String(t) }?.id } }
             switch bits.first ?? "" {
@@ -668,6 +668,7 @@ extension SelfTest {
             case "edit": KitelineKit.editTabGroup(named: bits.count > 1 ? bits[1] : "")   // 弹「编辑标签组」（组名、颜色）
             case "color": KitelineKit.recolorTabGroup(named: bits.count > 1 ? bits[1] : "", bits.count > 2 ? bits[2] : "")   // tabgroup:color:组名:red
             case "tab": UserDefaults.standard.set(bits.count > 1 ? bits[1] : "sessions", forKey: "listTab")   // 左边栏页签 sessions / groups / tabgroups
+            case "chat": KitelineKit.groupChatTabGroup(named: bits.count > 1 ? bits[1] : "")   // 一键建群：tabgroup:chat:组名
             default: break
             }
             Log.write("[capture] 会话组：\(KitelineKit.tabGroupSummary)；左边栏选中 \(KitelineModel.shared.selection ?? "-")")

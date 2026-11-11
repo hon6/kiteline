@@ -100,7 +100,13 @@ class Groups:
             keys = self._keys(body.get("keys"))
             if len(keys) < 2:
                 return 400, {"ok": False, "error": "至少选两个会话"}
-            group = self._create(keys, str(body.get("topic") or "").strip())
+            # name：建群时就定好的群名（会话组一键建群用组名），不再让 agent 起名；不当作群消息发出去
+            name = str(body.get("name") or "").strip()[:40]
+            topic = str(body.get("topic") or "").strip()
+            # 老版本手机（iPhone 1.14）会话组一键建群把组名当 topic 传：正好是装着这些会话的会话组的名字，就当群名、不当群消息发
+            if not name and topic and any(g.get("name") == topic and set(keys) <= set(g.get("keys") or []) for g in self.app.tab_groups.payload().get("groups", [])):
+                name, topic = topic[:40], ""
+            group = self._create(keys, topic, name)
             return 200, {"ok": True, "group": self._summary(group)}
         if not self._group(gid):
             return 404, {"ok": False, "error": "会话群不存在"}
@@ -226,10 +232,10 @@ class Groups:
             message["args"] = list(args)
         return message
 
-    def _create(self, keys, topic):
+    def _create(self, keys, topic, name=""):
         members = [self._member(k) for k in keys]
         at = now_ms()
-        group = {"id": _new_id("g-"), "name": self._provisional(members, topic), "autoName": True, "createdAt": at, "updatedAt": at,
+        group = {"id": _new_id("g-"), "name": name or self._provisional(members, topic), "autoName": not name, "createdAt": at, "updatedAt": at,
                  "members": members, "messages": [self._event("建群：" + "、".join(m["title"] for m in members), "created", [m["title"] for m in members])]}
         if topic:
             group["topic"] = topic[:2000]

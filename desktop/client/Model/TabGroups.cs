@@ -102,7 +102,10 @@ public sealed partial class TabGroupState : ObservableObject
             model.Flash(L("会话组里至少要有两个运行中的会话才能建群"));
             return;
         }
-        if (await GroupState.Shared.Create(keys, group.Name) is string gid) MainModel.Shared.Selection = MainModel.GroupPrefix + gid;
+        // 组名直接当群名（不当第一条群消息发给成员，免得每个会话白跑一轮）；老电脑不认 name，再改一次名兜底
+        if (await GroupState.Shared.Create(keys, "", group.Name) is not string gid) return;
+        if (GroupState.Shared.Group(gid)?.Name != group.Name) await GroupState.Shared.Rename(gid, group.Name);
+        MainModel.Shared.Selection = MainModel.GroupPrefix + gid;
     }
 
     /// 组的颜色：存的颜色 → 没有就按先后轮一个
@@ -213,12 +216,12 @@ public sealed partial class TabGroupState : ObservableObject
     }
 
     /// 新建一组（同 Mac 版 create）：fromCurrent = 未分组的标签页直接收成一组（分屏不重建）；否则用 keys 摆好再切过去。返回新组的 id
-    public string Create(string? name, IReadOnlyList<string> keys, bool fromCurrent = false)
+    public string Create(string? name, IReadOnlyList<string> keys, bool fromCurrent = false, string? color = null)
     {
         var panes = ChatPanes.Shared;
         var id = Guid.NewGuid().ToString();
         var list = fromCurrent && Active is null && !panes.IsPristine ? panes.Keys.Distinct().ToList() : keys.Distinct().ToList();
-        var group = new TabGroupItem(id, string.IsNullOrWhiteSpace(name) ? SuggestedName(list) : name.Trim(), NextColor(), list);
+        var group = new TabGroupItem(id, string.IsNullOrWhiteSpace(name) ? SuggestedName(list) : name.Trim(), color ?? NextColor(), list);
         if (fromCurrent && Active is null && !panes.IsPristine)
         {
             layouts[id] = panes.Snapshot();
@@ -290,7 +293,7 @@ public sealed partial class TabGroupState : ObservableObject
         return L("会话组 %@", n);
     }
 
-    string NextColor()
+    public string NextColor()
     {
         var used = Items.Select(g => ColorOf(g.Id).Id).ToHashSet();
         return TabGroupColor.Cycle.FirstOrDefault(c => !used.Contains(c)) ?? TabGroupColor.Cycle[Items.Count % TabGroupColor.Cycle.Length];
