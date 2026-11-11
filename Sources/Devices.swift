@@ -26,6 +26,8 @@ final class DeviceStore {
         var build: String?
         /// 订阅了 Kiteline Pro（App 每个请求带的 X-Kiteline-Pro）；旧版 App 不带
         var pro: Bool?
+        /// 订阅的方案（App 带的 X-Kiteline-Plan）：year / month / unlocked（开发版放开、没买）；旧版 App 不带
+        var plan: String?
         /// 最近一次经远程访问（点对点 / 中继）连进来的时间：点对点把连接转给本机 HTTPS 服务，来源是 127.0.0.1
         var remoteAt: Double?
         /// 微信小程序：中继给的用户编号（openid 摘要，10 位十六进制），随使用统计上报，运营后台据此对上小程序用户
@@ -86,7 +88,7 @@ final class DeviceStore {
     }
 
     /// 验证设备令牌；顺带记下最后使用时间、IP、App 报的机型版本、构建号、订阅状态和走没走远程访问（一分钟最多写一次盘）
-    func authenticate(_ token: String, ip: String, client: String? = nil, agent: String? = nil, pro: Bool? = nil, mpUser: String? = nil) -> Device? {
+    func authenticate(_ token: String, ip: String, client: String? = nil, agent: String? = nil, pro: Bool? = nil, mpUser: String? = nil, plan: String? = nil) -> Device? {
         guard token.hasPrefix(Self.prefix) else { return nil }
         let hash = Self.hash(token)
         lock.lock()
@@ -111,6 +113,14 @@ final class DeviceStore {
         if let pro, devices[index].pro != pro {
             devices[index].pro = pro
             changed = true
+        }
+        if pro != nil, devices[index].client != "miniprogram" {
+            // 报了订阅状态就同步方案：没订阅的旧方案清掉
+            let plan = plan.flatMap { ["year", "month", "unlocked"].contains($0) ? $0 : nil }
+            if devices[index].plan != plan {
+                devices[index].plan = plan
+                changed = true
+            }
         }
         // 以前配对的小程序没报名字，叫成了「浏览器」「浏览器 2」：认出是小程序后改成「微信小程序」（只改自动起的名字，用户改过的不动）
         if devices[index].client == "miniprogram", devices[index].name.range(of: #"^(Mac |Windows )?浏览器( \d+)?$"#, options: .regularExpression) != nil {

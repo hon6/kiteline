@@ -424,7 +424,7 @@ class MobileServer:
             pro = request.headers.get("x-kiteline-pro")
             device = self.app.devices.authenticate(token, request.remote, request.headers.get("x-kiteline-client"),
                                                    request.headers.get("user-agent"), None if pro is None else pro == "1",
-                                                   request.headers.get("x-kiteline-mp"))
+                                                   request.headers.get("x-kiteline-mp"), request.headers.get("x-kiteline-plan"))
             if device:
                 return "device", device
             if token.startswith("p") and self.app.pairing.link_valid(token):

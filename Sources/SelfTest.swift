@@ -505,6 +505,17 @@ extension SelfTest {
         case "size":
             let wh = arg.split(separator: "x").compactMap { Double($0) }
             if wh.count == 2 { window.setContentSize(NSSize(width: wh[0], height: wh[1])); window.setFrameOrigin(NSPoint(x: -20000, y: -20000)) }
+        case "fake":
+            // 灌入跨来源演示会话（本机 1 + 虚拟机 3，见 fakeRecords）：拍跨电脑会话群这类演示截图。
+            // 配合 CCPULSE_SESSIONS_DIR / CCPULSE_PROJECTS_DIR 指空目录，本机来源就只有假会话，画面干净
+            let localConfig = SourceConfig.local()
+            let sshConfig = SourceConfig.ssh(host: "dev-vm", name: "虚拟机")
+            AppState.shared.store.applySourceConfigs([localConfig, sshConfig])
+            AppState.shared.store.apply(sourceConfig: localConfig, state: .live(host: "本机", watcher: AppVersion.watcherScriptVersion, sessionCount: 1))
+            AppState.shared.store.apply(sourceConfig: sshConfig, state: .live(host: "dev-vm", watcher: AppVersion.watcherScriptVersion, sessionCount: 3))
+            AppState.shared.store.injectForSelfTest(SelfTest.fakeRecords())
+            KitelineModel.shared.refresh()
+            delay = 1
         case "live", "liveleft":
             // 模拟用户拖窗口边缘调大小（系统的实时调整：期间 inLiveResize 为真，一点点变）：live:宽x高 拖右下角；liveleft 拖左边（右边不动）
             let wh = arg.split(separator: "x").compactMap { Double($0) }

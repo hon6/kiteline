@@ -22,6 +22,8 @@ final class Store {
     private(set) var products: [Product] = []
     /// App Store 里确实买了、还在有效期
     private(set) var entitled = false
+    /// 买的是哪个方案：year / month（报给电脑的使用统计，运营后台分年付、月付）；没买是 nil
+    private(set) var plan: String?
     private(set) var loadingProducts = false
     private(set) var purchasing: String?
     /// 首次免费试用还能不能用（每个 Apple ID 只有一次）
@@ -87,12 +89,16 @@ final class Store {
     /// 重新看一遍现在有没有有效订阅（启动、买完、恢复购买、续费 / 退款通知来了）
     func refresh() async {
         var active = false
+        var plan: String?
         for await result in Transaction.currentEntitlements {
             if case .verified(let transaction) = result, Self.productIds.contains(transaction.productID), transaction.revocationDate == nil {
                 active = true
+                // 同时有两个（升级过渡）时按年付算
+                if plan != "year" { plan = transaction.productID.contains("year") ? "year" : "month" }
             }
         }
         entitled = active
+        self.plan = plan
         publish()
         ProGate.markChecked()
         if isPro { paywall = nil }
@@ -143,6 +149,8 @@ final class Store {
     private func publish() {
         let now = isPro
         ProGate.set(now)
+        // 报给电脑的方案：买了的写 year / month；没买却放开了（开发版、演示）写 unlocked，后台不算付费
+        ProGate.setPlan(entitled ? plan : now ? "unlocked" : nil)
         if let published, published != now { NotificationCenter.default.post(name: .tarsProChanged, object: nil) }
         published = now
     }
@@ -159,6 +167,10 @@ enum ProGate {
     /// 订阅状态（报给电脑的使用统计）：启动后第一次查完订阅之前是 nil，免得报错
     static var reported: Bool? { lock.withLock { checked ? unlocked : nil } }
     static func markChecked() { lock.withLock { checked = true } }
+    nonisolated(unsafe) private static var plan: String?
+    static func setPlan(_ value: String?) { lock.withLock { plan = value } }
+    /// 订阅方案（X-Kiteline-Plan）：year / month / unlocked；查完订阅之前、没订阅时是 nil
+    static var reportedPlan: String? { lock.withLock { checked ? plan : nil } }
 }
 
 extension AppModel {

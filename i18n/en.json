@@ -5222,5 +5222,6 @@
  "未能连接会话，请稍后再试": "Could not reach the session. Please try again later.",
  "这条消息已发给 Claude": "This message has already been sent to Claude.",
  "已更新": "Updated",
- "强插：中断 Claude 当前这一步，排队的消息马上发送": "Send now: interrupt Claude's current step and send the queued messages"
+ "强插：中断 Claude 当前这一步，排队的消息马上发送": "Send now: interrupt Claude's current step and send the queued messages",
+ "电脑上的 Claude Code 正停在一个选择框上，消息没有送进去（免得回车替你选了选项）。请在会话终端里或电脑上处理这个框后再发": "Claude Code on the computer is showing a dialog, so the message was not sent (to avoid the Return key choosing an option for you). Handle the dialog in the session terminal or on the computer, then send again."
 }

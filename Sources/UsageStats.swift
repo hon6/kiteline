@@ -169,6 +169,7 @@ enum UsageStats {
         var out: [String: Any] = ["id": digest("device/" + d.id), "via": d.via == "扫码" ? "qr" : "code", "remote": d.p2pId != nil,
                                   "push": pushed, "createdAt": Int64(d.createdAt), "lastSeen": Int64(d.lastSeen)]
         if let pro = d.pro { out["pro"] = pro }
+        if let plan = d.plan { out["plan"] = plan }
         if let remoteAt = d.remoteAt { out["remoteAt"] = Int64(remoteAt) }
         if d.client == "miniprogram" {
             // 微信小程序（来源由电脑端的小程序入口定，不能冒充）；mpUser 是中继给的用户编号，后台据此对上小程序用户和订阅

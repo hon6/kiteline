@@ -220,6 +220,8 @@ class UsageStats:
                "createdAt": int(d.get("createdAt") or 0), "lastSeen": int(d.get("lastSeen") or 0)}
         if d.get("pro") is not None:
             out["pro"] = bool(d["pro"])
+        if d.get("plan"):
+            out["plan"] = d["plan"]
         if d.get("remoteAt"):
             out["remoteAt"] = int(d["remoteAt"])
         client = parse_client(d.get("client"))

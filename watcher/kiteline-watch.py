@@ -1836,6 +1836,9 @@ def normalize_line(offset, entry):
                 items.append(dict(base(), t="event", level="error",
                                   text="接口出错：%s" % (error.get("formatted") or error.get("message") or "未知")))
         elif isinstance(entry.get("content"), str) and entry["content"].strip():
+            if entry["content"].startswith("kiteline: "):
+                # 我们自己的 mod 的提示（「kiteline: reloaded (6 hooks: …)」）：给开发看的，不进对话
+                return items
             item = goal_event(entry["content"], base())
             if item is None:
                 # 斜杠命令的回显（/model、/goal 不带参数……）：去掉外面那层标签
@@ -9257,6 +9260,51 @@ def session_trace(path, normalize, title=None, busy=None, expand=None, subagents
 TMUX_KEYS = {"enter": "Enter", "esc": "Escape", "escape": "Escape", "up": "Up", "down": "Down",
              "tab": "Tab", "shift+tab": "BTab", "1": "1", "2": "2", "3": "3", "4": "4", "y": "y", "n": "n"}
 
+# 终端里的 Claude Code 停在选择框上（11-11）：一轮答完后它会自己弹推广 / 引导框（「Teach auto mode about your environment?
+# 1. Yes / 2. Not now / 3. Don't show again」，光标默认在 Yes），这时往里粘字 + 回车，字被框吞掉、回车替用户选了 Yes，
+# 第二页的回车又把「扫描命令行历史」勾上了。认法（screen_text 的写法，去空白、小写）：最后一次画出的框底提示
+# 在最后一次画出的输入框状态行之后 = 框还开着（框关掉时输入框和状态行会整个重画，托管会话的真实输出验证过）
+_DIALOG_FOOTERS = ("esctocancel", "entertoconfirm")
+_PROMPT_MARKS = ("shift+tabtocycle", "forshortcuts", "/effort", "esctointerrupt", "automodeon", "bypasspermissionson",
+                 "accepteditson", "planmodeon")
+# 能替用户关掉的：只认这几种推广 / 引导框（Esc =「Not now」，什么都不改）。权限确认、提问框绝不替用户关
+_NAG_MARKS = ("teachautomode", "alsoscanshellhistory", "don'tshowagain")
+_NOT_NAG = ("doyouwant", "allow", "permission")
+DIALOG_REFUSED = ("电脑上的 Claude Code 正停在一个选择框上，消息没有送进去（免得回车替你选了选项）。"
+                  "请在会话终端里或电脑上处理这个框后再发")
+
+
+def claude_dialog(text):
+    """终端画面（screen_text 处理过的）停在选择框上：推广 / 引导框回 "nag"（可以 Esc 关掉），别的框回 "dialog"，没有框回 None"""
+    footer = max(text.rfind(mark) for mark in _DIALOG_FOOTERS)
+    if footer < 0 or len(text) - footer > 6000:   # 框开着时画面是静止的，框底提示就在最近的输出里；早画过的不算
+        return None
+    prompt = max(text.rfind(mark) for mark in _PROMPT_MARKS)
+    if prompt > footer:
+        return None
+    # 框的内容：从框顶那条「▔▔▔」边线（没有就往前 2000 字）到框底提示，别把框上面的对话算进来
+    box = text[max(prompt + 1, footer - 2000, text.rfind("▔", 0, footer) + 1):footer + 40]
+    if any(mark in box for mark in _NAG_MARKS) and not any(mark in box for mark in _NOT_NAG):
+        return "nag"
+    return "dialog"
+
+
+def _screen_gate(pane, text):
+    """tmux / Windows 控制台：要粘字之前看一眼当前屏幕。推广框按 Esc 关掉；别的框不送（抛错，客户端照实告诉用户）"""
+    if not text or not pane:
+        return
+    for _ in range(4):
+        kind = claude_dialog(screen_text(term_screen(pane).encode("utf-8", "replace")))
+        if kind == "nag":
+            log("%s 上弹着 Claude Code 的推广框，按 Esc 关掉再送" % pane)
+            term_keys(pane, "Escape")
+            time.sleep(1.0)
+            continue
+        if kind == "dialog":
+            raise RuntimeError(DIALOG_REFUSED)
+        return
+    raise RuntimeError(DIALOG_REFUSED)
+
 
 def tmux_send(pid, text, keys, submit):
     hosted = HOSTED.by_pid(pid)
@@ -9264,9 +9312,11 @@ def tmux_send(pid, text, keys, submit):
         return HOSTED.send(hosted, text, keys, submit)
     pane = _TMUX_PANES.get(pid) or find_tmux_pane(pid)
     if not pane and IS_WINDOWS and pid_alive(pid):
+        _screen_gate("console:%d" % pid, text)
         return console_send(pid, text, keys, submit)   # Windows 没有 tmux：写进它所在的控制台
     if not pane:
         raise RuntimeError("这个 CLI 会话不在 tmux 里，无法远程投递（在 tmux 中启动 claude 即可）")
+    _screen_gate(pane, text)
     if text:
         # 走 tmux 缓冲区 + 括号粘贴：多行内容不会被逐行提交
         buffer_name = "ccpulse-%d" % os.getpid()
@@ -14817,6 +14867,7 @@ class HostedHolder:
         self.buffer, self.end = bytearray(), 0
         self.lock = threading.Lock()
         self.write_lock = threading.Lock()
+        self.nag_lock, self.nag_tried = threading.Lock(), -1
         self.subscribers = []
         self.proc, self.fd, self.server = None, None, None
         self.started = time.time()
@@ -14874,6 +14925,7 @@ class HostedHolder:
         log("托管会话 %s：claude 已启动（pid %d，%s）" % (self.id, self.proc.pid, self.cwd))
         threading.Thread(target=self._serve, name="hosted-serve", daemon=True).start()
         threading.Thread(target=self._startup, name="hosted-startup", daemon=True).start()
+        threading.Thread(target=self._guard, name="hosted-guard", daemon=True).start()
         self._pump()
         try:
             code = self.proc.wait(timeout=5)
@@ -15016,7 +15068,41 @@ class HostedHolder:
             while data:
                 data = data[os.write(self.fd, data):]
 
+    def _dialog(self):
+        """现在是不是停在选择框上（见 claude_dialog）：看最近一段输出"""
+        return claude_dialog(screen_text(self._since(max(0, self.end - 131072))))
+
+    def _clear_nags(self):
+        """推广 / 引导框按 Esc 关掉（最多几次：引导有两页），回最后的状态（None / "dialog" / 还关不掉的 "nag"）"""
+        with self.nag_lock:
+            kind = self._dialog()
+            for _ in range(4):
+                # 同一个画面按过 Esc 没反应就别再按（空闲时连按两下 Esc 会打开「回到之前的消息」）
+                if kind != "nag" or self.end == self.nag_tried:
+                    break
+                log("托管会话 %s：Claude Code 弹了推广框，按 Esc 关掉" % self.id)
+                self.write(b"\x1b")
+                time.sleep(1.0)
+                self.nag_tried = self.end
+                kind = self._dialog()
+            return kind
+
+    def _guard(self):
+        """一直看着：Claude Code 空闲时弹出推广框（一轮答完常有）就关掉，免得挡住排队的消息、手机上一直「待确认」。
+        只在画面停住时看（框是静止的；干活时转圈的字一直在刷）"""
+        while self.proc and self.proc.poll() is None:
+            time.sleep(2.0)
+            if self.state["ready"] and time.time() - self.last_output > 1.5:
+                try:
+                    self._clear_nags()
+                except Exception as exc:  # noqa
+                    log("托管会话 %s：关推广框失败：%r" % (self.id, exc))
+
     def send(self, text, keys, submit):
+        if text:
+            # 停在框上时粘字 + 回车：字被框吞掉、回车替用户选了选项。推广框先关掉，别的框不送
+            if self._clear_nags():
+                raise RuntimeError(DIALOG_REFUSED)
         if text:
             # 括号粘贴：多行内容不会逐行提交（同 tmux paste-buffer -p）；去掉 ESC，免得内容里的「粘贴结束」提前收尾、后面变成按键
             body = text.replace("\r\n", "\n").replace("\x1b", "")

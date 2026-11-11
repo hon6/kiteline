@@ -108,6 +108,8 @@ final class MacClient: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         #if !KITELINE_MAC
         // 订阅了没有：电脑的使用统计里看谁是付费用户
         if let pro = ProGate.reported { request.setValue(pro ? "1" : "0", forHTTPHeaderField: "X-Kiteline-Pro") }
+        // 订阅的方案（year / month / unlocked = 开发版放开、没买）：后台分年付、月付，开发版不算付费
+        if let plan = ProGate.reportedPlan { request.setValue(plan, forHTTPHeaderField: "X-Kiteline-Plan") }
         #endif
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)

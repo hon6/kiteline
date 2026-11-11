@@ -81,10 +81,11 @@ class DeviceStore:
         log.write("登记设备「%s」（%s，%s）" % (device["name"], via, ip))
         return dict(device), token
 
-    def authenticate(self, token, ip, client=None, agent=None, pro=None, mp_user=None):
+    def authenticate(self, token, ip, client=None, agent=None, pro=None, mp_user=None, plan=None):
         """client：App 每个请求带的机型、系统、App 版本（X-Kiteline-Client），记下来给「设备」页和使用统计用；
         agent：User-Agent，App 的请求里系统自带构建号（TARS/202610271712 CFNetwork/…），旧版 App 也有；
         pro：订阅了 Kiteline Pro（X-Kiteline-Pro），旧版 App 不带。
+        plan：订阅的方案（X-Kiteline-Plan）：year / month / unlocked（开发版放开、没买），报了 pro 就跟着同步。
         mp_user：微信小程序带的用户编号（X-Kiteline-MP，中继给的 openid 摘要），随使用统计上报，运营后台据此对上小程序用户。
         手机 App 从 127.0.0.1 连进来只可能是点对点转进来的：记下最近一次走远程访问的时间（remoteAt）"""
         if not token.startswith(self.PREFIX):
@@ -108,6 +109,11 @@ class DeviceStore:
                     if pro is not None and device.get("pro") != pro:
                         device["pro"] = pro
                         changed = True
+                    if pro is not None and device.get("client") != "miniprogram":
+                        plan = plan if plan in ("year", "month", "unlocked") else None
+                        if device.get("plan") != plan:
+                            device["plan"] = plan
+                            changed = True
                     # 以前配对的小程序没报名字，叫成了「浏览器 2」：认出是小程序后改成「微信小程序」（只改自动起的名字）
                     if device.get("client") == "miniprogram" and re.fullmatch(r"(Mac |Windows )?浏览器( \d+)?", device.get("name") or ""):
                         name, n = "微信小程序", 2

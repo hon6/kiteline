@@ -2,6 +2,10 @@
 
 ## 1.0.39 (2026-11-11)
 
+### Bug Fixes
+
+- **Messages are no longer swallowed when a background session is blocked by a Claude Code dialog**: Claude Code sometimes shows a promotional or onboarding dialog after a reply (such as "Teach auto mode about your environment?"). Previously, a message sent from your phone at that moment landed in the dialog, and the Return key could pick an option on your behalf. Kiteline now closes these promotional dialogs automatically (the same as choosing "Not now") and never chooses an option for you. If a different dialog is open, such as a permission prompt, the message is not sent and you are asked to handle the dialog first.
+- Internal notices from Kiteline's own components (such as "kiteline: reloaded") no longer appear in conversations.
 
 ## 1.0.38 (2026-11-11)
 

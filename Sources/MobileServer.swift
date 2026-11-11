@@ -1247,7 +1247,8 @@ final class MobileServer {
             if let device = DeviceStore.shared.authenticate(token, ip: request.remoteAddress, client: request.headers["x-kiteline-client"],
                                                             agent: request.headers["user-agent"],
                                                             pro: request.headers["x-kiteline-pro"].map { $0 == "1" },
-                                                            mpUser: request.headers["x-kiteline-mp"]) { return .device(device) }
+                                                            mpUser: request.headers["x-kiteline-mp"],
+                                                            plan: request.headers["x-kiteline-plan"]) { return .device(device) }
             if token.hasPrefix("p"), linkTokenValid(token) { return .link(token) }
         }
         return nil
