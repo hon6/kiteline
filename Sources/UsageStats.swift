@@ -118,6 +118,12 @@ enum UsageStats {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// 推荐码：分享战绩时印进专属小程序码、写进转发卡片的链接；新用户经它打开小程序，中继记下是谁带来的。
+    /// 和统计编号一起算的 8 位摘要，运营后台用同样的算法对回是哪个客户（relay/stats 的 referralCode）；不含任何个人信息
+    static var referralCode: String {
+        SHA256.hash(data: Data(("kiteline-ref/" + identity.install).utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// 设备、会话的 id 不原样发：和本机编号一起算个摘要，后台只拿来区分是不是同一个
     private static func digest(_ value: String) -> String {
         SHA256.hash(data: Data((identity.install + "/" + value).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
@@ -171,6 +177,12 @@ enum UsageStats {
         if let pro = d.pro { out["pro"] = pro }
         if let plan = d.plan { out["plan"] = plan }
         if let remoteAt = d.remoteAt { out["remoteAt"] = Int64(remoteAt) }
+        // 分享战绩的次数（按渠道、按天）：运营后台看谁分享了多少次
+        if let shares = d.shares, !shares.isEmpty {
+            out["shares"] = shares
+            out["shareDays"] = d.shareDays ?? [:]
+            if let at = d.sharedAt { out["sharedAt"] = Int64(at) }
+        }
         if d.client == "miniprogram" {
             // 微信小程序（来源由电脑端的小程序入口定，不能冒充）；mpUser 是中继给的用户编号，后台据此对上小程序用户和订阅
             out["kind"] = "miniprogram"

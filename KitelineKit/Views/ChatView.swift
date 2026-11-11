@@ -28,6 +28,7 @@ struct ChatView: View {
     /// Agent 详情（点助手头像、标题栏的 agent 标志、会话菜单）
     @State private var showAgentInfo = false
     @State private var showShare = false
+    @State private var showBrag = false
     /// 会话菜单里点了「拉群协作」
     @State private var showGroup = false
     @State private var showTodos = false
@@ -443,6 +444,7 @@ struct ChatView: View {
         .sheetPanel(isPresented: $showInfo) { SessionReader(slot: slot) { session in if let session { SessionInfoView(session: session) } } }
         .sheetPanel(isPresented: $showAgentInfo) { AgentInfoSheet(key: key, agent: slot.agent) }
         .sheetPanel(isPresented: $showShare) { GuestShareSheet(key: key).environment(model) }
+        .sheetPanel(isPresented: $showBrag) { BragShareSheet(sessionKey: key).environment(model) }
         .sheetPanel(isPresented: $showGroup) { GroupPickerSheet(mode: .create([key])) { open(.group($0)) }.environment(model) }
         .sheetPanel(isPresented: $showSearch) { ChatSearchSheet(key: key) { jumpTarget = $0 } }
         .sheetPanel(isPresented: $showNewTask) {
@@ -654,6 +656,7 @@ struct ChatView: View {
         case .info: showInfo = true
         case .agentInfo: showAgentInfo = true
         case .share: showShare = true
+        case .brag: showBrag = true
         case .group: showGroup = true
         case .bottom: bottomRequest += 1
         case .close: confirmClose = true

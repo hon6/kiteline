@@ -506,6 +506,8 @@ final class DemoServer: @unchecked Sendable {
                 return json(["ok": true, "agents": [], "steps": [:]])
             case ("GET", "/api/todos"):
                 return json(todoState)
+            case ("GET", "/api/brag"):
+                return json(demoBrag(session: !key.isEmpty))
             case ("GET", "/api/machine"):
                 return json(demoMachine(query["source"] ?? "local"))
             case ("GET", "/api/agent-info"):
@@ -835,6 +837,50 @@ private struct TimeShift {
         }
     }
 }
+// MARK: - 分享战绩（演示）
+
+extension DemoServer {
+    /// 近 30 天每天的数字（固定的起伏，不随机，截图每次一样）；session = 一个任务从头到尾的
+    fileprivate func demoBrag(session: Bool) -> [String: Any] {
+        let hour = 3_600_000.0
+        if session {
+            return ["ok": true, "session": ["linesAdded": 1286, "linesRemoved": 214, "files": 23, "edits": 61, "prompts": 9, "toolCalls": 214,
+                                            "activeMinutes": 156, "agentMinutes": 156, "sessions": 1, "peak": 1, "input": 41_200, "output": 182_400,
+                                            "cacheRead": 38_600_000, "cacheWrite": 1_900_000, "requests": 233, "cost": 31.4,
+                                            "firstAt": now - 3 * hour, "lastAt": now - 0.2 * hour, "agents": ["claude"],
+                                            "agentTokens": ["claude": 40_723_600], "models": ["claude-opus-5-5": 40_723_600]]]
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let wave = [0.42, 0.65, 0.0, 0.81, 0.57, 0.93, 0.36, 0.0, 0.72, 0.88, 0.51, 0.66, 0.79, 0.0, 0.47, 0.84, 0.61, 0.95, 0.7, 0.55,
+                    0.0, 0.68, 0.77, 0.83, 0.59, 0.9, 0.74, 0.86, 1.0, 0.62]
+        var days: [[String: Any]] = []
+        for offset in 0..<30 {
+            let date = Date(timeIntervalSince1970: now / 1000 - Double(29 - offset) * 86400)
+            let w = wave[offset]
+            let start = Calendar.current.startOfDay(for: date).timeIntervalSince1970 * 1000
+            let tokens = Double(Int(310_000 * w) + Int(1_350_000 * w) + Int(412_000_000 * w) + Int(9_800_000 * w))
+            // 24 小时曲线（同 brag.js demoCurve）：上午、下午两段，晚上一段收尾
+            let curve: [Int] = (0..<96).map { i in
+                let h = Double(i) / 4
+                let v = h >= 9.2 && h < 12 ? 2 + i % 3 : h >= 13.5 && h < 18.5 ? 3 + (i * 7) % 4 : h >= 20 && h < 23.5 ? 1 + i % 2 : 0
+                return Int((Double(v) * w).rounded())
+            }
+            days.append(["day": formatter.string(from: date), "linesAdded": Int(3120 * w), "linesRemoved": Int(640 * w), "files": Int(46 * w),
+                         "edits": Int(180 * w), "prompts": Int(58 * w), "toolCalls": Int(1460 * w), "sessions": Int((11 * w).rounded()),
+                         "activeMinutes": Int(560 * w), "agentMinutes": Int(1180 * w), "peak": w > 0 ? Int((6 * w).rounded()) : 0,
+                         "input": Int(310_000 * w), "output": Int(1_350_000 * w), "cacheRead": Int(412_000_000 * w), "cacheWrite": Int(9_800_000 * w),
+                         "requests": Int(2100 * w), "cost": 128.6 * w, "firstAt": w > 0 ? start + 9.2 * hour : 0,
+                         "lastAt": w > 0 ? start + (offset == 28 ? 25.6 : 21.4) * hour : 0, "agents": w > 0 ? ["claude", "codex"] : [],
+                         "agentTokens": w > 0 ? ["claude": (tokens * 0.78).rounded(), "codex": (tokens * 0.22).rounded()] : [String: Double](),
+                         "models": w > 0 ? ["claude-opus-5-5": (tokens * 0.66).rounded(), "claude-sonnet-5-5": (tokens * 0.12).rounded(),
+                                            "gpt-5-codex": (tokens * 0.22).rounded()] : [String: Double](),
+                         "curve": curve])
+        }
+        return ["ok": true, "days": days, "range": 30, "machines": 1, "errors": []]
+    }
+}
+
 // MARK: - 会话群（演示）
 
 extension DemoServer {
@@ -843,10 +889,10 @@ extension DemoServer {
         demoGroups = []
         demoGroupMessages = [:]
         if var features = state["features"] as? [String] {
-            if !features.contains("groups") { features.append("groups") }
+            for name in ["groups", "brag"] where !features.contains(name) { features.append(name) }
             state["features"] = features
         } else {
-            state["features"] = ["files", "groups"]
+            state["features"] = ["files", "groups", "brag"]
         }
         guard let plan = demoKey(D("订单导出功能")), let home = demoKey(D("首页卡片间距")) else { return }
         let minute = 60_000.0

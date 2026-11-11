@@ -148,6 +148,14 @@ cp -R "$ROOT/Resources/en.lproj" "$APP/Contents/Resources/"
 # 网页版已下线（10-22）：Resources/web 不再打进 App，服务端根路径只回说明页（见 MobileServer.noticePage）
 # 世界模式的网页（three.js，各端共用一份，见 Sources/WorldView.swift、world.md（内部文档））
 cp -R "$ROOT/Resources/world" "$APP/Contents/Resources/"
+# 分享战绩的画图脚本和图（和小程序共用 miniprogram/lib/brag.js；Mac 的会话菜单里也能打开「分享本次任务战绩」）。
+# 开源版没有 miniprogram/，跳过
+if [ -f "$ROOT/miniprogram/lib/brag.js" ]; then
+  BRAG_TMP="$(mktemp -d)"
+  bash "$ROOT/tools/sync-brag.sh" "$BRAG_TMP/brag"
+  cp "$BRAG_TMP"/brag/* "$APP/Contents/Resources/"
+  rm -rf "$BRAG_TMP"
+fi
 # 代码 IDE 的编辑器内核（CodeMirror 6 打成一个 HTML，iPhone / Mac 共用；tools/editor/build.sh 生成）
 cp -R "$ROOT/Resources/editor" "$APP/Contents/Resources/"
 # 游客链接（局域网只读分享）看的页面：电脑自己在 /g/<编号> 给（见 Sources/GuestLinks.swift）

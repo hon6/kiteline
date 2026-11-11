@@ -84,6 +84,10 @@ struct SessionMenuSheet: View {
                         if model.hostFeatures.contains("share") {
                             MenuRow(symbol: "link", title: L("分享只读链接"), note: L("同一 Wi-Fi 的人用浏览器就能查看这个会话"), chevron: true) { run(.share) }
                         }
+                        // 分享战绩：这个任务用了多少 token、改了几行、干了多久，画成图发微信（只有数字，不含内容）
+                        if model.hostFeatures.contains("brag") {
+                            MenuRow(symbol: "trophy", title: L("分享本次任务战绩"), note: L("用了多少 Token、改了多少行，生成图片发微信"), chevron: true) { run(.brag) }
+                        }
                         MenuRow(symbol: "person.crop.circle", title: L("Agent 详情"), note: L("头像、昵称，所在设备的 IP 和配置")) { run(.agentInfo) }
                     }
                     // 关闭会话（电脑端给 close 才有，目前是 Claude Code）：关掉电脑上 VS Code 里的标签页（终端里 /exit），会话进历史
@@ -123,7 +127,7 @@ enum CloseSessionText {
 }
 
 /// menu、speak：横着的 iPhone 没有导航栏，分屏标题条上的「⋯」「朗读」经 externalAction 交给对话页
-enum SessionAction { case search, files, changes, tests, agents, stop, mode, model, goal, compact, newTask, info, agentInfo, bottom, close, menu, speak, terminal, group, share }
+enum SessionAction { case search, files, changes, tests, agents, stop, mode, model, goal, compact, newTask, info, agentInfo, bottom, close, menu, speak, terminal, group, share, brag }
 
 struct MenuTile: View {
     let symbol: String

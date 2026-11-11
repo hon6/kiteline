@@ -161,6 +161,32 @@ def aggregate_start_of_day():
     return config.start_of_day_ms()
 
 
+def yesterday_brag_line(payload, now):
+    """晨报里的「昨日战绩」一行：(中文, 英文)；昨天没干活回 None（同 Mac 版 Brag.yesterdayLine）"""
+    key = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    day = next((d for d in payload.get("days") or [] if d.get("day") == key), None)
+    if not day:
+        return None
+    n = lambda field: float(day.get(field) or 0)
+    tokens = n("input") + n("output") + n("cacheRead") + n("cacheWrite")
+    if tokens <= 0 and n("sessions") <= 0:
+        return None
+    zh_num = lambda v: "%.2f 亿" % (v / 1e8) if v >= 1e8 else "%.1f 万" % (v / 1e4) if v >= 1e4 else str(int(v))
+    en_num = lambda v: "%.2fB" % (v / 1e9) if v >= 1e9 else "%.1fM" % (v / 1e6) if v >= 1e6 else "%.1fK" % (v / 1e3) if v >= 1e3 else str(int(v))
+    zh, en = ["昨日战绩：%s Token" % zh_num(tokens)], ["Yesterday: %s tokens" % en_num(tokens)]
+    if n("linesAdded") > 0:
+        zh.append("+{:,} 行代码".format(int(n("linesAdded"))))
+        en.append("+{:,} lines".format(int(n("linesAdded"))))
+    hours = n("activeMinutes") / 60
+    if hours >= 0.1:
+        zh.append("在线 %.1f 小时" % hours)
+        en.append("%.1f h online" % hours)
+    if n("peak") >= 2:
+        zh.append("最多同时 %d 个 Agent" % n("peak"))
+        en.append("up to %d agents at once" % n("peak"))
+    return " · ".join(zh), " · ".join(en)
+
+
 def send_morning(app, manual, now=None):
     now = now or datetime.now()
     since_dt = (now - timedelta(days=1)).replace(hour=18, minute=0, second=0, microsecond=0)
@@ -170,7 +196,13 @@ def send_morning(app, manual, now=None):
     with app.store.lock:
         records = list(app.store.records)
     waiting = [r for r in records if r.activity == "waiting"]
-    if not sessions and not waiting and not manual:
+    # 昨日战绩一行（Token、代码行数、在线时长）：昨天干过活就推，点开今日动态最上面就是分享卡
+    try:
+        brag_line = yesterday_brag_line(aggregate.brag(app.store, 2), now)
+    except Exception as exc:  # noqa: BLE001
+        log.write("早安简报：读昨日战绩出错：%s" % exc)
+        brag_line = None
+    if not sessions and not waiting and not brag_line and not manual:
         log.write("早安简报：昨晚没有动态，也没有等你的会话，不推送")
         return "昨晚无动态"
     stuck = []
@@ -188,6 +220,8 @@ def send_morning(app, manual, now=None):
         lines = []
         if waiting:
             lines.append(p("待确认：%lld 个会话", len(waiting)) + p.comma + p.list.join(display_title(r.snap) for r in waiting[:3]))
+        if brag_line:
+            lines.append(brag_line[1] if english else brag_line[0])
         lines.append(p("昨晚：%@", headline(payload, english)) if sessions else p("昨晚无 Claude Code 动态"))
         if stuck:
             lines.append(p("可能停滞：%lld 个会话", len(stuck)) + p.comma + p.semicolon.join(

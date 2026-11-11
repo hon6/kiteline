@@ -945,6 +945,17 @@ final class MobileServer {
                 respond(.json(["ok": true, "daily": daily, "cap": cap]))
             case ("POST", "/api/budget/check"):
                 BudgetWatch.shared.check { message in respond(.json(["ok": true, "message": message])) }
+            case ("POST", "/api/brag/shared"):
+                // 手机上点了分享战绩：按设备记次数（主令牌——电脑自己的界面——不记）
+                if let deviceId = auth.deviceId { DeviceStore.shared.noteShare(request.jsonBody?["via"] as? String ?? "", for: deviceId) }
+                respond(.json(["ok": true]))
+            case ("GET", "/api/brag"):
+                // 分享战绩：带 key 只算这一个会话（任务做完时分享），不带就是最近 N 天按天的数字
+                if request.query["key"] != nil {
+                    self.forwardAny(request, ["cmd": "brag"], respond: respond)
+                } else {
+                    Brag.collect(days: Int(request.query["days"] ?? "") ?? 30, fresh: request.query["fresh"] == "1") { respond(.json($0)) }
+                }
             case ("GET", "/api/usage"):
                 UsageReport.collect(days: Int(request.query["days"] ?? "") ?? 7, fresh: request.query["fresh"] == "1") { respond(.json($0)) }
             case ("GET", "/api/limits"):

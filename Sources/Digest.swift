@@ -178,9 +178,12 @@ final class DailyReport {
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now) ?? now
         let since = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: yesterday) ?? yesterday
         Digest.collect(since: Int64(since.timeIntervalSince1970 * 1000), fresh: true) { payload in
+          // 昨日战绩一行（Token、代码行数、在线时长）：昨天干过活就推，点开今日动态最上面就是分享卡
+          Brag.collect(days: 2) { brag in
+            let bragLine = Brag.yesterdayLine(brag, now: now)
             let sessions = (payload["sessions"] as? [[String: Any]]) ?? []
             let waiting = AppState.shared.store.records.filter { $0.snapshot.act == .waiting }
-            if sessions.isEmpty && waiting.isEmpty && !manual {
+            if sessions.isEmpty && waiting.isEmpty && bragLine == nil && !manual {
                 Log.write("早安简报：昨晚没有动态，也没有等你的会话，不推送")
                 completion?("昨晚无动态"); return
             }
@@ -198,6 +201,7 @@ final class DailyReport {
                 if !waiting.isEmpty {
                     lines.append(p("待确认：%lld 个会话", waiting.count) + p.comma + waiting.prefix(3).map { $0.snapshot.displayTitle }.joined(separator: p.list))
                 }
+                if let bragLine { lines.append(english ? bragLine.en : bragLine.zh) }
                 lines.append(sessions.isEmpty ? p("昨晚无 Claude Code 动态") : p("昨晚：%@", Digest.headline(payload, english: english)))
                 if !stuck.isEmpty {
                     lines.append(p("可能停滞：%lld 个会话", stuck.count) + p.comma + stuck.prefix(3).map { title, minutes in
@@ -230,6 +234,7 @@ final class DailyReport {
                 Log.write("早安简报已推送：\(lines.joined(separator: "；"))")
                 completion?("已推送：\(lines.joined(separator: "；"))")
             }
+          }
         }
     }
 

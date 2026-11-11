@@ -1,5 +1,12 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.40 (2026-11-12)
+
+### New Features
+
+- **Share your stats** (iPhone, WeChat Mini Program): From the Usage page or the session menu, turn today's, yesterday's, the last 7 or 30 days', or a single task's token usage, lines of code changed, time online and number of agents running at once into a shareable image with a light-hearted one-liner, ready to send to WeChat friends or post to Moments. The image contains only numbers — no conversation content, project names or file names — and carries a Kiteline Mini Program code at the bottom. Yesterday's stats also pop up the first time you open the app after 8 a.m. each day (you can turn this off on the share page), and a stats strip on the home screen and in Today's Activity lets you check and share them any time. Requires this version of Kiteline on your computer.
+- **Yesterday's stats in the morning summary**: The morning push now includes a line with yesterday's token usage, lines of code added, time online and the most agents running at once, and is sent whenever you used Kiteline the day before.
+
 ## 1.0.39 (2026-11-11)
 
 ### Bug Fixes

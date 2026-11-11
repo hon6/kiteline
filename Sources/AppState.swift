@@ -456,7 +456,7 @@ final class AppState {
             // hostUpdate = 手机上能看这台电脑的新版本、让它下载安装和重启（/api/host-update）
             // hostedSetup = 远端电脑上后台运行 Claude Code：按设备检测出口、开关，把会话转到后台（/api/hosted/*）
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups"]
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag"]
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
             "hosted": ["tipOff": config.mobile.hostedTipOff],
         ]

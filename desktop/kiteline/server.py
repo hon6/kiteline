@@ -1298,6 +1298,22 @@ def r_usage(s, request, *_):
     return Response.json(aggregate.usage(s.app.store, int(request.query.get("days") or 7), request.query.get("fresh") == "1"))
 
 
+def r_brag_shared(s, request, kind, who, device_id):
+    """手机上点了分享战绩：按设备记次数（主令牌不记）"""
+    if device_id:
+        s.app.devices.note_share(device_id, str((request.json or {}).get("via") or ""))
+    return Response.json({"ok": True})
+
+
+def r_brag(s, request, *_):
+    """分享战绩：带 key 只算这一个会话（任务做完时分享），不带就是最近 N 天按天的数字"""
+    if request.query.get("key"):
+        return s.forward_any(request, {"cmd": "brag"}, timeout=70)
+    payload = dict(aggregate.brag(s.app.store, int(request.query.get("days") or 30), request.query.get("fresh") == "1"))
+    payload["ref"] = s.app.stats.referral_code()   # 推荐码：分享图上的专属小程序码、转发卡片的链接带它，后台统计谁带来了多少人
+    return Response.json(payload)
+
+
 def r_limits(s, request, *_):
     return Response.json(aggregate.limits(s.app.store, request.query.get("fresh") == "1"))
 
@@ -1881,7 +1897,7 @@ ROUTES = {
     ("GET", "/api/tests"): r_tests, ("GET", "/api/session-meta"): r_session_meta, ("GET", "/api/sessions"): r_sessions,
     ("GET", "/api/search"): r_search, ("GET", "/api/projects"): r_projects, ("GET", "/api/dirs"): r_dirs, ("POST", "/api/dirs"): r_dirs, ("GET", "/api/repo-info"): r_repo_info,
     ("GET", "/api/digest"): r_digest, ("POST", "/api/digest/push"): r_digest_push, ("POST", "/api/morning/push"): r_morning_push,
-    ("GET", "/api/usage"): r_usage, ("GET", "/api/limits"): r_limits, ("GET", "/api/budget"): r_budget, ("POST", "/api/budget"): r_budget_set,
+    ("GET", "/api/usage"): r_usage, ("GET", "/api/brag"): r_brag, ("POST", "/api/brag/shared"): r_brag_shared, ("GET", "/api/limits"): r_limits, ("GET", "/api/budget"): r_budget, ("POST", "/api/budget"): r_budget_set,
     ("POST", "/api/budget/check"): r_budget_check, ("GET", "/api/ping"): r_ping, ("GET", "/api/info"): r_info,
     ("GET", "/api/whoami"): r_whoami, ("GET", "/api/devices"): r_devices, ("POST", "/api/devices/link"): r_devices_link,
     ("POST", "/api/devices/register"): r_devices_register, ("POST", "/api/devices/revoke"): r_devices_revoke,

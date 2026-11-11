@@ -208,6 +208,25 @@ class DeviceStore:
         if changed:
             self._save()
 
+    def note_share(self, device_id, via):
+        """手机上点了分享战绩（发好友、发朋友圈、存图）：按渠道、按天（最近 60 天）记次数，随使用统计上报（同 Mac 版 noteShare）"""
+        via = via if via in ("friend", "moments", "save") else "other"
+        day = time.strftime("%Y-%m-%d")
+        with self._lock:
+            for device in self._devices:
+                if device["id"] == device_id:
+                    shares = device.setdefault("shares", {})
+                    shares[via] = shares.get(via, 0) + 1
+                    days = device.setdefault("shareDays", {})
+                    days[day] = days.get(day, 0) + 1
+                    for key in sorted(days)[:-60]:
+                        del days[key]
+                    device["sharedAt"] = now_ms()
+                    break
+            else:
+                return
+        self._save()
+
     def set_watch(self, device_id, paired, installed, complication=None):
         with self._lock:
             for device in self._devices:

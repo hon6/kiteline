@@ -22,6 +22,10 @@ struct TodayView: View {
                     Text("近 7 天").tag("week")
                 }
                 .pickerStyle(.segmented)
+                // 战绩条：跟着上面选的今天 / 昨天 / 近 7 天，数字一眼看到，点了生成分享图（电脑端支持才有）
+                if model.hostFeatures.contains("brag") {
+                    BragStrip(range: range == "yesterday" ? .yesterday : range == "week" ? .week : .today)
+                }
                 if let payload {
                     stats(payload.totals)
                     if payload.sessions.isEmpty { PageNote(text: "此期间暂无 Claude Code 动态。") }
@@ -203,6 +207,7 @@ struct UsageView: View {
     @State private var limits: [LimitDevice]?
     @State private var error: String?
     @State private var picking: BudgetKind?
+    @State private var showBrag = false
 
     enum BudgetKind: String, Identifiable { case daily, cap; var id: String { rawValue } }
 
@@ -223,6 +228,24 @@ struct UsageView: View {
                     Text("30 天").tag(30)
                 }
                 .pickerStyle(.segmented)
+                // 分享战绩：把用了多少 token、改了多少行画成图发微信（电脑端支持才有）
+                if model.hostFeatures.contains("brag") {
+                    Button { showBrag = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "trophy.fill").foregroundStyle(KiteColor.brand)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L("分享战绩")).font(.ui(.subheadline).weight(.semibold)).foregroundStyle(.primary)
+                                Text(L("用了多少 Token、改了多少行代码，生成图片发微信好友或朋友圈")).font(.ui(.caption)).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.ui(.caption).weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .padding(12)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
                 if let payload {
                     content(payload)
                 } else if let error {
@@ -238,6 +261,7 @@ struct UsageView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .sheetPanel(isPresented: $showBrag) { BragShareSheet().environment(model) }
         .task(id: days) { await load() }
         // 额度每 5 分钟重拉一次（同首页）
         .task {

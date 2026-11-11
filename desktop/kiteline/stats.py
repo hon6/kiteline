@@ -156,6 +156,11 @@ class UsageStats:
         self._identity = data
         return data
 
+    def referral_code(self):
+        """推荐码：分享战绩时印进专属小程序码、写进转发卡片的链接，新用户经它打开小程序，中继记下是谁带来的。
+        和统计编号一起算的 8 位摘要，运营后台用同样算法对回是哪个客户（同 Mac 版 UsageStats.referralCode）"""
+        return hashlib.sha256(("kiteline-ref/" + self.identity["install"]).encode()).hexdigest()[:8]
+
     def digest(self, value):
         """设备、会话的 id 不原样发：和本机编号一起算个摘要，后台只拿来区分是不是同一个"""
         return hashlib.sha256((self.identity["install"] + "/" + value).encode()).hexdigest()[:16]
@@ -224,6 +229,12 @@ class UsageStats:
             out["plan"] = d["plan"]
         if d.get("remoteAt"):
             out["remoteAt"] = int(d["remoteAt"])
+        if d.get("shares"):
+            # 分享战绩的次数（按渠道、按天）：运营后台看谁分享了多少次
+            out["shares"] = d["shares"]
+            out["shareDays"] = d.get("shareDays") or {}
+            if d.get("sharedAt"):
+                out["sharedAt"] = int(d["sharedAt"])
         client = parse_client(d.get("client"))
         agent = d.get("agent") or ""
         if d.get("build"):

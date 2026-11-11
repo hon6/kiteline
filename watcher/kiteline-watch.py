@@ -117,8 +117,8 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.35.0"
-FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs"]
+WATCHER_VERSION = "2.36.0"
+FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 MESSAGE_MAX_CHARS = 600
@@ -6972,6 +6972,13 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
             acc[0] += cost
             acc[1] += weight
     days, models, projects_out, agents = {}, {}, {}, {}
+    day_split = {}   # 天 -> {"agents": {agent: token}, "models": {模型: token}}：分享战绩的「阵容」用
+
+    def split(day, agent, model, vals):
+        entry = day_split.setdefault(day, {"agents": {}, "models": {}})
+        tokens = vals[0] + vals[1] + vals[2] + vals[3]
+        entry["agents"][agent] = entry["agents"].get(agent, 0) + tokens
+        entry["models"][model] = entry["models"].get(model, 0) + tokens
     totals = {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "requests": 0, "cost": 0.0, "estimated": 0.0}
     unpriced = set()
 
@@ -7006,6 +7013,7 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
             cwd = scan["cwd"] or ""
             add(projects_out.setdefault(cwd, blank(cwd=cwd)), vals, cost, estimated)
             add(agents.setdefault("claude", blank(agent="claude", name="Claude Code")), vals, cost, estimated)
+            split(day, "claude", model, vals)
             add(totals, vals, cost, estimated)
     sessions = sum(1 for _, scan in scans if any(hour * 3600000 >= since_ms for hour, _ in scan["buckets"]))
     # 别家 agent：插件报的一条条记录（花费是 agent 自己记的；没记的模型只算 token）
@@ -7031,6 +7039,7 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
             add(projects_out.setdefault(cwd, blank(cwd=cwd)), vals, cost, False)
             # 这家一条花费都没记（Codex、DSH、Qwen Code）：界面上写「仅 token」，别显示成 $0
             row = agents.setdefault(plugin.id, blank(agent=plugin.id, name=plugin.name, unpriced=True))
+            split(day, plugin.id, model, vals)
             add(row, vals, cost, False)
             row["unpriced"] = row["unpriced"] and not priced
             add(totals, vals, cost, False)
@@ -7046,7 +7055,360 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
         "totals": totals,
         "unpriced": sorted(unpriced),
         "sessions": sessions,
+        "daySplit": day_split,
     }
+
+
+# ---------------------------------------------------------------------------
+# 战绩（分享卡片用）：每天改了多少行、在线多久、同时开了几个会话。只有数字，不带任何对话内容、文件名、项目名
+# ---------------------------------------------------------------------------
+
+BRAG_IDLE_MS = 5 * 60000      # 同一个会话两次动静隔得比这短，算一直在干活
+_BRAG_SCAN_CACHE = {}         # path -> (signature, scan)
+
+
+def _patch_counts(patch):
+    """apply_patch 补丁 → [(路径, 加的行, 删的行)]，只数 + / - 行，上下文行不算"""
+    out = []
+    for line in (patch or "").split("\n"):
+        match = re.match(r"^\*\*\* (Add|Update|Delete) File: (.+)$", line)
+        if match:
+            out.append([match.group(2).strip(), 0, 0])
+        elif out and not line.startswith("*** ") and not line.startswith("@@"):
+            if line.startswith("+"):
+                out[-1][1] += 1
+            elif line.startswith("-"):
+                out[-1][2] += 1
+    return [tuple(item) for item in out]
+
+
+def _codex_patch_text(name, args):
+    """Codex 的一次工具调用里如果是补丁，取出补丁正文"""
+    if name == "apply_patch":
+        if isinstance(args, dict):
+            return args.get("input") or args.get("patch") or ""
+        return args if isinstance(args, str) else ""
+    if name in CODEX_SHELL_TOOLS and isinstance(args, dict):
+        command = _shell_text(args.get("cmd") or args.get("command"))
+        if command.startswith("apply_patch"):
+            body = command[len("apply_patch"):].strip()
+            if len(body) >= 2 and body[0] == body[-1] and body[0] in "'\"":
+                body = body[1:-1]
+            if "*** Begin Patch" in body:
+                return body.replace("\\n", "\n") if "\n" not in body else body
+    return ""
+
+
+def _brag_claude_file(path, scan):
+    """一份 Claude Code 记录：每条带时间的记录算一次动静；用户发的话、工具调用、编辑结果（按真实补丁数行）"""
+    try:
+        handle = open(path, "rb")
+    except OSError:
+        return
+    with handle:
+        for raw in handle:
+            tail = raw[-8000:]
+            found = list(_TS_BYTES.finditer(tail))
+            if not found:
+                continue
+            ts = parse_ts(found[-1].group(1).decode() + "Z")
+            if ts is None:
+                continue
+            scan["events"].append(ts)
+            head = raw[:1500]   # 用户那一行的 "type":"user" 在 message 前面；助手那一行的 type 在行尾，不能靠它认
+            if b'"type":"user"' not in head and b'"type": "user"' not in head:
+                # 工具调用只数个数，不解析整行（大部分时间花在这里）；正文里的同样字样是转义过的（\"），数不到
+                uses = raw.count(b'"type":"tool_use"') + raw.count(b'"type": "tool_use"')
+                if uses:
+                    scan["tools"].extend([ts] * uses)
+                continue
+            if b'"toolUseResult"' in raw and b'"structuredPatch"' not in raw:
+                continue   # 读文件、跑命令的结果：不是编辑，也不是用户说的话
+            entry = parse_line(raw)
+            if not isinstance(entry, dict) or entry.get("type") != "user":
+                continue
+            scan["cwd"] = scan["cwd"] or entry.get("cwd")
+            result = entry.get("toolUseResult")
+            if isinstance(result, dict):
+                target = result.get("filePath") or result.get("notebook_path") or ""
+                added = removed = 0
+                text = result.get("content")
+                if result.get("type") == "create" and isinstance(text, str) and text:
+                    added = text.count("\n") + (0 if text.endswith("\n") else 1)
+                for hunk in result.get("structuredPatch") or []:
+                    for line in (hunk.get("lines") if isinstance(hunk, dict) else None) or []:
+                        if isinstance(line, str) and line.startswith("+"):
+                            added += 1
+                        elif isinstance(line, str) and line.startswith("-"):
+                            removed += 1
+                if added or removed:
+                    scan["edits"].append((ts, added, removed, target))
+                continue
+            if entry.get("isSidechain") or entry.get("isMeta") or result is not None:
+                continue
+            if any(item.get("t") == "user" for item in normalize_line(0, entry)):
+                scan["prompts"].append(ts)
+
+
+def _brag_codex_file(path, scan):
+    """一份 Codex rollout：用户发的话、工具调用、补丁（apply_patch，或 shell 里调的 apply_patch）"""
+    try:
+        handle = open(path, "rb")
+    except OSError:
+        return
+    with handle:
+        for raw in handle:
+            entry = parse_line(raw)
+            if not isinstance(entry, dict):
+                continue
+            ts = parse_ts(entry.get("timestamp"))
+            payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+            if ts is None:
+                continue
+            scan["events"].append(ts)
+            kind = payload.get("type")
+            if entry.get("type") in ("session_meta", "turn_context"):
+                scan["cwd"] = payload.get("cwd") or scan["cwd"]
+            elif entry.get("type") == "event_msg" and kind == "user_message":
+                scan["prompts"].append(ts)
+            elif entry.get("type") == "response_item" and kind in ("function_call", "custom_tool_call", "local_shell_call"):
+                scan["tools"].append(ts)
+                name = payload.get("name") or ("shell" if kind == "local_shell_call" else "")
+                args = payload.get("arguments") if kind == "function_call" else payload.get("input")
+                if kind == "local_shell_call":
+                    args = payload.get("action") or {}
+                if isinstance(args, str) and kind == "function_call":
+                    try:
+                        args = json.loads(args)
+                    except ValueError:
+                        pass
+                for target, added, removed in _patch_counts(_codex_patch_text(name, args)):
+                    if added or removed:
+                        scan["edits"].append((ts, added, removed, target))
+
+
+def brag_scan(path, agent):
+    """一个会话的动静（含 Claude 子代理）：文件没变就用上次的"""
+    files = [path]
+    if agent == "claude":
+        sub_dir = os.path.join(path[:-6], "subagents")
+        try:
+            files += [os.path.join(sub_dir, n) for n in sorted(os.listdir(sub_dir)) if n.endswith(".jsonl")]
+        except OSError:
+            pass
+    try:
+        signature = tuple((os.path.getsize(f), os.path.getmtime(f)) for f in files)
+    except OSError:
+        return None
+    hit = _BRAG_SCAN_CACHE.get(path)
+    if hit and hit[0] == signature:
+        return hit[1]
+    scan = {"agent": agent, "events": [], "prompts": [], "tools": [], "edits": [], "cwd": None}
+    for name in files:
+        (_brag_claude_file if agent == "claude" else _brag_codex_file)(name, scan)
+    scan["events"].sort()
+    _BRAG_SCAN_CACHE[path] = (signature, scan)
+    return scan
+
+
+def _brag_spans(events, since_ms, until_ms):
+    """一串动静时间（已排序）→ 在干活的时间段 [[开始分钟, 结束分钟)]：相邻两次隔不到 5 分钟连成一段，孤零零的一次算 1 分钟"""
+    spans = []
+    for ts in events:
+        if ts < since_ms or (until_ms and ts >= until_ms):
+            continue
+        if spans and ts - spans[-1][2] <= BRAG_IDLE_MS:
+            spans[-1][1] = max(spans[-1][1], ts // 60000 + 1)
+            spans[-1][2] = ts
+        else:
+            spans.append([ts // 60000, ts // 60000 + 1, ts])
+    return [[s, e] for s, e, _ in spans]
+
+
+def brag_merge(lanes):
+    """好几个会话（可能在好几台电脑上）的时间段 → (并起来的总分钟数, 各会话加起来的分钟数, 最多同时几个)"""
+    points, union, total = [], [], 0
+    for lane in lanes:
+        for start, end in lane:
+            total += end - start
+            points.append((start, 1))
+            points.append((end, -1))
+    points.sort(key=lambda p: (p[0], p[1]))   # 同一分钟先结束再开始，首尾相接不算同时
+    peak = current = 0
+    for _, step in points:
+        current += step
+        peak = max(peak, current)
+    for start, end in sorted(span for lane in lanes for span in lane):
+        if union and start <= union[-1][1]:
+            union[-1][1] = max(union[-1][1], end)
+        else:
+            union.append([start, end])
+    return sum(e - s for s, e in union), total, peak
+
+
+def brag_curve(lanes, day, tz_minutes):
+    """一天 96 格（每格 15 分钟），每格有几个会话在干活：分享卡片上的 24 小时活跃曲线。多台电脑的直接逐格相加"""
+    try:
+        start = (calendar.timegm(time.strptime(day, "%Y-%m-%d")) // 60) - tz_minutes
+    except ValueError:
+        return [0] * 96
+    curve = [0] * 96
+    for lane in lanes:
+        hit = set()
+        for s, e in lane:
+            for slot in range(max(0, (s - start) // 15), min(96, (e - 1 - start) // 15 + 1)):
+                hit.add(slot)
+        for slot in hit:
+            curve[slot] += 1
+    return curve
+
+
+def _brag_files(since_ms):
+    """since 之后动过的会话记录：[(路径, agent)]"""
+    out = []
+    try:
+        projects = os.listdir(PROJECTS_DIR)
+    except OSError:
+        projects = []
+    for project in projects:
+        folder = os.path.join(PROJECTS_DIR, project)
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if name.endswith(".jsonl") and _SID_RE.match(name[:-6]):
+                path = os.path.join(folder, name)
+                try:
+                    newest = os.path.getmtime(path)
+                    sub = os.path.join(path[:-6], "subagents")
+                    if os.path.isdir(sub):
+                        newest = max([newest] + [os.path.getmtime(os.path.join(sub, n)) for n in os.listdir(sub)])
+                except OSError:
+                    continue
+                if newest * 1000 >= since_ms:
+                    out.append((path, "claude"))
+    home = os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
+    for path in recent_files([os.path.join(home, "sessions"), os.path.join(home, "archived_sessions")], ".jsonl", since_ms):
+        if os.path.basename(path).startswith("rollout-"):
+            out.append((path, "codex"))
+    return out
+
+
+def _brag_blank(day):
+    return {"day": day, "linesAdded": 0, "linesRemoved": 0, "files": 0, "edits": 0, "prompts": 0, "toolCalls": 0,
+            "sessions": 0, "activeMinutes": 0, "agentMinutes": 0, "peak": 0, "firstAt": None, "lastAt": None,
+            "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "requests": 0, "cost": 0.0, "agents": [], "lanes": []}
+
+
+def brag_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
+    """按天的战绩：token 与花费（同 usage_report，含各插件）+ 改了多少行、在线多久、同时开几个会话（Claude Code、Codex 的记录）。
+    lanes 是每个会话那天在干活的时间段（分钟），电脑端合并多台电脑时用它重算在线时长和「最多同时」"""
+    def day_of(ts):
+        return time.strftime("%Y-%m-%d", time.gmtime(ts / 1000.0 + tz_minutes * 60))
+
+    def day_start(ts):
+        local = ts + tz_minutes * 60000
+        return local - local % 86400000 - tz_minutes * 60000
+
+    def inside(ts):
+        return ts >= since_ms and not (until_ms and ts >= until_ms)
+
+    days = {}
+
+    def row_for(ts):
+        key = day_of(ts)
+        return days.setdefault(key, _brag_blank(key))
+
+    for path, agent in _brag_files(since_ms):
+        scan = brag_scan(path, agent)
+        if not scan or not scan["events"]:
+            continue
+        files_by_day = {}
+        for ts, added, removed, target in scan["edits"]:
+            if inside(ts):
+                row = row_for(ts)
+                row["linesAdded"] += added
+                row["linesRemoved"] += removed
+                row["edits"] += 1
+                files_by_day.setdefault(row["day"], set()).add(target)
+        for key, targets in files_by_day.items():
+            days[key]["files"] += len(targets)
+        for field, stamps in (("prompts", scan["prompts"]), ("toolCalls", scan["tools"])):
+            for ts in stamps:
+                if inside(ts):
+                    row_for(ts)[field] += 1
+        # 按天切开：跨午夜的会话两天各算各的
+        by_day = {}
+        for ts in scan["events"]:
+            if inside(ts):
+                by_day.setdefault(day_start(ts), []).append(ts)
+        for start, stamps in by_day.items():
+            row = row_for(start)
+            row["lanes"].append(_brag_spans(stamps, start, start + 86400000))
+            row["sessions"] += 1
+            row["firstAt"] = min(row["firstAt"] or stamps[0], stamps[0])
+            row["lastAt"] = max(row["lastAt"] or stamps[-1], stamps[-1])
+            if agent not in row["agents"]:
+                row["agents"].append(agent)
+    usage = usage_report(since_ms, until_ms, tz_minutes, plugins)
+    for item in usage.get("days") or []:
+        row = days.setdefault(item["day"], _brag_blank(item["day"]))
+        for field in ("input", "output", "cacheRead", "cacheWrite", "requests", "cost"):
+            row[field] += item.get(field) or 0
+    for key, entry in (usage.get("daySplit") or {}).items():
+        row = days.setdefault(key, _brag_blank(key))
+        row["agentTokens"], row["models"] = entry["agents"], entry["models"]
+        for agent in entry["agents"]:
+            if agent not in row["agents"]:
+                row["agents"].append(agent)
+    for row in days.values():
+        row["activeMinutes"], row["agentMinutes"], row["peak"] = brag_merge(row["lanes"])
+        row["curve"] = brag_curve(row["lanes"], row["day"], tz_minutes)
+    return {"days": sorted(days.values(), key=lambda d: d["day"]),
+            "agents": [a.get("agent") for a in usage.get("agents") or []], "idleMinutes": BRAG_IDLE_MS // 60000}
+
+
+def _brag_session_split(path, agent):
+    """一个会话按模型分的 token（阵容卡片用）"""
+    models = {}
+    if agent == "claude":
+        for (_, model), vals in ((scan_usage(path) or {}).get("buckets") or {}).items():
+            models[model] = models.get(model, 0) + vals[0] + vals[1] + vals[2] + vals[3]
+    else:
+        for record in cached_usage(path, codex_usage_scan):
+            model = str(record.get("model") or "unknown")
+            models[model] = models.get(model, 0) + sum(int(record.get(k) or 0) for k in ("input", "output", "cacheRead", "cacheWrite"))
+    return models
+
+
+def brag_session(path):
+    """一个会话从头到尾的战绩（任务做完时分享用）：同样只有数字"""
+    agent = "codex" if os.path.basename(path).startswith("rollout-") else "claude"
+    scan = brag_scan(path, agent)
+    if not scan:
+        raise RuntimeError("读不到这个会话的记录")
+    events = scan["events"]
+    spans = _brag_spans(events, 0, None)
+    tokens = {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "requests": 0, "cost": 0.0}
+    if agent == "claude":
+        usage = scan_usage(path) or {"buckets": {}, "rates": {}}
+        for (_, model), vals in usage["buckets"].items():
+            for index, field in enumerate(("input", "output", "cacheRead", "cacheWrite", "requests")):
+                tokens[field] += vals[index]
+            if model in usage["rates"] and usage["rates"][model][1] > 0:
+                tokens["cost"] += usage_weight(*vals[:4]) * usage["rates"][model][0] / usage["rates"][model][1]
+    else:
+        for record in cached_usage(path, codex_usage_scan):
+            for field in ("input", "output", "cacheRead", "cacheWrite", "requests"):
+                tokens[field] += int(record.get(field) or 0)
+    models = _brag_session_split(path, agent)
+    return dict(tokens, agent=agent, agents=[agent], models=models, agentTokens={agent: sum(models.values())},
+                linesAdded=sum(e[1] for e in scan["edits"]),
+                linesRemoved=sum(e[2] for e in scan["edits"]), files=len({e[3] for e in scan["edits"]}),
+                edits=len(scan["edits"]), prompts=len(scan["prompts"]), toolCalls=len(scan["tools"]),
+                activeMinutes=sum(e - s for s, e in spans), agentMinutes=sum(e - s for s, e in spans), sessions=1, peak=1,
+                firstAt=events[0] if events else None, lastAt=events[-1] if events else None)
 
 
 # ---------------------------------------------------------------------------
@@ -15977,6 +16339,12 @@ class Watcher:
             return call_with_timeout(15, find_files, request.get("root"), request.get("q"))
         if cmd == "get_file":
             return call_with_timeout(60, get_file, request.get("path"), request.get("cwd"), bool(request.get("reveal")))
+        if cmd == "brag":
+            # 分享战绩：按天的数字（sessionId 给了就只算这一个会话）
+            if request.get("sessionId"):
+                return {"session": call_with_timeout(60, brag_session, self.path_for(request.get("sessionId")))}
+            return call_with_timeout(90, brag_report, int(request.get("since") or 0), int(request.get("until") or 0) or None,
+                                     int(request.get("tz") or 0), self.plugins)
         if cmd == "usage_report":
             return usage_report(int(request.get("since") or 0), int(request.get("until") or 0) or None,
                                 int(request.get("tz") or 0), self.plugins)

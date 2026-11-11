@@ -32,6 +32,10 @@ final class DeviceStore {
         var remoteAt: Double?
         /// 微信小程序：中继给的用户编号（openid 摘要，10 位十六进制），随使用统计上报，运营后台据此对上小程序用户
         var mpUser: String?
+        /// 分享战绩的次数：按渠道（friend 发给好友 / moments 朋友圈或存图 / save 存相册）、按天（最近 60 天），最近一次的时间；随使用统计上报
+        var shares: [String: Int]?
+        var shareDays: [String: Int]?
+        var sharedAt: Double?
         /// computer = 互联的另一台 Kiteline 电脑（见 PeerComputers）；手机为空
         var kind: String?
         /// 电脑：对方电脑的编号；别的电脑替它的手机在本机登记的：那台电脑的编号
@@ -200,6 +204,26 @@ final class DeviceStore {
         devices[index].p2pId = p2pId
         lock.unlock()
         if changed { save() }
+    }
+
+    /// 手机上点了分享战绩（发好友、发朋友圈、存图）：记一次，运营后台看谁分享了多少次
+    func noteShare(_ via: String, for id: String) {
+        let via = ["friend", "moments", "save"].contains(via) ? via : "other"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let day = formatter.string(from: Date())
+        lock.lock()
+        guard let index = devices.firstIndex(where: { $0.id == id }) else { lock.unlock(); return }
+        var shares = devices[index].shares ?? [:]
+        shares[via, default: 0] += 1
+        var days = devices[index].shareDays ?? [:]
+        days[day, default: 0] += 1
+        for key in days.keys.sorted().dropLast(60) { days.removeValue(forKey: key) }   // 只留最近 60 天
+        devices[index].shares = shares
+        devices[index].shareDays = days
+        devices[index].sharedAt = Date().timeIntervalSince1970 * 1000
+        lock.unlock()
+        save()
     }
 
     /// 手机报上来的手表状态：配没配 Apple Watch、手表上装没装 Kiteline

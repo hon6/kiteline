@@ -273,6 +273,80 @@ def usage(store, days, fresh=False):
     return payload
 
 
+# 战绩（分享卡片）：问每台在线电脑的 watcher（brag），按天合并（同 Mac 版 Brag.collect）。只有数字，不带对话内容
+_brag_cache = {}
+_BRAG_SUMS = ("linesAdded", "linesRemoved", "files", "edits", "prompts", "toolCalls", "sessions",
+              "input", "output", "cacheRead", "cacheWrite", "requests", "cost")
+
+
+def brag_merge(lanes):
+    """各会话时间段（分钟）→ (并起来的分钟数, 加起来的分钟数, 最多同时几个)；同 watcher 的 brag_merge"""
+    points, union, total = [], [], 0
+    spans = [(int(s), int(e)) for lane in lanes for s, e in lane if int(e) > int(s)]
+    for start, end in spans:
+        total += end - start
+        points += [(start, 1), (end, -1)]
+    points.sort()
+    peak = current = 0
+    for _, step in points:
+        current += step
+        peak = max(peak, current)
+    for start, end in sorted(spans):
+        if union and start <= union[-1][1]:
+            union[-1][1] = max(union[-1][1], end)
+        else:
+            union.append([start, end])
+    return sum(e - s for s, e in union), total, peak
+
+
+def brag(store, days, fresh=False):
+    days = max(1, min(int(days or 30), 60))
+    hit = _brag_cache.get(days)
+    if not fresh and hit and time.time() - hit[0] < 60:
+        return hit[1]
+    since = config.start_of_day_ms() - (days - 1) * 86_400_000
+    tz = int(-time.altzone / 60) if time.localtime().tm_isdst else int(-time.timezone / 60)
+    by_day, lanes, machines = {}, {}, 0
+    errors = _offline_errors(store)
+    complete = not errors
+    for source, r, error in _ask_all(_live_sources(store), {"cmd": "brag", "since": since, "tz": tz}, 100):
+        if error:
+            errors.append(error)
+            continue
+        machines += 1
+        for day in r.get("days") or []:
+            key = day.get("day", "")
+            row = by_day.setdefault(key, {"day": key, "agents": []})
+            for field in _BRAG_SUMS:
+                row[field] = number(row.get(field)) + number(day.get(field))
+            row["agents"] = sorted(set(row["agents"]) | set(day.get("agents") or []))
+            for field, pick in (("firstAt", min), ("lastAt", max)):
+                if day.get(field):
+                    row[field] = pick(row[field], day[field]) if row.get(field) else day[field]
+            for field in ("agentTokens", "models"):   # 阵容逐项相加
+                merged = row.setdefault(field, {})
+                for name, value in (day.get(field) or {}).items():
+                    merged[name] = merged.get(name, 0) + number(value)
+            curve = day.get("curve") or []
+            if len(curve) == 96:   # 24 小时曲线逐格相加
+                row["curve"] = [a + number(b) for a, b in zip(row.get("curve") or [0] * 96, curve)]
+            lanes.setdefault(key, []).extend(day.get("lanes") or [])
+    start = datetime.fromtimestamp(since / 1000)
+    day_list = []
+    for offset in range(days):
+        key = (start + timedelta(days=offset)).strftime("%Y-%m-%d")
+        row = by_day.get(key) or {"day": key, "agents": []}
+        for field in _BRAG_SUMS:
+            row.setdefault(field, 0)
+        row["activeMinutes"], row["agentMinutes"], row["peak"] = brag_merge(lanes.get(key) or [])
+        day_list.append(row)
+    payload = {"ok": True, "days": day_list, "range": days, "since": since, "machines": machines, "errors": errors,
+               "generatedAt": int(time.time() * 1000)}
+    if complete and not errors:
+        _brag_cache[days] = (time.time(), payload)
+    return payload
+
+
 def today_cost(store):
     report = usage(store, 1)
     return number((report.get("totals") or {}).get("cost"))
