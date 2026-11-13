@@ -1394,5 +1394,6 @@ enum NativeConversation {
         }
         KitelineKit.openQuickReplies = { SettingsWindowController.shared.show(tab: .phrases) }
         KitelineKit.log = { Log.write($0) }
+        KitelineKit.hoverTip = { text in if let text { HoverTipPanel.show(text) } else { HoverTipPanel.hide() } }
     }
 }

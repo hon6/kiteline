@@ -44,8 +44,8 @@ READ_ONLY_DESKTOP = ("Antigravity 桌面版没有对外的操作接口，会话�
                      "Reply and confirm in Antigravity on your computer.")
 READ_ONLY_CLI = (("连不上这个 Antigravity CLI 会话所在的终端窗口，只能查看", "Couldn't reach the terminal window this Antigravity CLI session runs in, so it's view-only.")
                  if os.name == "nt" else
-                 ("Antigravity CLI 不在 tmux 中运行，只能查看；在 tmux 中启动 agy 后即可从手机回复和确认",
-                  "Antigravity CLI isn't running in tmux, so this session is view-only. Start agy in tmux to reply and confirm from your phone."))
+                 ("Antigravity CLI 不在 tmux 中运行，只能查看；在 tmux 中启动 agy，或在 Kiteline 新建任务时选择 Antigravity CLI（由 Kiteline 在后台运行）后即可从手机回复和确认",
+                  "Antigravity CLI isn't running in tmux, so this session is view-only. Start agy in tmux, or choose Antigravity CLI when creating a task in Kiteline (it runs in the background), to reply and confirm from your phone."))
 
 
 def create(kl):
@@ -352,6 +352,19 @@ def create(kl):
 
         normalize = staticmethod(agy_normalize)
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 Antigravity CLI 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
+            起来以后读屏、发字、按键都走通用终端层。字样照 agy 1.5.0（11-13） 实测的画面写（比较时不分大小写）"""
+            if resume and not (4 <= len(str(resume)) <= 128 and all(c.isalnum() or c in "_.:-" for c in str(resume))):
+                return None
+            return {"argv": ["agy"] + (["--conversation", str(resume)] if resume else []),
+                    "ready": ["? for shortcuts"],
+                    # 第一次在这个文件夹里跑会问信不信任它（默认选中「Yes, I trust this folder」）：用户在 Kiteline 里选了这个项目开任务，回车
+                    "answers": [{"when": "do you trust the contents of this project?", "keys": ["Enter"]}],
+                    # 没登录时停在选登录方式上：要用户本人在终端里登录
+                    "needsUser": ["select login method", "not signed in"],
+                    "settle": 1.0}
+
         def detect(self):
             forms = {}
             if shutil.which("agy"):
@@ -445,7 +458,7 @@ def create(kl):
             pid = self.pids.get(sid)
             pane = term_pane(pid) if pid else None
             if not pane:
-                raise RuntimeError("这个 Antigravity 会话不在 tmux 里运行，只能查看；在 tmux 中启动 agy 后，就可以从手机回复和确认")
+                raise RuntimeError("这个 Antigravity 会话不在 tmux 里运行，只能查看；在 tmux 中启动 agy，或在 Kiteline 新建任务时选择 Antigravity CLI（由 Kiteline 在后台运行）后，就可以从手机回复和确认")
             return pid, pane
 
         def send(self, sid, text, images):

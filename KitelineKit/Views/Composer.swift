@@ -34,6 +34,8 @@ struct Composer: View {
     #endif
     /// 剪贴板里有图（截图后点了「拷贝」、在别的 App 里拷贝了图片）：打字或点开「+」时输入框上面一条「粘贴」
     @State private var clipboardImage = false
+    /// 空着输入框按回车发排队的第一条：等电脑回应前不重复发
+    @State private var jumping = false
     @AppStorage("voiceMode") private var voiceMode = false
     @FocusState private var focused: Bool
     /// 对话区多宽：分列时窄的一列（不到 300）打字时收起语音、停止键，输入框才有地方
@@ -518,7 +520,18 @@ struct Composer: View {
 
     private func send() {
         var message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty || !attachments.isEmpty else { return }
+        guard !message.isEmpty || !attachments.isEmpty else {
+            // 空着输入框按回车：有排队的消息就把最前面一条马上发出去（强插），再按再发下一条；没有排队的什么也不做
+            if group == nil, enabled, let first = chat.queueRows(session).first, !jumping {
+                Haptics.tap()
+                jumping = true
+                Task {
+                    await model.queueAction(key, first.id, "now")
+                    jumping = false
+                }
+            }
+            return
+        }
         if let quote = chat.quote {
             // 引用的那几行用 > 开头，Claude 一看就知道你说的是哪段（和网页版一样）
             message = quote.split(separator: "\n").map { "> \($0)" }.joined(separator: "\n") + "\n\n" + message

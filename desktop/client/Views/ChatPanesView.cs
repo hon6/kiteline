@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Kiteline.Model;
 using Kiteline.UI;
 using static Kiteline.Lang;
@@ -66,12 +67,17 @@ public sealed class ChatPanesView : Panel
             (chats[gone] as ChatView)?.Closed();
             chats.Remove(gone);
         }
+        // 焦点在某个对话页里（正在输入框里打字）：摘下再挂回去时 Avalonia 会清掉焦点，会话列表一更新（Claude 状态变了、
+        // 排队的消息少了一条）接着打字、按回车就没反应（11-13 空输入框回车发排队消息时测出）。排好后还回去
+        var focused = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() as Control;
+        if (focused is not null && !chats.Values.Any(c => c.IsVisualAncestorOf(focused))) focused = null;
         // 对话页先从老的父级上摘下来，再挂到新排的树上
         foreach (var chat in chats.Values) if (chat.Parent is Panel p) p.Children.Remove(chat); else if (chat.Parent is Decorator d) d.Child = null; else if (chat.Parent is ContentControl c) c.Content = null;
         Children.Clear();
         Children.Add(Node(panes.Root, atTop: true, atRight: true));
         // 分屏时同一封信的两张信件用绳子连起来（盖在最上面，只有贴着绳子的地方接鼠标）
         if (panes.Count > 1) Children.Add(ropes);
+        if (focused is not null && focused.IsAttachedToVisualTree() && focused.IsEffectivelyVisible && focused.IsEffectivelyEnabled) focused.Focus();
     }
 
     readonly PeerRopeLayer ropes = new();

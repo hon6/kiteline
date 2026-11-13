@@ -1277,16 +1277,14 @@ private struct TraceEntry: Identifiable {
     var id: String { agent.id }
 }
 
-/// 正在进行：主题色小圆点，慢慢呼吸
+/// 正在进行：主题色小圆点，慢慢呼吸。
+/// 用图层自己播放的 PulseDot（KiteMark.swift），不用 SwiftUI 的循环动画：SwiftUI 的 repeatForever 每一帧都要把整个窗口的视图重新算一遍。
+/// 这个点还挂在对话页右上角的「执行过程」按钮上（会话在工作、面板没开时），所以只要有会话在工作就一直在跑——
+/// 11-13 用 Instruments 量到 Mac 版 4 秒里 11 万次视图更新、主线程八成时间在重排，CPU 常驻 35～45%（改之前的写法见 git 历史）。
+/// 位置不参与动画，也就没有原来「刚出现时在两处之间来回跑」的问题
 private struct LiveDot: View {
-    @State private var on = false
-
     var body: some View {
-        // 循环动画只作用在透明度上（作用域动画）：写成 .animation(_:value:) 会把位置也卷进去，
-        // 刚出现时从左上角排到按钮上的那一下变成无限来回，小点在两处之间一直跑（11-04 截图，同 Duo.swift 转屏按钮的坑）
-        Circle().fill(Theme.claude).frame(width: 7, height: 7)
-            .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { $0.opacity(on ? 1 : 0.3) }
-            .onAppear { on = true }
+        PulseDot(color: Theme.claude, size: 7, low: 0.3, period: 0.9)
     }
 }
 

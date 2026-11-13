@@ -295,7 +295,8 @@ struct ModelSheet: View {
             Group {
             SheetSection(title: L("模型"), footer: current.isEmpty ? L("Claude 尚未回复，暂无法确定当前使用的模型。")
                          : L("切换模型将在此会话中发送 /model 命令，自下一条消息起生效。")) {
-                ForEach(Array(ModelChoice.all.enumerated()), id: \.element.id) { index, choice in
+                ForEach(Array(ModelChoice.choices(seen: model.sessions.map { $0.usage?.model }, current: model.currentModel(key)).enumerated()),
+                        id: \.element.id) { index, choice in
                     if index > 0 { SheetDivider() }
                     Button {
                         if choice.name != current { model.setModel(key, choice.id, choice.name) }

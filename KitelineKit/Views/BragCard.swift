@@ -488,9 +488,15 @@ struct BragStrip: View {
     private var peak: Double { picked.map { ($0["peak"] as? NSNumber)?.doubleValue ?? 0 }.max() ?? 0 }
 
     private func load() async {
-        guard model.connected, model.hostFeatures.contains("brag") else { return }
         let want = range == .month ? "30" : range == .week ? "7" : "2"
-        guard let data = try? await model.api.data("/api/brag", ["days": want]),
+        // 先显示上次存在手机上的（不是灰色占位），再静默取新的（11-13）
+        if !loaded, let data = model.api.cachedData("/api/brag", ["days": want]),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            days = json["days"] as? [[String: Any]] ?? []
+            loaded = true
+        }
+        guard model.connected, model.hostFeatures.contains("brag") else { return }
+        guard let data = try? await model.api.dataCaching("/api/brag", ["days": want]),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         days = json["days"] as? [[String: Any]] ?? []
         loaded = true

@@ -71,12 +71,18 @@ public sealed class TodosPage : Panel
             Section(Ui.H(8, SectionTitle(L("需要你处理")).Shrink(), new Spacer(), dismissAll),
                 state.Suggestions.OrderByDescending(s => s.At).Select(SuggestionRow));
         }
-        if (pending.Count > 0 && (agentAll.Count > 0 || state.Suggestions.Count > 0)) Section(SectionTitle(L("我的待办")), []);
-        foreach (var group in Groups(pending))
-            Section(GroupHeader(group.Source), group.Items.Select(i => Row(i, false)));
+        // 我的待办（11-13 反馈难看重做，同 iPhone / Mac / 小程序）：一张卡片、行间细线，不再按出处分组、每组上面一行「出处 · 原消息 ›」；
+        // 出处写在每条下面一行小字（点整行跳原消息），「回到会话」是这行右边的文字链接。顺序照旧按出自哪条消息排在一起
+        if (pending.Count > 0)
+            Section(agentAll.Count > 0 || state.Suggestions.Count > 0 ? SectionTitle(L("我的待办")) : new Border { Height = 0 },
+                Groups(pending).SelectMany(g => g.Items).Select(i => Row(i, true)));
         if (agentAll.Count > 0)
         {
-            var header = Ui.H(8, SectionTitle(L("agent 的待办 · 它会自己处理")).Shrink(), new Spacer(),
+            var stale = agentAll.Where(IsStale).ToList();
+            var collapse = stale.Count > 0
+                ? new Tap(Ui.Text(L("收起久未更新的 %lld 条", stale.Count), 12, FontWeight.Medium, "Accent").Pad(6, 2), () => ConfirmStale(stale), 6).Keys("Transparent", "Fill05")
+                : null;
+            var header = Ui.H(8, SectionTitle(L("agent 的待办 · 它会自己处理")).Shrink(), new Spacer(), collapse,
                 agentAll.Count > 1 || !IsDefaultView ? ViewMenu(agentAll) : null);
             var groups = AgentGroups(agentTasks, agentAll);
             if (groups.Count == 1 && groups[0].Name is null)
@@ -210,6 +216,18 @@ public sealed class TodosPage : Panel
         return button;
     }
 
+    /// 3 天以上没更新（记下、开始、进度都算更新）、还没做完的 agent 待办
+    static bool IsStale(TodoItem item) => !item.Done && StaleDays(item) >= 3;
+    static long StaleDays(TodoItem item) =>
+        (long)Math.Max(0, (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (item.UpdatedAt ?? item.CreatedAt)) / 86_400_000);
+
+    /// 「收起久未更新的 N 条」：确认后全部标为已完成（只在你确认后改；agent 那边 todo list 也会看到）
+    async void ConfirmStale(List<TodoItem> items)
+    {
+        if (await Dialogs.Confirm(L("把 %lld 条 3 天以上没更新的 agent 待办标为已完成？", items.Count), L("全部标为已完成")))
+            foreach (var item in items) TodoState.Shared.SetDone(item, true);
+    }
+
     async void ConfirmClear()
     {
         if (await Dialogs.Confirm(L("删除所有已完成的待办？"), L("清空已完成"), destructive: true)) TodoState.Shared.ClearDone();
@@ -249,16 +267,6 @@ public sealed class TodosPage : Panel
         return order.Select(id => map[id]).OrderByDescending(g => g.Latest).ToList();
     }
 
-    static Control GroupHeader(TodoSource? source)
-    {
-        if (source is null) return SectionTitle(L("手动添加"));
-        var time = source.Ts is double ts ? Format.ListTime(ts) : "";
-        var row = Ui.H(6, Ui.Sym("bubble.left", 11, "Text2"), Ui.Text(source.Title, 12, FontWeight.Medium, "Text2").Trim().Shrink(),
-            time.Length > 0 ? Ui.Text("· " + time, 12, FontWeight.Medium, "Text2") : null, new Spacer(4),
-            Ui.Text(L("原消息"), 12, FontWeight.Medium, "Accent"), Ui.Sym("chevron.right", 10, "Accent"));
-        return new Tap(row, () => TodoState.OpenSource(source.Key, source.ItemId), 4).Keys("Transparent", "Transparent").Tip(L("打开该会话并定位到原消息"));
-    }
-
     static string SourceLine(TodoSource source) =>
         string.Join(" · ", new[] { source.Title, source.Ts is double ts ? Format.ListTime(ts) : "" }.Where(s => s.Length > 0));
 
@@ -279,15 +287,13 @@ public sealed class TodosPage : Panel
             content.Children.Add(detail);
         }
         if (showSource && item.Source is { } source)
-            content.Children.Add(Ui.H(5, Ui.Sym("arrowshape.turn.up.backward", 10.5, "Text3"), Ui.Text(SourceLine(source), 11.5, color: "Text3").Trim().Shrink()));
-        if (item.Source is { } from && !item.Done && !item.AgentTask)
         {
-            // 回到会话：打开原会话、输入框里先写好「已处理好：…」，确认后发给 agent（点整行只是跳到原消息）
-            var reply = new Tap(Ui.H(6, Ui.Sym("arrowshape.turn.up.backward", 12, "Accent"), Ui.Text(L("回到会话"), 12, FontWeight.Medium, "Accent")).Pad(11, 4),
-                () => TodoState.ReplyDone(from.Key, item.Text), 12).Keys("AccentFill14", "AccentFill20");
-            reply.HorizontalAlignment = HorizontalAlignment.Left;
-            reply.Margin = new Thickness(0, 4, 0, 0);
-            content.Children.Add(reply);
+            // 出处一行小字；右边「回到会话」：打开原会话、输入框里先写好「已处理好：…」，确认后发给 agent（点整行只是跳到原消息）
+            Control? reply = null;
+            if (!item.Done && !item.AgentTask)
+                reply = new Tap(Ui.H(3, Ui.Sym("arrowshape.turn.up.backward", 10.5, "Accent"), Ui.Text(L("回到会话"), 12, FontWeight.Medium, "Accent")).Pad(6, 2),
+                    () => TodoState.ReplyDone(source.Key, item.Text), 6).Keys("Transparent", "AccentFill14");
+            content.Children.Add(Ui.H(12, Ui.Text(SourceLine(source), 11.5, color: "Text2").Trim().Shrink(), new Spacer(), reply));
         }
         var body = new Tap(content, () => Tap(item), 6).Keys("Transparent", "Transparent");
         body.Cursor = Cursor.Default;
@@ -335,7 +341,9 @@ public sealed class TodosPage : Panel
         var where = item.Handler?.Title ?? item.Source?.Title;
         content.Children.Add(Ui.H(4, Ui.Text(orphaned ? L("会话已结束") : doing ? L("进行中") : L("待处理"), 11.5, color: orphaned ? "Orange" : doing ? "Accent" : "Text3"),
             where is null ? null : Ui.Text("· " + L("「%@」", where), 11.5, color: "Text3").Trim().Shrink(),
-            Ui.Text("· " + Format.ListTime(item.UpdatedAt ?? item.CreatedAt), 11.5, color: "Text3")));
+            Ui.Text("· " + Format.ListTime(item.UpdatedAt ?? item.CreatedAt), 11.5, color: "Text3"),
+            // 很久没动了：多半早做完 / 过期了，agent 没勾（标出来，组头可以一键收起，11-13）
+            IsStale(item) ? Ui.Text("· " + L("%lld 天没更新", StaleDays(item)), 11.5, color: "Orange") : null));
         var row = new Tap(Ui.HTop(10, iconBox, content.Grow()).Pad(12, 9), () =>
         {
             if ((item.Handler?.Key ?? item.Source?.Key) is string key) MainModel.Shared.Selection = key;

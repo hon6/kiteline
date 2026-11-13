@@ -249,7 +249,13 @@ public sealed class KiteFlight : Panel
             paused = value;
             if (paused) { timer?.Stop(); watch.Stop(); return; }
             watch.Restart();
-            timer ??= new DispatcherTimer(TimeSpan.FromSeconds(1 / Fps), DispatcherPriority.Render, (_, _) => Tick());
+            if (timer is null)
+            {
+                // 帧率跟着 Motion 走：客户端占的处理器高了自动降（没有显卡的电脑上这只纸鸢一帧就要把小窗口重新合成一遍）
+                timer = new DispatcherTimer(TimeSpan.FromSeconds(Motion.Slow / Fps), DispatcherPriority.Render, (_, _) => Tick());
+                Motion.Changed += () => timer.Interval = TimeSpan.FromSeconds(Motion.Slow / Fps);
+            }
+            Motion.Watch();
             timer.Start();
         }
     }

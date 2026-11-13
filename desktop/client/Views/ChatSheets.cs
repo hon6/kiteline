@@ -839,7 +839,46 @@ public static class ChatSheets
 
     // MARK: 模型和思考等级
 
-    static readonly (string Id, string Name)[] Models = [("claude-fable-5-1", "Fable 5.1"), ("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-haiku-5-5", "Haiku 5.5")];
+    /// 默认列出的（同 Claude Code 里的模型菜单）；Claude Code 出了新版本、在 VS Code 或终端里用过以后，按各会话在用的模型自动换成更新的版本（同 Mac 版 ModelChoice）
+    static readonly string[] DefaultModels = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+
+    static (string Family, int[] Version)? ParseModel(string? id)
+    {
+        var raw = (id ?? "").ToLowerInvariant();
+        if (!raw.StartsWith("claude-")) return null;
+        var parts = raw["claude-".Length..].Split('[')[0].Split('-');
+        if (parts[0].Length == 0 || !parts[0].All(char.IsLetter)) return null;
+        var version = parts.Skip(1).TakeWhile(p => p.Length is > 0 and <= 2 && p.All(char.IsAsciiDigit)).Select(int.Parse).ToArray();
+        return version.Length == 0 ? null : (parts[0], version);
+    }
+
+    static string ModelId(string family, int[] version) => "claude-" + family + "-" + string.Join("-", version);
+
+    static bool Older(int[] a, int[] b)
+    {
+        for (var i = 0; i < Math.Min(a.Length, b.Length); i++) if (a[i] != b[i]) return a[i] < b[i];
+        return a.Length < b.Length;
+    }
+
+    /// 每一家取默认和各会话在用的里面最新的版本；这个会话现在用的是旧版本时也列上
+    static List<(string Id, string Name)> Models(string? current)
+    {
+        var best = new Dictionary<string, int[]>();
+        var order = new List<string>();
+        foreach (var raw in DefaultModels.Concat(AppModel.Shared.Sessions.Select(s => s.Usage?.Model).OfType<string>()))
+        {
+            if (ParseModel(raw) is not { } p) continue;
+            if (!best.TryGetValue(p.Family, out var have)) { order.Add(p.Family); best[p.Family] = p.Version; }
+            else if (Older(have, p.Version)) best[p.Family] = p.Version;
+        }
+        var ids = order.Select(f => ModelId(f, best[f])).ToList();
+        if (ParseModel(current) is { } now && !ids.Contains(ModelId(now.Family, now.Version)))
+        {
+            var at = ids.FindIndex(i => ParseModel(i)?.Family == now.Family);
+            if (at >= 0) ids.Insert(at + 1, ModelId(now.Family, now.Version));
+        }
+        return ids.Select(i => (i, Tools.ModelName(i))).ToList();
+    }
 
     public static void Model(string key)
     {
@@ -852,7 +891,8 @@ public static class ChatSheets
             var chat = model.Chat(key);
             var stack = new StackPanel { Margin = new Thickness(14, 0, 14, 16) };
             stack.Children.Add(Header(L("模型")));
-            stack.Children.Add(Group(Models.Select(choice => (Control)Row(Ui.H(8, Ui.Text(choice.Name, 14, FontWeight.Medium), new Spacer(), choice.Name == current ? Ui.Sym("checkmark", 14, "WechatGreen") : null),
+            var used = chat.ModelOverride is { } mo && mo.Baseline == session?.Usage?.Model ? mo.Model : session?.Usage?.Model;
+            stack.Children.Add(Group(Models(used).Select(choice => (Control)Row(Ui.H(8, Ui.Text(choice.Name, 14, FontWeight.Medium), new Spacer(), choice.Name == current ? Ui.Sym("checkmark", 14, "WechatGreen") : null),
                 enabled ? () =>
                 {
                     if (choice.Name != current)

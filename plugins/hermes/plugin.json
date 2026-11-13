@@ -1,9 +1,9 @@
 {
  "id": "hermes",
  "name": "Hermes",
- "version": "1.0.2",
- "summary": "Nous Research 的开源 agent：查看会话、状态和完整对话；在 tmux 中运行时可回复、确认、回答提问和中断",
- "summaryEn": "Nous Research's open-source agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux",
+ "version": "1.1.0",
+ "summary": "Nous Research 的开源 agent：查看会话、状态和完整对话；在 tmux 中运行、或由 Kiteline 在后台运行时可回复、确认、回答提问和中断",
+ "summaryEn": "Nous Research's open-source agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux or in the background through Kiteline",
  "needs": [
   "fs.read",
   "db.read",
@@ -29,7 +29,7 @@
      "interrupt"
     ],
     "verified": false,
-    "note": "回复和确认需要 Hermes 在 tmux 中运行"
+    "note": "回复和确认需要 Hermes 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
    }
   },
   "windows": {
@@ -51,7 +51,7 @@
      "interrupt"
     ],
     "verified": true,
-    "note": "回复和确认需要 Hermes 在 tmux 中运行"
+    "note": "回复和确认需要 Hermes 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
    }
   }
  },

@@ -14,6 +14,7 @@ import os
 import threading
 import time
 import urllib.parse
+import uuid
 
 from . import config, log
 
@@ -155,11 +156,22 @@ def _bridge(fields, record, source):
 
 def _bridge_reply(fields, record, source):
     """同 _bridge，回 watcher 的整份回执（排队时带 qid）"""
-    try:
-        response = source.request(dict(fields, cmd="bridge", sessionId=record.snap.get("sessionId")), timeout=10)
-    except Exception as exc:  # noqa: BLE001
-        log.write("后台送达失败（%s）：%s，改走前台" % (record.snap.get("name"), exc))
-        return None
+    # 每条指令一个编号：回应没等到（链路卡了一下）时拿同一个编号再问一遍，watcher 不会重复送、把那一次的结果给我们
+    #（watcher 的 bridge_bid；老 watcher 不认编号，重问等于再发一遍，只问一次）。
+    # watcher 那头最多 3.3 秒就有结果，原来等满 10 秒才改走前台，手机那边早超时重发了
+    request = dict(fields, cmd="bridge", sessionId=record.snap.get("sessionId"), bid=uuid.uuid4().hex)
+    repeatable = "bridge_bid" in (getattr(source, "features", None) or ())
+    response = None
+    for attempt in (0, 1):
+        try:
+            response = source.request(request, timeout=4.5 if attempt == 0 else 5)
+            break
+        except Exception as exc:  # noqa: BLE001
+            if attempt == 0 and repeatable:
+                log.write("后台送达（%s）：%s，再问一次" % (record.snap.get("name"), exc))
+                continue
+            log.write("后台送达失败（%s）：%s，改走前台" % (record.snap.get("name"), exc))
+            return None
     if response.get("bridged") is True:
         return response
     log.write("后台送达没接上（%s），改走前台" % record.snap.get("name"))

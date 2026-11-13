@@ -281,10 +281,26 @@ public sealed class Composer : StackPanel
         input.Focus();
     }
 
+    /// 空着输入框按回车发排队的第一条：等电脑回应前不重复发
+    bool jumping;
+
+    async Task Jump(string qid)
+    {
+        jumping = true;
+        try { await AppModel.Shared.QueueAction(key, qid, "now"); }
+        finally { jumping = false; }
+    }
+
     void Send()
     {
         var text = (input.Text ?? "").Trim();
-        if (!Enabled || (text.Length == 0 && chat.Attachments.Count == 0)) return;
+        if (!Enabled) return;
+        if (text.Length == 0 && chat.Attachments.Count == 0)
+        {
+            // 空着输入框按回车：有排队的消息就把最前面一条马上发出去（强插），再按再发下一条；没有排队的什么也不做（同 iOS）
+            if (group is null && !jumping && chat.QueueRows(session).FirstOrDefault() is { } first) _ = Jump(first.Id);
+            return;
+        }
         if (chat.Quote is string quote) { text = string.Join("\n", quote.Split('\n').Select(l => "> " + l)) + "\n\n" + text; chat.Quote = null; }
         SendText(text, chat.Attachments.ToList());
         input.Text = "";

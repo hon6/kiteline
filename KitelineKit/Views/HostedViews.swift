@@ -1,6 +1,6 @@
 import SwiftUI
 
-// 在远端电脑上后台运行 Claude Code（电脑上 Kiteline 的设置，按设备开；电脑端见 Hosted.swift / desktop app.py）。默认都不开：
+// 在后台运行 Claude Code（电脑上 Kiteline 的设置；电脑端见 Hosted.swift / desktop app.py）。本机（电脑自己的项目）默认开，远端电脑按设备开、默认不开：
 // 先「检测出口 IP」——这台电脑照后台运行时的那套网络设置查出口，看过结果点「确认开启」才开这一台。
 // 会话页上的提示（在 VS Code 里跑、能转到后台的远端会话）点开也是这个面板，开了以后还能把当前会话转到后台。
 // iPhone 设置、Mac 设置的「来源」页、各端对话页都用这一份。
@@ -75,7 +75,7 @@ struct HostedProbe {
     }
 }
 
-/// 后台运行 Claude Code 的设置面板：说明；每台能后台运行的远端电脑各自「检测出口 IP」「确认开启 / 关闭」；从会话进来的还能把它转到后台
+/// 后台运行 Claude Code 的设置面板：说明；每台能后台运行的电脑（本机、远端）各自「检测出口 IP」「确认开启 / 关闭」；从会话进来的还能把它转到后台
 struct HostedSetupSheet: View {
     @Environment(AppModel.self) private var model
     @PanelDismiss private var dismiss
@@ -102,7 +102,7 @@ struct HostedSetupSheet: View {
                 Text("后台运行的 Claude Code 就在项目所在的电脑上运行，使用与 VS Code 中的 Claude Code 相同的网络设置（代理、证书、接口地址），每次启动前核对一致才运行。开启前请先检测出口。")
                     .font(.ui(.footnote)).foregroundStyle(.secondary)
                 if machines.isEmpty {
-                    Text("没有可在后台运行 Claude Code 的电脑（需通过 SSH 连接，且不是 Windows）。").font(.ui(.footnote)).foregroundStyle(.secondary)
+                    Text("没有可在后台运行 Claude Code 的电脑（Windows 电脑暂不支持）。").font(.ui(.footnote)).foregroundStyle(.secondary)
                 }
                 ForEach(machines, id: \.id) { card($0) }
                 if let failure {

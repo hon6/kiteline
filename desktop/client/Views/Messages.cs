@@ -648,26 +648,28 @@ public static class PendingMessage
 public sealed class Spinner : Control
 {
     readonly double size;
-    double angle;
-    DispatcherTimer? timer;
+    double since;
 
     public Spinner(double size = 16) { this.size = size; Width = size; Height = size; IsHitTestVisible = false; }
 
+    // 和别的小动画共用一个节拍（见 Beat）：原来自己带一个 80 毫秒的定时器
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        timer = new DispatcherTimer(TimeSpan.FromMilliseconds(80), DispatcherPriority.Render, (_, _) => { angle = (angle + 30) % 360; InvalidateVisual(); });
-        timer.Start();
+        since = Beat.Now;
+        Beat.Add(this);
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
-        timer?.Stop();
+        Beat.Remove(this);
     }
 
     public override void Render(DrawingContext context)
     {
+        // 每 80 毫秒转一格（30°），按经过的时间算
+        var angle = Math.Floor((Beat.Now - since) / 0.08) * 30 % 360;
         var c = new Point(size / 2, size / 2);
         var color = Palette.GetColor("Text2");
         for (var i = 0; i < 12; i++)

@@ -30,8 +30,8 @@ BUSY_MARKS = ("Ctrl+C cancel", "processing...", "reasoning...")
 APPROVAL_MARK, QUESTION_MARK = "Dangerous Command", "Hermes needs your input"
 READ_ONLY = (("Windows 上从手机操作 Hermes 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Hermes on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
-             ("Hermes 不在 tmux 中运行，只能查看；在 tmux 中启动 hermes 后即可从手机回复和确认",
-              "Hermes isn't running in tmux, so this session is view-only. Start hermes in tmux to reply and confirm from your phone."))
+             ("Hermes 不在 tmux 中运行，只能查看；在 tmux 中启动 hermes，或在 Kiteline 新建任务时选择 Hermes（由 Kiteline 在后台运行）后即可从手机回复和确认",
+              "Hermes isn't running in tmux, so this session is view-only. Start hermes in tmux, or choose Hermes when creating a task in Kiteline (it runs in the background), to reply and confirm from your phone."))
 # 确认框里的选项：方向键往下几格再回车
 OPTIONS = ({"key": "deny", "label": "拒绝", "labelEn": "Deny", "style": "destructive"},
            {"key": "once", "label": "允许", "labelEn": "Allow", "style": "primary"},
@@ -277,6 +277,18 @@ def create(kl):
             self.last = {}        # 会话 id → 已推过的最后一条消息 id
             self.questions = {}   # 会话 id → 等回答的 clarify 选项
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 Hermes 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
+            起来以后读屏、发字、按键都走通用终端层。字样照 hermes（11-13） 实测的画面写（比较时不分大小写）"""
+            if resume and not (4 <= len(str(resume)) <= 128 and all(c.isalnum() or c in "_.:-" for c in str(resume))):
+                return None
+            return {"argv": ["hermes"] + (["--resume", str(resume)] if resume else []),
+                    # 输入框上面的状态栏（模型 │ ctx …）出来 = 能输入了
+                    "ready": ["\u2502 ctx"],
+                    # 还没配置模型：它问要不要现在跑 hermes setup，要用户本人在终端里配
+                    "needsUser": ["isn't configured yet", "run setup now?"],
+                    "settle": 1.0}
+
         def detect(self):
             command = shutil.which("hermes")
             return {"installed": os.path.isfile(DB) or bool(command), "forms": {"cli": ""} if command else {}}
@@ -401,7 +413,7 @@ def create(kl):
             pid = self.pids.get(sid)
             pane = term_pane(pid) if pid else None
             if not pane:
-                raise RuntimeError("这个 Hermes 会话不在 tmux 里运行，只能查看；在 tmux 中启动 hermes 后，就可以从手机回复和确认")
+                raise RuntimeError("这个 Hermes 会话不在 tmux 里运行，只能查看；在 tmux 中启动 hermes，或在 Kiteline 新建任务时选择 Hermes（由 Kiteline 在后台运行）后，就可以从手机回复和确认")
             return pid, pane
 
         def send(self, sid, text, images):

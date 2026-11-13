@@ -159,6 +159,10 @@ class MobileServer:
         self._lock = threading.Lock()
         self._foreground = {}         # 设备 id → 最近一次「我在前台」
         self._recent_sends = {}
+        # 正在送的消息（「会话 + 消息 id」→ {done, response}）：手机 10 秒等不到回应会拿同一个 id 重发，这边可能还在送
+        #（后台通道卡住时要十来秒）；只记「送完的」认不出来，同一条会被投两遍
+        self._pending_sends = {}
+        self._pending_lock = threading.Lock()
         self._last_state = ""
         # 上一份广播出去的完整状态和它的序号（同 Mac 版 MobileServer.lastState / stateSeq）：连接时带 patch=1 的客户端
         # 之后只收变了的部分（statepatch，见 state_patch）；还没收到第一份整份的连接先不收状态广播
@@ -874,18 +878,41 @@ def r_send(s, request, *_):
     submit = body.get("submit", s.app.cfg.mobile["submitOnSend"])
     cid = body.get("cid")
     stamp = time.time()
-    s._recent_sends = {k: v for k, v in s._recent_sends.items() if stamp - v[0] < 600}
     if cid:
         cid = "%s|%s" % (record.key, cid)
-        if cid in s._recent_sends:
+        # 「送过的」「还在送的」在同一把锁里查和登记：各查各的话，一条刚送完、还没记进「送过的」的那一下，重发的会被当成新消息
+        with s._pending_lock:
+            s._recent_sends = {k: v for k, v in s._recent_sends.items() if stamp - v[0] < 600}
+            sent = s._recent_sends.get(cid)
+            first = None if sent else s._pending_sends.get(cid)
+            if not sent and first is None:
+                s._pending_sends[cid] = {"done": threading.Event(), "response": None}
+        if sent:
             log.write("手机重发的消息已经送过（%s），不再投递" % cid[-12:])
-            payload = dict(s._recent_sends[cid][1])
+            payload = dict(sent[1])
             payload["duplicate"] = True
             return Response.json(payload)
-    log.write("手机发往「%s」：%s（图 %d 张）" % (record.snap.get("name"), text[:60], len(attachments)))
-    outcome = delivery.send(text, attachments, record, source, submit, s.siblings(record))
-    if outcome.ok and cid:
-        s._recent_sends[cid] = (time.time(), dict(outcome))
+        if first is not None:
+            log.write("手机重发的消息还在送达途中（%s），等那一次的结果，不再投递" % cid[-12:])
+            first["done"].wait(90)
+            payload = dict(first["response"] or {"ok": False, "submitted": False, "message": "消息仍在送达途中，请稍后在对话中确认"})
+            payload["duplicate"] = True
+            return Response.json(payload, 200 if payload.get("ok") else 409)
+    result = None
+    try:
+        # 登记之后的每一步都在这个 try 里：中途出什么错，等着同一条结果的重发请求都会被放行
+        log.write("手机发往「%s」：%s（图 %d 张）" % (record.snap.get("name"), str(text)[:60], len(attachments)))
+        outcome = delivery.send(text, attachments, record, source, submit, s.siblings(record))
+        result = dict(outcome)
+    finally:
+        if cid:
+            with s._pending_lock:
+                if result is not None and result.get("ok"):
+                    s._recent_sends[cid] = (time.time(), dict(result))   # 先记「送过」再撤「在送」，中间没有空档
+                entry = s._pending_sends.pop(cid, None)
+            if entry:
+                entry["response"] = result
+                entry["done"].set()
     return Response.json(dict(outcome), 200 if outcome.ok else 409)
 
 
@@ -902,10 +929,10 @@ def r_key(s, request, *_):
 
 
 def r_hosted_probe(s, request, *_):
-    """出口检测：每台远端电脑照后台运行时的网络设置查出口 IP（见 app.hosted_probe）"""
+    """出口检测：本机和每台远端电脑照后台运行时的网络设置查出口 IP（见 app.hosted_probe）"""
     wanted = (request.json or {}).get("sourceId")
     with s.app.store.lock:
-        sources = [src for src in s.app.store.sources.values() if getattr(src, "kind", "") == "ssh" and wanted in (None, "", src.id)]
+        sources = [src for src in s.app.store.sources.values() if getattr(src, "kind", "") in ("ssh", "local") and wanted in (None, "", src.id)]
     return Response.json({"ok": True, "machines": s.app.hosted_probe(sources)})
 
 
@@ -1754,6 +1781,18 @@ def r_new_session(s, request, *_):
     return blocked or s.app.new_session(request)
 
 
+def r_launchable(s, request, *_):
+    """新任务里除了 Claude Code 还能选哪几家（在那台电脑上后台运行，同 Mac 版 GET /api/launchable）。老版本 watcher、Windows 电脑为空"""
+    source = s.app.store.source(request.query.get("sourceId", ""))
+    if not source or not source.live or "hosted_agents" not in (getattr(source, "features", None) or ()):
+        return Response.json({"ok": True, "agents": []})
+    try:
+        agents = source.request({"cmd": "launchable"}, timeout=25).get("agents") or []
+    except Exception:  # noqa: BLE001
+        agents = []
+    return Response.json({"ok": True, "agents": agents})
+
+
 def r_resume(s, request, *_):
     s.app.idle_close.touch([request.query.get("key", "")])
     blocked = s.cap_check(request)
@@ -1915,7 +1954,7 @@ ROUTES = {
     ("GET", "/api/host-update"): r_host_update, ("POST", "/api/host-update"): r_host_update_post,
     ("POST", "/api/schedules"): r_schedules_add, ("POST", "/api/schedules/update"): r_schedules_update,
     ("POST", "/api/schedules/delete"): r_schedules_delete, ("POST", "/api/schedules/run"): r_schedules_run,
-    ("POST", "/api/new-session"): r_new_session, ("POST", "/api/resume"): r_resume, ("POST", "/api/viewed"): r_viewed, ("GET", "/api/tts/voices"): r_tts_voices,
+    ("POST", "/api/new-session"): r_new_session, ("GET", "/api/launchable"): r_launchable, ("POST", "/api/resume"): r_resume, ("POST", "/api/viewed"): r_viewed, ("GET", "/api/tts/voices"): r_tts_voices,
     ("POST", "/api/tts"): r_tts, ("POST", "/api/translate"): r_translate, ("GET", "/api/bark"): r_bark, ("POST", "/api/bark"): r_bark_set, ("POST", "/api/bark/test"): r_bark_test,
     ("POST", "/api/alerts/reconnect"): r_alerts_reconnect, ("POST", "/api/world/intent"): r_world_intent,
     ("POST", "/api/notify/test"): r_notify_test, ("POST", "/api/stuck/tick"): r_stuck_tick, ("POST", "/api/idleclose/tick"): r_idleclose_tick,

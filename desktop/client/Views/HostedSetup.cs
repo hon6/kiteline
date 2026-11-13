@@ -8,7 +8,7 @@ using static Kiteline.Lang;
 
 namespace Kiteline.Views;
 
-/// 在远端电脑上后台运行 Claude Code（同 iOS / Mac 版 HostedViews.swift）：按设备开，默认都不开。
+/// 在后台运行 Claude Code（同 iOS / Mac 版 HostedViews.swift）：远端电脑按设备开、默认不开；这台电脑自己（本机）默认开，Windows 上不支持。
 /// 每台先「检测出口 IP」——照后台运行时的那套网络设置查出口，看过结果点「确认开启」才开这一台；
 /// 从对话页提示进来的，开了以后还能把当前会话转到后台。设置 → 来源、对话页提示都打开它
 public static class HostedSetup
@@ -34,7 +34,7 @@ public static class HostedSetup
         box.Children.Add(Ui.Text(L("后台运行的 Claude Code 就在项目所在的电脑上运行，使用与 VS Code 中的 Claude Code 相同的网络设置（代理、证书、接口地址），每次启动前核对一致才运行。开启前请先检测出口。"), 12, color: "Text2", lines: 5));
         var machines = Model.Sources.Where(s => s.Hosted is not null && (sourceId is null || s.Id == sourceId)).ToList();
         if (machines.Count == 0)
-            box.Children.Add(Ui.Text(L("没有可在后台运行 Claude Code 的电脑（需通过 SSH 连接，且不是 Windows）。"), 12, color: "Text2", lines: 3));
+            box.Children.Add(Ui.Text(L("没有可在后台运行 Claude Code 的电脑（Windows 电脑暂不支持）。"), 12, color: "Text2", lines: 3));
         var status = Ui.Text("", 12, color: "Red", lines: 3);
         void Redraw() => Draw(sheet, box, sourceId, key, probes, changed);
         foreach (var machine in machines) box.Children.Add(Card(machine, probes, status, Redraw, changed));

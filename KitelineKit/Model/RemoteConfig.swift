@@ -22,6 +22,8 @@ enum RemoteFeature: String, CaseIterable {
     case peerFlights
     /// 和 Apple Watch 连接（下次启动 App 生效）
     case watch
+    /// 竖着的 iPhone 底部的 Tab 栏（会话 / 项目 / 待办 / 概览 / 我）；关掉回到一页式首页（汇总卡片都在会话列表上面）
+    case homeTabs
 }
 
 struct AppConfig: Decodable, Equatable {

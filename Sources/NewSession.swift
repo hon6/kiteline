@@ -93,7 +93,11 @@ enum NewSession {
             lastStarted = (source.id, cwd, prompt)
             let what = sessionId.map { "恢复会话 \($0)" } ?? "新会话"
             Log.write("[dry-run] \(what) \(source.displayName):\(cwd)（submit=\(submit)）：\(prompt.prefix(120))")
-            completion(Outcome(ok: true, submitted: submit, openedWindow: false, message: "dry-run"))
+            // 集成测试：内容带「[dry-run-slow]」的过 2 秒才做完（测同一会话连发几条时的排队）
+            let delay: Double = prompt.contains("[dry-run-slow]") ? 2 : 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                completion(Outcome(ok: true, submitted: submit, openedWindow: false, message: "dry-run"))
+            }
             return
         }
         let host = source.kind == .ssh ? source.sshHost : nil

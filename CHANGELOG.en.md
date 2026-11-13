@@ -1,5 +1,54 @@
 # Kiteline Release Notes
 
+## 3.49.37 (2026-11-14)
+
+### New Features
+
+- **Groups and sessions are now in one list** (iPhone, WeChat Mini Program): The separate Sessions and Groups tabs are gone. Groups are sorted together with sessions using the current sort order; when grouping by device or project, groups appear as their own section at the top. Long-press New Session to create a group, or long-press a session and choose to start a group.
+
+### Improvements
+
+- Icon buttons on the session tab bar (Mark, Files, Changes, Tests, Open in VS Code, split, More, Close Tab) now show their name and description when you hover over them.
+
+### Bug Fixes
+
+- Fixed an issue where clicking a test run in the Test Report showed its details in the main window with no way back. Details now open inside the Test Report window, and Back returns to the list.
+- **Slash commands sent while Claude is busy now appear in the queue**: Commands such as /effort or /model sent from your phone while a session is working only run after Claude Code finishes the current turn. Previously they stayed at the bottom of the conversation as "Sending", with Claude's new replies appearing above them; they are now listed above the input box with your queued messages, marked "Runs after this turn", and can be reordered, edited, deleted or sent right away.
+- **Fixed the first message sometimes staying in the input box when resuming a very long session**: When a session with a large history is resumed in the background, Claude Code may still be loading it and the first message could be typed without being sent. Kiteline now checks that it was sent and submits it again if not.
+- **Fixed an occasional crash when quitting Kiteline** (Mac).
+- **Sessions no longer fail to connect after an update or reinstall** (Mac): Kiteline occasionally started before the installation had finished, after which no local or remote sessions could connect until you quit and reopened it. It now reconnects automatically.
+- Fixed an issue where switching models from your phone could leave the session on the computer stuck on a confirmation prompt.
+
+## 3.49.36 (2026-11-14)
+
+### New Features
+
+- **Choose other agents for new tasks and let Kiteline run them in the background** (projects on Mac and Linux computers): Besides Claude Code, you can pick Kimi Code, Grok Build, Hermes, Muse Code, Antigravity CLI, CodeBuddy Code, Qwen Code, pi or trae-agent if they're installed on the computer. Kiteline runs them in the background, so you can reply, approve and interrupt from your phone without starting them in tmux. You can also continue their finished sessions by sending a message (except trae-agent).
+- **WorkBuddy desktop support**: while WorkBuddy is open, its recent tasks appear in the session list with their progress and full conversation. On a Mac you can also send messages to them from your phone and choose WorkBuddy when creating a task (Kiteline briefly brings WorkBuddy to the front to fill in and send it).
+- **Projects on this computer can now run Claude Code in the background**: New tasks and resumed sessions no longer open VS Code. Kiteline runs Claude Code in the background instead; sending messages and approving never switch the front window and still work while the computer is locked, and VS Code uses less memory. When you want to look at the code, click “Open in VS Code” on the session’s tab bar to continue there. This is on by default; you can turn it off, or check the outbound IP, in Settings → Sources. If a background start is not possible (for example, Claude Code has not been set up in the terminal yet, or the system has not allowed Kiteline to access the project’s folder), the session opens in VS Code as before and the reason is shown. Remote computers are still turned on one by one after checking their outbound IP.
+- **The iPhone home screen now uses a tab bar** (iPhone): The home screen shows only your sessions; projects, to-dos, usage and highlights, and settings move to the Projects, To-dos, Overview and Me tabs at the bottom. The Sessions page keeps only Search and New Session at the top, with the Sessions and Groups tabs pinned below the title bar. Sessions with new messages or pending approvals show a small dot next to the avatar instead of a number. The tab bar shrinks into a round button at the bottom left as you scroll down and expands as soon as you scroll back. Session groups are no longer shown on iPhone (unchanged on iPad and computers).
+- **Home Screen widgets** (iPhone, iPad): Two new widgets, Sessions and Plan & Usage, show the status of recent sessions, your plan limits and today's token usage on the Home Screen or Lock Screen, and refresh when notifications arrive. You can also place them on your Mac desktop (macOS 14 or later).
+
+### Improvements
+
+- **Press Return with an empty input box to send the first queued message**: When Claude is busy and messages are queued, pressing Return (or Send on the keyboard) with an empty input box sends the message at the front of the queue right away, while the rest stay queued; press again to send the next one. With nothing queued, empty messages are not sent; messages that contain only images or files can still be sent. “Send now” likewise sends only that one message right away.
+- **Fable 5.2 is now in the model list**, and the list updates itself with Claude Code: once you've used a new model in VS Code or the terminal, it appears in the model list on every device. The older model a session is currently using is still shown.
+- **Lower CPU and memory use** (Mac): Kiteline no longer keeps using noticeable CPU while sessions are working, and no longer redraws the whole window repeatedly when a session group is open or computer load is shown. With very large session records (hundreds of MB), the background service no longer uses a large amount of memory at startup.
+- Opening the activity timeline or the subagent list on a very long session no longer slows down other actions.
+- The “working” kite animation uses less power (Apple Watch).
+- **Pages show what you saw last time right away** (iPhone, iPad): Projects, Overview, To-dos, Usage, Settings and other pages open instantly with the last data while fresh data loads in the background, with “Updating” shown in the title bar, instead of a blank wait.
+- **Agent to-dos with no progress for a long time are flagged**: To-dos an agent recorded that haven't been updated for more than 3 days are marked “No update for N days” and can be cleared in one tap; agents are also reminded to finish or close them when they check their to-dos. “My To-dos” is now a single card, with each item's source noted and a link back to its session.
+- **Notices above the session list can be dismissed** (iPhone, iPad): VS Code dialogs, disconnection and similar notices now have a close button on the right. A dismissed notice stays hidden and reappears if the situation changes.
+
+### Bug Fixes
+
+- **Messages are no longer lost when you send several in a row while resuming a past session from your phone**: Previously, sending "?" or "continue" before a resume had finished made each message try to resume the same session on its own; they collided and only one got through. Messages for the same session are now queued and sent in order once the session is back.
+- **Remote sessions that need Claude Code to sign in now open in VS Code right away**: If Claude Code has not been set up in the terminal of that computer, a background start stops at the sign-in method screen. Kiteline used to wait almost a minute; it now switches to VS Code as soon as it sees that screen and tells you to run claude once in that computer's terminal to finish setup.
+- **Messages from your phone are no longer delayed or delivered twice**: While the computer was computing usage, loading the list of past sessions, or searching, messages from your phone used to wait behind those operations for up to ten seconds or more, and the same message could then be delivered to the session twice. Messages, key presses, and answers are now always delivered immediately; when the computer does not respond in time, Kiteline first checks whether the message has already arrived and never sends it again.
+- **Resuming a past session on an unstable network no longer sends the same message twice**: When your phone resends automatically because no response arrived, the computer recognizes the same message, resumes the session once, and sends it once.
+- Fixed an issue where, when several messages were sent in a row to resume the same session, a later one occasionally arrived first. They are now delivered in the order sent.
+- **Marking or pinning a session no longer makes rows overlap or jump around in the list** (iPhone, iPad, Windows, Linux): an older list sent by the computer before it finished the change no longer overrides what you just did.
+
 ## 3.49.35 (2026-11-12)
 
 ### New Features
@@ -31,14 +80,12 @@
 - **Open local files mentioned by sessions on other computers** (Mac, iPhone, iPad): When Claude works on another computer (such as a virtual machine or server) and saves a file to this computer, tapping the path in its reply used to say "File not found". Kiteline now looks for the file on this computer and opens it.
 - **More audio and video formats open with a tap** (iPhone, iPad): AVI, MKV, WebM, 3GP, FLAC, OGG, Opus, AIFF and AMR file names in messages are now shown as tappable file links.
 
-
 ## 3.49.32 (2026-11-11)
 
 ### Bug Fixes
 
 - Fixed turning a session group into a group chat sending the group name to every member as the first group message and asking the sessions to name the group. The group chat now uses the session group's name and no longer interrupts its sessions (Mac, iPhone, iPad).
 - Fixed the session list explanation and the empty-state hints in the Groups and Session Groups tabs being cut off in the sidebar (Mac).
-
 
 ## 3.49.31 (2026-11-11)
 
@@ -59,7 +106,6 @@
 ### Bug Fixes
 
 - Fixed conversations stopping in the middle or at the top, and no longer following new messages, after the display was turned off and on again (Mac).
-
 
 ## 3.49.30 (2026-11-09)
 
@@ -100,7 +146,6 @@
 ### Bug Fixes
 
 - **Session groups show messages right away** (Mac, iPhone, iPad): Opening a session group could show a blank message list until you scrolled; the latest messages now appear immediately.
-
 
 ## 3.49.26 (2026-11-08)
 

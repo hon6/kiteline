@@ -26,7 +26,8 @@ final class LocalSource: SourceConnection {
     private let queue = DispatchQueue(label: "ccpulse.local")
     private let rpc = WatcherRPC()
     private(set) var hostHome: String? = NSHomeDirectory()
-    let hostFeatures: Set<String> = []   // 后台运行只给远端项目用
+    /// 本机 watcher 报的能力表（hello 的 features）：后台运行 Claude Code（hosted）、指令编号（bridge_bid）……
+    private(set) var hostFeatures: Set<String> = []
 
     init(config: SourceConfig) {
         self.config = config
@@ -80,7 +81,8 @@ final class LocalSource: SourceConnection {
     private func launch() {
         guard !stoppedByUser else { return }
         guard let scriptURL = resolveScript() else {
-            update(state: .failed(reason: "App 内缺少 ccpulse-watch.py"))
+            // 原来就此停住、要退出重开 App；安装包刚换过时可能只是还没拷完，照常退避重试
+            scheduleRestart(reason: "App 内缺少 ccpulse-watch.py")
             return
         }
         if !rpc.isHolding { update(state: .connecting) }
@@ -215,7 +217,8 @@ final class LocalSource: SourceConnection {
         if event.kind == "hello" {
             if let home = event.raw["home"] as? String { hostHome = home }
             rpc.release()   // 换进程期间排着的请求发给新进程
-            update(state: .live(host: event.host ?? "本机", watcher: event.watcherVersion, sessionCount: 0))
+            update(state: .live(host: event.host ?? "本机", watcher: event.watcherVersion, sessionCount: 0),
+                   features: Set(event.raw["features"] as? [String] ?? []))
             delegate?.source(self, didLog: "本机 watcher v\(event.watcherVersion ?? "?") 就绪")
         }
         if case .live(let host, let watcher, let count) = state, event.kind == "snapshots",
@@ -225,8 +228,10 @@ final class LocalSource: SourceConnection {
         delegate?.source(self, didReceive: event)
     }
 
-    private func update(state newState: LinkState) {
+    /// features：这次起来的 watcher 报的能力表。和状态一起在主线程上写（读它的都在主线程）；没在跑时清空
+    private func update(state newState: LinkState, features: Set<String>? = nil) {
         DispatchQueue.main.async {
+            if let features { self.hostFeatures = features } else if !newState.isLive { self.hostFeatures = [] }
             self.state = newState
             self.delegate?.source(self, didChange: newState)
         }
@@ -254,7 +259,7 @@ final class LocalSource: SourceConnection {
 
     /// 确保本机有一份与 App 版本一致的 watcher，并返回它的路径
     private func resolveScript() -> URL? {
-        guard let bundled = Bundle.main.url(forResource: "ccpulse-watch", withExtension: "py"),
+        guard let bundled = RemoteSession.bundledWatcherURL,
               let bundledText = try? String(contentsOf: bundled, encoding: .utf8) else {
             return nil
         }

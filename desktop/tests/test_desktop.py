@@ -1240,8 +1240,36 @@ _delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend = False, None, (lambda: 
 try:
     src = _BrSource({"bridged": True, "result": "ok"})
     out = _delivery.send("你好", [], _br_rec(), src, True, 0)
-    check("发消息：交给 mod（op send），不碰前台", out.ok and out["submitted"] and src.calls[-1] == {"op": "send", "text": "你好", "cmd": "bridge", "sessionId": "br-1"}
-          and not _br_front.calls, (out, src.calls))
+    sent = dict(src.calls[-1])
+    bid = sent.pop("bid", None)
+    check("发消息：交给 mod（op send，带指令编号），不碰前台", out.ok and out["submitted"] and sent == {"op": "send", "text": "你好", "cmd": "bridge", "sessionId": "br-1"}
+          and isinstance(bid, str) and len(bid) >= 16 and not _br_front.calls, (out, src.calls))
+
+    # 回应没等到（链路卡了一下）：拿同一个编号再问一遍，watcher 认得、不会重复送；老 watcher 不认编号的只问一次
+    class _BrFlaky:
+        def __init__(self, features, fail=1):
+            self.features, self.fail, self.calls, self.timeouts = features, fail, [], []
+
+        def request(self, payload, timeout=30):
+            self.calls.append(dict(payload))
+            self.timeouts.append(timeout)
+            if len(self.calls) <= self.fail:
+                raise RuntimeError("请求超时")
+            return {"bridged": True, "result": "ok"}
+
+    flaky = _BrFlaky({"bridge_bid"})
+    out = _delivery.send("卡了一下", [], _br_rec(), flaky, True, 0)
+    check("回应没等到：同一个编号再问一次拿到结果，不走前台；每次只等 5 秒以内",
+          out.ok and out["submitted"] and len(flaky.calls) == 2 and flaky.calls[0]["bid"] == flaky.calls[1]["bid"]
+          and max(flaky.timeouts) <= 5 and not _br_front.calls, (out, flaky.calls, flaky.timeouts))
+    flaky = _BrFlaky({"bridge_bid"}, fail=2)
+    out = _delivery.send("一直不通", [], _br_rec(), flaky, True, 0)
+    check("两次都没回应：改走前台", len(flaky.calls) == 2 and _br_front.calls and _br_front.calls[-1] == ("send", "一直不通"), (out, _br_front.calls))
+    del _br_front.calls[:]
+    flaky = _BrFlaky(set())
+    out = _delivery.send("老 watcher", [], _br_rec(), flaky, True, 0)
+    check("老 watcher（不认编号）：不重问，直接改走前台", len(flaky.calls) == 1 and _br_front.calls and _br_front.calls[-1] == ("send", "老 watcher"), (out, flaky.calls))
+    del _br_front.calls[:]
     out = _delivery.send("等确认时也能发", [], _br_rec("waiting"), src, True, 0)
     check("等确认时发：不按回车，排在确认之后（不再拒绝）", out.ok and src.calls[-1]["text"] == "等确认时也能发", out)
     out = _delivery.send("只填不提交", [], _br_rec(), src, False, 0)
@@ -1288,9 +1316,49 @@ try:
 finally:
     _delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend = _br_saved
 
-print("== 后台托管会话（远端项目不开 VS Code）")
+print("== 后台托管会话（本机、远端项目不开 VS Code）")
 from kiteline import app as _app  # noqa: E402
 from kiteline.store import Record as _Record  # noqa: E402
+
+# 恢复会话：手机等不到回应拿同一个消息编号重发，只恢复一次
+from kiteline.httpd import Response as _RsResponse  # noqa: E402
+
+
+class _RsRequest:
+    def __init__(self, key, cid):
+        self.query, self.json = {"key": key}, ({"cid": cid, "text": "继续"} if cid else {"text": "继续"})
+
+
+_rs_app = object.__new__(_app.App)
+_rs_app._resume_gates, _rs_app._resume_lock = {}, threading.Lock()
+_rs_app._resume_pending, _rs_app._resume_recent = {}, {}
+_rs_calls, _rs_status = [], [200]
+
+
+def _rs_once(key, request):
+    _rs_calls.append(key)
+    time.sleep(0.6)
+    return _RsResponse.json({"ok": _rs_status[0] == 200, "n": len(_rs_calls)}, _rs_status[0])
+
+
+_rs_app._resume_once = _rs_once
+_rs_out = []
+_rs_threads = [threading.Thread(target=lambda: _rs_out.append(_rs_app.resume(_RsRequest("k1", "c1")))) for _ in range(2)]
+for _t in _rs_threads:
+    _t.start()
+    time.sleep(0.15)
+for _t in _rs_threads:
+    _t.join()
+check("恢复会话：同一个消息编号还在处理时又来一遍，只恢复一次，两边拿到同一个回应",
+      len(_rs_calls) == 1 and len(_rs_out) == 2 and _rs_out[0] is _rs_out[1] and _rs_out[0].status == 200, (_rs_calls, _rs_out))
+check("恢复做成后 10 分钟内同一个编号再来：直接回上次的结果", _rs_app.resume(_RsRequest("k1", "c1")) is _rs_out[0] and len(_rs_calls) == 1)
+_rs_status[0] = 409
+_rs_bad = _rs_app.resume(_RsRequest("k1", "c2"))
+check("恢复失败的不记：手机上点重试（同一个编号）会再做一次", _rs_bad.status == 409 and _rs_app.resume(_RsRequest("k1", "c2")).status == 409 and len(_rs_calls) == 3, _rs_calls)
+_rs_status[0] = 200
+_rs_app.resume(_RsRequest("k1", None))
+_rs_app.resume(_RsRequest("k1", None))
+check("没带编号的（老客户端）照旧每次都做", len(_rs_calls) == 5 and not _rs_app._resume_pending, _rs_calls)
 
 
 class _HostSource:
@@ -1359,6 +1427,20 @@ try:
     check("后台起不来：改开 VS Code，并说明原因", _hs_editor and "后台启动未成功：Claude Code 没有启动起来" in result["message"]
           and "XYZ" not in result["message"], result)   # 只带第一句，不带后面的画面
     _hs_editor.clear()
+    # 停在要人操作的画面上（登录、首次设置）：这台先记 10 分钟，这期间的新任务直接开 VS Code，不再每次白等
+    src = _HostSource({"sessionId": "new-2", "hosted": "x9", "submitted": True})
+    result = _app.launch_session("/srv/p", "再来一个", True, None, "ssh", "服务器", source=src)
+    check("刚确认过这台起不来：10 分钟内直接开 VS Code，不再试后台", not src.calls and "srv" in _app.HOSTED_BLOCKED, (src.calls, _app.HOSTED_BLOCKED))
+    _hs_editor.clear()
+    _app.hosted_probe([src])
+    result = _app.launch_session("/srv/p", "再来一个", True, None, "ssh", "服务器", source=src)
+    check("检测过出口（用户多半处理过了）：重新试后台", "srv" not in _app.HOSTED_BLOCKED and src.calls[-1].get("cmd") == "hosted_start" and not _hs_editor,
+          (src.calls, _hs_editor))
+    src = _HostSource(RuntimeError("HOSTED_ACCESS：Kiteline 尚未获准读取此文件夹，请在这台电脑上允许 Kiteline 访问它"))
+    result = _app.launch_session("/srv/p", "做个功能", True, None, "local", "本机", source=src)
+    check("读不了项目文件夹：改开 VS Code，并告诉用户原因", _hs_editor and "尚未获准读取此文件夹" in result["message"]
+          and "已改在 VS Code 中打开" in result["message"] and "HOSTED_ACCESS" not in result["message"], result)
+    _hs_editor.clear()
     notes = []
     src = _HostSource(RuntimeError("Claude Code 没有启动起来"), delay=9.5)
     result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src, notify=notes.append)
@@ -1366,9 +1448,31 @@ try:
     time.sleep(2.5)
     check("之后起不来再改开 VS Code", len(_hs_editor) == 1, _hs_editor)
     _hs_editor.clear()
-    src = _HostSource({"sessionId": "x"})
+    src = _HostSource({"sessionId": "x", "hosted": "x3", "submitted": True})
     result = _app.launch_session("/local/p", "做个功能", True, None, "local", "本机", source=src)
-    check("本机项目照旧开 VS Code（不走后台）", not src.calls, src.calls)
+    check("本机项目：开着后台运行（默认）也先在后台起，不开 VS Code", result["ok"] and src.calls and src.calls[0].get("cmd") == "hosted_start"
+          and src.calls[0].get("cwd") == "/local/p" and not _hs_editor, (result, src.calls))
+    src = _HostSource({"sessionId": "x"}, features=())
+    result = _app.launch_session("/local/p", "做个功能", True, None, "local", "本机", source=src)
+    check("本机的 watcher 不支持后台运行（Windows）：照旧开 VS Code", not src.calls, src.calls)
+    # 新任务选了别家 agent（11-13）：走后台、带 agent；老版本 watcher（没有 hosted_agents）先拦下，别让它悄悄起成 Claude Code
+    _hs_editor.clear()
+    src = _HostSource({"sessionId": "", "hosted": "a1", "submitted": True, "agent": "pi"}, features=("hosted", "hosted_agents"))
+    result = _app.launch_agent("/srv/p", "做个功能", True, None, src, "pi")
+    check("别家 agent：hosted_start 带 agent，成功就回成功、不开 VS Code",
+          result["ok"] and src.calls and src.calls[0].get("agent") == "pi" and src.calls[0].get("cmd") == "hosted_start" and not _hs_editor,
+          (result, src.calls))
+    src = _HostSource({"sessionId": "x"}, features=("hosted",))
+    result = _app.launch_agent("/srv/p", "做个功能", True, None, src, "pi")
+    check("别家 agent、老版本 watcher：不发 hosted_start，回「版本较旧」", not result["ok"] and not src.calls
+          and "版本较旧" in result["message"] and not _hs_editor, (result, src.calls))
+    src = _HostSource(RuntimeError("HOSTED_NO_AGENT：这台电脑上找不到 pi 命令"), features=("hosted", "hosted_agents"))
+    done_calls = []
+    result = _app.launch_agent("/srv/p", "做个功能", True, None, src, "pi", done=done_calls.append)
+    check("别家 agent 起不来：直接报原因（去掉内部前缀），不退回 VS Code，done 收到没提交",
+          not result["ok"] and result["message"] == "这台电脑上找不到 pi 命令" and not _hs_editor and done_calls == [False], (result, done_calls))
+    _hs_editor.clear()
+    src = _HostSource({"sessionId": "x"})
     _app.HOSTED_SETTING[0] = lambda source_id: False
     result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
     check("这台没开后台运行（默认）：远端也照旧开 VS Code", not src.calls, src.calls)
@@ -1397,9 +1501,67 @@ try:
     check("出口检测：不支持的、离线的也列上并说明", "暂不支持" in probe[1]["error"] and "离线" in probe[2]["error"], probe[1:])
     vs_rec = _Record("srv", "服务器", "ssh", {"sessionId": "v-1", "name": "v-1", "activity": "idle", "entrypoint": "claude-vscode",
                                             "pid": 999, "cwd": "/srv/p"})
-    check("能转到后台的会话：远端、VS Code 里的 Claude Code、那台支持", _store_mod.hostable(vs_rec, _HostSource({}))
+    check("能转到后台的会话：本机或远端、VS Code 里的 Claude Code、那台支持", _store_mod.hostable(vs_rec, _HostSource({}))
           and not _store_mod.hostable(vs_rec, _HostSource({}, features=())) and not _store_mod.hostable(hosted_rec, _HostSource({}))
-          and not _store_mod.hostable(_Record("local", "本机", "local", dict(vs_rec.snap)), _HostSource({})), "hostable")
+          and _store_mod.hostable(_Record("local", "本机", "local", dict(vs_rec.snap)), _HostSource({}))
+          and not _store_mod.hostable(_Record("peer", "另一台", "kiteline", dict(vs_rec.snap)), _HostSource({})), "hostable")
+
+    class _HoCfg:
+        sources = [{"id": "local", "kind": "local"}, {"id": "ssh:a", "kind": "ssh", "sshHost": "a"}, {"id": "ssh:b", "kind": "ssh", "hostedOn": True}]
+        mobile = {}
+
+        def update(self, change):
+            data = {"sources": self.sources, "mobile": self.mobile}
+            change(data)
+
+    # 小程序入口的端口被别的程序占着：隔一阵再试，对方让出来就自己恢复
+    import socket as _mp_socket
+    from kiteline import mpgate as _mpgate_mod
+    _mp_busy = _mp_socket.socket()
+    _mp_busy.bind(("127.0.0.1", 0))
+    _mp_busy.listen(1)
+    _mp_port = _mp_busy.getsockname()[1]
+    _mp_app = object.__new__(_app.App)
+    _mp_app.MPGATE_RETRY = (0.3, 0.6)
+    _mp_gate = _mpgate_mod.Gate(lambda *a, **k: None, lambda: "测试电脑")
+    _mp_app.mpgate = _mp_gate
+    try:
+        _mp_gate.start("127.0.0.1", _mp_port)
+        _mp_failed = False
+    except OSError:
+        _mp_failed = True
+    _mp_thread = threading.Thread(target=_mp_app._retry_mpgate, args=(_mp_gate, "127.0.0.1", _mp_port), daemon=True)
+    _mp_thread.start()
+    time.sleep(0.8)
+    _mp_still = _mp_gate._listener is None
+    _mp_busy.close()
+    _mp_thread.join(3)
+    check("小程序入口：端口被占时启动报错、不占着套接字；占用的程序让出端口后自己恢复监听",
+          _mp_failed and _mp_still and _mp_gate._listener is not None and not _mp_thread.is_alive(), (_mp_failed, _mp_still, _mp_gate._listener))
+    _mp_gate.stop()
+    _mp_gate2 = _mpgate_mod.Gate(lambda *a, **k: None, lambda: "测试电脑")
+    _mp_app.mpgate = _mp_gate2
+    _mp_busy = _mp_socket.socket()
+    _mp_busy.bind(("127.0.0.1", 0))
+    _mp_busy.listen(1)
+    _mp_thread = threading.Thread(target=_mp_app._retry_mpgate, args=(_mp_gate2, "127.0.0.1", _mp_busy.getsockname()[1]), daemon=True)
+    _mp_thread.start()
+    time.sleep(0.2)
+    _mp_gate2.stop()
+    _mp_thread.join(3)
+    _mp_busy.close()
+    check("小程序入口：Kiteline 退出（入口已停）后不再重试", not _mp_thread.is_alive() and _mp_gate2._listener is None)
+
+    _ho_app = object.__new__(_app.App)
+    _ho_app.cfg = _HoCfg()
+    _ho_app.server = type("S", (), {"publish_state": staticmethod(lambda: None)})()
+    check("开关的默认值：本机默认开，远端默认关、按设备开", _ho_app.hosted_on("local") and not _ho_app.hosted_on("ssh:a") and _ho_app.hosted_on("ssh:b")
+          and not _ho_app.hosted_on("没有这台"))
+    _ho_app.set_hosted(source_id="local", on=False)
+    _ho_app.set_hosted(source_id="ssh:a", on=True)
+    check("改开关：本机记在 hostedLocal，远端记在来源自己的 hostedOn", not _ho_app.hosted_on("local") and _ho_app.hosted_on("ssh:a")
+          and _HoCfg.mobile == {"hostedLocal": False} and _HoCfg.sources[1].get("hostedOn") is True and "hostedOn" not in _HoCfg.sources[0],
+          (_HoCfg.mobile, _HoCfg.sources))
     closed = []
     _saved_close = _app.delivery.close
     _app.delivery.close = lambda record, source, siblings: (closed.append(record.key), _delivery.Outcome(True, False, "已关闭会话"))[1]
@@ -1420,6 +1582,7 @@ try:
         _app.delivery.close = _saved_close
 finally:
     _delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend, _app.launch_session, _app.HOSTED_SETTING[0] = _hs_saved
+    _app.HOSTED_BLOCKED.clear()
 
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

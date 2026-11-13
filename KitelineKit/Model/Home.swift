@@ -337,19 +337,33 @@ final class HomeStats {
     private(set) var budget: Budget?
     /// 卡片上的刷新按钮转圈
     private(set) var limitsBusy = false
+    /// 正在后台取新的（页面上已经显示着上次存的，右上角一个小转圈「更新中」）
+    private(set) var refreshing = false
     private var refreshedAt: Date?
     private var limitsRefreshedAt: Date?
     private var weekRefreshedAt: Date?
+
+    /// 启动时先填上次存在手机上的（今天的动态、用量、额度、项目、近 7 天），没连上电脑也有数；之后 refresh 静默换成新的
+    func restore(_ api: MacAPI) {
+        if today == nil { today = api.cached(DigestPayload.self, "/api/digest", ["since": Self.dayStart(0)])?.totals }
+        if usage == nil { usage = api.cached(UsagePayload.self, "/api/usage", ["days": "1"])?.totals }
+        if limits.isEmpty { limits = api.cached(LimitsPayload.self, "/api/limits")?.devices ?? [] }
+        if projects.isEmpty { projects = api.cached(ProjectsReply.self, "/api/projects", ["detail": "1"])?.projects ?? [] }
+        if week.isEmpty { week = api.cached(UsagePayload.self, "/api/usage", ["days": "7"])?.days ?? [] }
+        if budget == nil { budget = api.cached(Budget.self, "/api/budget") }
+    }
 
     /// 一分钟内不重复拉（回到首页、下拉刷新时 force）
     func refresh(_ api: MacAPI, force: Bool = false) async {
         if !force, let refreshedAt, Date().timeIntervalSince(refreshedAt) < 60 { return }
         refreshedAt = Date()
         limitsRefreshedAt = Date()
-        async let digest = try? api.get(DigestPayload.self, "/api/digest", ["since": Self.dayStart(0)])
-        async let usage = try? api.get(UsagePayload.self, "/api/usage", ["days": "1"])
-        async let projects = try? api.get(ProjectsReply.self, "/api/projects", ["detail": "1"])
-        async let limits = try? api.get(LimitsPayload.self, "/api/limits")
+        refreshing = true
+        defer { refreshing = false }
+        async let digest = try? api.getCaching(DigestPayload.self, "/api/digest", ["since": Self.dayStart(0)])
+        async let usage = try? api.getCaching(UsagePayload.self, "/api/usage", ["days": "1"])
+        async let projects = try? api.getCaching(ProjectsReply.self, "/api/projects", ["detail": "1"])
+        async let limits = try? api.getCaching(LimitsPayload.self, "/api/limits")
         if let digest = await digest { today = digest.totals }
         if let usage = await usage { self.usage = usage.totals }
         if let limits = await limits { self.limits = limits.devices }
@@ -367,8 +381,8 @@ final class HomeStats {
         defer { if fresh { limitsBusy = false } }
         limitsRefreshedAt = Date()
         let skipCache = fresh ? ["fresh": "1"] : [:]
-        async let usage = try? api.get(UsagePayload.self, "/api/usage", skipCache.merging(["days": "1"]) { $1 })
-        async let limits = try? api.get(LimitsPayload.self, "/api/limits", skipCache)
+        async let usage = try? api.getCaching(UsagePayload.self, "/api/usage", skipCache.merging(["days": "1"]) { $1 })
+        async let limits = try? api.getCaching(LimitsPayload.self, "/api/limits", skipCache)
         if let usage = await usage { self.usage = usage.totals }
         if let limits = await limits { self.limits = limits.devices }
     }
@@ -377,8 +391,8 @@ final class HomeStats {
     func refreshWeek(_ api: MacAPI, force: Bool = false) async {
         if !force, let weekRefreshedAt, Date().timeIntervalSince(weekRefreshedAt) < 300 { return }
         weekRefreshedAt = Date()
-        async let usage = try? api.get(UsagePayload.self, "/api/usage", ["days": "7"])
-        async let budget = try? api.get(Budget.self, "/api/budget")
+        async let usage = try? api.getCaching(UsagePayload.self, "/api/usage", ["days": "7"])
+        async let budget = try? api.getCaching(Budget.self, "/api/budget")
         if let usage = await usage { week = usage.days }
         if let budget = await budget { self.budget = budget }
     }

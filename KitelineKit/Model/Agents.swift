@@ -146,10 +146,38 @@ enum EffortLevel {
 // MARK: 模型（Claude Code 里的 /model）
 
 enum ModelChoice {
-    static let all: [(id: String, name: String)] = [
-        ("claude-fable-5-1", "Fable 5.1"), ("claude-opus-5-5", "Opus 5.5"),
-        ("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-haiku-5-5", "Haiku 5.5"),
-    ]
+    /// 默认列出的（同 Claude Code 里的模型菜单）。Claude Code 出了新版本、用户在 VS Code 或终端里用过以后，
+    /// choices 会按各会话实际在用的模型自动换成更新的版本，不用等 Kiteline 发版
+    static let defaults = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+
+    /// claude-fable-5-2 / claude-opus-4-8[1m] / claude-haiku-4-5-20251001 → (fable, [5, 2])；不是 Claude 的模型返回 nil
+    static func parse(_ id: String) -> (family: String, version: [Int])? {
+        let raw = id.lowercased()
+        guard raw.hasPrefix("claude-") else { return nil }
+        let parts = (raw.dropFirst("claude-".count).split(separator: "[").first ?? "").split(separator: "-", omittingEmptySubsequences: false)
+        guard let family = parts.first, !family.isEmpty, family.allSatisfy(\.isLetter) else { return nil }
+        let version = parts.dropFirst().prefix { !$0.isEmpty && $0.count <= 2 && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }
+            .compactMap { Int($0) }
+        return version.isEmpty ? nil : (String(family), version)
+    }
+
+    static func id(_ family: String, _ version: [Int]) -> String { "claude-\(family)-" + version.map(String.init).joined(separator: "-") }
+
+    /// 菜单里列哪些：每一家取默认和各会话在用的里面最新的版本；这个会话现在用的是旧版本时也列上（打着勾，看得清现在是哪个）
+    static func choices(seen: [String?], current: String?) -> [(id: String, name: String)] {
+        var best: [String: [Int]] = [:], order: [String] = []
+        for raw in defaults + seen.compactMap({ $0 }) {
+            guard let parsed = parse(raw) else { continue }
+            if best[parsed.family] == nil { order.append(parsed.family) }
+            if best[parsed.family].map({ $0.lexicographicallyPrecedes(parsed.version) }) ?? true { best[parsed.family] = parsed.version }
+        }
+        var ids = order.compactMap { family in best[family].map { id(family, $0) } }
+        if let current, let now = parse(current), !ids.contains(id(now.family, now.version)),
+           let at = ids.firstIndex(where: { parse($0)?.family == now.family }) {
+            ids.insert(id(now.family, now.version), at: at + 1)
+        }
+        return ids.map { ($0, modelName($0)) }
+    }
 }
 
 extension AppModel {

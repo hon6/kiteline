@@ -29,8 +29,8 @@ TAIL_BYTES = 512 * 1024
 BUSY_MARKS = ("[stop]", "Ctrl+c:cancel")
 READ_ONLY = (("Windows 上从手机操作 Grok Build 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Grok Build on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
-             ("Grok Build 不在 tmux 中运行，只能查看；在 tmux 中启动 grok 后即可从手机回复和确认",
-              "Grok Build isn't running in tmux, so this session is view-only. Start grok in tmux to reply and confirm from your phone."))
+             ("Grok Build 不在 tmux 中运行，只能查看；在 tmux 中启动 grok，或在 Kiteline 新建任务时选择 Grok Build（由 Kiteline 在后台运行）后即可从手机回复和确认",
+              "Grok Build isn't running in tmux, so this session is view-only. Start grok in tmux, or choose Grok Build when creating a task in Kiteline (it runs in the background), to reply and confirm from your phone."))
 # 确认框：数字就提交。3 允许 / 2 总是允许这条命令 / 4 拒绝
 OPTIONS = ({"key": "4", "label": "拒绝", "labelEn": "Deny", "style": "destructive"},
            {"key": "3", "label": "允许", "labelEn": "Allow", "style": "primary"},
@@ -296,6 +296,18 @@ def create(kl):
 
         normalize = staticmethod(grok_normalize)
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 Grok 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
+            起来以后读屏、发字、按键都走通用终端层。字样照 grok 命令行（11-13） 实测的画面写（比较时不分大小写）"""
+            if resume and not (4 <= len(str(resume)) <= 128 and all(c.isalnum() or c in "_.:-" for c in str(resume))):
+                return None
+            return {"argv": ["grok"] + (["--resume", str(resume)] if resume else []),
+                    # 新开：首页菜单、右下角的登录状态；恢复：对话下面输入框的按键提示（恢复时没有首页）
+                    "ready": ["resume session", "logged in", "ctrl+x:shortcuts"],
+                    # 没登录时停在浏览器授权上：要用户本人在终端里登录
+                    "needsUser": ["approve in your browser", "waiting for approval"],
+                    "settle": 1.0}
+
         def detect(self):
             command = shutil.which("grok")
             return {"installed": os.path.isdir(SESSIONS) or bool(command), "forms": {"cli": ""} if command else {}}
@@ -355,7 +367,7 @@ def create(kl):
             pid = self.pids.get(sid)
             pane = term_pane(pid) if pid else None
             if not pane:
-                raise RuntimeError("这个 Grok Build 会话不在 tmux 里运行，只能查看；在 tmux 中启动 grok 后，就可以从手机回复和确认")
+                raise RuntimeError("这个 Grok Build 会话不在 tmux 里运行，只能查看；在 tmux 中启动 grok，或在 Kiteline 新建任务时选择 Grok Build（由 Kiteline 在后台运行）后，就可以从手机回复和确认")
             return pid, pane
 
         def send(self, sid, text, images):

@@ -1377,7 +1377,13 @@ try:
     check("不带参数：测试 watcher（没有 CCPULSE_SKILLS）不往真实的 ~/.claude 里装、也不抛", "CCPULSE_SKILLS" in os.environ or W.sync_bridge_mod() is False)
     mod_ts = W.BRIDGE_MOD_FILES["hooks/register.ts"]
     check("mod：斜杠命令走 $.command.run，以「/」开头的普通话垫零宽空格（源码里是转义写法）",
-          "$.command.run(" in mod_ts and "`\\u200b${text}` : text" in mod_ts and "submit($, item.text)" in mod_ts and "\u200b" not in mod_ts)
+          "$.command.run(" in mod_ts and "`\\u200b${text}` : text" in mod_ts and "await deliver($, { id: item.id, text: item.text, cmd })" in mod_ts and "\u200b" not in mod_ts)
+    pb = mod_ts.split("on('classic.PostToolBatch'")[1].split("on('tool.call'")[0]
+    check("mod：Claude 忙时发来的斜杠命令也排进队（带 cmd），不插进这一轮，这一轮做完（turn.complete）再执行",
+          "later.push({ id: item.id, text: item.text, ...(cmd ? { cmd } : {}) })" in mod_ts
+          and "if (q.cmd) {" in pb and "later.push(q)" in pb
+          and "await deliver($, q)" in mod_ts.split("on('turn.complete'")[1].split("on('classic.PostToolBatch'")[0]
+          and "void $.command.run({ command: slash[0], args: slash[1] })" in mod_ts)
     check("读记录时去掉垫的零宽空格：手机上显示、核对送达都照原话", W.user_string_item("\u200b/Users/x 看看", {"id": "1"})["text"] == "/Users/x 看看")
     check("手机经 mod 发来、排队进来的话算你说的；别的插件的不算",
           W.normalize_line(0, {"type": "attachment", "timestamp": ts(1), "attachment": {
@@ -1399,9 +1405,9 @@ try:
     with open(os.path.join(q_dir, "q-v2.alive"), "w") as handle:
         json.dump({"at": q_started + 1000, "v": 2}, handle)
     with open(os.path.join(q_dir, "q-v2.queue.json"), "w") as handle:
-        json.dump({"items": [{"id": "a1", "text": "先这个"}, {"id": "b2", "text": "再这个"}, {"bad": 1}]}, handle)
+        json.dump({"items": [{"id": "a1", "text": "先这个"}, {"id": "b2", "text": "再这个"}, {"id": "c3", "text": "/effort high", "cmd": True}, {"bad": 1}]}, handle)
     check("排队列表：v2 的 mod 读出队列（坏条目跳过），v1（老 mod）回 None，快照 bridge 仍是真",
-          W.bridge_queue("q-v2", q_started) == [{"id": "a1", "text": "先这个"}, {"id": "b2", "text": "再这个"}]
+          W.bridge_queue("q-v2", q_started) == [{"id": "a1", "text": "先这个"}, {"id": "b2", "text": "再这个"}, {"id": "c3", "text": "/effort high", "cmd": True}]
           and W.bridge_queue("q-v1", q_started) is None and W.bridge_alive("q-v1", q_started) == 1 and W.bridge_alive("q-v2", q_started) == 2)
     for name in ("q-v1.alive", "q-v2.alive", "q-v2.queue.json"):
         os.remove(os.path.join(q_dir, name))
@@ -1484,6 +1490,169 @@ try:
               and not glob.glob(os.path.join(inbox, BR_SID + ".ack-*")))
         resp = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "keys", "text": "x"})
         check("不认识的指令不送", resp and resp.get("bridged") is False, str(resp))
+
+        # 同一条指令（bid）电脑端问了两遍（第一次的回应没等到）：只送一次，第二次拿到同一个结果
+        before = len(got)
+        first = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "send", "text": "只该送一次", "bid": "bid-once-1"})
+        again = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "send", "text": "只该送一次", "bid": "bid-once-1"})
+        check("带编号的指令重复询问：mod 只收到一次，第二次回同一个结果并标 repeat",
+              first and first.get("bridged") is True and again and again.get("bridged") is True and again.get("repeat") is True
+              and again.get("result") == first.get("result") and len(got) == before + 1, "%s / %s / %d" % (first, again, len(got) - before))
+        other = ask({"cmd": "bridge", "sessionId": BR_SID, "op": "send", "text": "另一条", "bid": "bid-once-2"})
+        check("换了编号就是新指令，照常送", other and other.get("bridged") is True and len(got) == before + 2 and got[-1]["text"] == "另一条")
+        check("握手里声明 bridge_bid（电脑端据此才敢拿同一个编号重问）", "bridge_bid" in W.FEATURES)
+
+        # 发消息不排在慢查询后面：慢查询（历史列表、用量报表……）在后台线程算，送进会话的请求由读线程直接分出去
+        shell = object.__new__(W.Watcher)
+        shell.sessions, shell.live, shell.agents = {}, set(), {}
+        emitted, real_emit, real_list = [], W.emit, W.list_sessions
+        W.emit = lambda obj: emitted.append((time.time(), obj))
+        W.list_sessions = lambda *a, **k: (time.sleep(1.5), [])[1]
+        try:
+            t0 = time.time()
+            shell.respond(json.dumps({"cmd": "sessions_list", "id": "slow1"}))
+            returned = time.time() - t0
+            shell.respond(json.dumps({"cmd": "ping", "id": "p1"}))
+            pinged = time.time() - t0
+            deadline = time.time() + 5
+            while time.time() < deadline and not any(o.get("id") == "slow1" for _, o in emitted):
+                time.sleep(0.05)
+            order = [o.get("id") for _, o in emitted]
+            slow_at = next((t - t0 for t, o in emitted if o.get("id") == "slow1"), 0)
+            check("慢查询不占住请求线：历史列表要 1.5 秒，respond 立刻返回，后到的 ping 先回，慢查询算完照常回",
+                  returned < 0.3 and pinged < 0.4 and order == ["p1", "slow1"] and 1.3 < slow_at < 4
+                  and emitted[-1][1].get("ok") is True and emitted[-1][1].get("sessions") == [], "%.2f %.2f %s %.2f" % (returned, pinged, order, slow_at))
+            # 统计类一次只算一个（几个一起算内存叠加、互相抢解释器）；文件类另走一档，不排在统计后面
+            del emitted[:]
+            real_dirs = W.list_dirs
+            W.list_dirs = lambda *a, **k: {"dirs": []}
+            t1 = time.time()
+            shell.respond(json.dumps({"cmd": "sessions_list", "id": "h1"}))
+            shell.respond(json.dumps({"cmd": "sessions_list", "id": "h2"}))
+            shell.respond(json.dumps({"cmd": "dirs", "id": "d1", "path": "/tmp"}))
+            deadline = time.time() + 8
+            while time.time() < deadline and len(emitted) < 3:
+                time.sleep(0.05)
+            at = {o.get("id"): t - t1 for t, o in emitted}
+            heavy = sorted(v for k, v in at.items() if k in ("h1", "h2"))
+            check("统计类查询一次只算一个（两个各 1.5 秒：第二个约 3 秒才回）；列目录这类不排在它们后面",
+                  len(at) == 3 and at.get("d1", 9) < 1.0 and len(heavy) == 2 and 1.3 < heavy[0] < 2.6 and 2.8 < heavy[1] < 4.8, str(at))
+            W.list_dirs = real_dirs
+            W.trim_memory()   # 不抛就行（Linux 上把内存还给系统，别的系统只做垃圾回收）
+            # 别家 agent 的会话从只读变成可操作（进了 tmux / 后台伪终端）、或在后台运行：快照要重新推，各端跟着换界面
+            base_snap = {"sessionId": "x", "agent": "pi", "activity": "idle", "readOnly": True}
+            check("只读 ↔ 可操作、是否在后台运行都算快照变化",
+                  W.signature(base_snap) != W.signature(dict(base_snap, readOnly=False))
+                  and W.signature(base_snap) != W.signature(dict(base_snap, hosted="abc")), "")
+            # 终端屏幕模拟（托管伪终端的读屏）：喂进输出，问现在屏幕上是什么字
+            E = "\x1b"
+            vt = W.VTScreen(40, 8)
+            vt.feed(("第一行\r\n第二行\r\n" + E + "[31m红字" + E + "[0m 普通").encode("utf-8"))
+            check("屏幕：普通输出按行落位，颜色不算字", vt.text() == "第一行\n第二行\n红字 普通", repr(vt.text()))
+            vt.feed((E + "[2A\r" + E + "[2K改过的第一行" + E + "[2B\r").encode("utf-8"))
+            check("屏幕：光标上移、清掉整行再重写（Ink 这类界面重画的写法）", vt.text().split("\n")[0] == "改过的第一行" and vt.text().split("\n")[1] == "第二行", repr(vt.text()))
+            vt.feed((E + "[2J" + E + "[H" + "❯ 1. Yes\r\n  2. No" + E + "[1;3H" + "X").encode("utf-8"))
+            check("屏幕：清屏、回到左上角、按行列定位改一个字", vt.text() == "❯ X. Yes\n  2. No", repr(vt.text()))
+            vt.feed((E + "[?1049h" + "全屏界面" + E + "[?1049l").encode("utf-8"))
+            check("屏幕：进出备用屏后主屏还在", vt.text() == "❯ X. Yes\n  2. No", repr(vt.text()))
+            vt.feed((E + "[2J" + E + "[H" + "中文AB" + E + "[1;3H" + E + "[K").encode("utf-8"))
+            check("屏幕：汉字占两格（第 3 列是第二个汉字的起点）", vt.text() == "中", repr(vt.text()))
+            vt.feed((E + "[2J" + E + "[H" + "\r\n".join("行%d" % i for i in range(12))).encode("utf-8"))
+            check("屏幕：写满了往上滚，留下最后几行；能只要最后几行", vt.text().split("\n")[-1] == "行11" and vt.text().split("\n")[0] == "行4" and vt.text(2) == "行10\n行11", repr(vt.text()))
+            vt.feed((E + "]0;窗口标题\x07" + E + "[2J" + E + "[H" + "a" + E + "[5C" + "b" + E + "[3D" + E + "[1P").encode("utf-8"))
+            check("屏幕：标题这类序列不算字；光标右移留空格、删一个字符后面的左移", vt.text() == "a    b", repr(vt.text()))
+            half = "中".encode("utf-8")
+            vt.feed((E + "[2J" + E + "[H").encode("utf-8") + half[:1])
+            vt.feed(half[1:] + (E + "[").encode("utf-8"))
+            vt.feed("2Cz".encode("utf-8"))
+            check("屏幕：一个字、一段控制序列被拆在两次输出里也认得", vt.text() == "中  z", repr(vt.text()))
+            vt.resize(30, 5)
+            check("屏幕：改大小不丢左上角的字", vt.text() == "中  z" and vt.cols == 30 and vt.rows == 5, repr(vt.text()))
+            # 后台运行前先看项目文件夹读不读得了：macOS 等用户点「允许访问文稿」时读目录会一直卡着，不能跟着卡
+            real_scandir = W.os.scandir
+            gate = threading.Event()
+
+            def stuck_scandir(path):
+                if str(path).endswith("要授权"):
+                    gate.wait(10)
+                return real_scandir(tempfile.gettempdir() if str(path).endswith("要授权") else path)
+
+            W.os.scandir = stuck_scandir
+            try:
+                t2 = time.time()
+                first = W.folder_reachable("/tmp/要授权", timeout=0.5)
+                took_first = time.time() - t2
+                t2 = time.time()
+                again = W.folder_reachable("/tmp/要授权", timeout=0.5)
+                took_again = time.time() - t2
+                check("目录读起来卡住（系统在等用户允许）：到时间就算读不了；它回来之前再问直接答读不了，不再多开线程等",
+                      first is False and 0.4 < took_first < 1.5 and again is False and took_again < 0.2, "%.2f %.2f" % (took_first, took_again))
+                gate.set()
+                time.sleep(0.3)
+                check("用户点了允许之后：读得了", W.folder_reachable("/tmp/要授权", timeout=0.5) is True)
+                check("读得了的目录、没有的目录", W.folder_reachable(tempfile.gettempdir()) is True and W.folder_reachable("/没有/这个/目录") is False)
+            finally:
+                gate.set()
+                W.os.scandir = real_scandir
+            check("统计类和文件类分开登记", W.HEAVY_CMDS <= W.SLOW_CMDS and "usage_report" in W.HEAVY_CMDS and "read_file" in W.SLOW_CMDS - W.HEAVY_CMDS)
+            saved_fast = W._FAST["watcher"]
+            W._FAST["watcher"] = None
+            check("快车道：watcher 还没准备好时照常排队", W.fast_lane(json.dumps({"cmd": "bridge", "id": "f0"})) is False)
+            W._FAST["watcher"] = shell
+            del emitted[:]
+            check("快车道：后台送达、写终端的请求由读线程直接分出去；别的请求、终端按键以外的照常排队",
+                  W.fast_lane(json.dumps({"cmd": "bridge", "id": "f1", "sessionId": "没有", "op": "send"})) is True
+                  and W.fast_lane(json.dumps({"cmd": "history", "id": "f2", "note": "\"bridge\""})) is False
+                  and W.fast_lane(json.dumps({"cmd": "ping", "id": "f3"})) is False and W.fast_lane("{坏的 \"bridge\"") is False)
+            deadline = time.time() + 3
+            while time.time() < deadline and not emitted:
+                time.sleep(0.05)
+            check("快车道上的请求照常应答（会话不在：bridged false）", [o.get("id") for _, o in emitted] == ["f1"] and emitted[0][1].get("bridged") is False, str(emitted))
+            # 同一个会话连发几条：按到达的先后一条一条做（第一条慢也不让后面的抢先）；别的会话不等它
+            order, lane_lock = [], threading.Lock()
+            real_handle = shell.handle
+
+            def slow_first(request):
+                if request.get("id") == "a1":
+                    time.sleep(0.5)
+                with lane_lock:
+                    order.append(request.get("id"))
+                return {"bridged": False}
+
+            shell.handle = slow_first
+            try:
+                t3 = time.time()
+                for rid, sid in (("a1", "甲"), ("a2", "甲"), ("b1", "乙"), ("a3", "甲"), ("a4", "甲")):
+                    W.fast_lane(json.dumps({"cmd": "bridge", "id": rid, "sessionId": sid, "op": "send", "text": rid}))
+                fed = time.time() - t3
+                time.sleep(0.2)
+                early = list(order)
+                deadline = time.time() + 4
+                while time.time() < deadline and len(order) < 5:
+                    time.sleep(0.05)
+                check("快车道：同一会话连发的几条按先后做完（第一条慢，后面的不抢先）；别的会话的不等它；读线程不被占住",
+                      [x for x in order if x.startswith("a")] == ["a1", "a2", "a3", "a4"] and early == ["b1"] and fed < 0.2 and not W._LANES,
+                      "%s %s %.2f %s" % (order, early, fed, list(W._LANES)))
+                real_thread = W.threading.Thread
+
+                class NoThread:
+                    def __init__(self, *a, **k):
+                        pass
+
+                    def start(self):
+                        raise RuntimeError("can't start new thread")
+
+                W.threading.Thread = NoThread
+                try:
+                    taken = W.fast_lane(json.dumps({"cmd": "bridge", "id": "n1", "sessionId": "丙", "op": "send"}))
+                finally:
+                    W.threading.Thread = real_thread
+                check("快车道：线程开不出来时这条照常排队（返回 False），不抛异常、不留下占着的线", taken is False and not W._LANES, str(list(W._LANES)))
+            finally:
+                shell.handle = real_handle
+            W._FAST["watcher"] = saved_fast
+        finally:
+            W.emit, W.list_sessions = real_emit, real_list
 
         # 记录里没有在等的调用（11-07 实测：会话弹出提问框后，这一轮一直没写进记录）：从 mod 写的 asks.json 补
         asks = os.path.join(inbox, BR_SID + ".asks.json")

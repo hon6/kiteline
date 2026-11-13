@@ -333,6 +333,17 @@
 <key>other</key><string>%lld days</string>
 </dict>
 </dict>
+<key>%lld 天没更新</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Not updated for %lld day</string>
+<key>other</key><string>Not updated for %lld days</string>
+</dict>
+</dict>
 <key>%lld 小时</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -848,6 +859,28 @@
 <key>NSStringFormatValueTypeKey</key><string>lld</string>
 <key>one</key><string>Found %lld session</string>
 <key>other</key><string>Found %lld sessions</string>
+</dict>
+</dict>
+<key>把 %lld 条 3 天以上没更新的 agent 待办标为已完成？</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Mark %lld agent to-do not updated for 3+ days as done?</string>
+<key>other</key><string>Mark %lld agent to-dos not updated for 3+ days as done?</string>
+</dict>
+</dict>
+<key>收起久未更新的 %lld 条</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Clear %lld stale item</string>
+<key>other</key><string>Clear %lld stale items</string>
 </dict>
 </dict>
 <key>新建标签组（%lld 列）</key>

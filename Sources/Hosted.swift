@@ -2,31 +2,49 @@ import AppKit
 import Foundation
 import KitelineKit
 
-/// 托管会话：远端（Remote-SSH）项目的新任务、恢复会话不开 VS Code，请那台电脑上的 watcher 在后台起 claude
+/// 托管会话：新任务、恢复会话不开 VS Code，请项目所在电脑上的 watcher 在后台起 claude（本机项目、远端 Remote-SSH 项目都行）
 /// （watcher/kiteline-watch.py 的 hosted_start：守护进程在伪终端里跑交互式 claude，SSH 断开、本机睡眠都不影响）。
 /// 之后发消息、按键、关闭走 Delivery 里 tmux 那条路（watcher 写进伪终端），会话终端里的「claude」就是它原本的界面。
 /// 那台电脑不支持（Windows）、找不到 claude、卡在要人操作的画面上时，NewSession 退回 VS Code。
-/// 按设备开（设置 → 来源，SourceConfig.hostedOn），默认关：用户先检测这台的出口（probe），看过结果确认才开。
+/// 远端按设备开（设置 → 来源，SourceConfig.hostedOn），默认关：用户先检测这台的出口（probe），看过结果确认才开。
+/// 本机默认开（MobileConfig.hostedLocal，11-13 起：平时不必开着 VS Code），同一个面板里能关、能检测出口。
 /// 后台运行的 claude 和 VS Code 里的 Claude Code 用同一套网络设置（代理、证书、接口地址），watcher 起之前套上、起来后核对
 enum Hosted {
     /// 这次新任务 / 恢复走不走后台（以配置里这台的开关为准：传进来的可能是开关改之前拿的）
     static func wanted(_ source: SourceConfig) -> Bool {
-        source.kind == .ssh && on(source.id) && !Delivery.dryRun
+        guard source.kind != .kiteline, on(source.id), !Delivery.dryRun else { return false }
+        // 本机还没连上 watcher、或它不支持时不试；刚确认过这台起不来（要人先到电脑上处理）的，过一阵再试
+        if source.kind == .local, !supported(source.id) { return false }
+        if let until = blocked[source.id]?.until, until > Date() { return false }
+        return true
     }
 
+    /// 这台开没开：远端看来源自己的开关，本机看 hostedLocal（默认开）
     static func on(_ sourceId: String) -> Bool {
-        AppState.shared.config.sources.first { $0.id == sourceId }?.hostedOn == true
+        let config = AppState.shared.config
+        guard let source = config.sources.first(where: { $0.id == sourceId }) else { return false }
+        return source.kind == .local ? config.mobile.hostedLocal : source.hostedOn
     }
+
+    /// 这个来源能不能后台运行：本机、SSH 远端，且那边的 watcher 支持（另一台 Kiteline 电脑上的由那台自己管）
+    static func capable(_ source: SourceConfig) -> Bool {
+        source.kind != .kiteline && supported(source.id)
+    }
+
+    /// 刚试过起不来、要用户先到那台电脑上处理的（停在登录、首次设置画面）：这段时间内的新任务直接开 VS Code，
+    /// 不然每次都先白等几秒。改开关、检测出口时清掉（用户多半处理过了）
+    private(set) static var blocked: [String: (until: Date, reason: String)] = [:]
+    static let blockedFor: TimeInterval = 600
 
     /// 那台电脑能不能后台运行（不是 Windows、watcher 是有这功能的版本）
     static func supported(_ sourceId: String) -> Bool {
         AppState.shared.source(withId: sourceId)?.hostFeatures.contains("hosted") == true
     }
 
-    /// 能转到后台运行的会话：远端电脑上、在 VS Code 里跑的 Claude Code。会话页据此提示「当前会话支持后台托管」
+    /// 能转到后台运行的会话：本机或远端电脑上、在 VS Code 里跑的 Claude Code。会话页据此提示「当前会话支持后台托管」
     static func hostable(_ record: SessionRecord) -> Bool {
         let snap = record.snapshot
-        return record.kind == .ssh && snap.hosted == nil && snap.agentID == "claude-code" && snap.isVSCode
+        return record.kind != .kiteline && snap.hosted == nil && snap.agentID == "claude-code" && snap.isVSCode
             && snap.readOnly != true && supported(record.sourceId)
     }
 
@@ -35,10 +53,11 @@ enum Hosted {
         EditorSettings.claudeEnvironment(scheme: Delivery.Editor.running()?.scheme ?? "vscode")
     }
 
-    /// 出口检测：远端电脑（sourceId 给了只测那一台）照后台运行时的那套网络设置访问查 IP 的公共网址（不连 Claude），
+    /// 出口检测：本机和远端电脑（sourceId 给了只测那一台）照后台运行时的那套网络设置访问查 IP 的公共网址（不连 Claude），
     /// 回 [{id, name, source, settings, egress, error}]；离线、不支持的也列上
     static func probe(sourceId: String? = nil, completion: @escaping ([[String: Any]]) -> Void) {
-        let sources = AppState.shared.config.sources.filter { $0.kind == .ssh && $0.enabled && (sourceId == nil || $0.id == sourceId) }
+        let sources = AppState.shared.config.sources.filter { $0.kind != .kiteline && $0.enabled && (sourceId == nil || $0.id == sourceId) }
+        for source in sources { blocked[source.id] = nil }
         var results = [[String: Any]?](repeating: nil, count: sources.count)
         let group = DispatchGroup()
         let env = netEnv
@@ -77,8 +96,13 @@ enum Hosted {
     static func update(sourceId: String? = nil, on: Bool? = nil, tipOff: Bool? = nil) {
         let state = AppState.shared
         if let sourceId, let on, let index = state.config.sources.firstIndex(where: { $0.id == sourceId }) {
-            state.updatePreferences { $0.sources[index].hostedOn = on }
-            state.store.applySourceConfigs(state.config.sources)
+            if state.config.sources[index].kind == .local {
+                state.updatePreferences { $0.mobile.hostedLocal = on }
+            } else {
+                state.updatePreferences { $0.sources[index].hostedOn = on }
+                state.store.applySourceConfigs(state.config.sources)
+            }
+            blocked[sourceId] = nil
             Log.write("\(state.config.sources[index].displayName)：后台运行 Claude Code \(on ? "已开启（检测过出口、用户确认）" : "已关闭")")
         }
         if let tipOff {
@@ -123,20 +147,34 @@ enum Hosted {
 
     /// 起来了回 .success；起不来回 .failure（调用方改开 VS Code）。
     /// accepted：要自动提交、6 秒还没起来时先回一声（手机那边的请求只等 12 秒；一般两三秒就好）
-    static func start(source: SourceConfig, cwd: String, prompt: String, submit: Bool, sessionId: String?,
+    /// agent：别家命令行 agent（插件 id，见 /api/launchable）。它们没有 VS Code 那条路，起不来就直接报原因、不退回 VS Code
+    static func start(source: SourceConfig, cwd: String, prompt: String, submit: Bool, sessionId: String?, agent: String? = nil,
                       accepted: ((NewSession.Outcome) -> Void)?,
                       completion: @escaping (Result<NewSession.Outcome, RemoteError>) -> Void) {
         guard let connection = AppState.shared.source(withId: source.id), connection.state.isLive else {
             completion(.failure(RemoteError("该机器当前离线"))); return
         }
-        var payload: [String: Any] = ["cmd": "hosted_start", "cwd": cwd, "prompt": prompt, "submit": submit && !prompt.isEmpty]
+        // 老版本 watcher 不认 agent：会照常起 Claude Code 还回成功，用户选的却是别家，先拦下
+        if agent != nil, !connection.hostFeatures.contains("hosted_agents") {
+            completion(.failure(RemoteError("HOSTED_UNSUPPORTED：该电脑上的 Kiteline 组件版本较旧，请更新后重试"))); return
+        }
+        if agent != nil, Delivery.dryRun {
+            Log.write("[dry-run] 后台运行 \(agent ?? "")：\(source.displayName):\(cwd)\(sessionId.map { "，恢复 \($0)" } ?? "")：\(prompt.prefix(120))")
+            completion(.success(NewSession.Outcome(ok: true, submitted: submit && !prompt.isEmpty, openedWindow: false, message: "dry-run"))); return
+        }
+        // netEnv：VS Code 设置里给 Claude Code 配的环境变量（VS Code 里没有在运行的 Claude Code 时，watcher 照终端环境再叠上它），
+        // 和「检测出口」用的是同一份，检测到的出口才是实际运行时的。别家 agent 照用户开终端时的环境，不用它
+        var payload: [String: Any] = ["cmd": "hosted_start", "cwd": cwd, "prompt": prompt, "submit": submit && !prompt.isEmpty,
+                                      "netEnv": netEnv]
         if let sessionId { payload["sessionId"] = sessionId }
-        Log.write("新会话：在 \(source.displayName) 后台运行 Claude Code（\(cwd)）\(sessionId.map { "，恢复 \($0)" } ?? "")")
+        if let agent { payload["agent"] = agent }
+        Log.write("新会话：在 \(source.displayName) 后台运行 \(agent ?? "Claude Code")（\(cwd)）\(sessionId.map { "，恢复 \($0)" } ?? "")")
         var done = false
         if submit, !prompt.isEmpty, let accepted {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
                 guard !done else { return }
-                accepted(NewSession.Outcome(ok: true, submitted: true, openedWindow: false, message: "正在后台启动 Claude Code，启动后将自动提交"))
+                accepted(NewSession.Outcome(ok: true, submitted: true, openedWindow: false,
+                                            message: agent == nil ? "正在后台启动 Claude Code，启动后将自动提交" : "正在后台启动，启动后将自动提交"))
             }
         }
         connection.request(payload, timeout: 70) { result in
@@ -156,9 +194,34 @@ enum Hosted {
                 Log.write("新会话：后台会话 \(reply["hosted"] as? String ?? "?") 已就绪（\(reply["sessionId"] as? String ?? "")）")
                 completion(.success(NewSession.Outcome(ok: true, submitted: submitted, openedWindow: false, message: message)))
             case .failure(let error):
-                Log.write("新会话：后台启动失败（\(error.description)），改在 VS Code 中打开")
+                Log.write(agent == nil ? "新会话：后台启动失败（\(error.description)），改在 VS Code 中打开"
+                                       : "新会话：后台启动 \(agent ?? "")失败（\(error.description)）")
+                if agent == nil, error.description.contains("停在了需要操作的画面上") {
+                    blocked[source.id] = (Date().addingTimeInterval(blockedFor), error.description)
+                    Log.write("\(source.displayName)：后台运行暂停 \(Int(blockedFor / 60)) 分钟（Claude Code 停在要人操作的画面上），这期间的新任务直接在 VS Code 中打开")
+                }
                 completion(.failure(error))
             }
+        }
+    }
+
+    /// 别家 agent 在后台起不来时给用户看的话：去掉内部前缀；老版本 watcher 不认 agent 的说清楚要更新
+    static func agentFailure(_ error: RemoteError) -> String {
+        let text = error.description
+        if text.contains("未知请求") { return "该电脑上的 Kiteline 组件版本较旧，请更新后重试" }
+        for prefix in ["HOSTED_UNSUPPORTED：", "HOSTED_NO_AGENT：", "HOSTED_ACCESS：", "HOSTED_NETWORK："] where text.hasPrefix(prefix) {
+            return String(text.dropFirst(prefix.count))
+        }
+        return text
+    }
+
+    /// 新任务里能选的别家 agent（这台电脑上装着、插件给了后台启动的配方）。老版本 watcher、Windows 电脑返回空
+    static func launchable(sourceId: String, completion: @escaping ([[String: Any]]) -> Void) {
+        guard let connection = AppState.shared.source(withId: sourceId), connection.state.isLive,
+              connection.hostFeatures.contains("hosted_agents") else { completion([]); return }
+        connection.request(["cmd": "launchable"], timeout: 25) { result in
+            guard case .success(let reply) = result, let agents = reply["agents"] as? [[String: Any]] else { completion([]); return }
+            completion(agents)
         }
     }
 
@@ -167,6 +230,8 @@ enum Hosted {
         let text = error.description
         // 网络检查没过（拿不到 VS Code 那边的网络设置、起来后核对不一致）：要告诉用户，出口不能悄悄换
         if text.hasPrefix("HOSTED_NETWORK：") { return "\(text.dropFirst("HOSTED_NETWORK：".count))，已改在 VS Code 中打开" }
+        // 读不了项目文件夹（macOS 在等用户允许 Kiteline 访问「文稿」这类位置）：说清楚，用户回到电脑前点一次就好
+        if text.hasPrefix("HOSTED_ACCESS：") { return "\(text.dropFirst("HOSTED_ACCESS：".count))，已改在 VS Code 中打开" }
         if text.hasPrefix("HOSTED_") || text.contains("未知请求") || text.contains("离线") { return nil }
         return "后台启动未成功：\(text.split(separator: "\n").first.map(String.init) ?? text)，已改在 VS Code 中打开"
     }

@@ -105,7 +105,7 @@ enum Delivery {
                     // ui：这台 Mac 会替插件按键（插件回动作单时执行，见 runUIActions；Cursor 编辑器空闲时发消息靠它）
                     let kinds = zip(paths, attachments.map { $0.file })
                     agentRequest(["cmd": "agent_send", "text": compose(text: text, images: [], files: kinds.filter { $0.1 }.map { $0.0 }),
-                                  "images": kinds.filter { !$0.1 }.map { $0.0 }, "ui": ["keys"]],
+                                  "images": kinds.filter { !$0.1 }.map { $0.0 }, "ui": ["keys", "open", "paste"]],
                                  record: record, source: source, submitted: true, completion: completion)
                     return
                 }
@@ -537,20 +537,32 @@ enum Delivery {
         var body = fields
         body["cmd"] = "bridge"
         body["sessionId"] = record.snapshot.sessionId
-        source.request(body, timeout: 10) { response in
-            DispatchQueue.main.async {
-                switch response {
-                case .success(let json) where json["bridged"] as? Bool == true:
-                    result(json)
-                case .success:
-                    Log.write("后台送达没接上（\(record.snapshot.name)），改走前台")
-                    result(nil)
-                case .failure(let error):
-                    Log.write("后台送达失败（\(record.snapshot.name)）：\(error)，改走前台")
-                    result(nil)
+        // 每条指令一个编号：回应没等到（链路卡了一下）时拿同一个编号再问一遍，watcher 不会重复送、把那一次的结果给我们
+        //（watcher 的 bridge_bid）。老 watcher 不认编号，重问等于再发一遍，只问一次。
+        // watcher 那头最多 3.3 秒就有结果（等 mod 回执 2.5 秒 + 宽限 0.8 秒），原来等满 10 秒才改走前台，手机那边早超时重发了
+        let repeatable = record.kind == .local || source.hostFeatures.contains("bridge_bid")
+        body["bid"] = UUID().uuidString
+        func ask(_ attempt: Int) {
+            source.request(body, timeout: attempt == 0 ? 4.5 : 5) { response in
+                DispatchQueue.main.async {
+                    switch response {
+                    case .success(let json) where json["bridged"] as? Bool == true:
+                        if attempt > 0 { Log.write("后台送达（\(record.snapshot.name)）：第二次询问拿到结果") }
+                        result(json)
+                    case .success:
+                        Log.write("后台送达没接上（\(record.snapshot.name)），改走前台")
+                        result(nil)
+                    case .failure(let error) where repeatable && attempt == 0:
+                        Log.write("后台送达（\(record.snapshot.name)）：\(error)，再问一次")
+                        ask(1)
+                    case .failure(let error):
+                        Log.write("后台送达失败（\(record.snapshot.name)）：\(error)，改走前台")
+                        result(nil)
+                    }
                 }
             }
         }
+        ask(0)
     }
 
     /// 排队的消息（Claude 忙时发的、还在 mod 里等着）：move（dir -1 / 1）、edit（text）、delete、now（强插：中断当前这一步，排队的马上进会话）。
@@ -608,7 +620,7 @@ enum Delivery {
                 // 插件回了动作单：照着在这台 Mac 上按（远端来源的会话界面也在这台 Mac 上）
                 if let actions = response["ui"] as? [[String: Any]], !actions.isEmpty {
                     DispatchQueue.main.async {
-                        runUIActions(actions, record: record, source: source) { problem in
+                        runUIActions(actions, local: record.kind == .local, sessionId: record.snapshot.sessionId, source: source) { problem in
                             completion(problem.map { Outcome(ok: false, submitted: false, message: $0) }
                                        ?? Outcome(ok: true, submitted: submitted, message: message))
                         }
@@ -622,16 +634,22 @@ enum Delivery {
         }
     }
 
-    /// 动作单里认得的程序（插件写 app 名，这里换成 bundle id）
-    static let uiApps: [String: (bundleId: String, name: String)] = ["cursor": ("com.todesktop.230313mzl4w4u92", "Cursor")]
+    /// 动作单里认得的程序（插件写 app 名，这里换成 bundle id）；schemes = open 这一步只许打开它自己注册的深链接协议
+    static let uiApps: [String: (bundleId: String, name: String, schemes: [String])] = [
+        "cursor": ("com.todesktop.230313mzl4w4u92", "Cursor", []),
+        "workbuddy": ("com.tencent.workbuddy.mac", "WorkBuddy", ["workbuddy"]),
+    ]
 
     /// 插件回的动作单（watcher 的 HOST_CAPS「ui.keys」，规范 guide/plugin-development.md 3.3 的第一步），按顺序做：
     ///   focus  把 app 里打开了这个项目的窗口切到前台，核对确实在前台
+    ///   open   打开 app 自己的深链接（只许它注册的协议，如 workbuddy://chat/<任务>），等它切到前台、核对确实在前台
     ///   plugin 回头请插件做一步（agent_ui），比如 Cursor 的配套扩展在窗口到前台后往对话输入框里填字
+    ///   paste  核对前台还是那个程序，粘贴文字（剪贴板用完还原）
     ///   key    核对前台还是那个窗口，按键
     /// 和别的投递排队；哪一步不成就停下、不按键（宁可不发也不发错），告诉用户停在哪（填进去了没有）；做完把前台还给用户。
     /// 远端来源的会话界面也在这台 Mac 上，同样在这里做。problem 为 nil = 都做完了
-    static func runUIActions(_ actions: [[String: Any]], record: SessionRecord, source: SourceConnection,
+    /// local：会话在这台 Mac 上（深链接只能打开这台 Mac 上的程序）；sessionId：plugin 这一步回给插件的会话（新建任务时为空）
+    static func runUIActions(_ actions: [[String: Any]], local: Bool, sessionId: String, source: SourceConnection,
                              completion: @escaping (_ problem: String?) -> Void) {
         let shown = actions.lazy.compactMap { uiApps[$0["app"] as? String ?? ""]?.name }.first ?? "编辑器"
         var filled = false
@@ -675,8 +693,50 @@ enum Delivery {
                         }
                         step(index + 1)
                     }
+                case "open":
+                    // 深链接：只许打开这个程序自己注册的协议（插件给的网址，别让它借这一步打开别的东西）
+                    guard let target = uiApps[action["app"] as? String ?? ""], let raw = action["url"] as? String,
+                          let url = URL(string: raw), let scheme = url.scheme?.lowercased(), target.schemes.contains(scheme) else {
+                        fail("当前版本的 Kiteline 不支持这一步，请更新 Kiteline"); return
+                    }
+                    // 深链接打开的是这台 Mac 上的程序：别的电脑上的会话不能在这里打开（会开到这台 Mac 上的同一个程序里）
+                    guard local else {
+                        fail("\(target.name) 在另一台电脑上，暂不支持从这里操作"); return
+                    }
+                    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: target.bundleId).first else {
+                        fail("\(target.name) 没有在运行"); return
+                    }
+                    front.target = app
+                    NSWorkspace.shared.open(url)
+                    // 深链接把文字填进了输入框（如 WorkBuddy 新建任务）：之后哪一步不成，都要告诉用户「已填入、没发出」，别让他重发出两份
+                    if action["fills"] as? Bool == true { filled = true }
+                    let wait = min(max(Double(action["wait"] as? Int ?? 1500) / 1000, 0.5), 6)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
+                        if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier { app.activate() }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+                                fail("\(target.name) 未能切到前台（电脑可能已锁屏，或被其他窗口遮挡），为避免误输入到其他应用而停止"); return
+                            }
+                            raised = app
+                            Log.write("动作单：打开 \(target.name) 的深链接 \(url.host ?? "")")
+                            step(index + 1)
+                        }
+                    }
+                case "paste":
+                    guard let text = action["text"] as? String, !text.isEmpty else {
+                        fail("当前版本的 Kiteline 不支持这一步，请更新 Kiteline"); return
+                    }
+                    // 粘贴前一定要先有 focus / open 把目标程序切到前台并核对过（插件的动作单顺序不对就不粘）
+                    guard raised != nil else { fail("插件给的操作步骤有误（粘贴前没有切到目标程序），为避免误输入而停止"); return }
+                    if let raised, NSWorkspace.shared.frontmostApplication?.processIdentifier != raised.processIdentifier {
+                        fail("\(shown) 已不在前台，为避免误输入到其他应用而停止"); return
+                    }
+                    pasteText(text)
+                    filled = true
+                    Log.write("动作单：在 \(shown) 粘贴 \(text.count) 个字")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { step(index + 1) }
                 case "plugin":
-                    source.request(["cmd": "agent_ui", "sessionId": record.snapshot.sessionId, "step": action["step"] as? String ?? ""],
+                    source.request(["cmd": "agent_ui", "sessionId": sessionId, "step": action["step"] as? String ?? ""],
                                    timeout: 15) { result in
                         DispatchQueue.main.async {
                             switch result {

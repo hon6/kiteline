@@ -365,6 +365,7 @@ struct TestsView: View {
     let key: String
     @State private var runs: [TestRunInfo]?
     @State private var error: String?
+    @State private var opened: TestRunInfo?
 
     var body: some View {
         List {
@@ -382,7 +383,17 @@ struct TestsView: View {
                     let bad = runs.filter { $0.ok == false }.count
                     Section {
                         ForEach(runs) { run in
+                            #if KITELINE_MAC
+                            // Mac 上测试报告开在面板里：NavigationLink { 详情 } 会推到主窗口右侧内容区（没有返回键、退不出来，11-13），
+                            // 改成按钮 + 本页的 navigationDestination，只在面板自己的导航栈里推
+                            Button { opened = run } label: {
+                                HStack { row(run); Spacer(minLength: 6); Image(systemName: "chevron.right").font(.ui(.caption)).foregroundStyle(.tertiary) }
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            #else
                             NavigationLink { TestRunDetail(run: run) } label: { row(run) }
+                            #endif
                         }
                     } header: {
                         Text(L("最近 %@ 次 · %@ 次通过", "\(runs.count)", "\(ok)") + (bad > 0 ? L(" · %@ 次失败", "\(bad)") : "")).textCase(nil).font(.sectionHeader)
@@ -392,6 +403,7 @@ struct TestsView: View {
         }
         .overlay { if runs == nil { if let error { LoadFailed(error: error) { await load() } } else { ProgressView() } } }
         .navigationTitle("测试报告")
+        .navigationDestination(item: $opened) { TestRunDetail(run: $0) }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -970,13 +982,25 @@ struct ComposeTask: View {
     @State private var clipboardImage = false
     @State private var busy = false
     @State private var overCap: String?
+    /// 除了 Claude Code 还能选的 agent（这台电脑上装着、可以在后台运行的，见 GET /api/launchable）；空 = 不显示选择
+    @State private var agents: [LaunchableAgent] = []
+    @State private var agent = "claude-code"
     @FocusState private var focused: Bool
+
+    struct LaunchableAgent: Identifiable, Equatable {
+        let id: String
+        let name: String
+        /// 桌面应用经界面新建（如 WorkBuddy）：会在电脑上切到它、填好并发送，不是在后台运行
+        var viaUI = false
+    }
 
     static func draftKey(_ project: ProjectInfo) -> String { "new:\(project.sourceId)\n\(project.cwd)" }
     private var draftKey: String { Self.draftKey(project) }
     private var text: Binding<String> { Binding(get: { model.drafts[draftKey] ?? "" }, set: { model.setDraft(draftKey, $0) }) }
     private var ready: Bool { project.open || project.live > 0 }
     private var scheduled: Bool { scheduleOnly || when == "sched" }
+    /// 选了别家 agent（定时任务只做 Claude Code）
+    private var otherAgent: LaunchableAgent? { scheduled ? nil : agents.first { $0.id == agent } }
 
     var body: some View {
         Form {
@@ -989,9 +1013,17 @@ struct ComposeTask: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                if !scheduled, !agents.isEmpty {
+                    Picker("Agent", selection: $agent) {
+                        Text(verbatim: "Claude Code").tag("claude-code")
+                        ForEach(agents) { Text(verbatim: $0.name).tag($0.id) }
+                    }
+                    .pickerStyle(.menu)
+                }
             }
             Section {
-                TextField("请描述需要 Claude 在此项目中完成的任务", text: text, axis: .vertical)
+                TextField(otherAgent.map { L("请描述需要 %@ 在此项目中完成的任务", $0.name) } ?? L("请描述需要 Claude 在此项目中完成的任务"),
+                          text: text, axis: .vertical)
                     .lineLimit(5...12)
                     .focused($focused)
                 #if os(iOS)
@@ -1072,8 +1104,13 @@ struct ComposeTask: View {
                         }
                     }
                 } footer: { Group {
-                        Text(isolated ? L("会在电脑上为新分支打开一个新的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")
-                             : (ready ? L("在已打开的 VS Code 窗口里新建会话") : L("将先在电脑上打开此项目的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")))
+                        if let otherAgent {
+                            Text(otherAgent.viaUI ? L("将在电脑上的 %@ 中新建任务并发送（会短暂切到 %@）", otherAgent.name, otherAgent.name)
+                                 : L("将在电脑后台运行 %@，可在手机上查看和操作", otherAgent.name))
+                        } else {
+                            Text(isolated ? L("会在电脑上为新分支打开一个新的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")
+                                 : (ready ? L("在已打开的 VS Code 窗口里新建会话") : L("将先在电脑上打开此项目的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")))
+                        }
                     }
                     .font(.ui(.footnote))
                 }
@@ -1082,7 +1119,7 @@ struct ComposeTask: View {
                 Button {
                     Task { await go(override: false) }
                 } label: {
-                    Text(busy ? (scheduled ? "正在创建…" : (ready ? "正在新建会话…" : "正在打开 VS Code…")) : (scheduled ? "创建定时任务" : "开始"))
+                    Text(busy ? (scheduled ? "正在创建…" : (ready || otherAgent != nil ? "正在新建会话…" : "正在打开 VS Code…")) : (scheduled ? "创建定时任务" : "开始"))
                         .font(.ui(.headline)).frame(maxWidth: .infinity)
                 }
                 .disabled(busy)
@@ -1105,6 +1142,15 @@ struct ComposeTask: View {
                   info["repo"] as? String != nil || info["repo"] as? Bool == true else { return }
             canIsolate = true
             worktrees = (info["worktrees"] as? [Any])?.count ?? 0
+        }
+        .task(id: project.sourceId) {
+            // 这台电脑上还能选哪几家 agent（老版本电脑端、Windows 电脑为空，就不显示选择）
+            let reply = try? await model.api.get("/api/launchable", ["sourceId": project.sourceId])
+            agents = ((reply?["agents"] as? [[String: Any]]) ?? []).compactMap { row in
+                guard let id = row["id"] as? String, !id.isEmpty, id != "claude-code" else { return nil }
+                return LaunchableAgent(id: id, name: row["name"] as? String ?? id, viaUI: row["via"] as? String == "ui")
+            }
+            if !agents.contains(where: { $0.id == agent }) { agent = "claude-code" }
         }
         .onChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
@@ -1143,11 +1189,13 @@ struct ComposeTask: View {
         }
         Haptics.tap()
         do {
-            let reply = try await model.api.post("/api/new-session", body: [
+            var body: [String: Any] = [
                 "sourceId": project.sourceId, "cwd": project.cwd, "text": prompt,
                 "images": attachments.map { ["name": $0.name, "data": $0.data.base64EncodedString()] },
                 "override": override, "worktree": isolated && canIsolate,
-            ])
+            ]
+            if let otherAgent { body["agent"] = otherAgent.id }
+            let reply = try await model.api.post("/api/new-session", body: body)
             model.setDraft(draftKey, "")
             model.awaitNewSession(sourceId: project.sourceId, cwd: reply["cwd"] as? String ?? project.cwd)
             if let branch = reply["branch"] as? String { model.flash(L("已在独立分支 %@ 开始", "\(branch)")) }

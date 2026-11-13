@@ -405,6 +405,7 @@ from kiteline import config as kconfig, store as kstore  # noqa: E402
 
 class SnapSource:
     id, name, kind, live, config = "local", "本机", "local", True, {}
+    features = set()    # 真的来源都有这一项（watcher 报的能力），本机来源也要看它
 
     def short_label(self):
         return "已连接"

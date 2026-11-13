@@ -45,6 +45,8 @@ final class MacStore {
     @MainActor
     func enterDemo() {
         Offline.clear()
+        // 小组件别还显示上一台电脑的会话（演示数据也不往小组件里写）
+        WidgetSync.clear()
         ImageCache.shared.clearMemory()
         DemoServer.shared.reset()
         Demo.set(true)
@@ -69,7 +71,10 @@ final class MacStore {
         }
         current = nil
         Keychain.delete()
-        Task { @MainActor in PushSetup.shared.leave() }
+        Task { @MainActor in
+            PushSetup.shared.leave()
+            WidgetSync.clear()
+        }
         #else
         current = nil
         Keychain.delete()

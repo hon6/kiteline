@@ -1,14 +1,15 @@
 {
  "id": "codebuddy",
  "name": "CodeBuddy / WorkBuddy",
- "version": "1.0.2",
- "summary": "腾讯的编程 agent（CodeBuddy Code 命令行、WorkBuddy 桌面版）：查看会话、状态和完整对话；命令行在 tmux 中运行时可回复、确认、回答提问和中断",
- "summaryEn": "Tencent's coding agent (CodeBuddy Code CLI and the WorkBuddy desktop app): view sessions, status and full conversations; reply, confirm, answer questions and interrupt when the CLI runs in tmux",
+ "version": "1.1.0",
+ "summary": "腾讯的编程 agent（CodeBuddy Code 命令行、WorkBuddy 桌面版）：查看会话、状态和完整对话；WorkBuddy 桌面版可从手机发消息、新建任务（Mac）；命令行在 tmux 中运行、或由 Kiteline 在后台运行时可回复、确认、回答提问和中断",
+ "summaryEn": "Tencent's coding agent (CodeBuddy Code CLI and the WorkBuddy desktop app): view sessions, status and full conversations; send messages to and create WorkBuddy desktop tasks from your phone (Mac); reply, confirm, answer questions and interrupt when the CLI runs in tmux or in the background through Kiteline",
  "needs": [
   "fs.read",
   "fs.tail",
   "proc",
-  "term.tmux"
+  "term.tmux",
+  "db.read"
  ],
  "detect": {
   "paths": [
@@ -32,14 +33,15 @@
      "interrupt"
     ],
     "verified": false,
-    "note": "回复和确认需要 CodeBuddy Code 在 tmux 中运行"
+    "note": "回复和确认需要 CodeBuddy Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
    },
    "desktop": {
     "abilities": [
-     "view"
+     "view",
+     "reply"
     ],
-    "verified": false,
-    "note": "WorkBuddy 桌面版的会话只能查看"
+    "verified": true,
+    "note": "WorkBuddy 桌面版：查看任务和完整对话；从手机发消息、新建任务时 Kiteline 用它的深链接打开任务、粘贴并发送（会短暂切到 WorkBuddy）；确认操作请在 WorkBuddy 中进行"
    }
   },
   "windows": {
@@ -55,7 +57,7 @@
      "view"
     ],
     "verified": false,
-    "note": "WorkBuddy 桌面版的会话只能查看"
+    "note": "WorkBuddy 桌面版的任务只能查看（Windows 上从手机发消息还没实测）"
    }
   },
   "linux": {
@@ -68,11 +70,14 @@
      "interrupt"
     ],
     "verified": true,
-    "note": "回复和确认需要 CodeBuddy Code 在 tmux 中运行"
+    "note": "回复和确认需要 CodeBuddy Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
    },
    "desktop": {
-    "abilities": [],
-    "note": "WorkBuddy 没有 Linux 版"
+    "abilities": [
+     "view"
+    ],
+    "verified": false,
+    "note": "WorkBuddy 桌面版的任务只能查看（Linux 版还没实测）"
    }
   }
  },
@@ -95,19 +100,19 @@
    "textEn": "Replying, confirming and interrupting from your phone on Windows aren't tested yet, so they're off and sessions are view-only (Kiteline can now type into Windows terminals; each agent is enabled once tested)"
   },
   {
-   "kind": "unsupported",
-   "text": "WorkBuddy 桌面版只能查看：它没有对外的操作接口",
-   "textEn": "The WorkBuddy desktop app is view-only: it offers no external control interface"
-  },
-  {
    "kind": "untested",
    "text": "Mac 上还没实测（Linux 上已全部实测）",
    "textEn": "Not yet tested on Mac (fully tested on Linux)"
   },
   {
    "kind": "untested",
-   "text": "WorkBuddy 桌面版还没在 Mac、Windows 真机上实测（它没有 Linux 版）",
-   "textEn": "The WorkBuddy desktop app hasn't been tested on a real Mac or Windows computer yet (it has no Linux version)"
+   "text": "WorkBuddy 桌面版只在 Mac 上实测过（Windows、Linux 版还没实测）",
+   "textEn": "The WorkBuddy desktop app has only been tested on a Mac (the Windows and Linux versions haven't been tested yet)"
+  },
+  {
+   "kind": "unsupported",
+   "text": "WorkBuddy 桌面版里等你确认的操作（权限、提问）要在 WorkBuddy 中处理：它没有对外的确认接口",
+   "textEn": "Approvals and questions in the WorkBuddy desktop app have to be answered in WorkBuddy: it offers no external interface for them"
   }
  ]
 }

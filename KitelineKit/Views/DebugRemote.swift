@@ -272,7 +272,10 @@ enum DebugRemote {
                     catch { note("trhost 失败：\((error as? TranslateError)?.message ?? "\(error)")") }
                 }
             } else if parts.first == "trprobe" {
+                // probeApple 只在调试版里有（截图版带 SNAPSHOT 不带 DEBUG，没有这个方法）
+                #if DEBUG
                 Task { await Translator.shared.probeApple() }
+                #endif
             } else if parts.first == "translated" {
                 // 每条翻译的状态、试过哪些服务、为什么换下一个 / 失败，加上当前设置和系统翻译语言包状态
                 let t = Translator.shared

@@ -265,8 +265,9 @@ extension AppModel {
     /// 还有成员会话在跑的 = 进行中的群；全都关了 = 历史群
     func isLive(_ group: GroupInfo) -> Bool { group.members.contains { session($0.key) != nil } }
 
-    /// 成员现在叫什么：在跑的用会话列表里的标题（改过名的跟着变）
-    func title(of member: GroupMember) -> String { session(member.key)?.title ?? member.title }
+    /// 成员现在叫什么：在跑的用会话列表里的标题（改过名的跟着变）。读标题表（只在有会话改名、增减时才变），
+    /// 不读整个会话列表：群聊页的每一行都调这个
+    func title(of member: GroupMember) -> String { sessionTitles[member.key] ?? member.title }
 
     /// 建群，返回群 id
     func createGroup(keys: [String], topic: String, name: String? = nil) async -> String? {

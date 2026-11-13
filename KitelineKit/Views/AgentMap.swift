@@ -9,6 +9,7 @@ struct AgentMapSheet: View {
     @State private var reply: AgentsReply?
     @State private var error: String?
     @State private var path: [AgentPage] = []
+    @State private var opener = AgentPageOpener()
 
     /// Mac：往里点是往前（新页面从右边滑进来），返回是往后（从左边滑回来）
     @State private var forward = true
@@ -39,7 +40,7 @@ struct AgentMapSheet: View {
             }
             .doneButton { dismiss() }
         }
-        .environment(\.openAgentPage) { push($0) }
+        .environment(\.openAgentPage, routed { push($0) })
         .task { await refresh() }
         .panelFrame(width: 640)
         #else
@@ -50,7 +51,7 @@ struct AgentMapSheet: View {
                 .navigationDestination(for: AgentPage.self) { subpage($0) }
                 .task { await refresh() }
         }
-        .environment(\.openAgentPage) { path.append($0) }
+        .environment(\.openAgentPage, routed { path.append($0) })
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         #endif
@@ -95,6 +96,12 @@ struct AgentMapSheet: View {
 
     private var slide: AnyTransition {
         .asymmetric(insertion: .move(edge: forward ? .trailing : .leading), removal: .move(edge: forward ? .leading : .trailing))
+    }
+
+    /// 每次重算把最新的动作放进同一个盒子里
+    private func routed(_ action: @escaping (AgentPage) -> Void) -> AgentPageOpener {
+        opener.action = action
+        return opener
     }
 
     private func push(_ page: AgentPage) {
@@ -150,8 +157,15 @@ enum AgentPage: Hashable {
     case transcript(SubagentInfo)
 }
 
+/// 环境里放的是这个盒子（同一个对象，环境值就不变）：直接放闭包的话，面板每次重算都是一个新闭包，
+/// 读它的每个节点都跟着重算（同 3.49.8 修过的分屏卡顿）
+final class AgentPageOpener {
+    var action: (AgentPage) -> Void = { _ in }
+    func callAsFunction(_ page: AgentPage) { action(page) }
+}
+
 extension EnvironmentValues {
-    @Entry var openAgentPage: (AgentPage) -> Void = { _ in }
+    @Entry var openAgentPage = AgentPageOpener()
 }
 
 /// 树里的一个节点（主 agent 或子 agent）

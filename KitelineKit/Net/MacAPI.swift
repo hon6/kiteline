@@ -16,8 +16,17 @@ final class MacAPI: @unchecked Sendable {
     /// 图片：单独一组连接。十几张图一起下时不占普通请求的连接（否则普通请求排队到超时，还会被当成断网去重新探路）；
     /// 大截图走远程访问可能要十几秒，超时放宽
     private let mediaClient: MacClient
+    /// 要等电脑把一件事做完才回应的请求（见 actionPaths）：单独一组连接、等得久一些
+    private let actionClient: MacClient
+    /// 发消息、恢复会话、语音转写后发送、按键、回答提问、调整排队、关闭会话：电脑要把这件事做完才回应，
+    /// 后台通道卡一下、恢复会话、转写长录音都可能要十几秒。原来和普通请求一样 12 秒超时：
+    /// 发消息的会换一条路重发（电脑那头其实还在送，同一条进去两遍），按键、回答的直接报「无法确认电脑是否已收到」
+    private static let actionPaths: Set<String> = ["/api/send", "/api/resume", "/api/voice", "/api/key", "/api/answer", "/api/queue", "/api/close"]
     /// 探路用：短超时，几个地址一起试
     private let pingClient: MacClient
+    /// 连远程访问的本机转发（https://127.0.0.1:端口）被直接拒绝时调：多半是 App 被挂起期间 iOS 回收了监听端口（苹果 TN2277），
+    /// 让点对点把端口重新开起来（AppModel 设）。11-13 用户出门时就是这样：没走「回到前台」那条路，端口一直是坏的，流量下又没有局域网可退
+    var remoteRefused: (@Sendable () async -> Void)?
     private let lock = NSLock()
     /// 上次通的那个地址；网络变了、请求连不上时清掉，下次先探路
     private var preferred: URL?
@@ -35,6 +44,7 @@ final class MacAPI: @unchecked Sendable {
         }
         pingClient = MacClient(mac: mac, timeout: 4)
         mediaClient = MacClient(mac: mac, timeout: 45)
+        actionClient = MacClient(mac: mac, timeout: 40)
         // 实时事件流：Mac 每 15 秒发一次保活，25 秒没动静就算断了（换路重连）
         streamClient = MacClient(mac: mac, timeout: 25)
     }
@@ -44,6 +54,7 @@ final class MacAPI: @unchecked Sendable {
         streamClient.close()
         pingClient.close()
         mediaClient.close()
+        actionClient.close()
     }
 
     /// 地址是哪条路
@@ -301,7 +312,7 @@ final class MacAPI: @unchecked Sendable {
     @discardableResult
     func post(_ path: String, _ query: [String: String] = [:], body: [String: Any] = [:]) async throws -> [String: Any] {
         // 带 cid 的（发消息）Mac 会去重，重发安全；按键这类不能重发：超时了可能已经按上了，再发一次就按到下一个确认上
-        let (data, http) = try await perform(idempotent: body["cid"] != nil) {
+        let (data, http) = try await perform(idempotent: body["cid"] != nil, using: Self.actionPaths.contains(path) ? actionClient : nil) {
             try MacClient.request(self.url($0, path, query), method: "POST", token: self.token, body: body)
         }
         return try APIError.check(data, http)
@@ -320,6 +331,42 @@ final class MacAPI: @unchecked Sendable {
         let (data, http) = try await perform { try MacClient.request(self.url($0, path, query), token: self.token) }
         _ = try APIError.check(data, http)
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// 同 get，顺手把回的 JSON 原样存一份在手机上（Offline.savePage）。页面打开时先用 cached 显示上次的，
+    /// 后台再用这个取新的、取到就换掉（11-13：进页面不能是空的，更新在后台静默做）
+    func getCaching<T: Decodable>(_ type: T.Type, _ path: String, _ query: [String: String] = [:]) async throws -> T {
+        #if SNAPSHOT
+        // 截图版测缓存：KITELINE_DEMO_SLOWAPI=<秒> 让这些接口晚这么久才回（看重开时是不是先显示缓存、右上角「更新中」）
+        if let delay = Double(ProcessInfo.processInfo.environment["KITELINE_DEMO_SLOWAPI"] ?? "") { try? await Task.sleep(for: .seconds(delay)) }
+        #endif
+        let (data, http) = try await perform { try MacClient.request(self.url($0, path, query), token: self.token) }
+        _ = try APIError.check(data, http)
+        let value = try JSONDecoder().decode(T.self, from: data)
+        Offline.savePage(Self.pageKey(path, query), data)
+        return value
+    }
+
+    /// 上次 getCaching 同一个接口、同样参数存下的结果（没存过、解不出来是 nil）。读的是本机文件，不联网
+    func cached<T: Decodable>(_ type: T.Type, _ path: String, _ query: [String: String] = [:]) -> T? {
+        Offline.loadPage(Self.pageKey(path, query)).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    }
+
+    /// 同 data（原始 JSON 自己解的页面用，如战绩条），顺手存一份
+    func dataCaching(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
+        let data = try await self.data(path, query)
+        Offline.savePage(Self.pageKey(path, query), data)
+        return data
+    }
+
+    /// 上次 dataCaching 存下的原始数据
+    func cachedData(_ path: String, _ query: [String: String] = [:]) -> Data? {
+        Offline.loadPage(Self.pageKey(path, query))
+    }
+
+    /// 缓存按「接口 + 参数」分开存；fresh（让电脑跳过它自己的缓存）不算参数
+    private static func pageKey(_ path: String, _ query: [String: String]) -> String {
+        path + "?" + query.filter { $0.key != "fresh" }.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
     }
 
     /// 图片等原始数据（走图片那组连接）
@@ -386,6 +433,7 @@ final class MacAPI: @unchecked Sendable {
                 NetLog.note("request_failed", ["via": "\(AddressKind.of(base))", "code": error.code.rawValue])
                 lastError = error
                 lock.withLock { if preferred == base { preferred = nil } }
+                if error.code == .cannotConnectToHost, AddressKind.of(base) == .remote { await remoteRefused?() }
                 if !idempotent, !Self.neverSent(error) {
                     throw OfflineError(message: L("网络连接曾中断，无法确认电脑是否已收到，请核实后再操作"))
                 }
@@ -456,6 +504,7 @@ final class MacAPI: @unchecked Sendable {
             } catch let error as URLError where Self.isUnreachable(error) {
                 lastError = error
                 lock.withLock { if preferred == base { preferred = nil } }
+                if error.code == .cannotConnectToHost, AddressKind.of(base) == .remote { await remoteRefused?() }
             }
         }
         throw OfflineError(message: MacClient.explain(lastError, host: L("电脑")).localizedDescription)

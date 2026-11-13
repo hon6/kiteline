@@ -14,11 +14,28 @@ final class AppModel {
     private(set) var host = ""
     private(set) var version = ""
     private(set) var sessions: [SessionInfo] = []
+    /// 会话标题（key → 标题）：只在有会话改名、增减时才换。群聊页每行消息、每个成员头像都要成员现在的名字，
+    /// 直接读 sessions 的话，任何会话一有动静（约两秒一次）所有行都跟着重算
+    /// （11-13 追踪 Mac 版：开着一个群聊页，4 秒里 sessions 牵动了 21 万次视图失效，全在 GroupMessageRow / GroupMemberFace 上）
+    private(set) var sessionTitles: [String: String] = [:]
     /// 上次登记的插件 agent（标志、称呼、要求的 iPhone 版本）：变了要重画列表（Agents 表本身不是 Observable）
     @ObservationIgnored private var agentProfiles: [AgentProfile]?
     private(set) var sources: [SourceInfo] = []
     /// 要人处理的状况（VS Code 弹着对话框、到某台机器的连接断了），列表顶上显示
     private(set) var alerts: [AlertInfo] = []
+    /// 在手机上「忽略」掉的提醒（编号 + 文字）：处理不了、又不想一直看到的先收起（11-13：VS Code 那条「无法重新连接」一直挂着）。
+    /// 状况消失了就从这里删掉，以后再出现、或文字变了照常显示
+    private(set) var ignoredAlerts: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "ignoredAlerts") ?? [])
+
+    /// 列表上要显示的提醒（去掉忽略的）
+    var shownAlerts: [AlertInfo] { alerts.filter { !ignoredAlerts.contains(Self.alertMark($0)) } }
+
+    func ignoreAlert(_ alert: AlertInfo) {
+        ignoredAlerts.insert(Self.alertMark(alert))
+        UserDefaults.standard.set(Array(ignoredAlerts), forKey: "ignoredAlerts")
+    }
+
+    private static func alertMark(_ alert: AlertInfo) -> String { alert.id + "|" + alert.text }
     /// 正在重连的提示（按钮转圈、不能连点）
     private(set) var reconnecting: Set<String> = []
     /// 各台机器的 CPU、内存、网速（来源 id → 数据，sys 事件每 5 秒一条）。只有「按来源」分组的组头读它，别的页面不跟着刷新
@@ -92,6 +109,8 @@ final class AppModel {
     private var lanTask: Task<Void, Never>?
     /// 什么时候切到后台的：回来时离开得久，远程访问的旧连接多半已被系统掐断，直接重连不等它超时
     @ObservationIgnored private var backgroundAt: Date?
+    /// 上次把远程访问端点整个重开的时间（restartRemoteIfStuck，一分钟最多一次）
+    @ObservationIgnored private var remoteRestartAt: Date?
     @ObservationIgnored private var pathWatch: UUID?
     @ObservationIgnored private var proWatch: NSObjectProtocol?
     private var needResync = false
@@ -123,6 +142,9 @@ final class AppModel {
         if let cached = Offline.loadState() { apply(cached) }
         loadCachedTodos()
         loadCachedFavorites()
+        // 首页 / 概览的数（用量、额度、今日动态、项目）也先用上次存的，进页面不是空的（11-13）
+        home.restore(api)
+        Offline.prunePages()
         tabGroupShared.api = api
         tabGroupShared.loadCached()
         terminals.model = self
@@ -306,6 +328,14 @@ final class AppModel {
             PhoneP2P.shared.networkChanged()
             api.networkChanged()
         }
+        if api.remoteRefused == nil {
+            api.remoteRefused = { [weak self] in
+                await MainActor.run {
+                    NetLog.note("forward_refused")
+                    self?.refreshRemoteForward()
+                }
+            }
+        }
         connect()
         startViewedReports()
         if embedded { return }
@@ -333,6 +363,36 @@ final class AppModel {
         api.useRemote(Task { await PhoneP2P.shared.connect(info) })
     }
 
+    /// 重开远程访问在本机的监听端口（端口变了就告诉请求层）
+    private func refreshRemoteForward() {
+        guard PhoneP2P.shared.localURL != nil else { return }
+        let before = PhoneP2P.shared.localURL
+        PhoneP2P.shared.resume()
+        if let after = PhoneP2P.shared.localURL, after != before {
+            api.useRemote(Task { () -> URL? in after })
+        }
+    }
+
+    /// 远程访问卡住了（换了网络、从后台回来后一直连不上电脑）：把点对点端点整个关掉重开，等于替用户把 App 退出重开。
+    /// 11-13 用户遇到：出门从 Wi-Fi 换到流量后一直连不上，退出 App 重开才好（电脑、中继那头都正常，六分钟里手机一次都没连过去）。
+    /// 一分钟最多重开一次：电脑真的关机、睡眠时不来回折腾
+    private func restartRemoteIfStuck() {
+        if let at = remoteRestartAt, Date().timeIntervalSince(at) < 60 { return }
+        restartRemote()
+    }
+
+    /// 把远程访问的点对点端点整个关掉重开（诊断发现「中继通、电脑没回应」时也调）
+    func restartRemote() {
+        guard Store.shared.isPro, PhoneP2P.available, let info = MacStore.shared.current?.remote else { return }
+        remoteRestartAt = Date()
+        let link = PhoneP2P.shared.link
+        NetLog.note("p2p_restart", ["up": link.up, "path": link.path.rawValue, "fails": link.fails, "relay": link.relayOnline])
+        NetLog.saveP2PLogs()
+        PhoneP2P.shared.stop()
+        api.useRemote(Task { await PhoneP2P.shared.connect(info) })
+        api.networkChanged()
+    }
+
     /// 订阅状态变了：订阅了就开远程访问；没订阅了（过期、开发版模拟免费）就关掉，只走局域网
     private func proChanged() {
         if Store.shared.isPro { startRemote() } else { PhoneP2P.shared.stop() }
@@ -345,6 +405,9 @@ final class AppModel {
     /// force：不管走的哪条路都重新选（订阅变了、诊断查通了路）
     func networkChanged(restartStream: Bool = true, force: Bool = false) {
         NetLog.note("network_changed", ["route": "\(api.routeKind)", "force": force, "restart": restartStream])
+        // 本机转发的监听端口可能已被 iOS 回收：App 被挂起又恢复、却没经过「切到后台 → 回到前台」（start 里的 resume）时就会这样，
+        // 之后连本机端口直接被拒，在流量下又没有局域网可退，只能退出重开 App（11-13 用户出门时）。每次换网络、回到前台都重开一下（一般还是同一个端口）
+        refreshRemoteForward()
         PhoneP2P.shared.networkChanged()
         if !force, api.routeKind == .remote, ProGate.isUnlocked { return }
         api.networkChanged()
@@ -428,6 +491,8 @@ final class AppModel {
                     misses = 0
                 } else {
                     misses += 1
+                    // 连续两次哪条路都不通：远程访问的端点可能卡住了，整个重开一次（等于替用户把 App 退出重开）
+                    if misses >= 2, !self.embedded { self.restartRemoteIfStuck() }
                     // 这台电脑连续连不上：和它互联的电脑里有连得上的就换过去（两台里有一台在线就能用）
                     if misses >= 2, !self.embedded, await self.switchToReachableComputer() { return }
                 }
@@ -732,16 +797,31 @@ final class AppModel {
         if !embedded { LiveActivities.shared.sessionsChanged(incoming, host: host) }   // 前台时有会话在干活：本机开实时活动
         #endif
         latestSessions = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        let titles = latestSessions.mapValues(\.title)
+        if titles != sessionTitles { sessionTitles = titles }
         for (key, slot) in sessionSlots { slot.set(latestSessions[key]) }
         if let incoming = state.faces { setFaces(incoming) } else { for (key, slot) in sessionSlots { slot.setFace(faces.face(key: key, agent: slot.agent)) } }
         sources = state.sources ?? []
         let incomingAlerts = state.alerts ?? []
-        if incomingAlerts != alerts { alerts = incomingAlerts }
+        if incomingAlerts != alerts {
+            alerts = incomingAlerts
+            // 忽略过的状况已经没了：忘掉，以后再出现照常显示
+            let live = Set(incomingAlerts.map(Self.alertMark))
+            if !ignoredAlerts.isSubset(of: live) {
+                ignoredAlerts = ignoredAlerts.intersection(live)
+                UserDefaults.standard.set(Array(ignoredAlerts), forKey: "ignoredAlerts")
+            }
+        }
         if let sys = state.sys { machineStats = sys }
         me = state.me
         quickReplies = state.quickReplies ?? []
-        pinned = state.pinned ?? []
-        if let incoming = state.marked, incoming != marked { marked = incoming }
+        // 刚在手机上改的置顶 / 标记，电脑确认前推来的旧列表不覆盖（见 pendingFlags）
+        let incomingPinned = reconcileFlags(state.pinned ?? [], list: "pin")
+        if incomingPinned != pinned { pinned = incomingPinned }
+        if let incoming = state.marked {
+            let merged = reconcileFlags(incoming, list: "mark")
+            if merged != marked { marked = merged }
+        }
         muted = Set(state.muted ?? [])
         quietActive = state.quietActive ?? false
         // 第一次见到的会话不算未读，之后有新动静才亮红点
@@ -1077,9 +1157,9 @@ final class AppModel {
         do {
             let reply = try await api.post("/api/queue", ["key": key], body: body)
             if action == "now" {
-                chat.queueDraft = nil   // 刚调过的临时队列作废：排队的都交出去了
-                // 强插：本机记下的排队消息改成普通的「已发送」，等对话里回显
-                for p in chat.pending where p.state == .later {
+                chat.queueDraft = nil   // 刚调过的临时队列作废，等电脑传回新队列
+                // 强插：本机记下的这一条改成普通的「已发送」，等对话里回显（别的照旧排队；老版本插件会全部交出去，由 trackQueued 撤掉）
+                for p in chat.pending where p.state == .later && (p.qid ?? p.id) == qid {
                     chat.update(p.id) { $0.state = .sent }
                     expirePending(key, p.id)
                 }
@@ -1166,13 +1246,41 @@ final class AppModel {
         }
     }
 
+    /// 置顶 / 取消置顶：同标记，先在本机改（行马上挪过去），电脑没接住再改回来
     func setPinned(_ key: String, _ on: Bool) {
+        let before = pinned
+        pinned = on ? [key] + pinned.filter { $0 != key } : pinned.filter { $0 != key }
+        pendingFlags["pin|\(key)"] = PendingFlag(on: on, until: Date().addingTimeInterval(10))
         Task {
             do {
                 try await api.post("/api/pin", body: ["key": key, "pinned": on])
-                pinned = on ? [key] + pinned.filter { $0 != key } : pinned.filter { $0 != key }
-            } catch { show(error) }
+            } catch {
+                pendingFlags["pin|\(key)"] = nil
+                pinned = before
+                show(error)
+            }
         }
+    }
+
+    /// 刚在手机上改、电脑还没确认的置顶 / 标记（"pin|会话" / "mark|会话" → 改成了什么、最多等到几点）。
+    /// 电脑每秒都推状态：它还没处理完这次请求时推来的那份是旧列表，照收的话这一行先挪上去、被挪回原位、过一会儿又挪上去，
+    /// 列表的挪动动画叠在一起，两行画在同一个位置、上面空出一块（用户 11-13 截图）。所以确认前把这一项按手机上的改法套回去
+    private struct PendingFlag { let on: Bool; let until: Date }
+    private var pendingFlags: [String: PendingFlag] = [:]
+
+    /// 电脑推来的置顶 / 标记列表，套上还没确认的改动；电脑那份已经是这样了（确认了）或等了 10 秒的，就不再管
+    private func reconcileFlags(_ incoming: [String], list: String) -> [String] {
+        var result = incoming
+        let now = Date()
+        for (id, flag) in pendingFlags where id.hasPrefix(list + "|") {
+            let key = String(id.dropFirst(list.count + 1))
+            if flag.until < now || incoming.contains(key) == flag.on {
+                pendingFlags[id] = nil
+                continue
+            }
+            result = flag.on ? [key] + result.filter { $0 != key } : result.filter { $0 != key }
+        }
+        return result
     }
 
     func isMarked(_ key: String) -> Bool { marked.contains(key) }
@@ -1181,11 +1289,13 @@ final class AppModel {
     func setMarked(_ key: String, _ on: Bool) {
         let before = marked
         marked = on ? [key] + marked.filter { $0 != key } : marked.filter { $0 != key }
+        pendingFlags["mark|\(key)"] = PendingFlag(on: on, until: Date().addingTimeInterval(10))
         Haptics.tap()
         Task {
             do {
                 try await api.post("/api/mark", body: ["key": key, "marked": on])
             } catch {
+                pendingFlags["mark|\(key)"] = nil
                 marked = before
                 show(error)
             }

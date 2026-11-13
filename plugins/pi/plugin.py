@@ -26,8 +26,8 @@ BUSY_MARK = "Working..."
 READ_ONLY = (("找不到 pi 所在的终端窗口，只能查看；请在电脑上回复",
               "Couldn't find the terminal window pi is running in, so this session is view-only. Reply on your computer.")
              if os.name == "nt" else
-             ("pi 不在 tmux 中运行，只能查看；在 tmux 中启动 pi 后即可从手机回复和中断",
-              "pi isn't running in tmux, so this session is view-only. Start pi in tmux to reply and interrupt from your phone."))
+             ("pi 不在 tmux 中运行，只能查看；在 tmux 中启动 pi，或在 Kiteline 新建任务时选择 pi（由 Kiteline 在后台运行）后即可从手机回复和中断",
+              "pi isn't running in tmux, so this session is view-only. Start pi in tmux, or choose pi when creating a task in Kiteline (it runs in the background), to reply and interrupt from your phone."))
 
 
 def create(kl):
@@ -371,6 +371,15 @@ def create(kl):
 
         normalize = staticmethod(pi_normalize)
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 pi 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
+            起来以后读屏、发字、按键都走通用终端层。字样照 pi 0.73（11-13） 实测的画面写（比较时不分大小写）"""
+            if resume and not (4 <= len(str(resume)) <= 128 and all(c.isalnum() or c in "_.:-" for c in str(resume))):
+                return None
+            return {"argv": ["pi"] + (["--session", str(resume)] if resume else []),
+                    # 开头那行按键说明画出来、输出停住 = 能输入了（第一次运行会先下载 fd、ripgrep，慢一点）
+                    "ready": ["/ commands", "ctrl+o more"], "settle": 1.0}
+
         def detect(self):
             command = shutil.which("pi")
             return {"installed": os.path.isdir(AGENT_DIR) or bool(command), "forms": {"cli": ""} if command else {}}
@@ -441,7 +450,7 @@ def create(kl):
             pid = self.pids.get(sid)
             pane = term_pane(pid) if pid else None
             if not pane:
-                raise RuntimeError("这个 pi 会话不在 tmux 里运行，只能查看；在 tmux 中启动 pi 后，就可以从手机回复和中断")
+                raise RuntimeError("这个 pi 会话不在 tmux 里运行，只能查看；在 tmux 中启动 pi，或在 Kiteline 新建任务时选择 pi（由 Kiteline 在后台运行）后，就可以从手机回复和中断")
             return pid, pane
 
         def send(self, sid, text, images):

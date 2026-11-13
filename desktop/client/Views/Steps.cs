@@ -122,8 +122,7 @@ public sealed class PulseDot : Control
 {
     readonly string color;
     readonly double size;
-    double t;
-    DispatcherTimer? timer;
+    double since;
 
     public PulseDot(string color, double size)
     {
@@ -133,19 +132,20 @@ public sealed class PulseDot : Control
         Height = size;
     }
 
+    // 和别的小动画共用一个节拍（见 Beat）：原来自己带一个 50 毫秒的定时器
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        timer = new DispatcherTimer(TimeSpan.FromMilliseconds(50), DispatcherPriority.Render, (_, _) => { t += 0.05; InvalidateVisual(); });
-        timer.Start();
+        since = Beat.Now;
+        Beat.Add(this);
     }
 
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e) { base.OnDetachedFromVisualTree(e); timer?.Stop(); }
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e) { base.OnDetachedFromVisualTree(e); Beat.Remove(this); }
 
     public override void Render(DrawingContext context)
     {
         // 0.7 秒一来回，最暗 0.25
-        var phase = t / 0.7 % 2;
+        var phase = (Beat.Now - since) / 0.7 % 2;
         var x = phase < 1 ? phase : 2 - phase;
         var alpha = 0.25 + 0.75 * (1 - x);
         var c = Palette.GetColor(color);

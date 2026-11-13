@@ -23,9 +23,9 @@ def is_vscode(snap):
 
 
 def hostable(record, source):
-    """能转到后台运行的会话：远端电脑上、在 VS Code 里跑的 Claude Code，那台电脑的 watcher 支持后台运行（同 Mac 版 Hosted.hostable）"""
+    """能转到后台运行的会话：本机或远端电脑上、在 VS Code 里跑的 Claude Code，那台电脑的 watcher 支持后台运行（同 Mac 版 Hosted.hostable）"""
     snap = record.snap
-    return (record.kind == "ssh" and not snap.get("hosted") and (snap.get("agent") or "claude-code") == "claude-code"
+    return (record.kind in ("ssh", "local") and not snap.get("hosted") and (snap.get("agent") or "claude-code") == "claude-code"
             and is_vscode(snap) and not snap.get("readOnly") and "hosted" in (getattr(source, "features", None) or ()))
 
 
@@ -361,8 +361,10 @@ class Store:
                        for s in sources]
         hosted_on = {e.get("id") for e in self.cfg.sources if e.get("hostedOn")}
         for item, s in zip(source_list, sources):
-            if s.kind == "ssh" and "hosted" in s.features:
-                item["hosted"] = "on" if s.id in hosted_on else "off"   # 能后台运行 Claude Code 才带（按设备开）
+            if s.kind in ("ssh", "local") and "hosted" in s.features:
+                # 能后台运行 Claude Code 才带：远端按设备开，本机默认开（hostedLocal）
+                on = m.get("hostedLocal", True) if s.kind == "local" else s.id in hosted_on
+                item["hosted"] = "on" if on else "off"
         return {
             "ok": True, "host": host, "version": version, "submitOnSend": m["submitOnSend"],
             "quickReplies": m["quickReplies"], "watch": m["watch"], "me": me, "muted": m["mutedSessions"],

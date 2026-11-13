@@ -188,15 +188,17 @@ enum SharedMotion {
 }
 
 /// 转屏提示（同系统「照片」）：手里的手机转了方向、界面没跟着转时，在手里那个方向的右上角放一个慢慢闪的旋转按钮，
-/// 点了界面转过去；竖着转横、横着转竖都提示。看加速度计（系统锁了竖屏也读得到），平放、刚转一下不算；提示 12 秒没点就收起
+/// 点了界面转过去；竖着转横、横着转竖都提示。看加速度计（系统锁了竖屏也读得到），平放、刚转一下不算。
+/// 闪 12 秒后不再闪、常亮着，手机一直横着就一直在（11-13 起首页顶栏不再放旋转按钮，这是唯一的入口，不能收起）
 struct RotationHint: View {
     @Environment(\.scenePhase) private var phase
     private var rotation = Rotation.shared
     /// 手里的方向：机身坐标的重力（竖着拿 y≈-1；顶朝左横拿 x≈-1）
     @State private var physical: Physical?
     @State private var shown = false
-    @State private var pulse = false
     @State private var since: Date?
+    /// 闪够 12 秒了：改成常亮（不再每秒重画 20 次）
+    @State private var steady = false
 
     private enum Physical: Equatable { case portrait, topLeft, topRight
         var landscape: Bool { self != .portrait }
@@ -210,24 +212,25 @@ struct RotationHint: View {
                     rotation.set(physical.landscape)
                     withAnimation(.snappy) { shown = false }
                 } label: {
-                    Image(systemName: physical.landscape ? "rectangle.landscape.rotate" : "rectangle.portrait.rotate")
-                        .font(.app(size: 20, weight: .medium)).foregroundStyle(Theme.claude)
-                        .rotationEffect(angle)
-                        .frame(width: 44, height: 44)
-                        .liquidGlass(in: Circle())
-                        // 慢闪只给不透明度（作用域动画）：withAnimation 开的循环动画会把转屏时的重新排版也卷进去，按钮一直来回漂
-                        .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) { $0.opacity(pulse ? 1 : 0.35) }
+                    // 慢闪按时间直接算不透明度、每秒 20 次只重画这个按钮：SwiftUI 的循环动画每一帧都要牵动所在的整页
+                    // （同 Mac 上 11-13 查出的 LiveDot）；1.3 秒一程来回。闪够了常亮，不再跑定时器
+                    if steady {
+                        hintIcon(physical, angle)
+                    } else {
+                        TimelineView(.periodic(from: .now, by: 1.0 / 20)) { timeline in
+                            let elapsed = timeline.date.timeIntervalSinceReferenceDate
+                            hintIcon(physical, angle).opacity(0.35 + 0.65 * (1 - cos(elapsed / 1.3 * .pi)) / 2)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(physical.landscape ? L("转为横屏") : L("转为竖屏"))
-                // 贴着手里那个方向的右上角，离两条边一样远（10-27：不用让开 Home 横条，那一角本来没有按钮）
+                // 贴着手里那个方向的右上角，离两条边一样远（10-27：不用让开 Home 横条，那一角本来没有按钮）。
+                // 竖着的界面落在下面两个角时让到底栏上面：11-13 起底下有 Tab 栏（对话页是输入栏），别压着「我」、「+」
                 .padding(14)
+                .padding(.bottom, !rotation.landscape && corner.vertical == .bottom ? 86 : 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: corner)
                 .transition(.opacity)
-                .onAppear {
-                    pulse = false
-                    Task { @MainActor in pulse = true }   // 下一轮再亮：先回到暗的，再开始闪
-                }
             }
         }
         .ignoresSafeArea()
@@ -245,6 +248,14 @@ struct RotationHint: View {
             withAnimation(.snappy) { shown = next.map { $0.landscape != rotation.landscape } ?? false }
         }
         #endif
+    }
+
+    private func hintIcon(_ physical: Physical, _ angle: Angle) -> some View {
+        Image(systemName: physical.landscape ? "rectangle.landscape.rotate" : "rectangle.portrait.rotate")
+            .font(.app(size: 20, weight: .medium)).foregroundStyle(Theme.claude)
+            .rotationEffect(angle)
+            .frame(width: 44, height: 44)
+            .liquidGlass(in: Circle())
     }
 
     /// 手里那个方向的右上角在界面上是哪个角、图标要转多少度才是正的
@@ -296,8 +307,10 @@ struct RotationHint: View {
         guard let since else { return }
         let mismatch = next.landscape != rotation.landscape
         let age = Date().timeIntervalSince(since)
-        let want = mismatch && age > 0.75 && age < 12.75
+        let want = mismatch && age > 0.75
         if want != shown { withAnimation(.snappy) { shown = want } }
+        let calm = age >= 12.75
+        if calm != steady { steady = calm }
     }
 }
 

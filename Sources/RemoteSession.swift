@@ -30,10 +30,16 @@ final class RemoteSession: SourceConnection {
     private(set) var hostHome: String?
     private(set) var hostFeatures: Set<String> = []
 
-    /// 远端 watcher 脚本的本地权威副本（随 App 打包）
+    /// 远端 watcher 脚本的本地权威副本（随 App 打包）。
+    /// 最后直接按路径看文件：App 在安装包还没拷完时就被启动（11-14 两个会话同时装开发版），Bundle 记住了「没有这个文件」，
+    /// 拷完了也一直找不到，本机和远端全连不上、要退出重开；直接看文件，拷完下次重试就好了
     static var bundledWatcherURL: URL? {
-        Bundle.main.url(forResource: "ccpulse-watch", withExtension: "py")
-            ?? Bundle.main.url(forResource: "ccpulse-watch", withExtension: "py", subdirectory: "Resources")
+        if let url = Bundle.main.url(forResource: "ccpulse-watch", withExtension: "py")
+            ?? Bundle.main.url(forResource: "ccpulse-watch", withExtension: "py", subdirectory: "Resources") {
+            return url
+        }
+        let direct = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ccpulse-watch.py")
+        return FileManager.default.fileExists(atPath: direct.path) ? direct : nil
     }
 
     var id: String { config.id }
@@ -344,9 +350,9 @@ final class RemoteSession: SourceConnection {
         if rpc.consume(event) { return }
         if event.kind == "hello" {
             if let home = event.raw["home"] as? String { hostHome = home }
-            hostFeatures = Set(event.raw["features"] as? [String] ?? [])
             rpc.release()   // 换进程期间排着的请求发给新进程
-            update(state: .live(host: event.host, watcher: event.watcherVersion, sessionCount: 0))
+            update(state: .live(host: event.host, watcher: event.watcherVersion, sessionCount: 0),
+                   features: Set(event.raw["features"] as? [String] ?? []))
             delegate?.source(self, didLog: "远端 \(event.host ?? "?") watcher v\(event.watcherVersion ?? "?")")
         }
         if case .live(let host, let watcher, let count) = state, event.kind == "snapshots",
@@ -494,8 +500,11 @@ final class RemoteSession: SourceConnection {
         return shellQuote(path)
     }
 
-    private func update(state newState: LinkState) {
+    /// features：这次连上时 watcher 报的能力表。和状态一起在主线程上写（读它的都在主线程；原来在读输出的线程上直接写）；
+    /// 断开时清空，免得离线了还按上次连着时的能力判断
+    private func update(state newState: LinkState, features: Set<String>? = nil) {
         DispatchQueue.main.async {
+            if let features { self.hostFeatures = features } else if !newState.isLive { self.hostFeatures = [] }
             self.state = newState
             self.delegate?.source(self, didChange: newState)
         }

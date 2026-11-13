@@ -52,6 +52,14 @@ final class MobileServer {
     private var streams: [ObjectIdentifier: HTTPStream] = [:]
     /// 最近送出去的消息（按「会话 + 消息 id」），10 分钟内重发的直接回上次的结果
     private var recentSends: [String: (at: Date, payload: [String: Any])] = [:]
+    /// 正在送的消息、正在做的恢复（按「会话 + 消息 id」→ 同一条重发过来、等着同一个结果的回应，只在主线程读写）。
+    /// 手机 10 秒等不到回应会换一条路拿同一个 id 重发，而这边可能还在送（后台通道卡住、恢复会话要十几秒）：
+    /// 只记「送完的」认不出来，同一条会被投两遍（11-13 查用户日志：每次后台通道超时都跟着一次重复投递）
+    private var pendingSends: [String: [(HTTPResponse) -> Void]] = [:]
+    /// 最近做成的恢复（按「会话 + 消息 id」），10 分钟内重发的直接回上次的结果，不再恢复一遍
+    private var recentResumes: [String: (at: Date, response: HTTPResponse)] = [:]
+    /// 正在恢复的历史会话（key → 排在后面的恢复请求，只在主线程读写）：手机上连发几条时后面的等前一条做完，见 resume
+    private var resumeGates: [String: [HTTPRequest]] = [:]
     /// 每条实时连接是哪台设备的（停用设备时把它的连接断掉）
     private var streamDevices: [ObjectIdentifier: String] = [:]
     /// 每条实时连接要哪种语言（en / zh）：电脑生成的字按看的那台设备的语言发（见 ServerLang）
@@ -999,6 +1007,11 @@ final class MobileServer {
                 Projects.collect(detail: request.query["detail"] == "1") { respond(.json($0)) }
             case ("GET", "/api/dirs"), ("POST", "/api/dirs"):
                 self.dirs(request, respond: respond)
+            case ("GET", "/api/launchable"):
+                // 新任务里除了 Claude Code 还能选哪几家（在那台电脑上后台运行）
+                Hosted.launchable(sourceId: request.query["sourceId"] ?? "") { agents in
+                    respond(.json(["ok": true, "agents": agents]))
+                }
             case ("POST", "/api/new-session"):
                 self.capGuard(request, respond: respond) { self.newSession(request, respond: respond) }
             case ("POST", "/api/quick-replies"):
@@ -1641,7 +1654,13 @@ final class MobileServer {
         }
     }
 
-    private func send(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+    /// 回应的内容里 ok 不是 false（恢复没做成时有的回 200、ok 为 false）
+    private static func succeeded(_ response: HTTPResponse) -> Bool {
+        ((try? JSONSerialization.jsonObject(with: response.body)) as? [String: Any])?["ok"] as? Bool != false
+    }
+
+    /// deduped：调用方（恢复会话）已经按消息 id 认过重发了，这里不再认
+    private func send(_ request: HTTPRequest, deduped: Bool = false, respond: @escaping (HTTPResponse) -> Void) {
         guard let (record, source) = resolve(request) else {
             respond(.error("会话不存在或已结束", status: 404)); return
         }
@@ -1650,7 +1669,7 @@ final class MobileServer {
         let attachments = MobileServer.attachments(in: body)
         let submit = body["submit"] as? Bool ?? config.submitOnSend
         // 手机断网重发时按消息 id 去重：请求其实已经到了、只是回应丢了，别让 Claude 收到两遍
-        let cid = (body["cid"] as? String).map { "\(record.key)|\($0)" }
+        let cid = deduped ? nil : (body["cid"] as? String).map { "\(record.key)|\($0)" }
         let now = Date()
         recentSends = recentSends.filter { now.timeIntervalSince($0.value.at) < 600 }
         if let cid = cid, let previous = recentSends[cid] {
@@ -1659,13 +1678,29 @@ final class MobileServer {
             payload["duplicate"] = true
             respond(.json(payload)); return
         }
+        // 这条在恢复会话时已经送进去了（手机没收到回应，重发时会话已经在列表里，于是改走了发消息这个入口）
+        if let cid = cid, let previous = recentResumes[cid], now.timeIntervalSince(previous.at) < 600 {
+            Log.write("手机重发的消息在恢复会话时已经送过（\(cid.suffix(12))），不再投递")
+            respond(previous.response); return
+        }
+        if let cid = cid, pendingSends[cid] != nil {
+            Log.write("手机重发的消息还在送达途中（\(cid.suffix(12))），等那一次的结果，不再投递")
+            pendingSends[cid]?.append(respond); return
+        }
+        if let cid = cid { pendingSends[cid] = [] }
         Log.write("手机发往「\(record.snapshot.name)」：\(text.prefix(60))（图 \(attachments.count) 张）")
         Delivery.send(text: text, attachments: attachments, to: record, source: source, submit: submit) { outcome in
             var payload: [String: Any] = ["ok": outcome.ok, "submitted": outcome.submitted, "message": outcome.message]
             if outcome.later { payload["later"] = true }
             if let qid = outcome.qid { payload["qid"] = qid }
             if outcome.ok, let cid = cid { self.recentSends[cid] = (Date(), payload) }
+            let waiters = cid.flatMap { self.pendingSends.removeValue(forKey: $0) } ?? []
             respond(.json(payload, status: outcome.ok ? 200 : 409))
+            if !waiters.isEmpty {
+                payload["duplicate"] = true
+                let again = HTTPResponse.json(payload, status: outcome.ok ? 200 : 409)
+                waiters.forEach { $0(again) }
+            }
         }
     }
 
@@ -1805,14 +1840,108 @@ final class MobileServer {
         }
     }
 
-    /// 恢复已经结束的会话：在它项目的 VS Code 窗口里打开这段对话；带了内容就顺便发出去
+    /// 恢复已经结束的会话：在它项目的 VS Code 窗口里打开这段对话；带了内容就顺便发出去。
+    /// 同一会话前一条恢复还没做完（手机上连发了几条）：这条先回「排在后面」，等前一条做完——会话接上了就当普通消息发进去，
+    /// 没接上再恢复一次。不然几条各自去起后台 claude、各开 VS Code 标签，互相撞掉（11-12 第一条卡在登录画面、后面两条丢了）
     private func resume(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        let key = request.query["key"] ?? ""
+        DispatchQueue.main.async {
+            // 手机等不到回应重发的（同一个消息 id）：还在恢复就等那一次的结果，恢复成了的直接回上次的结果。
+            // 原来重发的那条被当成新消息排在后面，会话恢复后同一句话进去两遍，还可能再开一个 VS Code 窗口
+            var respond = respond
+            if let cid = (request.jsonBody?["cid"] as? String).map({ "\(key)|\($0)" }) {
+                let now = Date()
+                self.recentResumes = self.recentResumes.filter { now.timeIntervalSince($0.value.at) < 600 }
+                if let previous = self.recentResumes[cid] {
+                    Log.write("手机重发的恢复请求已经做过（\(cid.suffix(12))），不再恢复")
+                    respond(previous.response); return
+                }
+                if self.pendingSends[cid] != nil {
+                    Log.write("手机重发的恢复请求还在处理（\(cid.suffix(12))），等那一次的结果")
+                    self.pendingSends[cid]?.append(respond); return
+                }
+                self.pendingSends[cid] = []
+                let first = respond
+                respond = { response in
+                    DispatchQueue.main.async {
+                        // 只记做成了的：没做成的（含状态 200、内容里 ok 为 false 的）不记，手机上点重试要能再做一次
+                        if response.status < 400, MobileServer.succeeded(response) { self.recentResumes[cid] = (Date(), response) }
+                        let waiters = self.pendingSends.removeValue(forKey: cid) ?? []
+                        first(response)
+                        waiters.forEach { $0(response) }
+                    }
+                }
+            }
+            if self.resumeGates[key] != nil {
+                Log.write("手机恢复会话：前一条还在恢复这个会话，这条排在它后面")
+                self.resumeGates[key]?.append(request)
+                respond(.json(["ok": true, "submitted": true, "openedWindow": false, "queued": true, "error": "",
+                               "message": "前一条消息正在恢复此会话，这条将在其后发出"]))
+                return
+            }
+            self.resumeGates[key] = []
+            self.resumeNow(request, respond: respond, release: self.resumeRelease(key))
+        }
+    }
+
+    /// 一条恢复做完时调（只算一次）：接着处理排在后面的。完成回调没来（不该发生）：最多拦 75 秒
+    private func resumeRelease(_ key: String) -> () -> Void {
+        var released = false
+        let release = {
+            DispatchQueue.main.async {
+                guard !released else { return }
+                released = true
+                self.drainResumes(key)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 75) { release() }
+        return release
+    }
+
+    /// 主线程：处理排在最前的一条，处理完再处理下一条；都处理完才撤掉闸门（处理期间新来的接着排）。
+    /// 先等几秒看会话接上没有（watcher 报上来要一两秒），接上了当普通消息发；没接上它自己再恢复一次。
+    /// 这些请求已经回过手机了，出错推一条提醒
+    private func drainResumes(_ key: String) {
+        guard let waiters = resumeGates[key], let first = waiters.first else {
+            resumeGates.removeValue(forKey: key); return
+        }
+        resumeGates[key] = Array(waiters.dropFirst())
+        let deadline = Date().addingTimeInterval(8)
+        func check() {
+            if AppState.shared.store.record(withKey: key) != nil {
+                send(first) { response in
+                    self.queuedFailure(response)
+                    DispatchQueue.main.async { self.drainResumes(key) }
+                }
+            } else if Date() < deadline {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: check)
+            } else {
+                resumeNow(first, respond: queuedFailure, release: resumeRelease(key))
+            }
+        }
+        check()
+    }
+
+    private func queuedFailure(_ response: HTTPResponse) {
+        guard response.status >= 400 else { return }
+        let reply = (try? JSONSerialization.jsonObject(with: response.body)) as? [String: Any]
+        let message = reply?["error"] as? String ?? reply?["message"] as? String ?? ""
+        notifyRoute(kind: "error", title: "消息未能送达", body: message.isEmpty ? "恢复会话未成功" : message, route: "")
+    }
+
+    private func resumeNow(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void, release: @escaping () -> Void) {
         guard let target = resolveAny(request),
               let sourceConfig = AppState.shared.config.sources.first(where: { $0.id == target.connection.id }) else {
+            release()
             respond(.error("会话不存在，或其所在机器离线", status: 404)); return
         }
         if AppState.shared.store.record(withKey: target.key) != nil {
-            respond(.error("此会话仍在运行，可直接发送消息", status: 409)); return
+            // 手机上还当它是历史会话，其实已经接上了：直接当普通消息发（重发的在 resume 入口认过了）
+            send(request, deduped: true) { response in
+                respond(response)
+                release()
+            }
+            return
         }
         let body = request.jsonBody ?? [:]
         let text = body["text"] as? String ?? ""
@@ -1821,10 +1950,12 @@ final class MobileServer {
         connection.request(["cmd": "session_info", "sessionId": target.sessionId], timeout: 20) { result in
             guard case .success(let response) = result, let meta = response["session"] as? [String: Any],
                   let cwd = meta["cwd"] as? String, cwd.hasPrefix("/") else {
+                release()
                 respond(.error("未找到该会话的工作目录", status: 404)); return
             }
             Delivery.stage(attachments, via: connection) { staged in
                 guard case .success(let paths) = staged else {
+                    release()
                     if case .failure(let error) = staged { respond(.error("图片或文件传输失败：\(error)", status: 502)) }
                     return
                 }
@@ -1832,9 +1963,17 @@ final class MobileServer {
                 let submit = !prompt.isEmpty && (body["submit"] as? Bool ?? self.config.submitOnSend)
                 Log.write("手机恢复会话 \(sourceConfig.displayName):\(target.sessionId)：\(text.prefix(60))")
                 let reply = self.launchReplies(respond, cwd: cwd, branch: nil)
+                // 别家 agent 已经结束的会话：用它插件的启动配方在后台接着这段对话（没有 VS Code 那条路）
+                if let agent = meta["agent"] as? String, !agent.isEmpty, agent != "claude-code" {
+                    MobileServer.startAgent(sourceConfig, cwd: cwd, prompt: prompt, submit: submit, sessionId: target.sessionId,
+                                            agent: agent, accepted: reply.accepted,
+                                            completion: { outcome in release(); reply.finished(outcome) })
+                    return
+                }
                 // editor：「在 VS Code 中恢复」按钮（Windows / Linux 客户端），远端项目也开 VS Code、不走后台托管
                 NewSession.start(source: sourceConfig, cwd: cwd, prompt: prompt, submit: submit, sessionId: target.sessionId,
-                                 inEditor: body["editor"] as? Bool == true, accepted: reply.accepted, completion: reply.finished)
+                                 inEditor: body["editor"] as? Bool == true, accepted: reply.accepted,
+                                 completion: { outcome in release(); reply.finished(outcome) })
             }
         }
     }
@@ -1860,6 +1999,45 @@ final class MobileServer {
             self.notifyRoute(kind: "error", title: "新任务未能自动提交", body: outcome.message, route: "")
         }
         return (accepted, finished)
+    }
+
+    /// 在后台运行别家命令行 agent（新任务选了它，或接着它已经结束的会话）：起不来直接报原因
+    static func startAgent(_ source: SourceConfig, cwd: String, prompt: String, submit: Bool, sessionId: String?, agent: String,
+                           accepted: @escaping (NewSession.Outcome) -> Void, completion: @escaping (NewSession.Outcome) -> Void) {
+        // 「插件 id:变体」= 桌面应用经界面新建（如 codebuddy:workbuddy）：插件回动作单（打开它自己的深链接、按回车），这台 Mac 执行
+        if agent.contains(":") {
+            guard let connection = AppState.shared.source(withId: source.id), connection.state.isLive else {
+                completion(NewSession.Outcome(ok: false, submitted: false, openedWindow: false, message: L("该机器当前离线"))); return
+            }
+            connection.request(["cmd": "agent_new", "agent": agent, "cwd": cwd, "text": prompt, "ui": ["keys", "open", "paste"]],
+                               timeout: 20) { result in
+                switch result {
+                case .success(let reply):
+                    let message = reply["message"] as? String ?? "已新建任务"
+                    guard let actions = reply["ui"] as? [[String: Any]], !actions.isEmpty else {
+                        completion(NewSession.Outcome(ok: true, submitted: true, openedWindow: false, message: message)); return
+                    }
+                    DispatchQueue.main.async {
+                        Delivery.runUIActions(actions, local: source.kind == .local, sessionId: "", source: connection) { problem in
+                            completion(NewSession.Outcome(ok: problem == nil, submitted: problem == nil, openedWindow: false,
+                                                          message: problem ?? message))
+                        }
+                    }
+                case .failure(let error):
+                    completion(NewSession.Outcome(ok: false, submitted: false, openedWindow: false, message: Hosted.agentFailure(error)))
+                }
+            }
+            return
+        }
+        Hosted.start(source: source, cwd: cwd, prompt: prompt, submit: submit, sessionId: sessionId, agent: agent,
+                     accepted: accepted) { result in
+            switch result {
+            case .success(let outcome):
+                completion(outcome)
+            case .failure(let error):
+                completion(NewSession.Outcome(ok: false, submitted: false, openedWindow: false, message: Hosted.agentFailure(error)))
+            }
+        }
     }
 
     /// 新任务「打开其他文件夹」：列某台电脑上一个目录里的子文件夹（不限项目目录，空 = 主目录）；POST 带 mkdir = 先在里面新建再列
@@ -1914,10 +2092,17 @@ final class MobileServer {
                 }
                 let prompt = Delivery.compose(text: text, paths: paths, attachments: attachments)
                 Log.write("手机新任务 \(sourceConfig.displayName):\(cwd)：\(text.prefix(60))（图 \(attachments.count) 张）")
+                // agent：选了别家命令行 agent（插件 id）就在那台电脑上后台运行它（见 Hosted.launchable）
+                let agent = (body["agent"] as? String).flatMap { $0.isEmpty || $0 == "claude-code" ? nil : $0 }
                 func launch(_ cwd: String, _ prompt: String, _ branch: String?) {
                     let reply = self.launchReplies(respond, cwd: cwd, branch: branch)
-                    NewSession.start(source: sourceConfig, cwd: cwd, prompt: prompt, submit: submit,
-                                     accepted: reply.accepted, completion: reply.finished)
+                    guard let agent else {
+                        NewSession.start(source: sourceConfig, cwd: cwd, prompt: prompt, submit: submit,
+                                         accepted: reply.accepted, completion: reply.finished)
+                        return
+                    }
+                    MobileServer.startAgent(sourceConfig, cwd: cwd, prompt: prompt, submit: submit, sessionId: nil, agent: agent,
+                                            accepted: reply.accepted, completion: reply.finished)
                 }
                 guard body["worktree"] as? Bool == true else { launch(cwd, prompt, nil); return }
                 Worktree.prepare(connection, cwd: cwd, prompt: prompt) { prepared in

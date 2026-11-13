@@ -34,9 +34,9 @@ TOOLS = {"Read": "Read", "Write": "Write", "Edit": "Edit", "Bash": "Bash", "Glob
 TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "completed"}
 READ_ONLY = (("Windows 上从手机操作 Kimi Code 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Kimi Code on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
-             ("Kimi Code 不在 tmux 中运行（或在桌面版、VS Code 中），只能查看；在 tmux 中启动 kimi 后即可从手机回复和确认",
+             ("Kimi Code 不在 tmux 中运行（或在桌面版、VS Code 中），只能查看；在 tmux 中启动 kimi，或在 Kiteline 新建任务时选择 Kimi Code（由 Kiteline 在后台运行）后即可从手机回复和确认",
               "Kimi Code isn't running in tmux (or runs in the desktop app or VS Code), so this session is view-only. "
-              "Start kimi in tmux to reply and confirm from your phone."))
+              "Start kimi in tmux, or choose Kimi Code when creating a task in Kiteline (it runs in the background), to reply and confirm from your phone."))
 # 等审批时的按钮：Kimi 终端界面的审批菜单 1 允许一次 / 2 本会话都允许 / 3 拒绝
 OPTIONS = ({"key": "3", "label": "拒绝", "labelEn": "Deny", "style": "destructive"},
            {"key": "1", "label": "允许", "labelEn": "Allow", "style": "primary"},
@@ -384,6 +384,18 @@ def create(kl):
         def normalizer_for(self, path):
             return lambda offset, entry: kimi_normalize(offset, entry, path)
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 Kimi Code 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
+            起来以后读屏、发字、按键都走通用终端层。字样照 kimi 2.5（11-13） 实测的画面写（比较时不分大小写）"""
+            if resume and not (4 <= len(str(resume)) <= 128 and all(c.isalnum() or c in "_.:-" for c in str(resume))):
+                return None
+            return {"argv": ["kimi"] + (["--session", str(resume)] if resume else []),
+                    # 右下角的上下文用量出来 = 进了主界面
+                    "ready": ["context:"],
+                    # 第一次在这个文件夹里跑会问信不信任它（默认选中「Trust and continue」）：用户在 Kiteline 里选了这个项目开任务，回车
+                    "answers": [{"when": "trust this folder?", "keys": ["Enter"]}],
+                    "settle": 1.0}
+
         def detect(self):
             command = shutil.which("kimi")
             return {"installed": os.path.isdir(KIMI_HOME) or bool(command), "forms": {"cli": ""} if command else {}}
@@ -470,7 +482,7 @@ def create(kl):
         def _pid(self, sid):
             pid = self.pids.get(sid)
             if not pid or not term_pane(pid):
-                raise RuntimeError("这个 Kimi Code 会话不在 tmux 里运行，只能查看；在 tmux 中启动 kimi 后，就可以从手机回复和确认")
+                raise RuntimeError("这个 Kimi Code 会话不在 tmux 里运行，只能查看；在 tmux 中启动 kimi，或在 Kiteline 新建任务时选择 Kimi Code（由 Kiteline 在后台运行）后，就可以从手机回复和确认")
             return pid
 
         def send(self, sid, text, images):

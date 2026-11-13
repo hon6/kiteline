@@ -16,10 +16,21 @@ APP="$ROOT/dist/Kiteline.app"
 DEST="/Applications/Kiteline.app"
 CC="$DEST/Contents/MacOS/TARS"
 
+# 同一时间只让一个会话编译、安装：几个会话同时 install 时，一个的 rm -rf / cp 和另一个的 open 会交错，
+# App 在安装包还没拷完时就被启动、找不到打包的 watcher，本机和远端全连不上（11-14）；同时编译还会互相覆盖 dist/Kiteline.app。
+# 锁放在 /tmp（各会话的 TMPDIR 不一样）；最多等 10 分钟（前一个卡死留下的锁也就等这么久）
+LOCK="/tmp/kiteline-install.lock"
+for i in $(seq 1 600); do mkdir "$LOCK" 2>/dev/null && break; [ "$i" = 1 ] && echo "另一个会话正在编译 / 安装 Kiteline，等它装完…"; sleep 1; done
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
 echo "==== 1/4 构建 ===="
 bash "$ROOT/build.sh"
 
 echo "==== 2/4 安装到 /Applications ===="
+# 先拷到旁边的临时位置，拷完再整个换进去（同一个磁盘上改名是一步完成的）：「应用程序」里任何时候都不会有拷到一半的包
+STAGE="/Applications/.Kiteline-installing.app"
+rm -rf "$STAGE"
+cp -R "$APP" "$STAGE"
 # 先退出正在运行的旧版本（手机端口等资源要释放）；改名前的 TARS / CC Pulse 一并退出并移除
 pkill -f "Kiteline.app/Contents/MacOS/TARS" 2>/dev/null || true
 pkill -f "TARS.app/Contents/MacOS/TARS" 2>/dev/null || true
@@ -35,7 +46,7 @@ if [ -d "/Applications/CC Pulse.app" ]; then
   echo "已移除改名前的 /Applications/CC Pulse.app（数据会自动迁移到 Kiteline）"
 fi
 rm -rf "$DEST"
-cp -R "$APP" "$DEST"
+mv "$STAGE" "$DEST"
 echo "已安装：$DEST"
 
 echo "==== 3/4 来源 ===="

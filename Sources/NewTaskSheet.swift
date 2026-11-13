@@ -64,6 +64,20 @@ struct NewTaskSheet: View {
     @State private var capConfirmed = false
     /// 在独立分支（git worktree）里做
     @State private var isolated = false
+    /// 用哪个 agent：除了 Claude Code，还能选那台电脑上装着、能在后台运行的（Hosted.launchable，按电脑记）
+    @State private var launchable: [String: [LaunchAgent]] = [:]
+    @State private var agent = "claude-code"
+
+    struct LaunchAgent: Identifiable, Equatable {
+        let id: String
+        let name: String
+        var viaUI = false
+    }
+
+    /// 这台电脑上能选的别家 agent（还没问到、没有就是空）
+    private var agentChoices: [LaunchAgent] { selected.flatMap { launchable[$0.sourceId] } ?? [] }
+    /// 选了别家 agent（定时任务只做 Claude Code）
+    private var otherAgent: LaunchAgent? { timing == "now" ? agentChoices.first { $0.id == agent } : nil }
     /// now / daily / weekdays / once
     @State private var timing = "now"
     @State private var when = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date().addingTimeInterval(86400)) ?? Date()
@@ -163,7 +177,10 @@ struct NewTaskSheet: View {
             }
             // 多行文字（⌘V 贴截图）、听写、图片一栏（拖进来、粘贴、选文件、从「照片」）：同 Mac 的「加入待办」
             TarsTaskInput(text: $text, images: $images,
-                          placeholder: selected.map { L("请描述需要 Claude 在「%@」中完成的任务", "\($0.name)") } ?? L("请先在上方选择项目"),
+                          placeholder: selected.map { project in
+                              otherAgent.map { L("请描述需要 %@ 在「%@」中完成的任务", $0.name, "\(project.name)") }
+                                  ?? L("请描述需要 Claude 在「%@」中完成的任务", "\(project.name)")
+                          } ?? L("请先在上方选择项目"),
                           enabled: !sending, submitTitle: timing == "now" ? L("开始") : L("创建"), onSubmit: start)
             HStack(spacing: 10) {
                 LookSegmented(selection: $timing, options: [("now", L("现在开始")), ("daily", L("每天")), ("weekdays", L("工作日")), ("once", L("仅一次"))])
@@ -174,6 +191,16 @@ struct NewTaskSheet: View {
                         .labelsHidden()
                 }
                 Spacer()
+                if timing == "now", !agentChoices.isEmpty {
+                    Picker("Agent", selection: $agent) {
+                        Text(verbatim: "Claude Code").tag("claude-code")
+                        ForEach(agentChoices) { Text(verbatim: $0.name).tag($0.id) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .help("除 Claude Code 外，也可选择这台电脑上已安装的其他命令行 Agent，由 Kiteline 在后台运行")
+                }
                 Toggle("在独立分支中进行（git worktree）", isOn: $isolated)
                     .toggleStyle(.checkbox)
                     .font(.app(size: 12))
@@ -184,6 +211,10 @@ struct NewTaskSheet: View {
                 if let message = message {
                     Label(message, systemImage: "exclamationmark.triangle").font(.app(size: 11.5)).foregroundStyle(.orange)
                         .lineLimit(2)
+                } else if let otherAgent {
+                    Text(otherAgent.viaUI ? L("将在电脑上的 %@ 中新建任务并发送（会短暂切到 %@）", otherAgent.name, otherAgent.name)
+                         : L("将在电脑后台运行 %@，可在手机上查看和操作", otherAgent.name))
+                        .font(.app(size: 11.5)).foregroundStyle(.secondary)
                 } else if let project = selected {
                     Text(project.open || project.live > 0 ? "在已打开的 VS Code 窗口里新建会话"
                          : "将先打开此项目的 VS Code 窗口\(project.kind == "ssh" ? "（Remote-SSH，要十几秒）" : "")")
@@ -203,6 +234,18 @@ struct NewTaskSheet: View {
         .frame(minWidth: 520, idealWidth: 600, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(L("新任务"))   // 放进面板的标题栏
         .onAppear(perform: load)
+        .onChange(of: selected?.sourceId) { _, sourceId in
+            // 换了电脑：先回到 Claude Code，问一次那台电脑上还能选哪几家（问过的记着）
+            if let sourceId, !agentChoices.contains(where: { $0.id == agent }) { agent = "claude-code" }
+            guard let sourceId, launchable[sourceId] == nil else { return }
+            Hosted.launchable(sourceId: sourceId) { rows in
+                let found = rows.compactMap { row -> LaunchAgent? in
+                    guard let id = row["id"] as? String, !id.isEmpty, id != "claude-code" else { return nil }
+                    return LaunchAgent(id: id, name: row["name"] as? String ?? id, viaUI: row["via"] as? String == "ui")
+                }
+                DispatchQueue.main.async { launchable[sourceId] = found }
+            }
+        }
         .sheetPanel(item: $browsing) { target in
             TarsFolderPicker(sourceId: target.source.id, machine: ServerLang.machine(target.source.displayName), start: target.start) { path in
                 adopt(path, source: target.source)
@@ -415,9 +458,20 @@ struct NewTaskSheet: View {
             return
         }
         func launch(_ cwd: String, _ prompt: String) {
-            NewSession.start(source: source, cwd: cwd, prompt: prompt, submit: true) { outcome in
-                sending = false
-                if outcome.ok { close() } else { message = outcome.message }
+            guard let otherAgent else {
+                NewSession.start(source: source, cwd: cwd, prompt: prompt, submit: true) { outcome in
+                    sending = false
+                    if outcome.ok { close() } else { message = outcome.message }
+                }
+                return
+            }
+            // 别家 agent：在那台电脑的后台运行它，起不来就把原因留在面板上
+            MobileServer.startAgent(source, cwd: cwd, prompt: prompt, submit: true, sessionId: nil, agent: otherAgent.id,
+                                    accepted: { _ in }) { outcome in
+                DispatchQueue.main.async {
+                    sending = false
+                    if outcome.ok { close() } else { message = outcome.message }
+                }
             }
         }
         guard isolated else { launch(project.cwd, prompt); return }

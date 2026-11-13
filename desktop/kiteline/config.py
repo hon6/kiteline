@@ -62,6 +62,8 @@ DEFAULT_MOBILE = {
     # （远端项目的新任务、恢复会话不开 VS Code，在那台电脑上后台运行，见 app.launch_hosted；默认关，检测过出口、用户确认才开。
     # 先前那版是这里一个默认开的 hostedRemote，那时的值不算数）
     "hostedTipOff": False,
+    # 这台电脑自己的项目（本机来源）在后台运行 Claude Code、不开 VS Code：默认开（11-13），Windows 上不支持、照旧开 VS Code
+    "hostedLocal": True,
     "quietStart": "23:00",
     "quietEnd": "08:00",
     "mutedSessions": [],

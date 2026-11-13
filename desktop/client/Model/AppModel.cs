@@ -383,9 +383,10 @@ public sealed partial class AppModel : ObservableObject
                 return reply.Str("text") ?? throw new Translator.TranslateException(L("电脑返回了无法识别的内容"));
             } : null;
         }
-        var pins = state.Pinned ?? [];
+        // 刚在这里改的置顶 / 标记，电脑确认前推来的旧列表不覆盖（见 pendingFlags）
+        var pins = ReconcileFlags(state.Pinned ?? [], "pin");
         if (!pins.SequenceEqual(Pinned)) Pinned = pins;
-        if (state.Marked is { } marks && !marks.SequenceEqual(Marked)) Marked = marks;
+        if (state.Marked is { } markedList && ReconcileFlags(markedList, "mark") is var marks && !marks.SequenceEqual(Marked)) Marked = marks;
         if (state.Faces is { } faces && !faces.SameAs(Faces)) Faces = faces;
         var muted = (state.Muted ?? []).ToHashSet();
         if (!muted.SetEquals(Muted)) Muted = muted;
@@ -602,10 +603,10 @@ public sealed partial class AppModel : ObservableObject
             var reply = await Api.Post("/api/queue", body, new Dictionary<string, string> { ["key"] = key });
             if (action == "now")
             {
-                chat.QueueDraft = null;   // 刚调过的临时队列作废：排队的都交出去了
+                chat.QueueDraft = null;   // 刚调过的临时队列作废，等电脑传回新队列
                 chat.Touch();
-                // 强插：本机记下的排队消息改成普通的「已发送」，等对话里回显
-                foreach (var p in chat.Pending.Where(p => p.State == SendState.Later).ToList())
+                // 强插：本机记下的这一条改成普通的「已发送」，等对话里回显（别的照旧排队；老版本插件会全部交出去，由 TrackQueued 撤掉）
+                foreach (var p in chat.Pending.Where(p => p.State == SendState.Later && (p.Qid ?? p.Id) == qid).ToList())
                 {
                     chat.Update(p.Id, x => x with { State = SendState.Sent });
                     ExpirePending(key, chat, p.Id);
@@ -765,14 +766,14 @@ public sealed partial class AppModel : ObservableObject
         catch (Exception e) { (HostedTipOff, Sources) = before; Show(e); }
     }
 
+    /// 置顶 / 取消置顶：同标记，先在本机改（行马上挪过去），电脑没接住再改回来
     public async void SetPinned(string key, bool on)
     {
-        try
-        {
-            await Api.Post("/api/pin", new Dictionary<string, object> { ["key"] = key, ["pinned"] = on });
-            Pinned = on ? [key, .. Pinned.Where(k => k != key)] : Pinned.Where(k => k != key).ToList();
-        }
-        catch (Exception e) { Show(e); }
+        var before = Pinned;
+        Pinned = on ? [key, .. Pinned.Where(k => k != key)] : Pinned.Where(k => k != key).ToList();
+        pendingFlags["pin|" + key] = (on, DateTime.UtcNow.AddSeconds(10));
+        try { await Api.Post("/api/pin", new Dictionary<string, object> { ["key"] = key, ["pinned"] = on }); }
+        catch (Exception e) { pendingFlags.Remove("pin|" + key); Pinned = before; Show(e); }
     }
 
     /// 标记 / 取消标记：先在本机改（星星立刻亮 / 灭），电脑没接住再改回来
@@ -780,8 +781,27 @@ public sealed partial class AppModel : ObservableObject
     {
         var before = Marked;
         Marked = on ? [key, .. Marked.Where(k => k != key)] : Marked.Where(k => k != key).ToList();
+        pendingFlags["mark|" + key] = (on, DateTime.UtcNow.AddSeconds(10));
         try { await Api.Post("/api/mark", new Dictionary<string, object> { ["key"] = key, ["marked"] = on }); }
-        catch (Exception e) { Marked = before; Show(e); }
+        catch (Exception e) { pendingFlags.Remove("mark|" + key); Marked = before; Show(e); }
+    }
+
+    /// 刚在这里改、电脑还没确认的置顶 / 标记（"pin|会话" / "mark|会话" → 改成了什么、最多等到几点）。电脑每秒推状态，它还没处理完这次
+    /// 请求时推来的是旧列表，照收的话这一行先挪上去、被挪回原位、过一会儿又挪上去（用户 11-13 在 iPhone 上看到列表画花，三端同样的写法）
+    readonly Dictionary<string, (bool On, DateTime Until)> pendingFlags = [];
+
+    List<string> ReconcileFlags(IEnumerable<string> incoming, string list)
+    {
+        var result = incoming.ToList();
+        var now = DateTime.UtcNow;
+        foreach (var (id, flag) in pendingFlags.ToList())
+        {
+            if (!id.StartsWith(list + "|")) continue;
+            var key = id[(list.Length + 1)..];
+            if (flag.Until < now || incoming.Contains(key) == flag.On) { pendingFlags.Remove(id); continue; }
+            result = flag.On ? [key, .. result.Where(k => k != key)] : result.Where(k => k != key).ToList();
+        }
+        return result;
     }
 
     public async void SetMuted(string key, bool on)

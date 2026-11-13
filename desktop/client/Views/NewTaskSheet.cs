@@ -47,6 +47,11 @@ public sealed class NewTaskSheet
     readonly DatePicker datePicker = new() { VerticalAlignment = VerticalAlignment.Center };
     readonly TimePicker timePicker = new() { VerticalAlignment = VerticalAlignment.Center, ClockIdentifier = "24HourClock", MinuteIncrement = 5 };
     readonly CheckBox isolated;
+    /// 用哪个 agent：除了 Claude Code，还能选这台电脑上装着、可以在后台运行的（GET /api/launchable，按电脑记）。没有可选的就不显示
+    readonly ComboBox agentBox = new() { MinWidth = 150, FontSize = Look.Pt(12), VerticalAlignment = VerticalAlignment.Center, IsVisible = false };
+    readonly Dictionary<string, List<(string Id, string Name, bool ViaUI)>> launchable = [];
+    string? agentsFor;
+    HashSet<string> viaUI = [];
     readonly TextBlock status = Ui.Text("", 11.5, color: "Text2", lines: 2).Wrap();
     readonly Icon warning = Ui.Sym("exclamationmark.triangle", 11.5, "Orange");
     readonly Tap startButton;
@@ -126,7 +131,8 @@ public sealed class NewTaskSheet
         timePicker.SelectedTime = new TimeSpan(9, 0, 0);
         isolated = new CheckBox { Content = Ui.Text(L("在独立分支中进行（git worktree）"), 12), VerticalAlignment = VerticalAlignment.Center }
             .Tip(L("在仓库旁新建 worktree 及以 tars/ 开头的分支，Claude 仅在其中修改，不影响主目录中正在进行的改动"));
-        var options = Ui.H(10, timing, datePicker, timePicker, new Spacer(), isolated);
+        agentBox.SelectionChanged += (_, _) => Update();
+        var options = Ui.H(10, timing, datePicker, timePicker, new Spacer(), agentBox, isolated);
 
         startButton = new Tap(startLabel.Pad(18, 0), Start, 7) { Height = 30, MinWidth = 88 }.Keys("Action", "Action");
         var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), () => window!.Close(), 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
@@ -331,10 +337,48 @@ public sealed class NewTaskSheet
     bool CanStart => !sending && Selected is not null && ((input.Text ?? "").Trim().Length > 0 || attached.Count > 0);
     string Timing => timing.Selected;
 
+    /// 选了别家 agent（定时任务只做 Claude Code）
+    (string Id, string Name)? OtherAgent =>
+        Timing == "now" && agentBox.IsVisible && agentBox.SelectedItem is ComboBoxItem { Tag: string id } item && id != "claude-code"
+            ? (id, item.Content as string ?? id) : null;
+
+    async void LoadAgents(string sourceId)
+    {
+        if (!launchable.ContainsKey(sourceId))
+        {
+            List<(string Id, string Name, bool ViaUI)> list = [];
+            try
+            {
+                var reply = await AppModel.Shared.Api.Get("/api/launchable", new Dictionary<string, string> { ["sourceId"] = sourceId });
+                foreach (var n in reply.Arr("agents") ?? [])
+                    if (n.Str("id") is string id && id.Length > 0 && id != "claude-code") list.Add((id, n.Str("name") ?? id, n.Str("via") == "ui"));
+                launchable[sourceId] = list;
+            }
+            catch (ApiError e) when ((int)e.Status == 404) { launchable[sourceId] = list; }   // 老版本电脑端没有这个接口：只有 Claude Code
+            catch { return; }   // 网络一时不通：不记，换个项目再选回来时再问（不在每次刷新时重问，免得一直发请求）
+        }
+        if (agentsFor != sourceId) return;
+        var items = new List<ComboBoxItem> { new() { Content = "Claude Code", Tag = "claude-code" } };
+        items.AddRange(launchable[sourceId].Select(a => new ComboBoxItem { Content = a.Name, Tag = a.Id }));
+        viaUI = launchable[sourceId].Where(a => a.ViaUI).Select(a => a.Id).ToHashSet();
+        agentBox.ItemsSource = items;
+        agentBox.SelectedIndex = 0;
+        Update();
+    }
+
     void Update()
     {
         var project = Selected;
-        input.Watermark = project is null ? L("请先在上方选择项目") : L("请描述需要 Claude 在「%@」中完成的任务", project.Name);
+        if (project is not null && agentsFor != project.SourceId)
+        {
+            agentsFor = project.SourceId;
+            agentBox.ItemsSource = null;
+            LoadAgents(project.SourceId);
+        }
+        agentBox.IsVisible = Timing == "now" && project is not null && launchable.TryGetValue(project.SourceId, out var choices) && choices.Count > 0;
+        var other = OtherAgent;
+        input.Watermark = project is null ? L("请先在上方选择项目")
+            : other is { } chosen ? L("请描述需要 %@ 在「%@」中完成的任务", chosen.Name, project.Name) : L("请描述需要 Claude 在「%@」中完成的任务", project.Name);
         datePicker.IsVisible = Timing == "once";
         timePicker.IsVisible = Timing != "now";
         isolated.IsEnabled = Timing == "now";
@@ -346,7 +390,9 @@ public sealed class NewTaskSheet
         {
             warning.IsVisible = false;
             status.Res(TextBlock.ForegroundProperty, "Text2");
-            status.Text = project is null ? "" : project.Open || project.Live > 0 ? L("在已打开的 VS Code 窗口里新建会话")
+            status.Text = project is null ? "" : other is { } running ? (viaUI.Contains(running.Id) ? L("将在电脑上的 %@ 中新建任务并发送（会短暂切到 %@）", running.Name, running.Name)
+                    : L("将在电脑后台运行 %@，可在手机上查看和操作", running.Name))
+                : project.Open || project.Live > 0 ? L("在已打开的 VS Code 窗口里新建会话")
                 : L("将先打开此项目的 VS Code 窗口") + (project.Kind == "ssh" ? L("（Remote-SSH，要十几秒）") : "");
         }
     }
@@ -444,12 +490,14 @@ public sealed class NewTaskSheet
                 window.Close();
                 return;
             }
-            var started = await api.Post("/api/new-session", new JsonObject
+            var body = new JsonObject
             {
                 ["sourceId"] = project.SourceId, ["cwd"] = project.Cwd, ["text"] = text,
                 ["images"] = new JsonArray(attached.Select(a => (JsonNode)new JsonObject { ["name"] = a.Name, ["data"] = Convert.ToBase64String(a.Data) }).ToArray()),
                 ["override"] = capConfirmed, ["worktree"] = isolated.IsChecked == true,
-            });
+            };
+            if (OtherAgent is { } agent) body["agent"] = agent.Id;
+            var started = await api.Post("/api/new-session", body);
             AppModel.Shared.AwaitNewSession(project.SourceId, started.Str("cwd") ?? project.Cwd);
             AppModel.Shared.Flash(started.Str("branch") is string branch ? L("已在独立分支 %@ 开始", branch)
                 : started.Truthy("submitted") ? L("已开始，等待新会话出现…") : started.Str("message") ?? L("已新建会话"));

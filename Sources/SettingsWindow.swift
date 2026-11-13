@@ -1018,7 +1018,8 @@ struct SourcesPane: View {
                 .font(.app(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // 有能后台运行、还没开的远端设备：问一声要不要开（勾了「不再提示」就不问，各行的按钮照旧在）
-            let candidates = model.sources.filter { $0.hostedSupport && !$0.hostedOn && $0.online }
+            // 只问远端的：本机默认就开着，用户自己关掉的不再问
+            let candidates = model.sources.filter { $0.kind == .ssh && $0.hostedSupport && !$0.hostedOn && $0.online }
             if !candidates.isEmpty, !tipOff {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "moon.stars").foregroundStyle(Color.accentColor).padding(.top, 1)

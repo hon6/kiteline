@@ -27,8 +27,8 @@ BUSY_MARK = "esc to interrupt"
 APPROVAL_WORDS = ("Allow once", "Reject")
 READ_ONLY = (("Windows 上从手机操作 Muse Code 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Muse Code on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
-             ("Muse Code 不在 tmux 中运行，只能查看；在 tmux 中启动 muse 后即可从手机回复和确认",
-              "Muse Code isn't running in tmux, so this session is view-only. Start muse in tmux to reply and confirm from your phone."))
+             ("Muse Code 不在 tmux 中运行，只能查看；在 tmux 中启动 muse，或在 Kiteline 新建任务时选择 Muse Code（由 Kiteline 在后台运行）后即可从手机回复和确认",
+              "Muse Code isn't running in tmux, so this session is view-only. Start muse in tmux, or choose Muse Code when creating a task in Kiteline (it runs in the background), to reply and confirm from your phone."))
 # 从手机确认命令还没用真实账号实测：确认框出来时这一会话按只读处理、请用户回电脑确认，实测通过后再开放（换成 pending_options + key）
 WAITING_LOCAL = ("Muse Code 正在等你确认命令。从手机确认 Muse 的命令还没实测，暂未开放，请在电脑上确认",
                  "Muse Code is waiting for you to confirm a command. Confirming Muse commands from your phone isn't tested yet, so it isn't available; please confirm on your computer.")
@@ -280,6 +280,20 @@ def create(kl):
         def abilities(self):
             return ["view", "reply"]   # 确认命令暂未开放；中断不在这张清单里
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 Muse Code 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
+            起来以后读屏、发字、按键都走通用终端层。字样照 muse 1.4.14（11-13） 实测的画面写（比较时不分大小写）"""
+            if resume and not (4 <= len(str(resume)) <= 128 and all(c.isalnum() or c in "_.:-" for c in str(resume))):
+                return None
+            return {"argv": ["muse", "resume", str(resume)] if resume else ["muse"],
+                    # 输入提示符（信任框、登录画面里都没有它）
+                    "ready": ["\u276f"],
+                    # 第一次在这个文件夹里跑会问信不信任它（默认选中「Trust and continue」）：用户在 Kiteline 里选了这个项目开任务，回车
+                    "answers": [{"when": "do you trust this workspace?", "keys": ["Enter"]}],
+                    # 没登录时停在选登录方式上：要用户本人在终端里登录
+                    "needsUser": ["log in with browser", "set an api key"],
+                    "settle": 1.0}
+
         def detect(self):
             import shutil
             command = shutil.which("muse")
@@ -332,7 +346,7 @@ def create(kl):
             pid = self.pids.get(sid)
             pane = term_pane(pid) if pid else None
             if not pane:
-                raise RuntimeError("这个 Muse Code 会话不在 tmux 里运行，只能查看；在 tmux 中启动 muse 后，就可以从手机回复和确认")
+                raise RuntimeError("这个 Muse Code 会话不在 tmux 里运行，只能查看；在 tmux 中启动 muse，或在 Kiteline 新建任务时选择 Muse Code（由 Kiteline 在后台运行）后，就可以从手机回复和确认")
             return pid, pane
 
         def send(self, sid, text, images):

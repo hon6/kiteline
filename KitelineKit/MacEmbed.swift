@@ -15,6 +15,9 @@ public enum KitelineKit {
     public static var openQuickReplies: () -> Void = {}
     /// 写进 Mac App 的日志（排查界面问题时留个记录）
     public static var log: (String) -> Void = { _ in }
+    /// 鼠标停在按钮上的说明：交给 Mac App 的 HoverTipPanel 画（文字 = 显示，nil = 收起）。
+    /// 分屏标签栏铺在窗口标题栏那一带，系统的 .help() 提示在那里不弹（11-13），用自绘的小浮窗
+    public static var hoverTip: (String?) -> Void = { _ in }
 
     /// 连本机的 Kiteline 服务（Mac App 自己起的那个）；地址或令牌变了就换一个重新连
     public static func connect(baseURL: URL, token: String) {

@@ -31,6 +31,7 @@ WHOLE_FILES = ("KitelineKit/Views/Look.swift",)
 ANY_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*[\u4e00-\u9fff](?:[^"\\\n]|\\.)*)"')
 OUTPUTS = [
     os.path.join(ROOT, "KitelineKit", "en.lproj", "Localizable.strings"),
+    os.path.join(ROOT, "ios", "TARSLive", "en.lproj", "Localizable.strings"),   # 主屏 / 锁屏小组件（实时活动扩展里）
     os.path.join(ROOT, "Resources", "en.lproj", "Localizable.strings"),
 ]
 DESKTOP_JSON = os.path.join(ROOT, "desktop", "kiteline", "i18n_en.json")

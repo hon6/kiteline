@@ -430,8 +430,8 @@ final class AppState {
             let linkState = store.sourceStates[source.id] ?? .stopped
             var item: [String: Any] = ["id": source.id, "name": source.displayName, "kind": source.kind.rawValue,
                                        "online": linkState.isLive, "status": linkState.shortLabel]
-            // 这台能后台运行 Claude Code 时才带：on / off（按设备开，见 Hosted）
-            if source.kind == .ssh, Hosted.supported(source.id) { item["hosted"] = source.hostedOn ? "on" : "off" }
+            // 这台能后台运行 Claude Code 时才带：on / off（远端按设备开，本机默认开，见 Hosted）
+            if Hosted.capable(source) { item["hosted"] = Hosted.on(source.id) ? "on" : "off" }
             return item
         }
         return [

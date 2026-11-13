@@ -1,5 +1,39 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.42 (2026-11-14)
+
+### Bug Fixes
+
+- **Slash commands sent while Claude is busy now appear in the queue**: Commands such as /effort or /model sent from your phone while a session is working only run after Claude Code finishes the current turn. Previously they stayed at the bottom of the conversation as "Sending", with Claude's new replies appearing above them; they are now listed above the input box with your queued messages, marked "Runs after this turn", and can be reordered, edited, deleted or sent right away.
+- **Fixed the first message sometimes staying in the input box when resuming a very long session**: When a session with a large history is resumed in the background, Claude Code may still be loading it and the first message could be typed without being sent. Kiteline now checks that it was sent and submits it again if not.
+- Fixed an issue where switching models from your phone could leave the session on the computer stuck on a confirmation prompt.
+
+## 1.0.41 (2026-11-14)
+
+### New Features
+
+- **Choose other agents for new tasks and let Kiteline run them in the background** (Linux): Besides Claude Code, you can pick Kimi Code, Grok Build, Hermes, Muse Code, Antigravity CLI, CodeBuddy Code, Qwen Code, pi or trae-agent if they're installed on the computer. Kiteline runs them in the background, so you can reply, approve and interrupt from your phone without starting them in tmux. You can also continue their finished sessions by sending a message (except trae-agent).
+- **View WorkBuddy desktop tasks**: while WorkBuddy is open, its recent tasks appear in the session list with their progress and full conversation (sending messages from your phone on Windows is still being tested, so they're view-only for now).
+- **Projects on this computer can now run Claude Code in the background** (Linux): New tasks and resumed sessions no longer open VS Code. Kiteline runs Claude Code in the background instead; sending messages and approving never switch the front window and still work while the computer is locked, and VS Code uses less memory. When you want to look at the code, click “Open in VS Code” on the session’s tab bar to continue there. This is on by default; you can turn it off, or check the outbound IP, in Settings → Sources. If a background start is not possible (for example, Claude Code has not been set up in the terminal yet), the session opens in VS Code as before and the reason is shown. Windows computers are not supported yet and keep opening VS Code; remote computers are still turned on one by one after checking their outbound IP.
+
+### Improvements
+
+- **Press Enter with an empty input box to send the first queued message**: When Claude is busy and messages are queued, pressing Enter with an empty input box sends the message at the front of the queue right away, while the rest stay queued; press again to send the next one. With nothing queued, empty messages are not sent; messages that contain only images or files can still be sent. “Send now” likewise sends only that one message right away.
+- **Fable 5.2 is now in the model list**, and the list updates itself with Claude Code: once you've used a new model in VS Code or the terminal, it appears in the model list on every device. The older model a session is currently using is still shown.
+- **Lower CPU and memory use**: The client uses less CPU while sessions are working (most noticeable on computers without a dedicated GPU, in virtual machines and over remote desktop), and no longer draws animations while the window is minimized or hidden in the tray. With very large session records (hundreds of MB), the background service no longer uses a large amount of memory at startup.
+- Opening the activity timeline or the subagent list on a very long session no longer slows down other actions.
+- **Agent to-dos with no progress for a long time are flagged** (Windows and Linux app): To-dos an agent recorded that haven't been updated for more than 3 days are marked “No update for N days” and can be cleared in one tap; agents are also reminded to finish or close them when they check their to-dos. “My To-dos” is now a single card, with each item's source noted and a link back to its session.
+
+### Bug Fixes
+
+- **The input box no longer loses focus while you type**: If a session's status changes while you are typing in a conversation (for example, Claude starts or finishes a step, or a queued message is sent), the input box keeps focus, so you can keep typing or press Enter to send.
+- **Messages are no longer lost when you send several in a row while resuming a past session from your phone**: Previously, sending "?" or "continue" before a resume had finished made each message try to resume the same session on its own; they collided and only one got through. Messages for the same session are now queued and sent in order once the session is back.
+- **Remote sessions that need Claude Code to sign in now open in VS Code right away**: If Claude Code has not been set up in the terminal of that computer, a background start stops at the sign-in method screen. Kiteline used to wait almost a minute; it now switches to VS Code as soon as it sees that screen and tells you to run claude once in that computer's terminal to finish setup.
+- **Messages from your phone are no longer delayed or delivered twice**: While the computer was computing usage, loading the list of past sessions, or searching, messages from your phone used to wait behind those operations for up to ten seconds or more, and the same message could then be delivered to the session twice. Messages, key presses, and answers are now always delivered immediately; when the computer does not respond in time, Kiteline first checks whether the message has already arrived and never sends it again.
+- **Resuming a past session on an unstable network no longer sends the same message twice**: When your phone resends automatically because no response arrived, the computer recognizes the same message, resumes the session once, and sends it once.
+- Fixed an issue where, when several messages were sent in a row to resume the same session, a later one occasionally arrived first. They are now delivered in the order sent.
+- **Marking or pinning a session no longer makes rows overlap or jump around in the list** (iPhone, iPad, Windows, Linux): an older list sent by the computer before it finished the change no longer overrides what you just did.
+
 ## 1.0.40 (2026-11-12)
 
 ### New Features
@@ -24,7 +58,6 @@
 
 - **Open local files mentioned by sessions on other computers**: When Claude works on another computer (such as a virtual machine or server) and saves a file to this computer, tapping the path on your phone used to say "File not found". Kiteline now looks for the file on this computer and opens it. AVI, MKV, WebM, FLAC, OGG and other audio and video file names in messages are now shown as tappable file links.
 
-
 ## 1.0.37 (2026-11-11)
 
 ### Improvements
@@ -37,7 +70,6 @@
 - Fixed the All, Marked, Working and Needs Approval filter buttons being cut off with no way to scroll when they don't fit. You can now scroll them sideways with the mouse wheel.
 - Fixed the session list in a new tab not scrolling when it is long.
 - Fixed a newly opened group chat tab being pushed out of sight in the tab bar when a split pane is narrow.
-
 
 ## 1.0.36 (2026-11-11)
 
@@ -57,7 +89,6 @@
 ### Bug Fixes
 
 - Fixed conversations stopping in the middle or at the top, and no longer following new messages, after the display was turned off and on again or the system moved or resized the window.
-
 
 ## 1.0.35 (2026-11-09)
 
@@ -88,7 +119,6 @@
 
 - **Select and copy message text freely**: Multiple paragraphs, headings, lists and code in a reply can now be selected in one continuous drag, as in an editor, instead of stopping at each line break. Double-click selects a word and triple-click a paragraph; copy with Ctrl+C or Copy Selected Text in the right-click menu. Each message now has a Copy button underneath to copy the whole message.
 - **Copy thinking, and collapse long thinking anytime**: Expanded thinking has a copy button in its top-right corner, and long thinking has a Hide button at the bottom, so you no longer need to scroll back to the top.
-
 
 ## 1.0.31 (2026-11-08)
 

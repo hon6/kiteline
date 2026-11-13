@@ -164,7 +164,9 @@ final class NetworkDiagnosis {
             start("relay")
             let relay = URL(string: info.relay.isEmpty ? "https://tars.betac.cn" : info.relay)
             let relayHost = relay?.host() ?? info.relay
+            var relayOK = false
             if let relay, let ms = await Self.relayPing(relay) {
+                relayOK = true
                 set("relay", .ok, L("%@ 已连通（%@ 毫秒）", "\(relayHost)", "\(ms)"))
             } else {
                 set("relay", .fail, L("无法连接中继 %@", "\(relayHost)"),
@@ -172,13 +174,26 @@ final class NetworkDiagnosis {
             }
 
             start("p2p")
-            if let local = await PhoneP2P.shared.connect(info) {
-                let result = await Self.ping([local], mac: mac, timeout: 8).first
+            var local = await PhoneP2P.shared.connect(info)
+            var result: Ping?
+            if let local { result = await Self.ping([local], mac: mac, timeout: 8).first }
+            // 中继通了、电脑却没回应：多半是手机这头的点对点端点在换网络后卡住了，电脑其实在线
+            // （11-13 用户遇到：出门换到流量后诊断报「中继已连通，但电脑未响应」，退出重开 App 就好）。先替用户把端点整个重开一次再测
+            var restarted = false
+            if relayOK, result?.status != 200, result?.status != 401, result?.certificate != true {
+                model.restartRemote()
+                restarted = true
+                local = await PhoneP2P.shared.connect(info)
+                result = nil
+                if let local { result = await Self.ping([local], mac: mac, timeout: 8).first }
+            }
+            if local != nil {
                 if result?.status == 200 {
                     reached = true
                     let link = PhoneP2P.shared.refreshLink()
                     let via = link.path == .relay ? L("经中继") : (link.onLAN ? L("局域网直连") : (link.path == .direct ? L("点对点直连") : ""))
-                    set("p2p", .ok, L("已连通") + (via.isEmpty ? "" : "，\(via)") + L("（%@ 毫秒）", "\(result?.ms ?? 0)"))
+                    set("p2p", .ok, L("已连通") + (via.isEmpty ? "" : "，\(via)") + L("（%@ 毫秒）", "\(result?.ms ?? 0)")
+                        + (restarted ? L("；已重新建立远程连接") : ""))
                 } else if result?.status == 401 {
                     revoked = true
                     set("p2p", .fail, L("已连接到电脑，但电脑不信任此手机"), fix: L("请在电脑上打开 Kiteline 的「手机访问」重新扫码"))

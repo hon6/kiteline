@@ -78,8 +78,10 @@ public sealed class QueueStrip : Panel
 
     Control Line(ChatStore.QueueRow row, int index, int count)
     {
-        var text = Ui.Text(row.Text.Trim().Replace('\n', ' '), 13).Shrink().Grow();
-        text.Margin = new Thickness(0, 0, 6, 0);
+        var text = Ui.Text(row.Text.Trim().Replace('\n', ' '), 13).Shrink();
+        // 斜杠命令（/effort、/model……）Claude Code 只在一轮做完后执行，插不进这一轮（同 iOS）
+        var label = Ui.H(6, text, IsCommand(row.Text) ? Ui.Text(L("这一轮结束后执行"), 11.5, color: "Text2") : null).Grow();
+        label.Margin = new Thickness(0, 0, 6, 0);
         // 强插：一个实心圆圈里一个上箭头（11-11），主题色
         var arrow = Ui.Sym("arrow.up.circle.fill", 19, "Accent");
         arrow.HorizontalAlignment = HorizontalAlignment.Center;
@@ -87,7 +89,7 @@ public sealed class QueueStrip : Panel
         var nowButton = new Tap(arrow, () => Act(row, "now"), 6)
         { Width = Button, Height = Button, Margin = new Thickness(2, 0, 0, 0), IsEnabled = busy is null, Opacity = busy is null ? 1 : 0.4 }
             .Tip(L("强插：中断 Claude 当前这一步，排队的消息马上发送"));
-        var line = Ui.H(2, text,
+        var line = Ui.H(2, label,
             row.Editable ? Icon("arrow.up", L("上移"), index == 0, () => Act(row, "move", dir: -1)) : null,
             row.Editable ? Icon("arrow.down", L("下移"), index == count - 1, () => Act(row, "move", dir: 1)) : null,
             row.Editable ? Icon("pencil", L("编辑"), false, () => { editing = row.Id; Refresh(); }) : null,
@@ -125,6 +127,10 @@ public sealed class QueueStrip : Panel
         input.AttachedToVisualTree += (_, _) => { input.Focus(); input.CaretIndex = input.Text?.Length ?? 0; };
         return new StackPanel { Spacing = 6, Margin = new Thickness(12, 8), Children = { box, buttons } };
     }
+
+    /// 斜杠命令：「/」后面紧跟命令名，再是空白或结尾（开头是路径的「/home/…」不算）
+    public static bool IsCommand(string text) =>
+        System.Text.RegularExpressions.Regex.IsMatch(text.Trim(), @"^/[\w:.-]+(\s|$)");
 
     static Control Icon(string symbol, string label, bool disabled, Action action)
     {

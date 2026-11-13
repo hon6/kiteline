@@ -35,8 +35,8 @@ BUSY_MARKS = ("esc to cancel", "esc 取消", "Esc 取消")
 # 只读时手机输入框里的说明和英文版（1.0.1 起；Kiteline 3.49.1 / 电脑端 1.0.8 以前的客户端不认这两个字段，照旧显示「仅可查看」）
 READ_ONLY = (("Windows 上没有 tmux，Qwen Code 的会话只能查看", "Windows has no tmux, so Qwen Code sessions are view-only.")
              if os.name == "nt" else
-             ("Qwen Code 不在 tmux 中运行，只能查看；在 tmux 中启动 Qwen Code 后即可从手机回复和确认",
-              "Qwen Code isn't running in tmux, so this session is view-only. Start Qwen Code in tmux to reply and confirm from your phone."))
+             ("Qwen Code 不在 tmux 中运行，只能查看；在 tmux 中启动 Qwen Code，或在 Kiteline 新建任务时选择 Qwen Code（由 Kiteline 在后台运行）后即可从手机回复和确认",
+              "Qwen Code isn't running in tmux, so this session is view-only. Start Qwen Code in tmux, or choose Qwen Code when creating a task in Kiteline (it runs in the background), to reply and confirm from your phone."))
 
 
 def pane_busy(pane):
@@ -51,6 +51,23 @@ def pane_busy(pane):
 
 def create(kl):
     QWEN_HOME = os.environ.get("QWEN_HOME") or os.path.join(kl.HOME, ".qwen")
+
+    def term_pane(pid):
+        """能操作的终端：tmux 窗格，或 Kiteline 自己的后台伪终端（hosted:…，中台 term_pane，2.37 起）；
+        Windows 控制台没实测，不算。老中台没有 term_pane 就只认 tmux"""
+        finder = getattr(kl, "term_pane", None) or kl.find_tmux_pane
+        pane = finder(pid)
+        return None if not pane or str(pane).startswith("console:") else pane
+
+    def screen_busy(pane):
+        """界面现在忙不忙（底下有「esc to cancel」）；看不了返回 None"""
+        if hasattr(kl, "term_screen"):
+            text = kl.term_screen(pane)
+            if text is None:
+                return None
+            tail = "\n".join(text.rstrip().splitlines()[-12:])
+            return any(mark in tail for mark in BUSY_MARKS)
+        return pane_busy(pane)
 
     def chat_path(cwd, sid):
         """对话记录：cwd 里非字母数字的字符换成 -（同 Claude Code）；对不上就在所有项目里找"""
@@ -199,6 +216,18 @@ def create(kl):
             import shutil
             return {"installed": os.path.isdir(QWEN_HOME) or bool(shutil.which("qwen")), "forms": {"cli": ""} if shutil.which("qwen") else {}}
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 Qwen Code 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux。
+            字样照 qwen 0.27.3（11-13，中文界面和英文界面）实测的画面写（比较时不分大小写）"""
+            if resume and not (4 <= len(str(resume)) <= 128 and all(c.isalnum() or c in "_.:-" for c in str(resume))):
+                return None
+            return {"argv": ["qwen"] + (["--resume", str(resume)] if resume else []),
+                    # 输入框的提示（中文界面 / 英文界面）、底下的「Shift + Tab 切换」
+                    "ready": ["输入您的消息", "type your message", "shift + tab"],
+                    # 还没配置模型：停在选认证方式上（Coding Plan / 第三方 / 自定义服务），要用户本人在终端里配
+                    "needsUser": ["third-party providers", "custom provider", "选择认证方式"],
+                    "settle": 1.0}
+
         def usage(self, since_ms):
             """token 用量（用量报表）：各项目 chats 下的对话记录（见 usage_scan）；只有带用量接口的中台才会来问"""
             out = []
@@ -228,9 +257,9 @@ def create(kl):
                     self.waiting.add(sid)
                 else:
                     self.waiting.discard(sid)
-                tmux = kl.find_tmux_pane(pid)
-                # 忙不忙：在 tmux 里看界面（准）；不在就看对话记录（中断看不出来，最多 10 分钟后算空闲）
-                busy = pane_busy(tmux) if tmux else None
+                tmux = term_pane(pid)
+                # 忙不忙：在 tmux / 后台伪终端里看界面（准）；不在就看对话记录（中断看不出来，最多 10 分钟后算空闲）
+                busy = screen_busy(tmux) if tmux else None
                 if busy is None:
                     busy = note["last"] in ("user", "tool_result") and now - updated < 10 * 60 * 1000
                 if pending:
@@ -258,7 +287,7 @@ def create(kl):
 
         def _pid(self, sid):
             pid = self.pids.get(sid)
-            if not pid or not kl.find_tmux_pane(pid):
+            if not pid or not term_pane(pid):
                 raise RuntimeError("这个 Qwen Code 会话不在 tmux 里运行，只能查看；在 tmux 中启动 Qwen Code 后，就可以从手机回复和确认")
             return pid
 

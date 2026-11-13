@@ -36,14 +36,18 @@ from .store import Store, display_title
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.40"
+VERSION = "1.0.42"
 
 
 class App:
     def __init__(self):
         self.version = VERSION
         self.cfg = config.Config()
-        HOSTED_SETTING[0] = lambda source_id: any(s.get("id") == source_id and s.get("hostedOn") for s in self.cfg.sources)
+        # 正在恢复的历史会话（key → 恢复完成的信号）：同一会话手机上连发几条时后面的排队，见 resume
+        self._resume_gates, self._resume_lock = {}, threading.Lock()
+        self._resume_pending = {}   # 「会话 + 消息编号」→ 正在处理的恢复（手机重发的等它的结果，见 resume）
+        self._resume_recent = {}    # 「会话 + 消息编号」→ (时刻, 回应)：10 分钟内做成过的恢复
+        HOSTED_SETTING[0] = self.hosted_on
         self.host = tls.host_name()
         self.devices = DeviceStore()
         self.pairing = Pairing()
@@ -160,12 +164,15 @@ class App:
         """微信小程序入口：局域网 WebSocket（加密隧道，见 mpgate.py）"""
         from . import mpgate
         m = self.cfg.mobile
+        self.mpgate = gate = mpgate.Gate(self.server.route, lambda: self.host)
+        host, port = m["bindAddress"], int(m.get("mpPort") or mpgate.DEFAULT_PORT)
         try:
-            self.mpgate = mpgate.Gate(self.server.route, lambda: self.host)
-            self.mpgate.start(m["bindAddress"], int(m.get("mpPort") or mpgate.DEFAULT_PORT))
+            gate.start(host, port)
         except OSError as exc:
-            log.write("小程序入口启动失败：%s" % exc)
-            return
+            # 端口被别的程序占着（比如调试用的端口转发）：隔一阵再试，对方让出来就自己恢复，不用重启 Kiteline。
+            # 远程通道不靠这个端口，下面照常连（原来这里直接返回，局域网入口起不来时远程也跟着没有）
+            log.write("小程序入口启动失败：%s，稍后自动重试" % exc)
+            threading.Thread(target=self._retry_mpgate, args=(gate, host, port), name="mpgate-retry", daemon=True).start()
         if m["remoteEnabled"] and mpgate.remote_allowed():
             # 远程：电脑主动连中继，小程序经中继找到这台电脑（内容端到端加密）。远程要 Pro，由中继验小程序的通行证（relay/push/mppay.go）
             self.mpgate.relay = mpgate.RelayLink(self.mpgate, self.cfg.relay())
@@ -212,8 +219,9 @@ class App:
                           "name": entry.get("name") or default, "enabled": enabled, "peerId": entry.get("peerId"),
                           "online": bool(source and source.live),
                           "status": (source.short_label() if source else "未连接") if enabled else "已停用"})
-            if source is not None and "hosted" in source.features and entry.get("kind") == "ssh":
-                items[-1]["hosted"] = "on" if entry.get("hostedOn") else "off"   # 能后台运行 Claude Code 才带（按设备开）
+            if source is not None and "hosted" in source.features and entry.get("kind", "local") in ("ssh", "local"):
+                # 能后台运行 Claude Code 才带：远端按设备开，本机默认开
+                items[-1]["hosted"] = "on" if self.hosted_on(entry.get("id")) else "off"
         added = {(entry.get("sshHost") or "").lower() for entry in self.cfg.sources}
         suggestions = [h for h in remotessh.recent_hosts() if h["host"].lower() not in added]
         peers = [{"id": p["id"], "name": p.get("name"), "address": (p.get("addresses") or [""])[0].replace("https://", ""),
@@ -359,6 +367,7 @@ class App:
             if server:
                 server.stop()
         if getattr(self, "mpgate", None):
+            self._mpgate_closing = True   # 重试线程（_retry_mpgate）看到它就不再起监听
             self.mpgate.stop()
             if getattr(self.mpgate, "relay", None):
                 self.mpgate.relay.stop()
@@ -542,16 +551,50 @@ class App:
     def move_to_background(record, source, siblings):
         return move_to_background(record, source, siblings)
 
+    # 小程序入口端口被占时多久再试：30 秒起、每次翻倍、最长 5 分钟一次
+    MPGATE_RETRY = (30, 300)
+
+    def _retry_mpgate(self, gate, host, port):
+        delay = self.MPGATE_RETRY[0]
+        while getattr(self, "mpgate", None) is gate and not getattr(gate, "stopped", False):
+            time.sleep(delay)
+            if getattr(self, "mpgate", None) is not gate or getattr(gate, "stopped", False):
+                return
+            try:
+                gate.start(host, port)
+            except OSError:
+                delay = min(delay * 2, self.MPGATE_RETRY[1])
+                continue
+            if getattr(self, "mpgate", None) is not gate or getattr(self, "_mpgate_closing", False):
+                gate.stop()    # 绑上端口的那一刻主机正好在退出：别留下一个没人管的监听
+                return
+            log.write("小程序入口已恢复监听 %s:%d" % (host, port))
+            return
+
+    def hosted_on(self, source_id):
+        """这台开没开后台运行 Claude Code：远端看来源自己的 hostedOn（按设备开、默认关），本机看 hostedLocal（默认开）"""
+        for entry in self.cfg.sources:
+            if entry.get("id") == source_id:
+                if entry.get("kind", "local") == "local":
+                    return bool(self.cfg.mobile.get("hostedLocal", True))
+                return bool(entry.get("hostedOn"))
+        return False
+
     def set_hosted(self, source_id=None, on=None, tip_off=None):
         """开 / 关某台的后台运行、「支持后台运行」的提示不再提示（同 Mac 版 Hosted.update）。只改开关，不重连这台"""
         def change(data):
             if source_id and on is not None:
                 for entry in data["sources"]:
                     if entry.get("id") == source_id:
-                        entry["hostedOn"] = bool(on)
+                        if entry.get("kind", "local") == "local":
+                            data["mobile"]["hostedLocal"] = bool(on)
+                        else:
+                            entry["hostedOn"] = bool(on)
             if tip_off is not None:
                 data["mobile"]["hostedTipOff"] = bool(tip_off)
         self.cfg.update(change)
+        if source_id:
+            HOSTED_BLOCKED.pop(source_id, None)
         if source_id and on is not None:
             log.write("%s：后台运行 Claude Code %s" % (source_id, "已开启（检测过出口、用户确认）" if on else "已关闭"))
         if tip_off:
@@ -1012,6 +1055,13 @@ class App:
                        % (branch, base, cwd))
             log.write("新任务用独立 worktree：%s → %s" % (branch, cwd))
         # 回车之后核实真的提交了：这个目录下有会话开始运行（发起前就在运行的不算）
+        agent = body.get("agent") if isinstance(body.get("agent"), str) and body.get("agent") not in ("", "claude-code") else None
+        if agent:
+            # 选了别家命令行 agent：在那台电脑上后台运行它（见 r_launchable）
+            result = launch_agent(cwd, prompt, submit, None, source, agent, notify=self._launch_failed)
+            if branch:
+                result["branch"] = branch
+            return Response.json(result, 200 if result.get("ok") else 409)
         busy_before = {r.key for r in self.store.records if r.activity in ("busy", "waiting")}
         keys_before = {r.key for r in self.store.records}
         want = os.path.normcase(os.path.normpath(cwd))
@@ -1028,18 +1078,126 @@ class App:
         return Response.json(result)
 
     def resume(self, request):
+        """恢复历史会话。同一会话前一条恢复还没做完（手机上连发了几条）：这条先回「排在后面」，等前一条做完——
+        会话接上了就当普通消息发进去，没接上再自己恢复一次。不然几条各自去起后台 claude、各开 VS Code 标签，互相撞掉（同 Mac 版）。
+        _resume_gates[key] 是队尾那条做完的信号，后来的挂在它后面，一条接一条"""
+        key = request.query.get("key", "")
+        # 手机等不到回应会拿同一个消息编号（cid）重发：还在处理就等那一次的结果，做成了的 10 分钟内直接回上次的结果。
+        # 原来重发的那条被当成新消息排在后面，会话恢复后同一句话进去两遍（同 Mac 版 MobileServer.resume）
+        cid = (request.json or {}).get("cid")
+        if not cid:
+            return self._resume_once(key, request)
+        cid = "%s|%s" % (key, cid)
+        now = time.time()
+        entry = None
+        with self._resume_lock:
+            self._resume_recent = {k: v for k, v in self._resume_recent.items() if now - v[0] < 600}
+            done = self._resume_recent.get(cid)
+            first = None if done else self._resume_pending.get(cid)
+            if not done and first is None:
+                entry = self._resume_pending[cid] = {"done": threading.Event(), "response": None}
+        if done:
+            log.write("手机重发的恢复请求已经做过（%s），不再恢复" % cid[-12:])
+            return done[1]
+        if first is not None:
+            log.write("手机重发的恢复请求还在处理（%s），等那一次的结果" % cid[-12:])
+            first["done"].wait(90)
+            return first["response"] or Response.json({"ok": False, "submitted": False, "message": "仍在恢复此会话，请稍后在对话中确认"}, 409)
+        response = None
+        try:
+            response = self._resume_once(key, request)
+            return response
+        finally:
+            with self._resume_lock:
+                self._resume_pending.pop(cid, None)
+                # 只记做成了的：没做成的（含状态 200、内容里 ok 为 false 的）不记，手机上点重试要能再做一次
+                if response is not None and response.status < 400 and _response_ok(response):
+                    self._resume_recent[cid] = (time.time(), response)
+            entry["response"] = response
+            entry["done"].set()
+
+    def _resume_once(self, key, request):
+        mine = threading.Event()
+        with self._resume_lock:
+            previous = self._resume_gates.get(key)
+            self._resume_gates[key] = mine
+        if previous is not None:
+            log.write("手机恢复会话：前一条还在恢复这个会话，这条排在它后面")
+            threading.Thread(target=self._resume_after, args=(key, previous, mine, request), name="resume-queued", daemon=True).start()
+            return Response.json({"ok": True, "submitted": True, "openedWindow": False, "queued": True, "error": "",
+                                  "message": "前一条消息正在恢复此会话，这条将在其后发出"})
+        return self._resume_gated(key, mine, request)
+
+    def _release_resume(self, key, mine):
+        with self._resume_lock:
+            if self._resume_gates.get(key) is mine:
+                del self._resume_gates[key]
+        mine.set()
+
+    def _resume_gated(self, key, mine, request):
+        state = {"async": False}
+        try:
+            response = self._resume_now(request, lambda *_: self._release_resume(key, mine), state)
+        except Exception:
+            self._release_resume(key, mine)
+            raise
+        if not state["async"] or response.status != 200 or not _response_ok(response):
+            self._release_resume(key, mine)   # 当场就没做成（比如找不到 VS Code）：不会再有完成回调，马上放行后面排着的
+        else:
+            # 完成回调没来（不该发生）时最多拦这么久。要比最慢的一条路长：后台启动等 70 秒没起来，再改开 VS Code、等标签加载好再提交
+            timer = threading.Timer(RESUME_GATE_SECONDS, self._release_resume, args=(key, mine))
+            timer.daemon = True
+            timer.start()
+        return response
+
+    def _resume_after(self, key, previous, mine, request):
+        """排队的恢复请求（已经回过手机了，出错推提醒）：前一条做完后，等几秒看会话接上没有，接上了直接发，没接上自己恢复"""
+        previous.wait(RESUME_GATE_SECONDS + 5)
+        deadline = time.time() + 8   # 前一条刚接上：等 watcher 报上这个会话
+        record = self.store.record(key)
+        while not record and time.time() < deadline:
+            time.sleep(0.5)
+            record = self.store.record(key)
+        if record:
+            try:
+                outcome = self._send_live(record, request.json or {})
+            finally:
+                self._release_resume(key, mine)
+            if not outcome.ok:
+                self._launch_failed(outcome.get("message") or "")
+            return
+        response = self._resume_gated(key, mine, request)
+        if response.status != 200:
+            try:
+                message = json.loads(response.body.decode("utf-8")).get("error") or ""
+            except ValueError:
+                message = ""
+            self._launch_failed(message or "恢复会话未成功")
+
+    def _send_live(self, record, body):
+        """恢复请求到的时候会话其实已经接上了：当普通消息发进去"""
+        source = self.store.source(record.source_id)
+        text, attachments = body.get("text") or "", delivery.attachments_of(body)
+        submit = body.get("submit", self.cfg.mobile["submitOnSend"])
+        log.write("手机发往「%s」（恢复请求，会话已接上）：%s（图 %d 张）" % (record.snap.get("name"), text[:60], len(attachments)))
+        return delivery.send(text, attachments, record, source, submit, self.server.siblings(record))
+
+    def _resume_now(self, request, done, state):
         target = self.store.resolve_any(request.query.get("key", ""))
         if not target:
             return Response.error("会话不存在，或其所在机器离线", 404)
-        if self.store.record(request.query.get("key", "")):
-            return Response.error("此会话仍在运行，可直接发送消息", 409)
+        live = self.store.record(request.query.get("key", ""))
+        if live:
+            outcome = self._send_live(live, request.json or {})
+            return Response.json(dict(outcome), 200 if outcome.ok else 409)
         session_id, source = target
         body = request.json or {}
         try:
             info = source.request({"cmd": "session_info", "sessionId": session_id}, timeout=20)
             cwd = (info.get("session") or {}).get("cwd")
+            agent = (info.get("session") or {}).get("agent")
         except Exception:  # noqa: BLE001
-            cwd = None
+            cwd = agent = None
         if not cwd:
             return Response.error("未找到该会话的工作目录", 404)
         attachments = delivery.attachments_of(body)
@@ -1050,9 +1208,17 @@ class App:
         prompt = delivery.compose(body.get("text") or "", paths, attachments)
         submit = bool(prompt) and body.get("submit", self.cfg.mobile["submitOnSend"])
         log.write("手机恢复会话 %s:%s：%s" % (source.name, session_id, (body.get("text") or "")[:60]))
+        if agent and agent != "claude-code":
+            # 别家 agent 已经结束的会话：用它插件的启动配方在后台接着这段对话
+            state["async"] = True
+            result = launch_agent(cwd, prompt, submit, session_id, source, agent, notify=self._launch_failed, done=done)
+            return Response.json(result, 200 if result.get("ok") else 409)
         # editor：客户端「在 VS Code 中恢复」按钮，远端项目也开 VS Code（不走后台托管）
-        return Response.json(launch_session(cwd, prompt, submit, session_id, source.kind, source.name, source=source, notify=self._launch_failed,
-                                            in_editor=body.get("editor") is True))
+        result = launch_session(cwd, prompt, submit, session_id, source.kind, source.name, source=source, notify=self._launch_failed,
+                                done=done, in_editor=body.get("editor") is True)
+        # 没开成的（ok False，回的仍是 200）不会再回调 done：当场放行排在后面的，别拦 75 秒
+        state["async"] = bool(result.get("ok"))
+        return Response.json(result)
 
     def _launch_failed(self, message):
         """新任务 / 恢复会话先回了「将自动提交」，后来没提交成功：推一条提醒（同 Mac 版 launchReplies 的 finished）"""
@@ -1275,8 +1441,22 @@ def _show_editor(folders):
             return
 
 
-# 某台远端电脑开没开后台运行 Claude Code（来源的 hostedOn，按设备）：App 起来时接上（launch_session 是模块级的）
+# 某台电脑开没开后台运行 Claude Code（远端：来源的 hostedOn，按设备；本机：hostedLocal，默认开）：App 起来时接上（launch_session 是模块级的）
 HOSTED_SETTING = [lambda source_id: False]
+# 刚试过起不来、要用户先到那台电脑上处理的（停在登录、首次设置画面）：来源 id → 到什么时候为止不再试后台，
+# 这期间的新任务直接开 VS Code（不然每次都先白等几秒）。改开关、检测出口时清掉（同 Mac 版 Hosted.blocked）
+HOSTED_BLOCKED = {}
+HOSTED_BLOCKED_FOR = 600
+# 恢复会话的完成回调最久等多久（见 App._resume_gated）
+RESUME_GATE_SECONDS = 180
+
+
+def _response_ok(response):
+    """回应的内容里 ok 不是 false（恢复没做成时有的回 200、ok 为 false）"""
+    try:
+        return json.loads(response.body.decode("utf-8")).get("ok") is not False
+    except (ValueError, AttributeError):
+        return True
 
 
 def hand_over(record, source):
@@ -1300,9 +1480,11 @@ def hand_over(record, source):
 
 
 def hosted_probe(sources):
-    """出口检测（同 Mac 版 Hosted.probe）：每台远端电脑照后台运行时的那套网络设置访问查 IP 的公共网址（不连 Claude），
+    """出口检测（同 Mac 版 Hosted.probe）：本机和每台远端电脑照后台运行时的那套网络设置访问查 IP 的公共网址（不连 Claude），
     回 [{id, name, source, settings, egress, error}]；离线、不支持的也列上"""
     env = remotessh.claude_environment()
+    for source in sources:
+        HOSTED_BLOCKED.pop(source.id, None)
     results = [None] * len(sources)
 
     def one(index, source):
@@ -1360,18 +1542,28 @@ def move_to_background(record, source, siblings):
     return False, "未能转到后台运行：%s" % error
 
 
-def launch_hosted(cwd, prompt, submit, session_id, source):
-    """远端项目不开 VS Code：请那台电脑上的 watcher 在后台起 claude（watcher/kiteline-watch.py 的 hosted_start，同 Mac 版 Hosted.start）。
-    返回 (结果, None) 或 (None, 起不来的原因)"""
+def launch_hosted(cwd, prompt, submit, session_id, source, agent=None):
+    """不开 VS Code：请项目所在电脑（本机或远端）上的 watcher 在后台起 claude（watcher/kiteline-watch.py 的 hosted_start，同 Mac 版 Hosted.start）。
+    agent：别家命令行 agent（插件 id，见 r_launchable），在同一套后台伪终端里跑。返回 (结果, None) 或 (None, 起不来的原因)"""
     payload = {"cmd": "hosted_start", "cwd": cwd, "prompt": prompt, "submit": bool(submit and prompt),
                "netEnv": remotessh.claude_environment()}
     if session_id:
         payload["sessionId"] = session_id
-    log.write("新会话：在 %s 后台运行 Claude Code（%s）%s" % (getattr(source, "name", ""), cwd, "，恢复 %s" % session_id if session_id else ""))
+    if agent:
+        # 老版本 watcher 不认 agent：会照常起 Claude Code 还回成功，用户选的却是别家，先拦下
+        if "hosted_agents" not in (getattr(source, "features", None) or ()):
+            return None, "HOSTED_UNSUPPORTED：该电脑上的 Kiteline 组件版本较旧，请更新后重试"
+        payload["agent"] = agent
+    log.write("新会话：在 %s 后台运行 %s（%s）%s" % (getattr(source, "name", ""), agent or "Claude Code", cwd,
+                                             "，恢复 %s" % session_id if session_id else ""))
     try:
         reply = source.request(payload, timeout=70)
     except Exception as exc:  # noqa: BLE001
-        log.write("新会话：后台启动失败（%s），改在 VS Code 中打开" % exc)
+        log.write("新会话：后台启动%s失败（%s）%s" % (agent or "", exc, "" if agent else "，改在 VS Code 中打开"))
+        if not agent and "停在了需要操作的画面上" in str(exc):
+            HOSTED_BLOCKED[source.id] = time.time() + HOSTED_BLOCKED_FOR
+            log.write("%s：后台运行暂停 %d 分钟（Claude Code 停在要人操作的画面上），这期间的新任务直接在 VS Code 中打开"
+                      % (getattr(source, "name", ""), HOSTED_BLOCKED_FOR // 60))
         return None, str(exc)
     submitted = bool(reply.get("submitted"))
     if not prompt:
@@ -1385,12 +1577,67 @@ def launch_hosted(cwd, prompt, submit, session_id, source):
             "sessionId": reply.get("sessionId")}, None
 
 
+def agent_failure(reason):
+    """别家 agent 在后台起不来时给用户看的话（同 Mac 版 Hosted.agentFailure）：去掉内部前缀；老版本 watcher 说清楚要更新"""
+    reason = str(reason or "")
+    if "未知请求" in reason:
+        return "该电脑上的 Kiteline 组件版本较旧，请更新后重试"
+    for prefix in ("HOSTED_UNSUPPORTED：", "HOSTED_NO_AGENT：", "HOSTED_ACCESS：", "HOSTED_NETWORK："):
+        if reason.startswith(prefix):
+            return reason[len(prefix):]
+    return reason
+
+
+def launch_agent(cwd, prompt, submit, session_id, source, agent, notify=None, done=None):
+    """在后台运行别家命令行 agent（新任务选了它，或接着它已经结束的会话）：没有 VS Code 那条路，起不来直接报原因。
+    同 launch_session：8 秒内没起来先回「正在后台启动」，结果靠 notify / done 交代"""
+    if delivery.DRY_RUN:
+        log.write("[dry-run] 后台运行 %s：%s:%s%s：%s" % (agent, getattr(source, "name", ""), cwd, "，恢复 %s" % session_id if session_id else "", prompt[:120]))
+        if done:
+            done(bool(submit and prompt))
+        return {"ok": True, "submitted": bool(submit and prompt), "openedWindow": False, "message": "dry-run", "error": "", "cwd": cwd}
+    box = {}
+    worker = threading.Thread(target=lambda: box.update(zip(("result", "reason"), launch_hosted(cwd, prompt, submit, session_id, source, agent))),
+                              name="hosted-agent", daemon=True)
+    worker.start()
+    worker.join(8)
+
+    def failed():
+        message = agent_failure(box.get("reason"))
+        return {"ok": False, "submitted": False, "openedWindow": False, "message": message, "error": message, "cwd": cwd}
+    if not worker.is_alive():
+        if box.get("result"):
+            if done:
+                done(box["result"]["submitted"])
+            return box["result"]
+        if done:
+            done(False)
+        return failed()
+
+    def finish():
+        worker.join()
+        if box.get("result"):
+            if done:
+                done(box["result"]["submitted"])
+            return
+        if done:
+            done(False)
+        if notify:
+            notify(failed()["message"])
+    threading.Thread(target=finish, name="hosted-agent-wait", daemon=True).start()
+    return {"ok": True, "submitted": bool(submit and prompt), "openedWindow": False, "error": "", "cwd": cwd,
+            "message": "正在后台启动，启动后将自动提交" if submit and prompt else "正在后台启动"}
+
+
 def hosted_note(reason):
     """退回 VS Code 时要不要告诉用户为什么：不支持、没装 claude、旧 watcher 的不说（本来就该开 VS Code）"""
     reason = str(reason or "")
     # 网络检查没过（拿不到 VS Code 那边的网络设置、起来后核对不一致）：要告诉用户，出口不能悄悄换
     if reason.startswith("HOSTED_NETWORK："):
         return "%s，已改在 VS Code 中打开" % reason[len("HOSTED_NETWORK："):].split("\n")[0]
+    # 读不了项目文件夹（macOS 在等用户允许访问「文稿」这类位置）：说清楚，用户回到电脑前点一次就好
+    if reason.startswith("HOSTED_ACCESS："):
+        return "%s，已改在 VS Code 中打开" % reason[len("HOSTED_ACCESS："):].split("\n")[0]
     if reason.startswith("HOSTED_") or "未知请求" in reason or "离线" in reason or "未连接" in reason:
         return None
     return "后台启动未成功：%s，已改在 VS Code 中打开" % reason.split("\n")[0]
@@ -1401,8 +1648,11 @@ def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="�
     """在项目的 VS Code 窗口里新开（或恢复）一个 Claude Code 会话，内容预填进输入框；submit 时再按回车。
     先回一个结果（新标签加载要十几秒，手机的请求等不了），提交在后台做；done(提交上了没有) 在后台做完时调（同 Mac 版 NewSession 的 completion）。
     远端（Remote-SSH）项目用 vscode-remote 地址开窗口（VS Code 没开着也行），开之前先把 Remote-SSH 准备好（见 remotessh）。
-    远端项目默认先在那台电脑上后台运行 Claude Code、不开 VS Code（launch_hosted），起不来再开 VS Code；in_editor = 一定开 VS Code"""
-    if not in_editor and source_kind == "ssh" and source is not None and not delivery.DRY_RUN and HOSTED_SETTING[0](source.id):
+    开了后台运行的电脑（本机默认开，远端按设备开）先在那台电脑上后台运行 Claude Code、不开 VS Code（launch_hosted），起不来再开 VS Code；
+    in_editor = 一定开 VS Code"""
+    if (not in_editor and source_kind in ("ssh", "local") and source is not None and not delivery.DRY_RUN
+            and "hosted" in (getattr(source, "features", None) or ()) and HOSTED_SETTING[0](source.id)
+            and HOSTED_BLOCKED.get(source.id, 0) < time.time()):
         box = {}
         worker = threading.Thread(target=lambda: box.update(zip(("result", "reason"), launch_hosted(cwd, prompt, submit, session_id, source))),
                                   name="hosted-start", daemon=True)
@@ -1438,6 +1688,14 @@ def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="�
     if delivery.DRY_RUN:
         what = "恢复会话 %s" % session_id if session_id else "新会话"
         log.write("[dry-run] %s %s:%s（submit=%s）：%s" % (what, source_name, cwd, "true" if submit else "false", prompt[:120]))
+        if done:
+            # 集成测试：内容带「[dry-run-slow]」的过 2 秒才算做完（测同一会话连发几条时的排队，同 Mac 版）
+            if "[dry-run-slow]" in (prompt or ""):
+                timer = threading.Timer(2, done, args=(bool(submit),))
+                timer.daemon = True
+                timer.start()
+            else:
+                done(bool(submit))
         return {"ok": True, "submitted": submit, "openedWindow": False, "message": "dry-run", "error": "", "cwd": cwd}
     code = code_command()
     if not code:

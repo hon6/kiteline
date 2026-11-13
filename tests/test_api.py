@@ -403,6 +403,24 @@ check("空搜索词被拒绝", status == 400)
 status, body, _ = request("/api/resume?key=%s" % q(ENDED), "POST", {"text": "再加一个忘记密码入口"})
 check("给已结束的会话发消息 = 在 VS Code 里恢复并发出", status == 200 and body["ok"] and body["submitted"], str(body))
 check("恢复用的是原来的会话 id", "[dry-run] 恢复会话 eeeeeeee-1111-2222-3333-444444444444" in log_tail())
+# 手机上连发几条：后面的排在前一条后面（不各自去起后台 claude、各开 VS Code 标签）；前一条没接上，后面的再自己恢复
+import threading
+replies = {}
+def fire(text):
+    replies[text] = request("/api/resume?key=%s" % q(ENDED), "POST", {"text": text})
+first = threading.Thread(target=fire, args=("连发第一条[dry-run-slow]",))
+first.start()
+time.sleep(0.5)
+fire("连发第二条")
+first.join()
+status2, body2, _ = replies["连发第二条"]
+check("连发：第二条先回「排在后面」", status2 == 200 and body2.get("queued") is True and body2.get("ok"), str(body2))
+for _ in range(40):
+    if "[dry-run] 恢复会话 eeeeeeee-1111-2222-3333-444444444444" in log_tail() and "连发第二条" in log_tail().split("连发第一条", 1)[-1]:
+        break
+    time.sleep(0.5)
+tail = log_tail()
+check("连发：前一条做完后第二条才自己恢复（会话没接上）", tail.count("排在它后面") >= 1 and tail.rfind("连发第二条") > tail.rfind("连发第一条"), tail[-600:])
 
 print("== 会话之间的消息（SendMessage）")
 plan = by_title.get("订单导出功能", {})
@@ -454,8 +472,9 @@ status, body, _ = request("/api/git?key=%s" % q(busy["sourceId"] + "#ffffffff-00
 check("不存在的会话看改动报告给 404", status == 404, status)
 status, body, _ = request("/api/usage?days=7")
 check("用量按项目带机器 id（项目总览对得上花费）", status == 200 and all(p.get("sourceId") for p in body.get("projects", [])), str(body.get("projects"))[:200])
-status, body, _ = request("/api/resume?key=%s" % q(busy["key"]), "POST", {"text": "x"})
-check("还在运行的会话不走恢复", status == 409)
+status, body, _ = request("/api/resume?key=%s" % q(busy["key"]), "POST", {"text": "恢复时其实已接上"})
+check("会话其实还在运行：恢复请求当普通消息发进去", status == 200 and body.get("ok") and "手机发往" in log_tail()
+      and "恢复时其实已接上" in log_tail(), str(body))
 status, body, _ = request("/api/history?key=%s" % q(busy["sourceId"] + "#../../etc"))
 check("不合法的会话 id 被拒绝", status == 404)
 

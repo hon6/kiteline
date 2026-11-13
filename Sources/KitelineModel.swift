@@ -267,7 +267,7 @@ final class KitelineModel: ObservableObject {
             return SourceItem(id: pair.config.id, name: ServerLang.machine(pair.config.displayName), kind: pair.config.kind,
                               host: pair.config.sshHost, enabled: pair.config.enabled, online: online,
                               status: ServerLang.ui(pair.state.shortLabel), sessions: count,
-                              hostedSupport: pair.config.kind == .ssh && Hosted.supported(pair.config.id), hostedOn: pair.config.hostedOn,
+                              hostedSupport: Hosted.capable(pair.config), hostedOn: Hosted.on(pair.config.id),
                               peerId: pair.config.peerId)
         }
         if summaries != sources { sources = summaries }

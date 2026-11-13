@@ -10,6 +10,8 @@ struct TodayView: View {
     @State private var range = "today"
     @State private var payload: DigestPayload?
     @State private var error: String?
+    /// 后台在取新的（页面上先显示着上次存的）
+    @State private var refreshing = false
 
     private var title: String { ["today": L("今日动态"), "yesterday": L("昨日动态"), "week": L("近 7 天动态")][range] ?? L("今日动态") }
 
@@ -52,8 +54,19 @@ struct TodayView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task(id: range) { await load() }
+        .updating(refreshing && payload != nil)
+        .task(id: range) {
+            // 先显示上次存的这一段（换了范围也是），再静默取新的
+            if let cached = model.api.cached(DigestPayload.self, "/api/digest", digestQuery) { payload = cached }
+            await load()
+        }
         .refreshable { await load() }
+    }
+
+    private var digestQuery: [String: String] {
+        var query = ["since": HomeStats.dayStart(range == "week" ? -6 : (range == "yesterday" ? -1 : 0))]
+        if range == "yesterday" { query["until"] = HomeStats.dayStart(0) }
+        return query
     }
 
     private func stats(_ t: DigestTotals) -> some View {
@@ -70,10 +83,10 @@ struct TodayView: View {
     }
 
     private func load() async {
-        var query = ["since": HomeStats.dayStart(range == "week" ? -6 : (range == "yesterday" ? -1 : 0))]
-        if range == "yesterday" { query["until"] = HomeStats.dayStart(0) }
+        refreshing = true
+        defer { refreshing = false }
         do {
-            payload = try await model.api.get(DigestPayload.self, "/api/digest", query)
+            payload = try await model.api.getCaching(DigestPayload.self, "/api/digest", digestQuery)
             error = nil
         } catch {
             if payload == nil { self.error = error.localizedDescription }
@@ -208,6 +221,8 @@ struct UsageView: View {
     @State private var error: String?
     @State private var picking: BudgetKind?
     @State private var showBrag = false
+    /// 后台在取新的（页面上先显示着上次存的）
+    @State private var refreshing = false
 
     enum BudgetKind: String, Identifiable { case daily, cap; var id: String { rawValue } }
 
@@ -262,12 +277,19 @@ struct UsageView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .sheetPanel(isPresented: $showBrag) { BragShareSheet().environment(model) }
-        .task(id: days) { await load() }
+        .updating(refreshing && payload != nil)
+        .task(id: days) {
+            // 先显示上次存的（这个范围的用量、预算、额度），再静默取新的
+            if let cached = model.api.cached(UsagePayload.self, "/api/usage", ["days": String(days)]) { payload = cached }
+            if let cached = model.api.cached(Budget.self, "/api/budget") { budget = cached }
+            if limits == nil, let cached = model.api.cached(LimitsPayload.self, "/api/limits") { limits = cached.devices }
+            await load()
+        }
         // 额度每 5 分钟重拉一次（同首页）
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(300))
-                if !Task.isCancelled, let fresh = try? await model.api.get(LimitsPayload.self, "/api/limits") { limits = fresh.devices }
+                if !Task.isCancelled, let fresh = try? await model.api.getCaching(LimitsPayload.self, "/api/limits") { limits = fresh.devices }
             }
         }
         .refreshable { await load() }
@@ -373,9 +395,11 @@ struct UsageView: View {
 
     private func load() async {
         do {
-            async let usage = model.api.get(UsagePayload.self, "/api/usage", ["days": String(days)])
-            async let budget = try? model.api.get(Budget.self, "/api/budget")
-            async let limits = try? model.api.get(LimitsPayload.self, "/api/limits")
+            refreshing = true
+            defer { refreshing = false }
+            async let usage = model.api.getCaching(UsagePayload.self, "/api/usage", ["days": String(days)])
+            async let budget = try? model.api.getCaching(Budget.self, "/api/budget")
+            async let limits = try? model.api.getCaching(LimitsPayload.self, "/api/limits")
             payload = try await usage
             self.budget = await budget ?? self.budget
             if let limits = await limits { self.limits = limits.devices }
@@ -412,6 +436,8 @@ struct HistoryView: View {
     @State private var loaded = false
     @State private var truncated = false
     @State private var errors: [String] = []
+    /// 后台在取新的（页面上先显示着上次存的）
+    @State private var refreshing = false
     /// 分组：none 按日期 / source 按来源 / project 按项目（同会话列表）
     @AppStorage("historyGrouping") private var grouping = "none"
     /// 按状态筛：all / live 进行中 / ended 已结束（同会话列表的筛选条）
@@ -477,8 +503,15 @@ struct HistoryView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .updating(refreshing && loaded)
         // 搜索词变了重新搜；没在搜时换了项目也重新读（把这个项目的会话取全）
         .task(id: query.isEmpty ? "\n" + projectFilter : query) {
+            // 没在搜时先显示上次存的列表（进页面不是空白转圈），再静默取新的（11-13）
+            if query.isEmpty, sessions.isEmpty, let cached = model.api.cached(PastSessionsReply.self, "/api/sessions") {
+                sessions = cached.sessions
+                truncated = cached.truncated
+                loaded = true
+            }
             // 打字时等一下再搜
             if !query.isEmpty { try? await Task.sleep(for: .milliseconds(400)) }
             guard !Task.isCancelled else { return }
@@ -651,7 +684,9 @@ struct HistoryView: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         let project = projectFilter
         do {
-            let reply = q.isEmpty ? try await model.api.get(PastSessionsReply.self, "/api/sessions")
+            if q.isEmpty { refreshing = true }
+            defer { refreshing = false }
+            let reply = q.isEmpty ? try await model.api.getCaching(PastSessionsReply.self, "/api/sessions")
                 : try await model.api.get(PastSessionsReply.self, "/api/search", ["q": q])
             var list = reply.sessions
             // 按项目筛着时这个项目的会话另外取全，并进列表（各电脑只列最近 120 个，老一些的项目不全）
@@ -737,6 +772,10 @@ struct ProjectsView: View {
     /// 整个读失败（不是某台机器读失败）：显示「加载失败 · 重试」，不显示「0 个项目」
     @State private var failed: String?
     @AppStorage("projectFilter") private var filter = "all"
+    /// iPhone 底部「项目」页签的根页面：顶上放历史会话、定时任务两个入口（原来在首页的方格里）
+    var tabRoot = false
+    /// 后台在取新的（页面上先显示着上次存的）
+    @State private var refreshing = false
 
     var body: some View {
         let shown = projects.filter { p in
@@ -745,6 +784,13 @@ struct ProjectsView: View {
         .sorted { (rank($0), $0.lastActive ?? 0) > (rank($1), $1.lastActive ?? 0) }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
+                if tabRoot {
+                    EntryRows(entries: [
+                        EntryRows.Entry(symbol: "clock.arrow.circlepath", title: L("历史会话"), value: nil) { open(.history) },
+                        EntryRows.Entry(symbol: "calendar.badge.clock", title: L("定时任务"), value: nil) { open(.schedules) },
+                    ])
+                    .padding(.bottom, 12)
+                }
                 // 读到了才显示统计和筛选：还在读时「0 个项目 · 0 个运行中」像是真的没有
                 if loaded, failed == nil {
                     Text(stats).font(.ui(.footnote)).foregroundStyle(.secondary).padding(.horizontal, 4)
@@ -765,13 +811,18 @@ struct ProjectsView: View {
             }
             .padding(16)
         }
+        .tabBarScrollWatch()
         .background(Theme.pageBackground)
         .overlay { if !loaded { ProgressView("正在读取各机器上的项目…") } }
         .navigationTitle("项目")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task { await load() }
+        .updating(refreshing && loaded)
+        .task {
+            restore()
+            await load()
+        }
         .refreshable { await load() }
     }
 
@@ -794,18 +845,31 @@ struct ProjectsView: View {
                 dirty > 0 ? L("%lld 个有未提交改动", count: dirty) : nil, unpushed > 0 ? L("%lld 个未推送", count: unpushed) : nil].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// 先显示上次存在手机上的项目和 7 天花费（进页面不是空白转圈），再静默取新的（11-13）
+    private func restore() {
+        guard projects.isEmpty, let reply = model.api.cached(ProjectsReply.self, "/api/projects", ["detail": "1"]) else { return }
+        projects = reply.projects.filter { $0.exists || $0.live > 0 }
+        loaded = true
+        if let usage = model.api.cached(UsagePayload.self, "/api/usage", ["days": "7"]) {
+            cost7 = Dictionary(usage.projects.map { ($0.key, $0.cost) }, uniquingKeysWith: +)
+        }
+    }
+
     private func load() async {
+        refreshing = true
+        defer { refreshing = false }
         do {
-            let reply = try await model.api.get(ProjectsReply.self, "/api/projects", ["detail": "1"])
+            let reply = try await model.api.getCaching(ProjectsReply.self, "/api/projects", ["detail": "1"])
             projects = reply.projects.filter { $0.exists || $0.live > 0 }
             errors = reply.errors
             failed = nil
         } catch {
-            failed = error.localizedDescription
+            // 手上有上次存的就接着显示它，不换成「加载失败」
+            if projects.isEmpty { failed = error.localizedDescription }
         }
         loaded = true
         // 7 天花费单独取（要扫 7 天的记录，慢一点），回来后补上
-        if let usage = try? await model.api.get(UsagePayload.self, "/api/usage", ["days": "7"]) {
+        if let usage = try? await model.api.getCaching(UsagePayload.self, "/api/usage", ["days": "7"]) {
             cost7 = Dictionary(usage.projects.map { ($0.key, $0.cost) }, uniquingKeysWith: +)
         }
     }
@@ -927,6 +991,70 @@ struct PageNote: View {
     var body: some View {
         Text(text).font(.ui(.footnote)).foregroundStyle(color ?? .secondary).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4)
+    }
+}
+
+/// 页面已经显示着上次存的数据、后台在取新的：导航栏右边一个小转圈「更新中」，取完消失（11-13：
+/// 进页面先给缓存，后台静默更新，更新时在某个位置转个圈）。没有缓存时页面自己照旧在中间转圈
+struct UpdatingMark: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            if active {
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("更新中").font(.ui(.caption)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    /// 后台更新时导航栏右边显示「更新中」
+    func updating(_ active: Bool) -> some View { modifier(UpdatingMark(active: active)) }
+}
+
+/// 一组入口（同系统设置的分组卡片）：图标一列对齐、标题、右边的值和「›」，行间细线从文字起
+struct EntryRows: View {
+    struct Entry: Identifiable {
+        let symbol: String
+        let title: String
+        let value: String?
+        let action: () -> Void
+        var id: String { title }
+    }
+    let entries: [Entry]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                if index > 0 { Divider().padding(.leading, 48) }
+                Button(action: entry.action) {
+                    HStack(spacing: 12) {
+                        Image(systemName: entry.symbol)
+                            .font(.app(size: 17))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+                        Text(entry.title).foregroundStyle(.primary)
+                        Spacer(minLength: 8)
+                        if let value = entry.value { Text(value).foregroundStyle(.secondary).monospacedDigit() }
+                        Image(systemName: "chevron.right").font(.ui(.footnote).weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .font(.ui(.body))
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 48)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowButtonStyle())
+            }
+        }
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

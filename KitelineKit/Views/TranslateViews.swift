@@ -85,7 +85,8 @@ struct TranslateBadge: View {
         Button(action: action) {
             HStack(spacing: 3) {
                 if let symbol { Image(systemName: symbol) } else { Color.clear.frame(width: 12, height: 1) }
-                Text(title)
+                // 这一行窄时文字别被压成一条竖缝（11-13 截图里「原文」只剩一个竖点）
+                Text(title).lineLimit(1).fixedSize()
             }
             .foregroundStyle(tint ?? .secondary)
             .padding(.horizontal, 4).padding(.vertical, 1)

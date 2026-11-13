@@ -79,12 +79,18 @@ public sealed class Api
     readonly HttpClient media;
     /// 实时事件流：不设总超时，靠保活判断断线
     readonly HttpClient stream;
+    /// 要等后台把一件事做完才回应的请求（见 ActionPaths）：等得久一些
+    readonly HttpClient action;
+    /// 发消息、恢复会话、语音转写后发送、按键、回答提问、调整排队、关闭会话：后台要把这件事做完才回应，
+    /// 后台通道卡一下、恢复会话、转写长录音都可能要十几秒；原来 12 秒就报「连接本机 Kiteline 超时」，其实那头还在送
+    static readonly HashSet<string> ActionPaths = new() { "/api/send", "/api/resume", "/api/voice", "/api/key", "/api/answer", "/api/queue", "/api/close" };
 
     public Api(LocalHost host)
     {
         Host = host;
         client = Make(TimeSpan.FromSeconds(12));
         media = Make(TimeSpan.FromSeconds(45));
+        action = Make(TimeSpan.FromSeconds(40));
         stream = Make(Timeout.InfiniteTimeSpan);
     }
 
@@ -152,7 +158,7 @@ public sealed class Api
         var request = Request(HttpMethod.Post, Url(path, query));
         var text = body is null ? "{}" : body is JsonNode node ? node.ToJsonString() : System.Text.Json.JsonSerializer.Serialize(body, JsonOptions.Default);
         request.Content = new StringContent(text, Encoding.UTF8, "application/json");
-        var http = text.Length > 256_000 ? media : client;
+        var http = text.Length > 256_000 ? media : ActionPaths.Contains(path) ? action : client;
         return J.Parse(await Send(http, request, cancel));
     }
 

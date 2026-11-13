@@ -19,8 +19,8 @@ import time
 
 READ_ONLY = (("Windows 上从手机操作 trae-agent 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling trae-agent on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
-             ("trae-agent 不在 tmux 中运行，只能查看；在 tmux 中启动 trae-cli interactive 后即可从手机发任务",
-              "trae-agent isn't running in tmux, so this session is view-only. Start trae-cli interactive in tmux to send tasks from your phone."))
+             ("trae-agent 不在 tmux 中运行，只能查看；在 tmux 中启动 trae-cli interactive，或在 Kiteline 新建任务时选择 trae-agent（由 Kiteline 在后台运行）后即可从手机发任务",
+              "trae-agent isn't running in tmux, so this session is view-only. Start trae-cli interactive in tmux, or choose trae-agent when creating a task in Kiteline (it runs in the background), to send tasks from your phone."))
 BUSY_TEXT = "trae-agent 正在执行任务，做完才能发下一个（它在忙时不接收新任务，也不能插话）"
 
 
@@ -231,6 +231,15 @@ def create(kl):
             self.live = {}    # 会话 id → (pid, 轨迹路径)
             self.sent = {}    # 会话 id → 已推过的项 id
 
+        def launch(self, cwd, resume=None):
+            """Kiteline 在自己的后台伪终端里起 trae-agent 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
+            起来以后读屏、发字、按键都走通用终端层。字样照 trae-cli（11-13） 实测的画面写（比较时不分大小写）"""
+            if resume:
+                return None   # trae-agent 没有恢复会话的参数：每次都是新任务
+            return {"argv": ["trae-cli", "interactive"],
+                    # 全屏界面的输入框提示。配置照它自己的规矩读项目目录里的 trae_config.yaml，没有配置时它会报错退出
+                    "ready": ["enter your task"], "settle": 1.0}
+
         def detect(self):
             import shutil
             command = shutil.which("trae-cli")
@@ -298,7 +307,7 @@ def create(kl):
             pid = (self.live.get(sid) or (None, None))[0]
             pane = term_pane(pid) if pid else None
             if not pane:
-                raise RuntimeError("这个 trae-agent 会话不在 tmux 里运行，只能查看；在 tmux 中启动 trae-cli interactive 后，就可以从手机发任务")
+                raise RuntimeError("这个 trae-agent 会话不在 tmux 里运行，只能查看；在 tmux 中启动 trae-cli interactive，或在 Kiteline 新建任务时选择 trae-agent（由 Kiteline 在后台运行）后，就可以从手机发任务")
             return pid, pane
 
         def send(self, sid, text, images):

@@ -1,9 +1,9 @@
 {
  "id": "antigravity",
  "name": "Antigravity",
- "version": "1.0.2",
- "summary": "Google 的 agent 编程工具：查看命令行、桌面版的会话、状态和完整对话；命令行在 tmux 中运行时可回复、确认、回答提问和中断",
- "summaryEn": "Google's agentic coding tool: view sessions, status and full conversations from the CLI and desktop app; reply, confirm, answer questions and interrupt when the CLI runs in tmux",
+ "version": "1.1.0",
+ "summary": "Google 的 agent 编程工具：查看命令行、桌面版的会话、状态和完整对话；命令行在 tmux 中运行、或由 Kiteline 在后台运行时可回复、确认、回答提问和中断",
+ "summaryEn": "Google's agentic coding tool: view sessions, status and full conversations from the CLI and desktop app; reply, confirm, answer questions and interrupt when the CLI runs in tmux or in the background through Kiteline",
  "needs": [
   "fs.read",
   "fs.tail",
@@ -31,7 +31,7 @@
      "interrupt"
     ],
     "verified": false,
-    "note": "回复和确认需要 Antigravity CLI 在 tmux 中运行"
+    "note": "回复和确认需要 Antigravity CLI 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
    },
    "desktop": {
     "abilities": [
@@ -71,7 +71,7 @@
      "interrupt"
     ],
     "verified": true,
-    "note": "回复和确认需要 Antigravity CLI 在 tmux 中运行"
+    "note": "回复和确认需要 Antigravity CLI 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
    },
    "desktop": {
     "abilities": [

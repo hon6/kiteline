@@ -1229,7 +1229,12 @@ class NeedsMore(W.AgentPlugin):
 
 reg = W.AgentPlugins([BrokenPlugin(), FakePlugin(), NeedsMore()])
 check("用到登记表里没有的能力：不启用", reg.get("future") is None and [p.id for p in reg.all] == ["broken", "fake"])
-check("一个插件出错不影响别家（快照、取对话）", reg.sessions() == [{"sessionId": "f1", "agent": "fake", "caps": []}] and reg.pump() == [])
+_fake_rows = reg.sessions()
+check("一个插件出错不影响别家（快照、取对话）",
+      [{k: s.get(k) for k in ("sessionId", "agent", "caps")} for s in _fake_rows] == [{"sessionId": "f1", "agent": "fake", "caps": []}] and reg.pump() == [])
+check("插件漏了电脑端解析时必填的字段（name、cwd、cwdShort、activity）：中台补上，不让整条会话被丢掉",
+      _fake_rows and all(isinstance(_fake_rows[0].get(k), str) for k in ("name", "cwd", "cwdShort", "activity"))
+      and _fake_rows[0]["activity"] == "idle", _fake_rows)
 try:
     reg.handle("nobody", {"cmd": "agent_send", "sessionId": "x", "text": "hi"})
     check("没有对应插件：说不支持", False)
@@ -1641,6 +1646,128 @@ cbuse = cb.usage(0)
 check("CodeBuddy：token 同一次请求只算一次（messageId），输入减读缓存", len(cbuse) == 1
       and (cbuse[0]["input"], cbuse[0]["output"], cbuse[0]["cacheRead"], cbuse[0]["requests"]) == (70, 20, 30, 1), cbuse)
 del os.environ["CODEBUDDY_CONFIG_DIR"]
+
+# WorkBuddy 桌面版（11-13 用户 Mac 上 WorkBuddy 5.9.3 实测的布局）：任务在 workbuddy.db，sessions/<pid>.json 平时是预热的工作进程
+WBHOME = os.path.join(ROOT, "workbuddy")
+os.makedirs(os.path.join(WBHOME, "sessions"))
+os.makedirs(os.path.join(WBHOME, "projects", "Users-u-WorkBuddy-t1"))
+with open(os.path.join(WBHOME, "sessions", "%d.json" % os.getpid()), "w") as handle:
+    json.dump({"pid": os.getpid(), "sessionId": "prewarm-wb-pool-1", "cwd": "/", "kind": "prewarm", "startedAt": 1}, handle)
+wbnow = int(time.time() * 1000)
+wbdb = sqlite3.connect(os.path.join(WBHOME, "workbuddy.db"))
+wbdb.executescript("""
+create table sessions (id text primary key, cwd text not null, user_id text not null, title text, custom_title text, status text,
+  created_at integer, updated_at integer, last_activity_at integer, deleted_at integer, transport text default 'local',
+  is_background_automation integer);
+""")
+for row in (("wb-1", "/Users/u/WorkBuddy/t1", "写周报", None, "working", wbnow - 5000, wbnow, wbnow, None, "local", 0),
+            ("wb-2", "/Users/u/WorkBuddy/t2", "旧标题", "我改的标题", "completed", wbnow - 9000, wbnow - 8000, wbnow - 8000, None, "local", 0),
+            ("wb-old", "/Users/u/WorkBuddy/t3", "三天前", None, "completed", 1, 2, 2, None, "local", 0),
+            ("wb-del", "/Users/u/WorkBuddy/t4", "删掉的", None, "completed", wbnow, wbnow, wbnow, wbnow, "local", 0),
+            ("wb-cloud", "/Users/u/WorkBuddy/t5", "云端的", None, "completed", wbnow, wbnow, wbnow, -1, "cloud", 0),
+            ("wb-auto", "/Users/u/WorkBuddy/t6", "自动化", None, "completed", wbnow, wbnow, wbnow, None, "local", 1)):
+    wbdb.execute("insert into sessions values (?, ?, 'u', ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+wbdb.commit()
+wbdb.close()
+with open(os.path.join(WBHOME, "projects", "Users-u-WorkBuddy-t1", "wb-1.jsonl"), "w") as handle:
+    for entry in ({"id": "u1", "timestamp": wbnow - 4000, "type": "message", "role": "user", "content": [{"type": "input_text", "text":
+                   '<system-reminder data-role="user-context">\n<user_info>OS Version: darwin</user_info>\n</system-reminder>\n<user_query>帮我写本周周报</user_query>'}]},
+                  {"id": "a1", "timestamp": wbnow - 3000, "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "好的，先看看本周的记录"}]}):
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+os.environ["WORKBUDDY_HOME"] = WBHOME
+wb = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "codebuddy")
+wb.desktop_running = lambda: True
+wbsnap = {s["sessionId"]: s for s in W.AgentPlugins([], external=[wb], off=()).sessions()}
+check("WorkBuddy：预热的工作进程不算会话；桌面版任务按 workbuddy.db 列（最近 24 小时、没删、本机的、不是自动化的）",
+      set(wbsnap) == {"wb-1", "wb-2"}, sorted(wbsnap))
+check("WorkBuddy：状态 working 算忙，completed 空闲；标题优先用户改的；只读、写明桌面版没有操作接口；带对话记录路径",
+      wbsnap.get("wb-1", {}).get("activity") == "busy" and wbsnap.get("wb-2", {}).get("activity") == "idle"
+      and wbsnap.get("wb-2", {}).get("title") == "我改的标题" and wbsnap["wb-1"]["readOnly"] is True
+      and "桌面版" in (wbsnap["wb-1"].get("readOnlyReason") or "") and (wbsnap["wb-1"].get("transcriptPath") or "").endswith("wb-1.jsonl")
+      and wbsnap["wb-1"]["entrypoint"] == "workbuddy-desktop", str(wbsnap)[:500])
+wbitems = [i for n, line in enumerate(open(wbsnap["wb-1"]["transcriptPath"])) for i in wb.normalize(n, json.loads(line))]
+check("WorkBuddy：用户的话去掉带属性的系统提示块、只留 <user_query> 里的", [(i["t"], i.get("text")) for i in wbitems]
+      == [("user", "帮我写本周周报"), ("text", "好的，先看看本周的记录")], wbitems)
+try:
+    wb.send("wb-1", "你好", [])
+    wb_err = ""
+except RuntimeError as exc:
+    wb_err = str(exc)
+check("WorkBuddy 桌面版的任务发消息：这台电脑做不了时报桌面版的原因（不是让人开 tmux）", "WorkBuddy" in wb_err and "tmux" not in wb_err, wb_err)
+# Mac 上（电脑端声明能做 open / paste / keys）：回动作单——深链接打开这个任务、粘贴、回车；正在跑的不发；新建任务走 task 深链接
+wb_globals = wb.send_desktop.__globals__
+wb_globals["DESKTOP_SEND"] = True
+wb.host_ui = ("keys", "open", "paste")
+wb.busy = set()
+wbui = wb.send("wb-2", "接着写", [])
+check("WorkBuddy 发消息（Mac）：动作单 = 打开 workbuddy://chat/<任务> → 粘贴 → 回车 → 核对它收到了",
+      [a.get("do") for a in wbui.get("ui", [])] == ["open", "paste", "key", "plugin"] and wbui["ui"][0]["url"] == "workbuddy://chat/wb-2"
+      and wbui["ui"][0]["app"] == "workbuddy" and wbui["ui"][1]["text"] == "接着写" and wbui["ui"][3]["step"] == "verify:wb-2", wbui)
+# 核对这一步：记录里多了一句用户的话 = 收到；没多 = 报没收到（不当成发出去了）
+os.environ["WORKBUDDY_HOME"] = WBHOME
+wb_chat = os.path.join(WBHOME, "projects", "Users-u-WorkBuddy-t1", "wb-2.jsonl")
+with open(wb_chat, "w") as handle:
+    handle.write(json.dumps({"id": "u0", "type": "message", "role": "user", "content": [{"type": "input_text", "text": "旧的一句"}]}) + "\n")
+wb.sent["wb-2"] = ("接着写", wb.user_count("wb-2"))
+threading.Timer(0.8, lambda: open(wb_chat, "a").write(json.dumps({"id": "u1", "type": "message", "role": "user",
+                                                                  "content": [{"type": "input_text", "text": "接着写"}]}) + "\n")).start()
+check("核对收到：记录里多了这句 → 收到", wb.ui_step("wb-2", "verify:wb-2") == "WorkBuddy 已收到")
+wb.busy = {"wb-2"}
+try:
+    wb.send("wb-2", "接着写", [])
+    busy_err = ""
+except RuntimeError as exc:
+    busy_err = str(exc)
+check("WorkBuddy 正在跑这个任务：不发（等它做完）", "正在处理" in busy_err, busy_err)
+wb.busy = set()
+wb.host_ui = ("keys",)
+try:
+    wb.send("wb-2", "接着写", [])
+    old_err = ""
+except RuntimeError as exc:
+    old_err = str(exc)
+check("电脑端是老版本（不会 open / paste）：不回动作单，报更新", "更新" in old_err, old_err)
+wb.host_ui = ("keys", "open", "paste")
+wbnew = wb.new_task("workbuddy", ROOT, "写一份周报")
+check("WorkBuddy 新建任务：动作单 = 打开 workbuddy://task?action=start&prompt=…&cwd=…（填好）→ 回车",
+      [a.get("do") for a in wbnew.get("ui", [])] == ["open", "key"] and wbnew["ui"][0]["url"].startswith("workbuddy://task?action=start&prompt=")
+      and "cwd=" in wbnew["ui"][0]["url"] and wbnew["ui"][0].get("fills") is True, wbnew)
+wb.desktop_running = lambda: True
+check("新任务列表里的 WorkBuddy：插件 id:变体、经界面新建",
+      wb.new_task_targets() == [{"variant": "workbuddy", "name": "WorkBuddy"}], wb.new_task_targets())
+try:
+    wb.new_task("workbuddy", ROOT, "长" * 8001)
+    long_err = ""
+except RuntimeError as exc:
+    long_err = str(exc)
+check("WorkBuddy 新建任务超过 8000 字：报错（它的深链接放不下，不悄悄截断）", "8000" in long_err, long_err)
+wb_globals["DESKTOP_SEND"] = False
+wb.host_ui = ()
+# 数据库一时读不了（被锁）：沿用上一次的任务列表，别让手机上的任务一闪就没了
+os.environ["WORKBUDDY_HOME"] = WBHOME
+wb.desktop_running = lambda: True
+first = {s["sessionId"] for s in wb.sessions()}
+real_tasks = wb.desktop_tasks
+wb.desktop_tasks = lambda home, listed, now: None
+second = {s["sessionId"] for s in wb.sessions()}
+wb.desktop_tasks = real_tasks
+check("WorkBuddy 数据库读不了：沿用上一次的任务列表", first == second == {"wb-1", "wb-2"}, (first, second))
+# 判断 WorkBuddy 开着没有：只认程序本体，参数里带 ~/WorkBuddy 目录的进程不算
+del wb.desktop_running
+# 插件拿到的中台是 create(kl) 时的那个对象（测试里是 globals 的快照），从方法的闭包里取出来换掉它的 process_list
+wb_kl = dict(zip(type(wb).desktop_running.__code__.co_freevars, type(wb).desktop_running.__closure__))["kl"].cell_contents
+real_plist = wb_kl.process_list
+for cmds, want, what in ((["ls /Users/u/WorkBuddy", "codebuddy --add-dir /Users/u/WorkBuddy"], False, "参数里带 WorkBuddy 目录"),
+                         (["/Applications/WorkBuddy.app/Contents/MacOS/Electron --remote-debugging-port=1"], True, "Mac 上的程序本体"),
+                         (['"C:\\Program Files\\WorkBuddy\\WorkBuddy.exe" --type=renderer'], True, "Windows 上的程序本体")):
+    wb_kl.process_list = lambda cmds=cmds: [{"pid": 100 + i, "cmd": c} for i, c in enumerate(cmds)]
+    wb._desktop = (0.0, False)
+    check("判断 WorkBuddy 开着没有：%s → %s" % (what, "算" if want else "不算"), wb.desktop_running() is want, cmds)
+wb_kl.process_list = real_plist
+wb.desktop_running = lambda: False
+check("WorkBuddy 没开着：桌面版任务不列（进历史）", not [s for s in W.AgentPlugins([], external=[wb], off=()).sessions()
+                                                    if s["sessionId"].startswith("wb-")])
+del os.environ["WORKBUDDY_HOME"]
 
 print("\n== ZCode 插件（plugins/zcode：~/.zcode/cli/db/db.sqlite，只读；单独下发）")
 ZHOME = os.path.join(ROOT, "zcode")
@@ -2500,6 +2627,27 @@ class TokensOnly(W.AgentPlugin):
 report = W.usage_report(u_now - 86400000, None, 0, W.AgentPlugins([UsageDemo(), TokensOnly()], external=[], off=()))
 flags = {a["agent"]: a.get("unpriced") for a in report["agents"]}
 check("用量报表：一条花费都没记的 agent 标「无费率」（界面写「仅 token」），记了的不标", flags.get("tokens-only") is True and flags.get("usage-demo") is False, str(flags))
+
+# 后台启动配方（AgentPlugin.launch）：命令、恢复参数、字样都是 11-13 在宿主机上照真实画面实测的（见 guide/plugin-development.md 4.3）
+print("== 后台启动配方")
+recipes = {p.id: p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0]}
+expect = {"pi": ("pi", "--session"), "kimi-code": ("kimi", "--session"), "grok": ("grok", "--resume"), "hermes": ("hermes", "--resume"),
+          "muse-code": ("muse", "resume"), "antigravity": ("agy", "--conversation"), "codebuddy": ("codebuddy", "--resume"),
+          "trae-agent": ("trae-cli", None), "qwen-code": ("qwen", "--resume")}
+for pid, (command, flag) in expect.items():
+    plugin = recipes.get(pid)
+    fresh = plugin.launch("/tmp", None) if plugin else None
+    resumed = plugin.launch("/tmp", "abc-123_x") if plugin else None
+    check("配方 %s：新开 %s，有就绪字样%s" % (pid, command, "，恢复用 %s 编号" % flag if flag else "，不支持恢复（返回 None）"),
+          isinstance(fresh, dict) and fresh["argv"][0] == command and fresh.get("ready")
+          and all(isinstance(m, str) and m.strip() for m in fresh.get("ready"))
+          and ((resumed is None) if flag is None else (isinstance(resumed, dict) and flag in resumed["argv"] and "abc-123_x" in resumed["argv"])),
+          (fresh, resumed))
+    if plugin and flag:
+        check("配方 %s：恢复编号带空格、分号这类的不给配方（不拼进命令行）" % pid,
+              plugin.launch("/tmp", "x; rm -rf /") is None and plugin.launch("/tmp", "a b") is None)
+check("没给配方的插件（zcode、cursor）launch 返回 None", all(recipes[i].launch("/tmp", None) is None
+                                                         for i in ("zcode", "cursor") if i in recipes))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 if os.path.exists("/tmp/kl-agents-%d.sock" % os.getpid()):

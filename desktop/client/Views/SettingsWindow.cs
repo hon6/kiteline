@@ -788,8 +788,9 @@ public sealed class SettingsWindow : Window
         void Reload() => Select("sources");
         var list = new StackPanel();
         var rows = reply.Arr("sources").Items().ToList();
-        // 有能后台运行、还没开的远端设备：问一声要不要开（选了「不再提示」就不问，各行的按钮照旧在；同 Mac 版 SourcesPane）
-        var candidates = rows.Where(r => r.Str("hosted") == "off" && r.Truthy("online")).Select(r => Lang.Machine(r.Str("name") ?? "")).ToList();
+        // 有能后台运行、还没开的远端设备：问一声要不要开（选了「不再提示」就不问，各行的按钮照旧在；同 Mac 版 SourcesPane）。
+        // 只问远端的：本机默认就开着，用户自己关掉的不再问
+        var candidates = rows.Where(r => r.Str("kind") == "ssh" && r.Str("hosted") == "off" && r.Truthy("online")).Select(r => Lang.Machine(r.Str("name") ?? "")).ToList();
         if (candidates.Count > 0 && !AppModel.Shared.HostedTipOff)
         {
             var hint = new StackPanel { Spacing = 8 };
@@ -999,7 +1000,7 @@ public sealed class SettingsWindow : Window
             .Res(Border.BackgroundProperty, "Fill06");
         // ⓘ：设备详情（IP、系统、处理器、内存、装了哪些 agent）
         var details = new Tap(Ui.Sym("info.circle", 15, "Text2").Pad(4), () => AgentDetails.OpenMachine(id, name), 6).Keys("Transparent", "Fill08").Tip(L("设备详情"));
-        // 能后台运行 Claude Code 的远端：开没开、点开检测出口和开关（按设备，见 HostedSetup）
+        // 能后台运行 Claude Code 的电脑（本机、远端）：开没开、点开检测出口和开关（见 HostedSetup）
         Control? hosted = null;
         if (source.Str("hosted") is { } state)
         {

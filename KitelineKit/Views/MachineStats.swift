@@ -79,7 +79,8 @@ struct UsageRing: View {
                 .rotationEffect(.degrees(-90))
         }
         .frame(width: size, height: size)
-        .animation(.smooth, value: ratio)
+        // 不给数值变化加动画：占用每 5 秒来一次，几个小环各自平滑半秒，这半秒里整个窗口每一帧都要重算
+        // （11-13 追踪：AnimatableAttribute<_StrokedShape<_TrimmedShape>> 每秒约 100 次）；11 点大的环直接跳到新值看不出差别
     }
 }
 

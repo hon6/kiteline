@@ -1006,9 +1006,43 @@ public struct TarsPaneButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(help)
+        .paneTip(help)
         .accessibilityLabel(help)
     }
+}
+
+/// 标签栏上按钮的悬停说明（代替 .help()：标签栏铺在标题栏那一带，系统提示不弹）：停 0.35 秒出、移开 / 点按 / 消失就收
+struct PaneTip: ViewModifier {
+    let text: String
+    @State private var pending: DispatchWorkItem?
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHint(text)
+            .onHover { inside in
+                pending?.cancel()
+                pending = nil
+                if inside {
+                    let work = DispatchWorkItem { KitelineKit.hoverTip(text) }
+                    pending = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+                } else {
+                    KitelineKit.hoverTip(nil)
+                }
+            }
+            .simultaneousGesture(TapGesture().onEnded {
+                pending?.cancel()
+                KitelineKit.hoverTip(nil)
+            })
+            .onDisappear {
+                pending?.cancel()
+                KitelineKit.hoverTip(nil)
+            }
+    }
+}
+
+extension View {
+    func paneTip(_ text: String) -> some View { modifier(PaneTip(text: text)) }
 }
 #endif
 
@@ -1830,7 +1864,7 @@ private struct PaneHeader: View {
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help(L("更多"))
+                .paneTip(L("更多"))
             }
         }
         .foregroundStyle(focused || !several ? .secondary : .tertiary)
@@ -1928,7 +1962,7 @@ private struct PaneTab: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .opacity(active || hovering ? 1 : 0)
-                .help(L("关闭标签页"))
+                .paneTip(L("关闭标签页"))
                 .accessibilityLabel(L("关闭标签页"))
             }
         }

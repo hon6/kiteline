@@ -66,6 +66,7 @@
 "%@ 个在工作" = "%@ working";
 "%@ 个在工作 · %@ 个有新消息" = "%@ working · %@ with new messages";
 "%@ 个子 agent · 轻点查看详情" = "%@ subagents · Tap for details";
+"%@ 个工作中 · 共 %@ 个" = "%@ working · %@ total";
 "%@ 个待确认" = "%@ pending";
 "%@ 个改动" = "%@ changes";
 "%@ 个文件" = "%@ files";
@@ -210,6 +211,7 @@
 "%@，内容已填入输入框；未获得「%@」权限，无法自动提交" = "%@. Content has been entered into the input field; permission for “%@” was not granted, so it can't be submitted automatically.";
 "%@，加载完成后将自动提交" = "%@. It will be submitted automatically once loading finishes.";
 "%@，将自动提交" = "%@ It will be submitted automatically.";
+"%@，已改在 VS Code 中打开" = "%@; opened in VS Code instead";
 "%@，有结论了。%@" = "%@ has reached a conclusion. %@";
 "%@，请到官网下载新版本。" = "%@. Download the new version from the website.";
 "%@，请在电脑上到官网下载新版本" = "%@. Download the new version from the website on your computer";
@@ -259,6 +261,7 @@
 "%lld 处出错" = "%lld errors";
 "%lld 处改动" = "%lld changes";
 "%lld 天" = "%lld days";
+"%lld 天没更新" = "Not updated for %lld days";
 "%lld 失败" = "%lld Failed";
 "%lld 小时" = "%lld hours";
 "%lld 张图" = "%lld images";
@@ -316,6 +319,7 @@
 "== 日志尾部 ==" = "== Log Tail ==";
 "== 来源 ==" = "== Sources ==";
 "Aa 你好" = "Aa Hello";
+"Agent" = "Agent";
 "Agent 名称，例如 Cline、Aider、Gemini CLI" = "Agent name, e.g. Cline, Aider, Gemini CLI";
 "Agent 报告" = "Reported by agent";
 "Agent 详情" = "Agent Details";
@@ -421,6 +425,8 @@
 "Kiteline 与这台机器的连接已断开，这台机器上的会话暂时看不到，正在自动重连（%@）" = "Kiteline lost its connection to this computer. Its sessions are hidden for now while Kiteline reconnects automatically (%@)";
 "Kiteline 使用了下列开源软件，感谢这些项目的作者与贡献者。" = "Kiteline uses the open-source software listed below. Thanks to the authors and contributors of these projects.";
 "Kiteline 图片 %@.%@" = "Kiteline Image %@.%@";
+"Kiteline 尚未获准读取此文件夹，请在这台电脑上允许 Kiteline 访问它（系统设置 → 隐私与安全性 → 文件与文件夹）" = "Kiteline isn't allowed to read this folder yet. Allow Kiteline to access it on this computer (System Settings → Privacy & Security → Files and Folders)";
+"Kiteline 尚未获准读取此文件夹，请在这台电脑上允许 Kiteline 访问它（系统设置 → 隐私与安全性 → 文件与文件夹），已改在 VS Code 中打开" = "Kiteline isn't allowed to read this folder yet. Allow Kiteline to access it on this computer (System Settings → Privacy & Security → Files and Folders). Opened in VS Code instead";
 "Kiteline 当时处于前台，仅在 App 内提醒" = "Kiteline was in the foreground, so the alert appeared only inside the app.";
 "Kiteline 插件" = "Kiteline Plugin";
 "Kiteline 插件出错：%@ %@" = "Kiteline plugin error: %@ %@";
@@ -484,6 +490,7 @@
 "Siri 自然语音" = "Siri Natural Voice";
 "Stay hungry.\nStay foolish." = "Stay hungry.\nStay foolish.";
 "Talk is cheap.\nShow me the code." = "Talk is cheap.\nShow me the code.";
+"Token、代码行数、在线时长和出场的 Agent，一键生成分享图" = "Tokens, lines of code, time online and agents used — one tap to a shareable image";
 "Ultracode 已关" = "Ultracode Off";
 "Ultracode 已开" = "Ultracode On";
 "VS Code 不在前台。Wayland 桌面不允许其他程序替你切换窗口，为避免误输入到其他应用，未按下按键。请先切到 VS Code 再操作" = "VS Code isn’t in the foreground. Wayland desktops don’t allow other apps to switch windows for you, so the key wasn’t pressed to avoid typing into another app. Switch to VS Code first, then try again.";
@@ -524,12 +531,14 @@
 "VS Code 配套扩展" = "VS Code companion extension";
 "VS Code 里的 Kiteline 配套扩展版本较旧，请在电脑上重新加载窗口" = "The Kiteline companion extension in VS Code is out of date. Please reload the window on the computer";
 "ValueError: thread/status 的格式变了" = "ValueError: the thread/status format has changed";
+"Vibe 时长" = "Vibe time";
 "Windows 上截整个屏幕：在 PowerShell 里用 `Add-Type -AssemblyName System.Windows.Forms,System.Drawing` 后把 " = "To capture the whole screen on Windows, in PowerShell run `Add-Type -AssemblyName System.Windows.Forms,System.Drawing`, then draw ";
 "Windows 上没有 tmux，Qwen Code 的会话只能查看" = "Windows has no tmux, so Qwen Code sessions are view-only.";
 "Windows 浏览器" = "Windows Browser";
 "Windows 防火墙还没有放行 Kiteline：同一网络里的手机、其他电脑可能连不进来" = "Windows Firewall hasn't allowed Kiteline yet: phones and other computers on the same network may not be able to connect";
 "Windows 防火墙阻止了 Kiteline 的入站连接：同一网络里的手机、其他电脑连不进来" = "Windows Firewall is blocking incoming connections to Kiteline: phones and other computers on the same network can't connect";
 "Windows/Linux 客户端：读图缩略图、看大图左右滑" = "Windows/Linux client: image thumbnails and swipe between full-size images";
+"WorkBuddy 正在处理这个任务，请等它完成后再发" = "WorkBuddy is still working on this task. Send again once it's done.";
 "[--desktop] [--caption 说明]  或  shot --text" = "[--desktop] [--caption text]  or  shot --text";
 "[Desktop Entry]\nType=Application\nName=Kiteline\nComment=在手机上跟进和回复 Claude Code\n" = "[Desktop Entry]\nType=Application\nName=Kiteline\nComment=Follow and reply to Claude Code from your phone\n";
 "[㐀-鿿]" = "[㐀-鿿]";
@@ -881,6 +890,7 @@
 "今日已花费 $%@，超出每日上限 $%@" = "Spent $%@ today, over the daily cap of $%@";
 "今日已花费 $%@，超出预算 $%@" = "Spent $%@ today, over the budget of $%@";
 "今日已花费 $%@，达到预算的 80%%" = "Spent $%@ today, reaching 80%% of the budget";
+"今日战绩" = "Today's Stats";
 "今日无动态" = "No activity today.";
 "今日暂无 Claude Code 动态" = "No Claude Code activity today.";
 "今日暂无动态" = "No Activity Today";
@@ -1020,6 +1030,7 @@
 "俄语" = "Russian";
 "保存" = "Save";
 "保存中…" = "Saving…";
+"保存图片，发朋友圈" = "Save image for WeChat Moments";
 "保存失败：%@" = "Save failed: %@";
 "保存（Ctrl+S）" = "Save (Ctrl+S)";
 "保存（⌘S）" = "Save (⌘S)";
@@ -1058,6 +1069,7 @@
 "停用「%@」？此设备将立即断开，之后需重新扫码或输入配对码才能连接。" = "Deactivate “%@”? This device will be disconnected immediately and will need to scan the code or enter the pairing code again to connect.";
 "停用后该设备需要重新配对。确定停用吗？" = "A deactivated device must be paired again. Deactivate this device?";
 "停用设备" = "Deactivate Device";
+"像素园区里看各会话" = "Your sessions in a pixel campus";
 "允许" = "Allow";
 "允许使用%@" = "Allow %@";
 "允许或拒绝" = "allow or deny";
@@ -1095,6 +1107,7 @@
 "免费试用 %lld 天" = "%lld Days Free Trial";
 "入口已失效" = "This Link Has Expired";
 "全景" = "Overview";
+"全景视图" = "Live views";
 "全选" = "Select All";
 "全部" = "All";
 "全部 %lld" = "All %lld";
@@ -1113,6 +1126,7 @@
 "全部暂存" = "Stage All";
 "全部机器" = "All Computers";
 "全部来源在线（%@）" = "All sources online (%@)";
+"全部标为已完成" = "Mark All as Done";
 "全部正常" = "All Clear";
 "全部清理" = "Clear All";
 "全部空闲" = "All idle";
@@ -1126,6 +1140,7 @@
 "兰亭黑-简，清瘦的黑体" = "Lanting Hei, a slim sans-serif";
 "共 %@" = "Total %@";
 "共 %@ 个" = "%@ total";
+"共 %@ 个会话" = "%@ sessions";
 "共 %@ 个会话 · %@ 次调用" = "%@ sessions · %@ calls";
 "共 %@ 个用例" = "%@ tests in total";
 "共享" = "Share";
@@ -1198,6 +1213,7 @@
 "准备下载…" = "Preparing Download…";
 "准备就绪" = "Ready";
 "准备证书中" = "Preparing certificate…";
+"出勤" = "Streak";
 "出口 IP" = "Outbound IP";
 "出自「%@」" = "From “%@”";
 "出自「%@」，加入后点击即可跳转到原消息" = "From “%@”. Tap after adding to jump to the original message.";
@@ -1219,6 +1235,9 @@
 "分享…" = "Share…";
 "分享只读链接" = "Share Read-Only Link";
 "分享只读链接…" = "Share Read-Only Link…";
+"分享战绩" = "Share My Stats";
+"分享本次任务" = "Share This Task";
+"分享本次任务战绩" = "Share Task Stats";
 "分屏中的信绳" = "Message Rope in Split View";
 "分屏中的信绳：同一封信的两张信件用绳子连起" = "Rope in split view: connect both copies of the same letter";
 "分布在 %@ 个分支上" = " across %@ branch(es)";
@@ -1278,6 +1297,7 @@
 "到达设定时间后，Kiteline 将在该项目的 VS Code 窗口中新建会话并发送任务（电脑需保持开机；因睡眠错过的任务会在 1 小时内补执行）。" = "At the scheduled time, Kiteline starts a new session in this project’s VS Code window and sends the task. The computer must stay on; tasks missed while it was asleep run within one hour.";
 "到达设定时间后，在项目的 VS Code 窗口中新建会话并将任务发送给 Claude。新建方式：在主窗口「新任务」或手机端新任务中选择「定时」。" = "When the set time arrives, a new session opens in the project’s VS Code window and the task is sent to Claude. To create one, choose “Scheduled” in New Task in the main window or in New Task on your phone.";
 "刷新" = "Refresh";
+"前一条消息正在恢复此会话，这条将在其后发出" = "The previous message is still resuming this session. This one will be sent right after it.";
 "前后左右移动" = "Move";
 "前往 App Store" = "Open App Store";
 "前往 App Store 更新" = "Update on the App Store";
@@ -1373,6 +1393,7 @@
 "发给 %@" = "To %@";
 "发给你和别的会话" = "Sent to you and other sessions";
 "发给全部成员" = "To all members";
+"发给微信好友" = "Send to WeChat friends";
 "发送" = "Send";
 "发送「继续」，%@ 接着推进目标" = "Sends “Continue” so %@ carries on toward the goal";
 "发送下载链接到电脑" = "Send Download Link to Computer";
@@ -1495,6 +1516,7 @@
 "后台运行 Claude Code" = "Run Claude Code in the Background";
 "后台运行…" = "Background…";
 "后台运行的 Claude Code 就在项目所在的电脑上运行，使用与 VS Code 中的 Claude Code 相同的网络设置（代理、证书、接口地址），每次启动前核对一致才运行。开启前请先检测出口。" = "Claude Code running in the background runs on the computer where the project is, with the same network settings as Claude Code in VS Code (proxy, certificates, API address). They are verified to match before every launch. Check the outbound connection before turning this on.";
+"后台运行的会话没有结束" = "The background session didn't end.";
 "后台运行：已开启" = "Background: On";
 "向 VS Code 发送消息" = "Send a message to VS Code.";
 "向上" = "Scroll Up";
@@ -1556,6 +1578,7 @@
 "图片传输到会话所在机器失败：%@" = "Failed to transfer the image to the session’s computer: %@";
 "图片传输失败：%@" = "Image transfer failed: %@";
 "图片传送失败：%@" = "Image failed to send: %@";
+"图片只有数字，不包含对话内容、项目名和文件名。图片下方带 Kiteline 小程序码，好友长按即可识别。" = "The image contains only numbers — no conversation content, project names or file names. A Kiteline Mini Program code at the bottom lets friends open it with a long press.";
 "图片太大" = "The image is too large";
 "图片尚未加载" = "Image not loaded yet";
 "图片尚未加载完成" = "Image has not finished loading";
@@ -1653,7 +1676,7 @@
 "在电脑浏览器中打开以下网址，下载对应系统的安装包。" = "Open this address in a browser on your computer and download the version for your system.";
 "在电脑的 VS Code 中打开 Claude Code，或在终端运行 claude，会话将自动显示在此处。" = "Open Claude Code in VS Code on your computer, or run claude in Terminal. Sessions will appear here automatically.";
 "在电脑菜单栏中右键 Kiteline →「重新连接」；并确认可免密 ssh 登录远端主机" = "In the menu bar on your computer, right-click Kiteline → “Reconnect”; and make sure you can sign in to the remote host over SSH without a password.";
-"在线" = "Online";
+"在线" = "online";
 "在线 %@/%@，离线：%@" = "Online %@/%@, offline: %@";
 "在线来源 %@/%@" = "Sources online %@/%@";
 "在线的手机" = "Online Phones";
@@ -1827,6 +1850,8 @@
 "将关闭此会话在 VS Code 中的标签页，Claude 随之结束此会话，正在进行的工作会中断。之后可在「历史会话」中恢复。" = "This closes the session’s tab in VS Code, and Claude ends the session. Any work in progress will be interrupted. You can resume it later from History.";
 "将关闭这个会话在 VS Code 中的标签页，并在后台接着这段对话。" = "This closes the session's tab in VS Code and continues the conversation in the background.";
 "将向终端中的 Claude 发送 /exit 结束此会话，正在进行的工作会中断。之后可在「历史会话」中恢复。" = "This sends /exit to Claude in the terminal to end the session. Any work in progress will be interrupted. You can resume it later from History.";
+"将在电脑上的 %@ 中新建任务并发送（会短暂切到 %@）" = "The task will be created and sent in %@ on the computer (%@ will briefly come to the front).";
+"将在电脑后台运行 %@，可在手机上查看和操作" = "%@ will run in the background on the computer. You can follow and control it from your phone.";
 "将当前分支变基到此" = "Rebase Current Branch onto This";
 "将当前分支重置到这里" = "Reset Current Branch to Here";
 "将截图拖到此处，或在文字框中按 Ctrl+V 粘贴" = "Drag a screenshot here, or press Ctrl+V in the text field to paste.";
@@ -1954,6 +1979,7 @@
 "已加载的对话中，Claude 未修改过此文件。" = "Claude has not modified this file in the loaded conversation.";
 "已发出请求，请在那台电脑上点「允许」（60 秒内）" = "Request sent. Click Allow on that computer within 60 seconds.";
 "已发到 Bark" = "Sent to Bark.";
+"已发到 WorkBuddy" = "Sent to WorkBuddy.";
 "已发现 %@，但无法连接。请确认电脑上的 Kiteline 正在运行，或手动输入地址。" = "Found %@, but could not connect. Make sure Kiteline is running on your computer, or enter the address manually.";
 "已发送" = "Sent";
 "已发送 /effort %@（%@），Claude 本轮结束后生效" = "Sent /effort %@ (%@). Takes effect after Claude finishes this turn.";
@@ -1985,6 +2011,7 @@
 "已在 VS Code 中新建会话，内容已填入输入框" = "Started a new session in VS Code. Your text is in the input box.";
 "已在 VS Code 中新建会话，内容已填入输入框，但未能自动提交。请在电脑上按回车键提交" = "A new session was created in VS Code and the message was filled in, but it couldn't be submitted automatically. Press Return on your computer to submit it";
 "已在 VS Code 中新建会话，内容已填入输入框，将自动提交" = "Started a new session in VS Code. Your text is in the input box and will be submitted automatically.";
+"已在 WorkBuddy 中新建任务" = "Task created in WorkBuddy.";
 "已在 ufw 中放行端口 %s" = "Ports %s are allowed in ufw";
 "已在另一个工作树中检出" = "Checked out in another worktree";
 "已在后台恢复对话" = "Resumed the conversation in the background";
@@ -2022,6 +2049,7 @@
 "已失效" = "Expired";
 "已存储" = "Stored";
 "已存到相册" = "Saved to Photos";
+"已存到相册，在微信朋友圈选择这张图即可" = "Saved to Photos. Choose it when posting to WeChat Moments.";
 "已存在同名的分支或标签" = "A branch or tag with that name already exists";
 "已存在同名的文件或文件夹" = "A file or folder with that name already exists";
 "已安装" = "Installed";
@@ -2086,6 +2114,7 @@
 "已提交并推送" = "Committed and pushed";
 "已提交，感谢反馈。我们会根据反馈优先接入更多 Agent。" = "Submitted. Thank you — your feedback helps us decide which agents to support next.";
 "已收藏" = "Added to Favorites";
+"已改好，等你看一眼" = "Done, take a look";
 "已放弃" = "Aborted";
 "已放行端口 %s，同一网络里的手机、其他电脑可以连接" = "Ports %s are allowed; phones and other computers on the same network can connect";
 "已放行：同一网络里的手机、其他电脑可以连接" = "Allowed: phones and other computers on the same network can connect";
@@ -2123,6 +2152,7 @@
 "已经 tmux 送达" = "Delivered via tmux.";
 "已结束" = "Ended";
 "已结束 · %@ · %@" = "Ended · %@ · %@";
+"已结束后台运行的会话" = "The background session has ended.";
 "已结束的会话" = "Ended session";
 "已结束的会话会先在电脑上的 VS Code 中恢复，再发送。" = "An ended session is resumed in VS Code on your computer before the message is sent.";
 "已继续目标" = "Goal resumed";
@@ -2272,6 +2302,7 @@
 "待确认" = "Needs Approval";
 "待确认 1/%lld" = "Awaiting Approval 1/%lld";
 "待确认 · %@" = "Needs approval · %@";
+"待确认、工作中的会话，轻点进入对应会话。" = "Sessions that need approval or are working. Tap one to open it.";
 "待确认：%@" = "Needs approval: %@";
 "待确认：%@ 个会话，" = "Awaiting approval: %@ sessions, ";
 "待确认：%@ 个会话，%@" = "Awaiting approval: %@ sessions, %@";
@@ -2300,6 +2331,7 @@
 "恢复会话" = "Resume Session";
 "恢复会话 %@" = "Resume Session %@";
 "恢复会话后未能送进去，请在电脑上查看该会话，或在群里重发" = "The session was resumed, but the message didn't get in. Check the session on the computer, or send it to the group again";
+"恢复会话未成功" = "The session could not be resumed.";
 "恢复内置版本" = "Restore Built-in Version";
 "恢复失败" = "Failed to Restore";
 "恢复对话" = "Resume Conversation";
@@ -2310,6 +2342,7 @@
 "恢复贮藏" = "Pop Stash";
 "恢复默认" = "Restore Defaults";
 "恢复默认头像和昵称" = "Restore Default Avatar and Nickname";
+"想用 Bash" = "Wants to run Bash";
 "意大利语" = "Italian";
 "慢" = "Slow";
 "成功" = "Success";
@@ -2383,8 +2416,12 @@
 "打开" = "Open";
 "打开 / 关闭终端" = "Open / Close Terminal";
 "打开 App 或小程序，扫描此二维码，或输入下方的 6 位配对码。首次配对时手机与电脑需连接同一网络。" = "Open the app or Mini Program and scan this QR code, or enter the 6-digit pairing code below. For the first pairing, your phone and computer must be on the same network.";
+"打开 App 查看会话" = "Open the app to see sessions";
+"打开 App 查看用量" = "Open the app to see usage";
 "打开 App，扫描此二维码，或输入下方的 6 位配对码。首次配对时手机与电脑需连接同一网络。" = "Open the app and scan this QR code, or enter the 6-digit code below. For the first pairing, your phone and computer need to be on the same network.";
 "打开 Kiteline" = "Open Kiteline";
+"打开 Kiteline 后，这里显示待确认和工作中的会话" = "Open Kiteline to see sessions that need approval or are working";
+"打开 Kiteline 后，这里显示订阅额度和今日 token 用量" = "Open Kiteline to see plan limits and today's token usage";
 "打开「%@」" = "Open “%@”";
 "打开下载的安装包，将 Kiteline 拖入「应用程序」后打开，按提示授予所需权限。需要 macOS 14 或更新版本。" = "Open the downloaded disk image, drag Kiteline to Applications, open it and grant the requested permissions. Requires macOS 14 or later.";
 "打开下载页" = "Open Download Page";
@@ -2436,6 +2473,7 @@
 "技能" = "Skill";
 "技能会装给这台电脑和远端电脑上的各个编程 agent（Claude Code、Codex、OpenCode、DeepSeek Harness 等）。截图技能使 agent 回复时尽量附带相关截图；网页测试技能使 agent 完成网页功能后在浏览器中实际操作一遍，并发来带截图的测试报告；待办与关键信息技能使 agent 把需要以后处理的事加入待办，并把账号、密码等关键信息单独发来，方便收藏。各 agent 的接入、开关和兼容情况在「插件」页查看和管理。" = "Skills are installed for each coding agent on this computer and on remote computers (Claude Code, Codex, OpenCode, DeepSeek Harness and more). The screenshot skill makes agents include relevant screenshots in their replies whenever possible. The web testing skill makes agents try out finished web features in a real browser and send an illustrated test report. The to-do and key info skill makes agents add things to handle later to your to-dos, and send key information such as accounts and passwords separately so you can save it to Favorites. Connections, switches and compatibility for each agent are managed on the Plugins page.";
 "技能会装给这台电脑和远端电脑上的各个编程 agent（Claude Code、Codex、OpenCode、DeepSeek Harness 等）。截图技能使 agent 回复时尽量附带相关截图；网页测试技能使 agent 完成网页功能后在浏览器中实际操作一遍，并发来带截图的测试报告；待办与关键信息技能使 agent 把需要以后处理的事加入待办，并把账号、密码等关键信息单独发来，方便收藏；任务阶段技能使 agent 按任务的实际做法规划步骤，并在进入每一步时主动报告，会话列表据此显示「2/4 开发中」；Claude Code 进入下一步却没有报告时，Kiteline 会提醒它补报（未安装时按 agent 的操作自动识别）。各 agent 的接入、开关和兼容情况在「插件」页查看和管理。" = "Skills are installed for each coding agent on this computer and on remote computers (Claude Code, Codex, OpenCode, DeepSeek Harness and more). The screenshot skill makes agents include relevant screenshots in their replies whenever possible. The web testing skill makes agents try out finished web features in a real browser and send an illustrated test report. The to-do and key info skill makes agents add things to handle later to your to-dos, and send key information such as accounts and passwords separately so you can save it to Favorites. The task stage skill makes agents plan steps that fit each task and report each step as they enter it, so the session list can show “2/4 Developing”; when Claude Code moves on to the next step without reporting it, Kiteline reminds it to (without the skill, the stage is detected from what the agent does). Connections, switches and compatibility for each agent are managed on the Plugins page.";
+"把 %lld 条 3 天以上没更新的 agent 待办标为已完成？" = "Mark %lld agent to-dos not updated for 3+ days as done?";
 "把「%@」合并到当前分支「%@」？" = "Merge “%@” into the current branch “%@”?";
 "把「%@」硬重置到 %@？之后的提交和所有未提交的更改都会丢失，此操作无法撤销。" = "Hard reset “%@” to %@? Later commits and all uncommitted changes will be lost. This cannot be undone.";
 "把「%@」重置到 %@？之后的提交会被撤出分支，文件改动保留在工作区。" = "Reset “%@” to %@? Later commits will be removed from the branch; their file changes stay in the working tree.";
@@ -2488,6 +2526,7 @@
 "拷贝相对路径" = "Copy Relative Path";
 "拷贝这条消息" = "Copy this message";
 "拷贝选中的文字" = "Copy selected text";
+"指挥官" = "Commander";
 "按 %@%@ 自动续期。" = "Renews automatically at %@%@.";
 "按 Agent" = "By Agent";
 "按会话" = "By Session";
@@ -2511,6 +2550,7 @@
 "按键" = "Key Press";
 "按项目" = "By Project";
 "换一个目标" = "Change Goal";
+"换一句" = "Another line";
 "换上新版本失败：%@" = "Couldn't switch to the new version: %@";
 "换个关键词试试。" = "Try a different keyword.";
 "据此生成与 DeepSeek Harness 桌面窗口相同的访问凭证，连接其在本机（127.0.0.1）提供的服务，" = "uses it to create the same access credentials as the DeepSeek Harness desktop window, and connects to the service it provides on this computer (127.0.0.1) ";
@@ -2613,6 +2653,7 @@
 "收藏" = "Favorites";
 "收藏的消息" = "Saved messages";
 "收起" = "Collapse";
+"收起久未更新的 %lld 条" = "Clear %lld stale items";
 "收起会话列表" = "Hide Session List";
 "收起头像选择" = "Hide Avatar Choices";
 "收起常用语" = "Hide Quick Replies";
@@ -2860,6 +2901,7 @@
 "昨天" = "Yesterday";
 "昨天 %@" = "Yesterday %@";
 "昨日动态" = "Yesterday";
+"昨日战绩" = "Yesterday's Stats";
 "昨晚无 Claude Code 动态" = "No Claude Code activity last night.";
 "昨晚无动态" = "No activity last night.";
 "昨晚：" = "Last night:";
@@ -2931,6 +2973,7 @@
 "暂无正在运行的会话" = "No running sessions.";
 "暂无短语" = "No Quick Replies";
 "暂无结果" = "No results.";
+"暂无订阅额度数据" = "No plan limit data";
 "暂无记录" = "No records yet.";
 "暂无设备开启推送" = "No devices have push notifications turned on.";
 "暂无通知" = "No Notifications";
@@ -2959,6 +3002,7 @@
 "最多 %@ 张" = "Up to %@ images";
 "最多 %lld 张" = "Up to %lld Images";
 "最多 %lld 张。单张时显示在文字左侧，多张时以九宫格排列于文字下方；轻点图片可放大查看。" = "Up to %lld images. With one image, it appears to the left of the text; with several, they are arranged in a grid below the text. Tap an image to enlarge it.";
+"最多同时" = "max parallel";
 "最多拆分为三列，请先关闭一列" = "You can split into at most three columns. Close one first.";
 "最多拆分为两个分屏，请先关闭一个" = "You can split into at most two panes. Close one first.";
 "最多附 %@ 张图片" = "Attach up to %@ images";
@@ -3127,6 +3171,7 @@
 "本机证书尚未就绪，请确认「手机访问」已开启" = "This computer's certificate isn't ready. Make sure Phone Access is on.";
 "本机识别不可用" = "On-device recognition is unavailable.";
 "本机语音识别模型加载失败" = "Failed to load the on-device speech recognition model.";
+"本次任务" = "This task";
 "本次对话中修改了 %lld 次" = "Modified %lld times in this conversation";
 "本轮 %@" = "This turn %@";
 "本轮结束后检查" = "Checked when this turn ends";
@@ -3248,6 +3293,8 @@
 "欢迎使用 Kiteline" = "Welcome to Kiteline";
 "欢迎来到 Kiteline" = "Welcome to Kiteline";
 "正在 %@" = "Running %@";
+"正在 编辑文件" = "Editing files";
+"正在 运行测试" = "Running tests";
 "正在下载 Kiteline %@" = "Downloading Kiteline %@";
 "正在下载 Kiteline %@（%@）" = "Downloading Kiteline %@ (%@)";
 "正在下载更新 %@" = "Downloading Update %@";
@@ -3274,8 +3321,10 @@
 "正在变基" = "Rebasing";
 "正在合并" = "Merging";
 "正在后台下载新版本，装好后会提示重启" = "Downloading the new version in the background. You'll be prompted to restart once it's installed.";
+"正在后台启动" = "Starting in the background";
 "正在后台启动 Claude Code" = "Starting Claude Code in the background";
 "正在后台启动 Claude Code，启动后将自动提交" = "Starting Claude Code in the background. The message will be submitted once it starts.";
+"正在后台启动，启动后将自动提交" = "Starting in the background. The task will be submitted once it's ready.";
 "正在向电脑查询…" = "Checking with your computer…";
 "正在处理" = "Already in progress";
 "正在安装 Kiteline %@" = "Installing Kiteline %@";
@@ -3324,6 +3373,7 @@
 "正在移植" = "Coming Soon";
 "正在移除" = "Removing";
 "正在统计…" = "Calculating…";
+"正在统计各台电脑的数据…" = "Collecting numbers from your computers…";
 "正在统计各机器的用量…" = "Calculating usage for each computer…";
 "正在继续" = "Continuing";
 "正在获取" = "Fetching";
@@ -3421,6 +3471,7 @@
 "每天" = "Daily";
 "每天 %@" = "Daily %@";
 "每天推送日报" = "Send Daily Report Every Day";
+"每天第一次打开时弹出昨日战绩" = "Show yesterday's stats the first time I open the app each day";
 "每天花费" = "Daily Cost";
 "每日上限 %@ · 已用 %lld%%" = "Daily cap %@ · Used %lld%%";
 "每日上限（美元）" = "Daily Cap (USD)";
@@ -3454,7 +3505,7 @@
 "没有匹配的文件夹" = "No matching folders";
 "没有匹配的项目" = "No Matching Projects";
 "没有可以贮藏的改动" = "No changes to stash";
-"没有可在后台运行 Claude Code 的电脑（需通过 SSH 连接，且不是 Windows）。" = "No computer can run Claude Code in the background (it must be connected over SSH and not run Windows).";
+"没有可在后台运行 Claude Code 的电脑（Windows 电脑暂不支持）。" = "No computer can run Claude Code in the background (Windows computers are not supported yet).";
 "没有可提交的改动" = "Nothing to commit";
 "没有可添加的内容" = "Nothing to add.";
 "没有可用的推送订阅" = "No push subscription available.";
@@ -3470,6 +3521,8 @@
 "没有找到 VS Code（code 命令）" = "VS Code (code command) not found.";
 "没有找到系统的 python3" = "System python3 was not found";
 "没有权限在这里新建文件夹" = "You don't have permission to create a folder here.";
+"没有权限读取此文件夹" = "No permission to read this folder";
+"没有权限读取此文件夹，已改在 VS Code 中打开" = "No permission to read this folder; opened in VS Code instead";
 "没有权限读取该目录" = "You don't have permission to read this folder.";
 "没有符合条件的项目。" = "No projects match the filter.";
 "没有符合筛选条件的会话" = "No sessions match the filters";
@@ -3530,8 +3583,10 @@
 "消息内容" = "Message";
 "消息已在 VS Code 输入框中，但按回车后未能提交。请在电脑上检查该会话的输入框" = "The message is in the VS Code input box, but pressing Return didn’t submit it. Check the session’s input box on your computer.";
 "消息已在 VS Code 输入框中，但按回车后未能提交（电脑前台被「%@」占用）。请在电脑上检查该会话的输入框" = "The message is in the VS Code input box, but pressing Return didn’t submit it (“%@” was in front on the computer). Check the session’s input box on your computer.";
+"消息未能送达" = "Message Not Delivered";
 "消息翻译" = "Message Translation";
 "深色" = "Dark";
+"深色模式适配" = "Dark mode support";
 "混合重置（保留改动，不暂存）" = "Mixed Reset (Keep Changes, Unstaged)";
 "添加" = "Add";
 "添加 %lld 个会话" = "Add %lld Sessions";
@@ -3611,12 +3666,15 @@
 "生成一个局域网网址，和这台电脑在同一网络（Wi-Fi）里的人用浏览器就能查看这个会话，不用装 Kiteline：对话和执行的步骤，不含思考过程、图片和关键信息。会话有进展时，对方的页面自动更新。" = "Create a local network address so anyone on the same network (Wi-Fi) as this computer can view this session in a browser without installing Kiteline: the conversation and the steps taken, without thinking, images or key information. The page updates automatically as the session progresses.";
 "生成于 %@ · 统计所有在线来源，包括已关闭的会话" = "Generated %@ · Covers all connected sources, including closed sessions.";
 "生成于 %@，统计所有在线来源，包括已关闭的会话。" = "Generated at %@. Covers all online sources, including closed sessions.";
+"生成图片失败" = "Couldn't create the image";
 "生成链接" = "Create Link";
 "用 iPhone 相机扫描二维码，或在 App Store 中搜索「Kiteline」。" = "Scan the QR code with your iPhone camera, or search for “Kiteline” in the App Store.";
 "用「预览」打开" = "Open in Preview";
 "用「预览」打开（可标注、另存）" = "Open in Preview (to mark up or save a copy)";
 "用了" = "Took";
 "用了 %@" = "Took %@";
+"用了多少 Token、改了多少行代码，生成图片发微信好友或朋友圈" = "Tokens used and lines of code changed, as an image for WeChat friends or Moments";
+"用了多少 Token、改了多少行，生成图片发微信" = "Tokens used and lines changed, as an image for WeChat";
 "用于将手机发送的消息粘贴到 VS Code 中的会话并提交，以及操作确认框。未授权时，手机消息将无法送达。" = "Lets Kiteline paste messages from your phone into sessions in VS Code, submit them, and respond to approval dialogs. Without this permission, messages from your phone can’t be delivered.";
 "用于录制语音并发送给 Agent。" = "Used to record voice messages to send to the agent.";
 "用于所有 %@ 会话" = "Use for All %@ Sessions";
@@ -3655,9 +3713,11 @@
 "电脑上没有运行中的 Claude Code 会话" = "No Claude Code sessions are running on your computer";
 "电脑上没有运行中的会话" = "No sessions running on your computer.";
 "电脑上的 %@ 需要 Kiteline %@ 或更高版本才能完整显示，轻点前往 App Store 更新" = "%@ on your computer requires Kiteline %@ or later to display fully. Tap to update in the App Store.";
+"电脑上的 Claude Code 正停在一个选择框上，消息没有送进去（免得回车替你选了选项）。请在会话终端里或电脑上处理这个框后再发" = "Claude Code on the computer is showing a dialog, so the message was not sent (to avoid the Return key choosing an option for you). Handle the dialog in the session terminal or on the computer, then send again.";
 "电脑上的 Kiteline" = "Kiteline on Your Computer";
 "电脑上的 Kiteline 未开启远程访问" = "Remote Access is off in Kiteline on your computer.";
 "电脑上的 Kiteline 版本较旧，暂不支持接收文件。请先在电脑上更新到最新版本" = "The version of Kiteline on your computer can't receive files. Update it to the latest version first.";
+"电脑上的 Kiteline 版本较旧，更新到最新版本后即可分享战绩" = "Kiteline on your computer is out of date. Update it to the latest version to share stats.";
 "电脑上的 Kiteline 版本过旧，无法修改手表选项" = "The version of Kiteline on your computer is too old to change watch options.";
 "电脑上的 VS Code 将弹出确认框，询问是否允许 Claude Code 扩展打开链接。请在电脑上勾选「不再询问」并点击「打开」，会话即会打开" = "VS Code on your computer will ask whether to allow the Claude Code extension to open a link. On your computer, select “Do not ask me again for this extension” and click “Open” to open the session.";
 "电脑上的 VS Code 将弹出确认框，询问是否允许 Claude Code 扩展打开链接。请在电脑上勾选「不再询问」并点击「打开」，会话打开后内容会填入输入框，按回车键即可提交" = "VS Code on your computer will ask whether to allow the Claude Code extension to open a link. On your computer, select “Do not ask me again for this extension” and click “Open”. The session will open with your text in the input box. Press Enter to submit.";
@@ -3726,6 +3786,7 @@
 "登录流程" = "Sign-in flow";
 "登录状态正在刷新" = "sign-in was being refreshed";
 "登录页已修改完成，测试全部通过。是否需要提交？" = "The login page changes are complete, and all tests pass. Should I commit them?";
+"登录页文案" = "Login page copy";
 "登录验证失败" = "authentication failed";
 "登记设备" = "Register Device";
 "的 Apple Watch" = "’s Apple Watch";
@@ -3877,6 +3938,7 @@
 "筛选文件夹" = "Filter folders";
 "签名" = "Signature";
 "简体中文" = "简体中文";
+"算力" = "Compute";
 "管理订阅" = "Manage Subscriptions";
 "类型" = "Type";
 "粉色" = "Pink";
@@ -3973,6 +4035,7 @@
 "缺少会话" = "Missing session.";
 "缺少会话 key" = "Missing session key";
 "缺少内容" = "Content missing";
+"缺少分享卡片的绘制脚本，请重新安装 App" = "The stats card renderer is missing. Please reinstall the app.";
 "缺少参数" = "Missing parameter.";
 "缺少提示" = "Missing alert";
 "缺少文件" = "No files specified";
@@ -4055,6 +4118,7 @@
 "虚拟屏幕（看不见）" = "Virtual screen (invisible)";
 "蜂窝数据（5G / 4G）" = "Cellular Data (5G / 4G)";
 "行 %@，列 %@" = "Ln %@, Col %@";
+"行代码" = "lines";
 "行号" = "Line number";
 "行楷" = "Xingkai";
 "行楷-简，毛笔行书" = "Xingkai, brush running script";
@@ -4078,6 +4142,7 @@
 "计划" = "Plan";
 "计划推进" = "Plan advancing";
 "计划进度" = "Plan progress";
+"订单接口限流" = "Order API rate limit";
 "订阅" = "Subscription";
 "订阅 Kiteline Pro 后可用" = "Available with Kiteline Pro";
 "订阅信息加载失败，轻点重试" = "Couldn’t load subscription information. Tap to retry.";
@@ -4088,6 +4153,7 @@
 "订阅数据损坏：%@" = "Subscription data is corrupted: %@";
 "订阅远程访问" = "Get Remote Access";
 "订阅额度" = "Plan Limits";
+"订阅额度（5 小时、本周）和今日 token 用量。" = "Plan limits (5-hour and weekly) and today's token usage.";
 "让 Claude 写提交信息并提交" = "Have Claude Write the Message and Commit";
 "让 Claude 把已提交的改动推送到远端（不会强推）" = "Ask Claude to push committed changes to the remote (no force push).";
 "让 Claude 把当前改动提交到 Git（只提交，不推送）" = "Ask Claude to commit current changes to Git (commit only, no push).";
@@ -4192,6 +4258,8 @@
 "请把已经提交的改动推送到远端：先用 git status -sb 确认当前分支和要推的远端，然后 git push。推送失败或需要强推时先停下来告诉我，不要自行使用 --force。" = "Please push the committed changes to the remote: first run git status -sb to confirm the current branch and the remote to push to, then run git push. If the push fails or a force push is needed, stop first and tell me. Do not use --force on your own.";
 "请把当前的改动提交到 git：先看 git status 和 git diff，只提交和这次任务相关的文件，写一条简洁的中文提交信息，然后 git commit。先不要推送，提交完告诉我提交号和改了哪些文件。" = "Please commit the current changes to git: first look at git status and git diff, commit only the files related to this task, write one concise commit message, then run git commit. Do not push yet. After committing, tell me the commit ID and which files changed.";
 "请按电脑上 Kiteline「就绪检查」中的说明处理。" = "Follow the instructions in Kiteline's Readiness Check on your computer.";
+"请描述需要 %@ 在「%@」中完成的任务" = "Describe the task you want %@ to complete in “%@”.";
+"请描述需要 %@ 在此项目中完成的任务" = "Describe the task you want %@ to complete in this project.";
 "请描述需要 Claude 在「%@」中完成的任务" = "Describe the task you want Claude to complete in “%@”.";
 "请描述需要 Claude 在此项目中完成的任务" = "Describe the task you want Claude to complete in this project";
 "请查看我发来的图片和文件：" = "Please look at the images and files I sent:";
@@ -4219,6 +4287,7 @@
 "读" = "Read";
 "读不了文件：%@" = "Can't read file: %@";
 "读不了这个目录：%@" = "Can't read this folder: %@";
+"读了什么、改了什么" = "What they read and changed";
 "读到行" = "Lines read";
 "读取" = "Read";
 "读取 Git 状态超时：位于「文稿」「桌面」或网络磁盘中的项目，需先在电脑上允许 Kiteline 访问该文件夹（系统设置 → 隐私与安全性 → 文件与文件夹）。" = "Timed out reading Git status. For projects in “Documents”, “Desktop” or on a network volume, first allow Kiteline to access the folder on your computer (System Settings → Privacy & Security → Files and Folders).";
@@ -4344,8 +4413,11 @@
 "运行于" = "Runs In";
 "运行测试" = "Run tests";
 "运行测试并发送结果" = "Run the tests and send the results.";
+"近 30 天" = "Last 30 days";
+"近 30 天战绩" = "Last 30 Days' Stats";
 "近 7 天" = "Last 7 Days";
 "近 7 天动态" = "Last 7 Days";
+"近 7 天战绩" = "Last 7 Days' Stats";
 "近 7 天花费：" = "7-day cost:";
 "返回" = "Back";
 "返回 Kiteline，状态将自动更新" = "Return to Kiteline. The status will update automatically.";
@@ -4364,6 +4436,7 @@
 "还没有配置远端仓库" = "No remote repository is configured yet";
 "这一组还没有会话。点右上角「添加会话」，或在首页长按会话选「添加到会话组」。" = "This group has no sessions yet. Tap \"Add Sessions\" in the top-right corner, or long-press a session on the home screen and choose \"Add to Session Group\".";
 "这一轮反复检查仍未达成" = "repeated checks this turn found it unmet";
+"这一轮结束后执行" = "Runs after this turn";
 "这一轮被中断" = "This turn was interrupted";
 "这个 Agent 不记录可读取的执行过程" = "This agent does not keep a readable execution record";
 "这个 CLI 会话不在 tmux 里，无法远程投递（在 tmux 中启动 claude 即可）" = "This CLI session isn't running in tmux, so messages can't be delivered remotely. Start claude inside tmux to fix this.";
@@ -4574,9 +4647,11 @@
 "闲置 %@ 分钟后自动锁屏：锁屏期间无法把手机消息发进 VS Code（终端里放在 tmux 中运行的会话不受影响）" = "Locks automatically after %@ minutes of inactivity. While locked, messages from your phone cannot be sent into VS Code (sessions running in tmux in Terminal are not affected).";
 "闲置 30 分钟" = "idle for 30 minutes";
 "防火墙放行" = "Firewall Access";
+"阵容" = "Lineup";
 "阿拉伯语" = "Arabic";
 "附图片" = "Attach Image";
 "附截图" = "Attach Screenshot";
+"除 Claude Code 外，也可选择这台电脑上已安装的其他命令行 Agent，由 Kiteline 在后台运行" = "Besides Claude Code, you can choose another command-line agent installed on that computer. Kiteline runs it in the background.";
 "除系统字体和等宽字体外，其余字体由 Apple 字体服务提供：首次选择时下载（数 MB 至十余 MB），下载完成前以同风格的系统字体显示。长时间阅读建议选用「正文」或「书卷」类字体。代码始终使用等宽字体。" = "Apart from the system font and monospaced font, other fonts are provided by Apple's font service. They download the first time you select them (several MB to over 10 MB), and until the download finishes, a system font of the same style is shown. For long reading, Body or Book-style fonts are recommended. Code always uses a monospaced font.";
 "除系统翻译外，翻译时消息文字会发送到所选服务。" = "Except for System Translation, message text is sent to the selected service when translating.";
 "随时处理确认请求" = "Respond to Approval Requests Anytime";
@@ -4648,6 +4723,7 @@
 "领先 %@ 个提交（未推送）" = "Ahead by %@ commits (not pushed)";
 "颜色" = "Color";
 "额度" = "Limit";
+"额度与用量" = "Limits & Usage";
 "额度：%@" = "Usage limits: %@";
 "风筝线" = "Kite Lines";
 "风筝线：侧栏左侧连起最近 15 分钟有往来的会话" = "Kite Lines: Link sessions that exchanged messages in the last 15 minutes along the left of the sidebar";
@@ -4737,3 +4813,4 @@
 "；" = "; ";
 "；%@ 上也有" = "; also on %@";
 "；先轻点「一键安装」装上 tmux，或在电脑终端运行 %@" = "; first tap “One-Click Install” to install tmux, or run %@ in Terminal on the computer";
+"；已重新建立远程连接" = "; the remote connection was re-established";

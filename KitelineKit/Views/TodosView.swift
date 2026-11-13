@@ -16,6 +16,8 @@ struct TodosView: View {
     /// 「创建会话」：打开新建会话，内容带上这条待办
     @State private var creating: TodoItem?
     @State private var confirmClear = false
+    /// 「收起久未更新的 N 条」的确认
+    @State private var confirmStale = false
     /// agent 的待办怎么分组、排序、只看哪台机器（同会话列表的「显示方式」）；分组没选过就跟会话列表一样
     @AppStorage("listGrouping") private var listGrouping = "none"
     @AppStorage("todosGrouping") private var groupingChoice: String?
@@ -55,14 +57,14 @@ struct TodosView: View {
                     }
                 }
             }
-            if !pending.isEmpty, !agentAll.isEmpty || !state.suggestions.isEmpty {
-                Section {} header: { sectionTitle(L("我的待办")) }
-            }
-            ForEach(groups(pending)) { group in
+            // 我的待办（11-13 反馈难看重做，同「提醒事项」）：一组、行间细线，不再每条上面一行出处 + 一张卡；
+            // 出处写在每条下面一行淡色小字（整行点一下跳到原消息），「回到会话」是这行右边的文字链接（不再是带底色的胶囊）。
+            // 顺序照旧按出自哪条消息排在一起
+            if !pending.isEmpty {
                 Section {
-                    ForEach(group.items) { row($0, showSource: false) }
+                    ForEach(groups(pending).flatMap(\.items)) { row($0, showSource: true) }
                 } header: {
-                    groupHeader(group)
+                    if !agentAll.isEmpty || !state.suggestions.isEmpty { sectionTitle(L("我的待办")) }
                 }
             }
             if !agentAll.isEmpty {
@@ -107,6 +109,7 @@ struct TodosView: View {
                 }
             }
         }
+        .tabBarScrollWatch()
         .overlay { if state.items.isEmpty, state.suggestions.isEmpty { emptyState } }
         // 别处（电脑、网页）勾掉 / 加了一条，推过来时行平滑挪动，不是一下跳过去
         .animation(.snappy, value: state.items.map { "\($0.id)\($0.done)" } + state.suggestions.map(\.id) + agentTasks.map(\.id))
@@ -126,6 +129,11 @@ struct TodosView: View {
         .sheetPanel(item: $editor) { TodoEditor(target: $0) }
         .sheetPanel(item: $creating) { item in NewTaskView(initialText: item.task, match: model.todoOrigin(item)) }
         .confirmPanel(L("删除所有已完成的待办？"), isPresented: $confirmClear, confirm: L("清空已完成"), destructive: true) { model.clearDoneTodos() }
+        // 一键收起久未更新的 agent 待办（11-13：很多早做完、早过期了，agent 没勾）：只在你确认后改
+        .confirmPanel(L("把 %lld 条 3 天以上没更新的 agent 待办标为已完成？", count: staleAgentTasks.count), isPresented: $confirmStale,
+                      confirm: L("全部标为已完成")) {
+            for item in staleAgentTasks { model.setTodoDone(item, true) }
+        }
     }
 
     // MARK: 一条待办
@@ -141,28 +149,30 @@ struct TodosView: View {
             }
             .buttonStyle(.steady(.plain))
             .help(item.done ? "标为未完成" : "标为已完成")
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 TodoContent(item: item)
                 if let detail = item.detail, !detail.isEmpty, !item.done {
                     Text(detail).font(.ui(.footnote)).foregroundStyle(.secondary).lineLimit(3)
                 }
                 if showSource, let source = item.source {
-                    Label(sourceLine(source), systemImage: "arrowshape.turn.up.backward")
-                        .font(.ui(.caption)).foregroundStyle(.tertiary).lineLimit(1)
-                }
-                if let source = item.source, !item.done {
-                    // 回到会话：打开原会话、输入框里先写好「已处理好：…」，确认后发给 agent（点整行只是跳到原消息）
-                    Button { model.replyDone(key: source.key, text: item.text, open: open) } label: {
-                        Label("回到会话", systemImage: "arrowshape.turn.up.backward")
-                            .font(.ui(.footnote).weight(.medium))
-                            .padding(.horizontal, 11).padding(.vertical, 5)
-                            .background(Theme.claude.opacity(0.10), in: Capsule())
-                            .overlay(Capsule().strokeBorder(Theme.claude.opacity(0.25)))
-                            .foregroundStyle(Theme.claude)
-                            .contentShape(Capsule())
+                    // 出处一行淡色小字；右边「回到会话」：打开原会话、输入框里先写好「已处理好：…」，确认后发给 agent（点整行只是跳到原消息）
+                    HStack(spacing: 12) {
+                        Text(sourceLine(source)).font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 0)
+                        if !item.done {
+                            Button { model.replyDone(key: source.key, text: item.text, open: open) } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "arrowshape.turn.up.backward").font(.ui(.caption2).weight(.semibold))
+                                    Text("回到会话")
+                                }
+                                .font(.ui(.footnote).weight(.medium))
+                                .foregroundStyle(Theme.claude)
+                                .padding(.vertical, 2).padding(.leading, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.steady(.plain))
+                        }
                     }
-                    .buttonStyle(.steady(.plain))
-                    .padding(.top, 4)
                 }
             }
             .padding(.top, 2)
@@ -241,32 +251,6 @@ struct TodosView: View {
             if let latest = map[id]?.latest, latest < item.createdAt { map[id]?.latest = item.createdAt }
         }
         return order.compactMap { map[$0] }.sorted { $0.latest > $1.latest }
-    }
-
-    @ViewBuilder
-    private func groupHeader(_ group: TodoGroup) -> some View {
-        if let source = group.source {
-            Button { jump(source) } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "bubble.left").font(.ui(.caption))
-                    Text(source.title).lineLimit(1)
-                    if let time = source.ts.map({ Format.listTime($0) }), !time.isEmpty {
-                        Text("· \(time)").layoutPriority(1)
-                    }
-                    Spacer(minLength: 4)
-                    Text("原消息").foregroundStyle(Theme.claude)
-                    Image(systemName: "chevron.right").font(.ui(.caption2).weight(.semibold)).foregroundStyle(Theme.claude)
-                }
-                .font(.ui(.footnote).weight(.medium))
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.steady(.plain))
-            .textCase(nil)
-            .help("打开该会话并定位到原消息")
-        } else {
-            sectionTitle(L("手动添加"))
-        }
     }
 
     private func sectionTitle(_ text: String) -> some View {
@@ -374,9 +358,29 @@ struct TodosView: View {
         HStack(spacing: 8) {
             sectionTitle(L("agent 的待办 · 它会自己处理")).lineLimit(1)
             Spacer(minLength: 8)
+            let stale = all.filter(Self.isStale).count
+            if stale > 0 {
+                // 收起久未更新的：确认后全部标为已完成（agent 那边 todo list 也会看到）
+                Button { confirmStale = true } label: {
+                    Text(L("收起久未更新的 %lld 条", count: stale)).font(.ui(.footnote).weight(.medium)).foregroundStyle(Theme.claude)
+                }
+                .buttonStyle(.steady(.plain))
+                .textCase(nil)
+            }
             if all.count > 1 || !isDefaultView { viewMenu(all) }
         }
     }
+
+    /// 3 天以上没更新、还没做完的 agent 待办（记下、开始、进度都算更新）
+    static func isStale(_ item: TodoItem) -> Bool {
+        !item.done && staleDays(item) >= 3
+    }
+
+    static func staleDays(_ item: TodoItem) -> Int {
+        Int(max(0, Date().timeIntervalSince1970 * 1000 - (item.updatedAt ?? item.createdAt)) / 86_400_000)
+    }
+
+    private var staleAgentTasks: [TodoItem] { model.todos.items.filter { $0.agentTask && Self.isStale($0) } }
 
     private func agentGroupHeader(_ group: AgentGroup) -> some View {
         HStack(spacing: 6) {
@@ -485,6 +489,11 @@ struct TodosView: View {
                         if let where_ { Text(verbatim: "·"); Text(L("「%@」", where_)).lineLimit(1) }
                         Text(verbatim: "·")
                         Text(Format.listTime(item.updatedAt ?? item.createdAt))
+                        if Self.isStale(item) {
+                            // 很久没动了：多半早做完 / 过期了，agent 没勾（标出来，组头可以一键收起）
+                            Text(verbatim: "·")
+                            Text(L("%lld 天没更新", count: Self.staleDays(item))).foregroundStyle(.orange)
+                        }
                     }
                     .font(.ui(.caption))
                     .foregroundStyle(.tertiary)

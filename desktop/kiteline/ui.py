@@ -201,7 +201,7 @@ class Console:
     # 客户端设置窗口能改的配置项：键 → 校验（不在表里的一律不认）
     CONFIG_KEYS = {
         "notifyOnNeedsAttention": bool, "notifyOnConclusion": bool,   # 存在配置顶层（同 Mac 版）
-        "remindWaiting": bool, "autoCloseIdle": bool, "hostedTipOff": bool, "submitOnSend": bool,
+        "remindWaiting": bool, "autoCloseIdle": bool, "hostedTipOff": bool, "hostedLocal": bool, "submitOnSend": bool,
         "digestTime": "time", "morningTime": "time", "quietStart": "time", "quietEnd": "time",
         "voiceLocale": ("zh-CN", "zh-HK", "zh-TW", "en-US"),
         "relayURL": "url", "installOpenCodePlugin": bool, "usageStats": bool, "installAgentSkill": bool,

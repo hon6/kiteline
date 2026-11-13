@@ -29,7 +29,7 @@ struct SourceConfig: Codable, Equatable, Identifiable {
     var pathPrefixes: [String] = []
     var enabled: Bool = true
     /// 这台远端电脑上的新任务、恢复会话不开 VS Code，在那台电脑上后台运行 Claude Code（见 Hosted.swift）。
-    /// 按设备开，默认关：用户检测过这台的出口、看过结果点确认才开
+    /// 按设备开，默认关：用户检测过这台的出口、看过结果点确认才开。本机来源不看这项，看 MobileConfig.hostedLocal（默认开）
     var hostedOn: Bool = false
 
     // kiteline 专用：哪台电脑（PeerComputer.id）、那台电脑上的哪个来源（来源列表由 PeerComputers 按对方报的自动增删）
@@ -96,7 +96,7 @@ enum ConfigKey: String, CodingKey {
     // 手机访问
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
-    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff
+    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal
     case quietStart, quietEnd, mutedSessions, pinnedSessions, markedSessions, myName, avatar, remoteEnabled, relayURL, watch, usageStats
     // 旧版扁平字段
     case watchedPathPrefixes
@@ -145,6 +145,9 @@ struct MobileConfig: Codable, Equatable {
     /// 「支持后台运行 Claude Code」的提示（会话页、来源页）：勾了「不再提示」就不再显示（各端共用）。
     /// 开关本身按设备，见 SourceConfig.hostedOn（先前那版是这里一个默认开的 hostedRemote，那时的值不算数）
     var hostedTipOff: Bool = false
+    /// 这台电脑自己的项目（本机来源）：新任务、恢复会话在后台运行 Claude Code，不打开 VS Code。默认开（11-13）；
+    /// 远端电脑仍按设备开，见 SourceConfig.hostedOn。起不来（没装、没走完首次设置、读不了项目文件夹、网络设置对不上）照旧开 VS Code
+    var hostedLocal: Bool = true
     /// 免打扰时段（"HH:mm"，可跨午夜）：这段时间「有结论了 / 发来图片 / 定时任务」不推到锁屏，「需要你确认」和花费提醒照推；空 = 不启用
     var quietStart: String = "23:00"
     var quietEnd: String = "08:00"
@@ -254,6 +257,7 @@ struct MobileConfig: Codable, Equatable {
         remindWaiting = flag(.remindWaiting, true)
         autoCloseIdle = flag(.autoCloseIdle, true)
         hostedTipOff = flag(.hostedTipOff, false)
+        hostedLocal = flag(.hostedLocal, true)
         quietStart = text(.quietStart, "23:00")
         quietEnd = text(.quietEnd, "08:00")
         mutedSessions = (try? c.decodeIfPresent([String].self, forKey: .mutedSessions)) ?? nil ?? []

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import CryptoKit
 
 /// 设置、通知、项目详情、定时任务这些页面用到的接口数据（和手机网页版同一套接口）
 
@@ -431,6 +432,46 @@ enum Offline {
 
     nonisolated static func removeChat(_ key: String) {
         try? FileManager.default.removeItem(at: chatURL(key))
+    }
+
+    // MARK: 各页的数据（项目、用量、今日动态、历史会话、设置里的电脑和设备……）
+
+    /// 接口原样回的 JSON 存一份（见 MacAPI.getCaching）：下次进页面先显示它，不是空白转圈。
+    /// 和对话一样放 offline 目录（不进备份、断开配对时一起清掉）；演示模式不存
+    nonisolated static func savePage(_ key: String, _ data: Data) {
+        #if !KITELINE_MAC
+        if Demo.active { return }
+        #endif
+        let url = pageURL(key)
+        Task.detached(priority: .utility) {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    nonisolated static func loadPage(_ key: String) -> Data? {
+        #if !KITELINE_MAC
+        if Demo.active { return nil }
+        #endif
+        return try? Data(contentsOf: pageURL(key))
+    }
+
+    /// 启动时清掉 14 天没再写过的页面缓存：按日期取的（今日动态带当天 0 点）每天一个新文件，不清会一直攒
+    nonisolated static func prunePages(olderThan days: Double = 14) {
+        Task.detached(priority: .background) {
+            let cutoff = Date().addingTimeInterval(-days * 86400)
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for file in files where file.lastPathComponent.hasPrefix("page-") {
+                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                if modified < cutoff { try? FileManager.default.removeItem(at: file) }
+            }
+        }
+    }
+
+    nonisolated private static func pageURL(_ key: String) -> URL {
+        // 接口 + 参数可能很长、带斜杠：取个摘要当文件名
+        let digest = Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return folder.appendingPathComponent("page-\(digest).json")
     }
 
     nonisolated private static var folder: URL {

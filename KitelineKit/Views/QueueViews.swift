@@ -84,12 +84,22 @@ struct QueueStrip: View {
             editor(row)
         } else {
             HStack(spacing: 2) {
-                Text(row.text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " "))
-                    .font(.ui(.subheadline))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.trailing, 6)
+                HStack(spacing: 6) {
+                    Text(row.text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " "))
+                        .font(.ui(.subheadline))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // 斜杠命令（/effort、/model……）Claude Code 只在一轮做完后执行，插不进这一轮（11-13 反馈「是不是要等会话结束才生效」）
+                    if Self.isCommand(row.text) {
+                        Text(L("这一轮结束后执行"))
+                            .font(.ui(.caption))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 6)
                 if row.editable {
                     icon("arrow.up", L("上移"), disabled: index == 0) { act(row, "move", dir: -1) }
                     icon("arrow.down", L("下移"), disabled: index == count - 1) { act(row, "move", dir: 1) }
@@ -151,6 +161,11 @@ struct QueueStrip: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// 斜杠命令：「/」后面紧跟命令名，再是空白或结尾（开头是路径的「/Users/…」不算）
+    static func isCommand(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).range(of: #"^/[\w:.-]+(\s|$)"#, options: .regularExpression) != nil
     }
 
     private func icon(_ symbol: String, _ label: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {

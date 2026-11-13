@@ -207,10 +207,17 @@ public sealed class PeerOverlay : Control
     {
         IsHitTestVisible = false;
         ClipToBounds = true;
-        timer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) => Tick());
-        AttachedToVisualTree += (_, _) => { PeerBoard.Shared.Changed += Refresh; PeerPrefs.Changed += Refresh; Refresh(); };
-        DetachedFromVisualTree += (_, _) => { PeerBoard.Shared.Changed -= Refresh; PeerPrefs.Changed -= Refresh; timer.Stop(); };
+        // 帧率跟着 Motion 走（客户端占的处理器高了自动降）；画面按当前时间算，帧率变了快慢不变
+        timer = new DispatcherTimer(TimeSpan.FromMilliseconds(33 * Motion.Slow), DispatcherPriority.Render, (_, _) => Tick());
+        AttachedToVisualTree += (_, _) =>
+        {
+            PeerBoard.Shared.Changed += Refresh; PeerPrefs.Changed += Refresh; Motion.Changed += Paced;
+            Paced(); Motion.Watch(); Refresh();
+        };
+        DetachedFromVisualTree += (_, _) => { PeerBoard.Shared.Changed -= Refresh; PeerPrefs.Changed -= Refresh; Motion.Changed -= Paced; timer.Stop(); };
     }
+
+    void Paced() => timer.Interval = TimeSpan.FromMilliseconds(33 * Motion.Slow);
 
     /// 侧栏重排、往来有变化：看要不要开始动
     public void Refresh()

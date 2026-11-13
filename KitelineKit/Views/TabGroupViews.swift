@@ -140,9 +140,11 @@ struct ListTabs: View {
 
     @Binding var selection: String
     let tabs: [Tab]
+    /// 占满宽度、几格平分（iPhone Tab 栏里贴在标题栏下面那一排，11-13）；不给就是按字宽排在左边
+    var fill = false
 
     var body: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: fill ? 0 : 18) {
             ForEach(tabs, id: \.id) { tab in
                 let on = selection == tab.id
                 Button {
@@ -152,20 +154,25 @@ struct ListTabs: View {
                     HStack(spacing: 4) {
                         Text(tab.title).font(.ui(.headline).weight(on ? .semibold : .regular))
                             .foregroundStyle(on ? Color.primary : Color.secondary)
-                        Text("\(tab.count)").font(.ui(.subheadline).monospacedDigit()).foregroundStyle(.tertiary)
+                        // 数字用次要色：原来的三级灰在深色下看不清（11-13）；占满宽度那种（iPhone Tab 栏里）不写数字，嫌乱
+                        if !fill {
+                            Text("\(tab.count)").font(.ui(.subheadline).monospacedDigit())
+                                .foregroundStyle(on ? Color.primary.opacity(0.75) : Color.secondary)
+                        }
                     }
                     .padding(.vertical, 6)
-                    .overlay(alignment: .bottom) { Capsule().fill(on ? Theme.claude : .clear).frame(height: 2.5) }
+                    .overlay(alignment: .bottom) { Capsule().fill(on ? Theme.claude : .clear).frame(width: fill ? 28 : nil, height: 2.5) }
                     .overlay(alignment: .topTrailing) {
                         if tab.alert { Circle().fill(Color.orange).frame(width: 7, height: 7).offset(x: 6, y: 3) }
                     }
+                    .frame(maxWidth: fill ? .infinity : nil)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .fixedSize()
+        .fixedSize(horizontal: !fill, vertical: true)
     }
 }
 
@@ -578,6 +585,17 @@ struct TabGroupEditor: View {
     }
 }
 
+/// 这台设备上显示不显示会话组：iPhone 上不显示（11-13：会话组是为了多列分屏，手机上没法多列），iPad、Mac 照旧
+enum TabGroupDevice {
+    static var shows: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom != .phone
+        #else
+        true
+        #endif
+    }
+}
+
 /// 会话长按菜单里的「添加到标签组 ▸」：各组（已在组里的打勾，点了移出）、新建标签组
 struct TabGroupSessionMenu: View {
     let key: String
@@ -586,7 +604,7 @@ struct TabGroupSessionMenu: View {
 
     var body: some View {
         let shared = model.tabGroupShared
-        if shared.supported {
+        if shared.supported, TabGroupDevice.shows {
             Menu {
                 ForEach(shared.items) { group in
                     let inside = group.keys.contains(key)
