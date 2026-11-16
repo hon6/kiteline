@@ -8,6 +8,8 @@
 （Windows 敲命令面板，Linux 由配套扩展直接执行）；连接断了就立即重连。
 要打开 claude.ai 的 Artifact 链接时弹的「是否要 Code 打开外部网站？」不提醒，直接替用户取消（见 artifact_dialog）；
 投递时焦点不在 Claude 输入框、消息粘进了终端弹的「是否确实要将 3 行文本粘贴到终端?」同样取消（见 stray_paste_dialog）。
+Claude Code 扩展问「Trust this folder in Claude Code?」时，用户在这个文件夹里用过 Claude（那台电脑上有它的会话记录）、
+或者是 Kiteline 刚替用户打开的项目，就替他点「Trust folder」（见 folder_trust、decide_trust）；陌生文件夹照常提醒、留给用户决定。
 和 Mac 版同一套接口：state 里的 alerts、POST /api/alerts/reconnect。
 """
 
@@ -175,6 +177,59 @@ def stray_paste_dialog(entry):
     return any(next((line.strip() for line in text.splitlines() if line.strip()), "").startswith(head) for text in pasted)
 
 
+def folder_trust(entry):
+    """Claude Code 扩展（2.1.325 起）开会话前问的「Trust this folder in Claude Code?」：返回（文件夹, 「Trust folder」按钮），不是返回 None。
+    说明的第一行是文件夹路径（仓库里的子文件夹后面跟着「This folder is part of the repository at …」）"""
+    texts = entry.get("texts") or []
+    if not any("Trust this folder in Claude Code" in t for t in texts):
+        return None
+    found = buttons(entry, {"trust folder"})
+    if not found:
+        return None
+    for text in texts:
+        line = (text.strip().splitlines() or [""])[0].split("  This folder is part")[0].strip()
+        if line.startswith(("/", "~")) or re.match(r"^[A-Za-z]:\\", line):
+            return line, found[0]
+    return None
+
+
+def decide_trust(app, directory, place):
+    """要不要替用户信任这个文件夹（同 Mac 版 EditorAlerts.decideTrust）：Kiteline 刚替用户打开的项目（就是它或它的上级文件夹），
+    或者那台电脑上有这个文件夹的 Claude 会话记录（用户在这里用过 Claude），就信任；问不到、陌生的文件夹留给用户决定。
+    远端窗口（「[SSH: 主机]」）问那台机器的 watcher，本地窗口问本机的"""
+    folder = directory.rstrip("/\\") or directory
+    if delivery.recently_opened(folder):
+        log.write("信任框：%s 是 Kiteline 刚替用户打开的项目" % folder)
+        return True
+    with app.store.lock:
+        sources = [s for s in app.store.sources.values() if s.live]
+    match = re.search(r"\[SSH: ([^\]]+)\]", place or "")
+    if match:
+        shown = match.group(1).strip().lower()
+        ssh = [s for s in sources if s.kind == "ssh"]
+
+        def host(s):
+            raw = str(s.config.get("sshHost") or "").lower()
+            return raw, raw.split("@")[-1]
+        same = [s for s in ssh if shown in host(s) or shown.split("@")[-1] in host(s)]
+        candidates = same or ssh
+    elif remote_place(place or ""):
+        candidates = []   # WSL、开发容器这类：Kiteline 没有对应的来源
+    else:
+        candidates = [s for s in sources if s.kind == "local"]
+    for source in candidates:
+        try:
+            reply = source.request({"cmd": "folder_used", "dir": folder}, timeout=8)
+        except Exception as exc:  # noqa: BLE001  旧版 watcher 不认这个命令、连接断了：当没用过
+            log.write("信任框：问 %s 失败：%s" % (source.name, exc))
+            continue
+        if isinstance(reply, dict) and reply.get("used"):
+            log.write("信任框：%s 上有 %s 的 %s 份 Claude 会话记录" % (source.name, folder, reply.get("sessions")))
+            return True
+    log.write("信任框：%s 没有 Claude 会话记录，留给用户决定" % folder)
+    return False
+
+
 def auto_cancel(entry):
     """替用户按掉的框：要打开 Artifact 链接的（artifact）、投递时粘进了终端的（paste）；不是返回 None"""
     if artifact_dialog(entry):
@@ -236,6 +291,7 @@ class Alerts:
         self._dialogs = {}           # 对话框的键 → {"first", "owner", "place", "texts", "buttons", "panel"}（读过一次就记着；键见 open_dialogs）
         self._dialog_ids = {}        # 提示的 id → 对话框的键（手机上点「尝试重连」时找回是哪个框）
         self._dialog_notified = set()
+        self._trust = {}             # 「信任此文件夹」框的键 → 结论（None = 还在问）
         self._ever_live = set()
         self._down_since = {}
         self._notified = set()       # 推过断线的来源：连回来时说一声
@@ -267,6 +323,8 @@ class Alerts:
         for key in list(self._dialogs):
             if key not in seen:
                 self._dialogs.pop(key)
+        for key in [k for k in self._trust if k not in seen]:
+            self._trust.pop(key, None)
         result = []
         for key, (owner, place, read) in seen.items():
             entry = self._dialogs.setdefault(key, {"first": now, "owner": owner, "place": place})
@@ -279,6 +337,18 @@ class Alerts:
                 entry.update(info)
                 cancel_artifact_dialog(key, entry, kind)
                 continue
+            trust = folder_trust(info)
+            if trust:
+                entry.update(info)
+                if self._trust.get(key) is True:
+                    click(key, entry, trust[1])
+                    if not entry.get("trusted"):
+                        entry["trusted"] = True
+                        log.write("已替用户信任文件夹（Claude Code 的「Trust this folder」）：%s %s" % (entry.get("place") or "VS Code", trust[0]))
+                    continue
+                if key not in self._trust:
+                    self._trust[key] = None
+                    threading.Thread(target=self._decide_trust, args=(key, trust[0], entry.get("place") or ""), daemon=True).start()
             if now - entry["first"] < SETTLE:
                 continue
             entry.update(info)
@@ -286,6 +356,19 @@ class Alerts:
                 continue   # 打开 / 保存面板：人就在电脑前操作
             result.append(self._dialog_alert(key, entry))
         return result
+
+    def _decide_trust(self, key, directory, place):
+        try:
+            yes = decide_trust(self.app, directory, place)
+        except Exception as exc:  # noqa: BLE001
+            log.write("信任框判断出错：%s" % exc)
+            yes = False
+        if key in self._trust:
+            self._trust[key] = yes
+            entry = self._dialogs.get(key)
+            trust = folder_trust(entry) if entry and "texts" in entry else None
+            if yes and trust:   # 马上按，不等下一拍（下一拍框还在会再按一次）
+                click(key, entry, trust[1])
 
     def _dialog_alert(self, key, entry):
         texts = entry.get("texts") or []

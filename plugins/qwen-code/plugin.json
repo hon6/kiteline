@@ -55,6 +55,6 @@
  },
  "limitsNote": "Qwen Code 的免费额度已于 2026 年 4 月停止；阿里云百炼 Coding Plan 的用量只能在阿里云控制台查看，没有查询接口，「今日用量」中不显示",
  "limitsNoteEn": "Qwen Code's free quota ended in April 2026, and Alibaba Cloud Model Studio Coding Plan usage can only be viewed in the Alibaba Cloud console (no usage API), so it isn't shown under Today's usage",
- "notes": "用量统计（「今日用量」和用量页的 token，按模型、项目、Agent 分）计入 Qwen Code；Qwen Code 不记录花费，只统计 token。",
- "notesEn": "Usage stats (tokens in Today’s Usage and on the Usage page, by model, project and agent) now include Qwen Code. Qwen Code doesn't record spend, so only tokens are counted."
+ "notes": "新建任务时可以选 Qwen Code，由 Kiteline 在后台运行（Mac、Linux 电脑上的项目），不用先在 tmux 里启动也能从手机回复和中断；它已结束的会话也可以直接发消息接着进行。需要电脑上的 Kiteline 为 Mac 3.49.36、Windows / Linux 1.0.41 及以上。",
+ "notesEn": "Choose Qwen Code when starting a new task and Kiteline runs it in the background (projects on Mac and Linux computers), so you can reply and interrupt from your phone without starting it in tmux first; you can also message its finished sessions to continue them. Requires Kiteline 3.49.36 on Mac or 1.0.41 on Windows / Linux, or later."
 }

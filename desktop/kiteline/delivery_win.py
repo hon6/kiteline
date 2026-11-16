@@ -485,6 +485,7 @@ def _focus_session(record):
         time.sleep(1.0)   # 刚写进设置的，VS Code 要一会儿才读到
     # 注意不能带 prompt 预填：会话标签已经打开时扩展只把它调到前面，提示「Your prompt was not applied」，内容不会填进去
     link = delivery.editor_link(record.snap.get("sessionId"), scheme)
+    delivery.note_opened(record.snap.get("cwd"))   # 扩展接着问「信任此文件夹」的话替用户答（见 alerts.decide_trust）
     log.write("打开 %s://anthropic.claude-code/open（会话 %s）" % (scheme, record.snap.get("name")))
     os.startfile(link)   # noqa: S606（ShellExecute 打开自定义协议）
     return True, not trusted

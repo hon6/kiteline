@@ -1107,6 +1107,7 @@ enum Delivery {
 
     private static func openSessionLink(record: SessionRecord, prompt: String?, scheme: String, after delay: TimeInterval,
                                         completion: @escaping (Bool) -> Void) {
+        EditorAlerts.shared.noteOpened(cwd: record.snapshot.cwd)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             var components = URLComponents()
             components.scheme = scheme

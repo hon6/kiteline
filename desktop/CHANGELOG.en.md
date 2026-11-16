@@ -1,5 +1,16 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.43 (2026-11-16)
+
+### Improvements
+
+- **Claude Code's "Trust this folder?" prompt is now handled for you**: Newer versions of the Claude Code extension ask whether to trust the project folder before a session opens, and nothing continues until someone answers, so it could stay stuck while you're away from the computer. If you have used Claude Code in that folder before, or you just started a task or opened a session there from your phone, Kiteline now answers "Trust" for you. Folders you have never used are still left for you to decide, and you'll get a reminder.
+- **When Claude Code can't run in the background, the session page now explains why and what to do**: With background running turned on, if Claude Code can't start in the background on a computer (for example, its command line hasn't finished first-time setup, it can't reach Claude, Kiteline isn't allowed to read the project folder, or the project folder can't be found), Kiteline opens the session in VS Code instead. Previously this was only mentioned briefly after sending and was easy to miss. Now the top of that session's page shows the cause and how to fix it; once it's fixed, tap Retry to move the session to the background.
+
+### Bug Fixes
+
+- **Fixed phones and other computers being unable to connect when the computer name contains non-English characters**: When the computer name (for example, one written in Chinese) contained such characters, Kiteline could not create the certificate for its secure local connection, so neither phones nor other Kiteline computers could connect. Connections now work normally.
+
 ## 1.0.42 (2026-11-14)
 
 ### Bug Fixes

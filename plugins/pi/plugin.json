@@ -63,8 +63,8 @@
  ],
  "speaker": "pi",
  "caps": [],
- "notes": "首个版本：查看 pi 的会话和完整对话，在 tmux 中运行时可从手机回复、中断和关闭会话。",
- "notesEn": "First release: view pi sessions and full conversations; reply, interrupt and close sessions from your phone when pi runs in tmux.",
+ "notes": "新建任务时可以选 pi，由 Kiteline 在后台运行（Mac、Linux 电脑上的项目），不用先在 tmux 里启动也能从手机回复和中断；它已结束的会话也可以直接发消息接着进行。需要电脑上的 Kiteline 为 Mac 3.49.36、Windows / Linux 1.0.41 及以上。",
+ "notesEn": "Choose pi when starting a new task and Kiteline runs it in the background (projects on Mac and Linux computers), so you can reply and interrupt from your phone without starting it in tmux first; you can also message its finished sessions to continue them. Requires Kiteline 3.49.36 on Mac or 1.0.41 on Windows / Linux, or later.",
  "gaps": [
   {
    "kind": "unsupported",

@@ -68,6 +68,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     var queue: [QueuedItem]? = nil
     /// 远端电脑上、在 VS Code 里跑的 Claude Code，能转到后台运行（会话页提示「支持后台托管」，见 HostedViews.swift）
     var hostable: Bool
+    /// 所在电脑开着后台运行、最近一次却没起来（改在 VS Code 中打开了）：原因和办法（会话页顶上说，见 HostedViews.swift）；老版本电脑端没有
+    var hostedIssue: HostedIssue? = nil
     /// 最后一次在任何一端（这台手机、Mac、别的手机）看过这个会话的时间（毫秒）：「新消息」按它和本机记的取较晚的算；老版本电脑端没有
     var viewedAt: Double?
     /// 最近一轮是别的会话来信引起的（会话之间的往来、群消息）：不算给你的新消息
@@ -90,7 +92,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case key, title, name, sourceId, sourceName, sourceKind, activity, activityText, blocking, reason, preview
         case pendingTool, canReply, cwd, updatedAt, startedAt, usage, error, effort, ultracode, permissionMode, cwdShort, subagents, terminals
-        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable, viewedAt, fromPeer, queue
+        case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable, hostedIssue, viewedAt, fromPeer, queue
     }
 
     init(from decoder: Decoder) throws {
@@ -131,6 +133,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         stage = ((try? c.decodeIfPresent(StageInfo.self, forKey: .stage)) ?? nil).flatMap { $0.valid ? $0 : nil }
         goal = ((try? c.decodeIfPresent(GoalInfo.self, forKey: .goal)) ?? nil).flatMap { $0.valid ? $0 : nil }
         hostable = ((try? c.decodeIfPresent(Bool.self, forKey: .hostable)) ?? nil) ?? false
+        hostedIssue = (try? c.decodeIfPresent(HostedIssue.self, forKey: .hostedIssue)) ?? nil
         viewedAt = try? c.decodeIfPresent(Double.self, forKey: .viewedAt)
         fromPeer = ((try? c.decodeIfPresent(Bool.self, forKey: .fromPeer)) ?? nil) ?? false
     }
@@ -163,6 +166,18 @@ struct SourceInfo: Decodable, Hashable {
     var status: String?
     /// 这台能后台运行 Claude Code 时才有：on / off（按设备开，见 HostedViews.swift）；本机、Windows、老版本电脑端没有
     var hosted: String?
+    /// 这台最近一次后台启动 Claude Code 没成功的原因（开着后台运行时才有）
+    var hostedIssue: HostedIssue?
+}
+
+/// 后台启动 Claude Code 没成功的原因（电脑端 Hosted.classify / 电脑端 hosted_issue 给）：reason、fix 是整句中文，按表翻译；detail 是原始报错（路径等），不翻译
+struct HostedIssue: Decodable, Hashable {
+    var kind: String
+    var reason: String
+    var fix: String
+    var detail: String?
+    /// 秒
+    var at: Double
 }
 
 struct Me: Decodable, Hashable {

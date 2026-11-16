@@ -13,6 +13,8 @@ import KitelineKit
 /// 有人正在用电脑时不推送（框就在他眼前），手机列表顶上照样显示，问题消失就撤掉。
 /// 要打开 claude.ai 的 Artifact 链接时弹的「是否要 Code 打开外部网站？」不提醒，直接替用户取消（见 Dialog.artifactLink）；
 /// 投递时焦点不在 Claude 输入框、消息粘进了终端弹的「是否确实要将 3 行文本粘贴到终端?」同样取消（见 Dialog.strayPaste）。
+/// Claude Code 扩展问「Trust this folder in Claude Code?」时，用户在这个文件夹里用过 Claude（那台电脑上有它的会话记录）、
+/// 或者是 Kiteline 刚替用户打开的项目，就替他点「Trust folder」（见 Dialog.folderTrust、decideTrust）；陌生文件夹照常提醒、留给用户决定。
 final class EditorAlerts {
     static let shared = EditorAlerts()
 
@@ -62,6 +64,20 @@ final class EditorAlerts {
             cancel != nil && texts.contains(where: EditorAlerts.isArtifactLink)
         }
 
+        /// Claude Code 扩展（2.1.325 起）开会话前问的「Trust this folder in Claude Code?」：（文件夹, 「Trust folder」按钮）。
+        /// 第二段说明的第一行是文件夹路径（在仓库里的子文件夹后面跟着「This folder is part of the repository at …」）
+        var folderTrust: (directory: String, button: AXUIElement)? {
+            guard texts.contains(where: { $0.contains("Trust this folder in Claude Code") }),
+                  let button = buttons.first(where: { EditorAlerts.plain($0.title) == "trust folder" })?.element else { return nil }
+            for text in texts {
+                guard let line = text.components(separatedBy: .newlines).first?.components(separatedBy: "  This folder is part")
+                    .first?.trimmingCharacters(in: .whitespaces), line.count > 1 else { continue }
+                let windowsPath = line.count > 2 && line.dropFirst().hasPrefix(":\\")
+                if line.hasPrefix("/") || line.hasPrefix("~") || windowsPath { return (line, button) }
+            }
+            return nil
+        }
+
         /// Kiteline 投递时焦点不在 Claude 输入框、粘进了终端：VS Code 弹「是否确实要将 3 行文本粘贴到终端?」（多行才弹），
         /// 预览是前三行、每行前 30 个字（长的带「…」）。预览对得上刚投递的话才算，用户自己往终端里粘的不管
         func strayPaste(of pasted: [String]) -> Bool {
@@ -105,6 +121,10 @@ final class EditorAlerts {
     private var timer: DispatchSourceTimer?
     /// 替用户取消过的框（只在 queue 上读写）：按了没关的下一拍再按，日志只记一次
     private var cancelled: Set<String> = []
+    /// 「信任此文件夹」框：问过的（框 id → 结论，nil = 还在问；只在 queue 上读写）
+    private var trustAnswers: [String: Bool?] = [:]
+    /// Kiteline 最近替用户打开的项目（新任务、打开会话；只在主线程读写）：这几分钟里弹的信任框直接信任
+    private var openedProjects: [String: Date] = [:]
     /// Kiteline 最近一分钟往 VS Code 里粘过的话（只在 queue 上读写）：粘进了终端时认得出它弹的框（见 Dialog.strayPaste）
     private var recentPastes: [(text: String, at: Date)] = []
     /// 下面这些只在主线程读写
@@ -262,12 +282,41 @@ final class EditorAlerts {
         }
     }
 
-    /// 后台队列：替用户按掉的框——要打开 Artifact 链接的、投递时粘进了终端的（见 Dialog.strayPaste），返回剩下要提醒的
+    /// 后台队列：替用户按掉的框——要打开 Artifact 链接的、投递时粘进了终端的（见 Dialog.strayPaste），
+    /// 以及判断下来可以替用户信任的「信任此文件夹」框（见 decideTrust），返回剩下要提醒的
     private func cancelAutomatic(in dialogs: [Dialog], pruning: Bool = true) -> [Dialog] {
-        if pruning { cancelled.formIntersection(dialogs.map(\.id)) }
+        if pruning {
+            cancelled.formIntersection(dialogs.map(\.id))
+            trustAnswers = trustAnswers.filter { id, _ in dialogs.contains { $0.id == id } }
+        }
         recentPastes = recentPastes.filter { Date().timeIntervalSince($0.at) < 60 }
         let pasted = recentPastes.map(\.text)
         return dialogs.filter { dialog in
+            if let trust = dialog.folderTrust {
+                switch trustAnswers[dialog.id] {
+                case .some(.some(true)):
+                    AXUIElementPerformAction(trust.button, kAXPressAction as CFString)
+                    if cancelled.insert(dialog.id).inserted {
+                        Log.write("已替用户信任文件夹（Claude Code 的「Trust this folder」）：\(dialog.window.isEmpty ? "VS Code" : dialog.window) \(trust.directory)")
+                    }
+                    return false
+                case .none:
+                    trustAnswers[dialog.id] = .some(nil)
+                    let id = dialog.id, window = dialog.window, pid = dialog.pid
+                    DispatchQueue.main.async {
+                        self.decideTrust(directory: trust.directory, window: window) { yes in
+                            self.queue.async {
+                                guard self.trustAnswers[id] != nil else { return }
+                                self.trustAnswers[id] = .some(yes)
+                                if yes { _ = self.cancelAutomatic(in: Self.scanDialogs(pids: [pid]), pruning: false) }
+                            }
+                        }
+                    }
+                    return true
+                default:
+                    return true
+                }
+            }
             let stray = !dialog.artifactLink && dialog.strayPaste(of: pasted)
             guard dialog.artifactLink || stray, let cancel = dialog.cancel else { return true }
             AXUIElementPerformAction(cancel, kAXPressAction as CFString)
@@ -293,6 +342,60 @@ final class EditorAlerts {
                 if Self.scanDialogs(pids: [pid]).count <= left.count { return true }
             }
             return false
+        }
+    }
+
+    // MARK: - 信任此文件夹
+
+    /// Kiteline 要替用户在这个项目里开会话（新任务、打开 / 恢复会话）时记一下（主线程）：接下来弹的信任框是这次操作引起的，
+    /// 用户在手机上选了这个项目，相当于已经同意（同后台运行的会话替用户答终端里的信任提问）
+    func noteOpened(cwd: String) {
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.noteOpened(cwd: cwd) }; return }
+        let now = Date()
+        openedProjects = openedProjects.filter { now.timeIntervalSince($0.value) < 300 }
+        openedProjects[cwd] = now
+    }
+
+    /// 主线程：要不要替用户信任这个文件夹。Kiteline 刚替用户打开的项目（就是它或它的上级文件夹），或者那台电脑上
+    /// 有这个文件夹的 Claude 会话记录（用户在这里用过 Claude），就信任；问不到、陌生的文件夹照常提醒，留给用户决定。
+    /// 远端窗口（标题带「[SSH: 主机]」）问那台机器的 watcher，本地窗口问本机的
+    private func decideTrust(directory: String, window: String, completion: @escaping (Bool) -> Void) {
+        let now = Date()
+        let folder = directory.hasSuffix("/") && directory.count > 1 ? String(directory.dropLast()) : directory
+        if openedProjects.contains(where: { now.timeIntervalSince($0.value) < 300 && ($0.key == folder || $0.key.hasPrefix(folder + "/")) }) {
+            Log.write("信任框：\(folder) 是 Kiteline 刚替用户打开的项目")
+            completion(true)
+            return
+        }
+        let store = AppState.shared.store
+        var candidates: [SourceConfig]
+        if let range = window.range(of: "[SSH: ") {
+            let shown = String(window[range.upperBound...].prefix { $0 != "]" })
+            let ssh = store.sourceConfigs.filter { $0.kind == .ssh }
+            let same = ssh.filter { WindowLocator.sameHost(shown, $0.sshHost ?? "", port: $0.sshPort) }
+            candidates = same.isEmpty ? ssh : same
+        } else if window.hasSuffix("]"), window.contains(" [") {
+            candidates = []   // WSL、开发容器这类：Kiteline 没有对应的来源
+        } else {
+            candidates = store.sourceConfigs.filter { $0.kind == .local }
+        }
+        let sources = candidates.compactMap { AppState.shared.source(withId: $0.id) }.filter { $0.state.isLive }
+        guard !sources.isEmpty else { completion(false); return }
+        var pending = sources.count, answered = false
+        for source in sources {
+            source.request(["cmd": "folder_used", "dir": folder], timeout: 8) { result in
+                pending -= 1
+                guard !answered else { return }
+                if case .success(let reply) = result, reply["used"] as? Bool == true {
+                    answered = true
+                    Log.write("信任框：\(source.config.displayName) 上有 \(folder) 的 \(reply["sessions"] as? Int ?? 0) 份 Claude 会话记录")
+                    completion(true)
+                } else if pending == 0 {
+                    answered = true
+                    Log.write("信任框：\(folder) 没有 Claude 会话记录，留给用户决定")
+                    completion(false)
+                }
+            }
         }
     }
 

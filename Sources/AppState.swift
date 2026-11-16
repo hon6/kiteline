@@ -424,6 +424,8 @@ final class AppState {
             if snap.fromPeer { item["fromPeer"] = true }
             if let usage = snap.usage { item["usage"] = usage.payload }
             if Hosted.hostable(record) { item["hostable"] = true }   // 能转到后台运行（会话页提示「支持后台托管」）
+            // 开着后台运行却起不来、改在 VS Code 中打开的：会话页顶上说原因和办法
+            if let issue = Hosted.issue(for: record) { item["hostedIssue"] = issue.payload }
             return item
         }
         let sourceList: [[String: Any]] = store.sourceConfigs.map { source in
@@ -432,6 +434,7 @@ final class AppState {
                                        "online": linkState.isLive, "status": linkState.shortLabel]
             // 这台能后台运行 Claude Code 时才带：on / off（远端按设备开，本机默认开，见 Hosted）
             if Hosted.capable(source) { item["hosted"] = Hosted.on(source.id) ? "on" : "off" }
+            if let issue = Hosted.issue(source.id) { item["hostedIssue"] = issue.payload }   // 最近一次后台启动没成功的原因
             return item
         }
         return [

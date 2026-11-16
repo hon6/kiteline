@@ -154,10 +154,13 @@ public sealed class ChatView : Grid
     void UpdateHostedTip()
     {
         var session = Session;
-        var signature = session is null ? "" : $"{session.Hostable}|{model.Sources.FirstOrDefault(s => s.Id == session.SourceId)?.Hosted}|{model.HostedTipOff}|{model.Connected}";
+        var signature = session is null ? "" : $"{session.Hostable}|{model.Sources.FirstOrDefault(s => s.Id == session.SourceId)?.Hosted}|{model.HostedTipOff}|{model.Connected}|{session.HostedIssue?.At}";
         if (signature == hostedSignature) return;
         hostedSignature = signature;
-        hostedTip.Child = session is not null && model.Connected ? HostedSetup.Tip(session) : null;
+        // 没开后台运行：提示能开；开着却没起来：说原因和办法（两种不会同时出现）
+        hostedTip.Child = session is not null && model.Connected
+            ? HostedSetup.Tip(session) ?? HostedSetup.IssueTip(session, () => { hostedSignature = null; hostedTip.Child = null; })
+            : null;
     }
 
     void Schedule()

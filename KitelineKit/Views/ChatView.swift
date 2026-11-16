@@ -278,7 +278,10 @@ struct ChatView: View {
                 VStack(spacing: 6) {
                     NetStrip()
                     SessionReader(slot: slot) { session in
-                        if let session { HostedTip(session: session) { showHosted = true } }
+                        if let session {
+                            HostedTip(session: session) { showHosted = true }
+                            HostedIssueTip(session: session) { showHosted = true }
+                        }
                     }
                     if let since = chat.newSince, !catchupDismissed {
                         CatchupPill(chat: chat, since: since, speaker: slot.speaker, expire: {

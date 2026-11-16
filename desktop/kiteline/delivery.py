@@ -230,6 +230,29 @@ def _backend():
     return delivery_bridge
 
 
+_opened_lock = threading.Lock()
+OPENED_PROJECTS = {}   # Kiteline 最近替用户打开的项目 → 时刻：这几分钟里 Claude Code 问「信任此文件夹」就替用户答（见 alerts.decide_trust）
+
+
+def note_opened(cwd):
+    """要替用户在这个项目里开会话（新任务、打开 / 恢复会话）时记一下：用户在手机上选了这个项目，相当于已经同意信任它"""
+    if not cwd:
+        return
+    now = time.time()
+    with _opened_lock:
+        for key in [k for k, at in OPENED_PROJECTS.items() if now - at > 300]:
+            OPENED_PROJECTS.pop(key, None)
+        OPENED_PROJECTS[cwd] = now
+
+
+def recently_opened(folder):
+    """folder 是 Kiteline 最近替用户打开的项目（或它的上级文件夹）"""
+    now = time.time()
+    with _opened_lock:
+        return any(now - at < 300 and (cwd == folder or cwd.startswith(folder.rstrip("/\\") + "/") or cwd.startswith(folder.rstrip("/\\") + "\\"))
+                   for cwd, at in OPENED_PROJECTS.items())
+
+
 def editor_link(session_id, scheme="vscode", prompt=None, shell_decodes=False):
     """扩展自带的 URI：切到这个会话的标签；带 prompt 时把内容预填进输入框（扩展只预填、不提交）。
     预填只对新开的面板有效（新任务、恢复已关闭的会话）：会话标签已经打开时扩展只把它调到前面，内容不会填进去。

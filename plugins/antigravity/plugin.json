@@ -92,8 +92,8 @@
  ],
  "speaker": "Antigravity",
  "caps": [],
- "notes": "Windows 上也能从手机回复、确认、回答提问、中断和关闭 Antigravity CLI 的会话（不用 tmux）。",
- "notesEn": "On Windows you can now reply, confirm, answer questions, interrupt and close Antigravity CLI sessions from your phone (no tmux needed).",
+ "notes": "新建任务时可以选 Antigravity CLI，由 Kiteline 在后台运行（Mac、Linux 电脑上的项目），不用先在 tmux 里启动也能从手机回复和中断；它已结束的会话也可以直接发消息接着进行。需要电脑上的 Kiteline 为 Mac 3.49.36、Windows / Linux 1.0.41 及以上。",
+ "notesEn": "Choose Antigravity CLI when starting a new task and Kiteline runs it in the background (projects on Mac and Linux computers), so you can reply and interrupt from your phone without starting it in tmux first; you can also message its finished sessions to continue them. Requires Kiteline 3.49.36 on Mac or 1.0.41 on Windows / Linux, or later.",
  "gaps": [
   {
    "kind": "unsupported",

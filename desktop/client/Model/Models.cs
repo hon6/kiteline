@@ -65,6 +65,8 @@ public sealed record SessionInfo
     public GoalInfo? Goal { get; init; }
     /// 远端电脑上、在 VS Code 里跑的 Claude Code，能转到后台运行（对话页提示「支持后台托管」，见 Views/HostedSetup.cs）
     public bool Hostable { get; init; }
+    /// 所在电脑开着后台运行、最近一次却没起来（改在 VS Code 中打开了）：原因和办法（对话页顶上说，见 Views/HostedSetup.cs）；老版本后台没有
+    public HostedIssue? HostedIssue { get; init; }
     /// 最后一次在任何一端看过这个会话的时间（毫秒，同 iOS 版 viewedAt）：「新消息」按它和本机记的取较晚的算
     public double? ViewedAt { get; init; }
     /// 最近一轮是别的会话来信引起的（会话之间的往来、群消息）：不算给你的新消息
@@ -136,6 +138,7 @@ public sealed record SessionInfo
             Stage = StageInfo.Parse(n.Get("stage")),
             Goal = GoalInfo.Parse(n.Get("goal")),
             Hostable = n.Bool("hostable") ?? false,
+            HostedIssue = HostedIssue.Parse(n.Get("hostedIssue")),
             ViewedAt = n.Num("viewedAt"),
             FromPeer = n.Bool("fromPeer") ?? false,
         };
@@ -253,6 +256,13 @@ public sealed record PendingOption(string Key, string Label, string Style)
 }
 
 /// Hosted：这台能后台运行 Claude Code 时才有，on / off（按设备开，见 Views/HostedSetup.cs）；本机、Windows、老版本后台没有
+/// 后台启动 Claude Code 没成功的原因（后台 hosted_issue / Mac 版 Hosted.classify 给）：Reason、Fix 是整句中文，按表翻译；Detail 是原始报错（路径等），不翻译
+public sealed record HostedIssue(string Kind, string Reason, string Fix, string? Detail, double At)
+{
+    public static HostedIssue? Parse(JsonNode? n) =>
+        n.Str("reason") is string reason ? new HostedIssue(n.Str("kind") ?? "other", reason, n.Str("fix") ?? "", n.Str("detail"), n.Num("at") ?? 0) : null;
+}
+
 public sealed record SourceInfo(string Id, string Name, string? Kind, bool Online, string? Status, string? Hosted = null)
 {
     public static SourceInfo? Parse(JsonNode? n) =>

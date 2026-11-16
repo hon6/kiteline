@@ -145,6 +145,7 @@ def _focus_session(record):
     link = delivery.editor_link(record.snap.get("sessionId"), scheme)
     opener = shutil.which("code") if scheme == "vscode" else None
     cmd = [opener, "--open-url", link] if opener else [shutil.which("xdg-open") or "xdg-open", link]
+    delivery.note_opened(record.snap.get("cwd"))   # 扩展接着问「信任此文件夹」的话替用户答（见 alerts.decide_trust）
     log.write("打开 %s://anthropic.claude-code/open（会话 %s）" % (scheme, record.snap.get("name")))
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True, not trusted

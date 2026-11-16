@@ -29,6 +29,52 @@ def hostable(record, source):
             and is_vscode(snap) and not snap.get("readOnly") and "hosted" in (getattr(source, "features", None) or ()))
 
 
+# 每台电脑最近一次后台启动 Claude Code 没成功的原因（已改在 VS Code 中打开）：来源 id → {kind, reason, fix, detail?, at}。
+# 会话页顶上照这个告诉用户为什么、怎么办（11-16 起，同 Mac 版 Hosted.issues）；起成功、改开关时清掉，一天后过期
+HOSTED_ISSUES = {}
+
+
+def hosted_issue(text):
+    """后台启动的报错 → 给用户看的原因和办法（同 Mac 版 Hosted.classify，整句写出来按表翻译）；本来就该开 VS Code 的回 None"""
+    text = str(text or "")
+    first = text.split("\n")[0]
+
+    def make(kind, reason, fix, detail=None):
+        item = {"kind": kind, "reason": reason, "fix": fix, "at": time.time()}
+        if detail:
+            item["detail"] = detail
+        return item
+    if (text.startswith("HOSTED_UNSUPPORTED") or text.startswith("HOSTED_OPEN") or "未知请求" in text or "离线" in text
+            or "未连接" in text):
+        return None
+    if "停在了需要操作的画面上" in text:
+        return make("login", "这台电脑上的 Claude Code 命令行还没有完成首次设置（停在登录或首次设置画面）",
+                    "请在这台电脑的终端中运行一次 claude，按提示完成首次设置（需要时登录），再点「重试」。")
+    if "Unable to connect to Anthropic" in text or "Checkingconnectivity" in text or "Checking connectivity" in text:
+        return make("network", "后台启动的 Claude Code 连接 Claude 服务超时，启动时的联网检查没有通过",
+                    "请在这台电脑的终端中运行一次 claude，确认能正常连接并完成首次设置；若终端中也连不上，请检查这台电脑的网络或代理设置。")
+    if text.startswith("HOSTED_NETWORK："):
+        return make("netcheck", "无法确认后台运行的 Claude Code 与 VS Code 中的使用同一套网络设置",
+                    "请在 VS Code 中打开一次 Claude Code 后再点「重试」，或在设置 → 来源中重新检测出口。", first[len("HOSTED_NETWORK："):])
+    if text.startswith("HOSTED_ACCESS："):
+        return make("access", "Kiteline 没有读取这个项目文件夹的权限",
+                    "请回到这台电脑，在系统弹出的提示中允许 Kiteline 访问该文件夹（或在系统设置 → 隐私与安全性 → 文件与文件夹中打开），再点「重试」。",
+                    first[len("HOSTED_ACCESS："):])
+    if text.startswith("HOSTED_NO_CLAUDE"):
+        return make("missing", "这台电脑上找不到 Claude Code 命令行",
+                    "请在这台电脑上安装 Claude Code（或在 VS Code 中安装 Claude Code 扩展），再点「重试」。")
+    if "目录不存在" in text:
+        return make("folder", "在这台电脑上找不到项目文件夹", "请确认项目文件夹存在、所在的磁盘或网络共享已挂载，再点「重试」。",
+                    first.replace("目录不存在：", ""))
+    return make("other", "Claude Code 在后台没有启动起来", "请在这台电脑的终端中运行一次 claude 查看具体情况，处理后再点「重试」。", first)
+
+
+def current_hosted_issue(source_id):
+    """这台最近一天内的后台启动问题（开关另看）"""
+    issue = HOSTED_ISSUES.get(source_id)
+    return issue if issue and time.time() - issue.get("at", 0) < 86400 else None
+
+
 def display_title(snap):
     title = snap.get("title")
     return title if title else snap.get("name", "")
@@ -285,6 +331,15 @@ class Store:
         with self.lock:
             return self.sources.get(source_id)
 
+    def _hosted_on(self, source_id, m):
+        """这台开没开后台运行 Claude Code（远端按设备 hostedOn，本机 hostedLocal 默认开）"""
+        source = self.sources.get(source_id)
+        if source is None:
+            return False
+        if source.kind == "local":
+            return bool(m.get("hostedLocal", True))
+        return any(e.get("id") == source_id and e.get("hostedOn") for e in self.cfg.sources)
+
     def state_payload(self, host, version, me, viewed_at=None):
         m = self.cfg.mobile
         with self.lock:
@@ -334,6 +389,11 @@ class Store:
             item["caps"] = caps_payload(snap) + ["term"]
             if hostable(record, self.sources.get(record.source_id)):
                 item["hostable"] = True   # 能转到后台运行（会话页提示「支持后台托管」）
+            # 开着后台运行却起不来、改在 VS Code 中打开的：会话页顶上说原因和办法
+            issue = current_hosted_issue(record.source_id)
+            if (issue and record.kind in ("ssh", "local") and not snap.get("hosted") and is_vscode(snap) and not snap.get("readOnly")
+                    and (snap.get("agent") or "claude-code") == "claude-code" and self._hosted_on(record.source_id, m)):
+                item["hostedIssue"] = issue
             if snap.get("terminals"):
                 item["terminals"] = snap["terminals"]
             # 新消息怎么算（各端，同 Mac）：最后一次在任何一端看过的时间；最近一轮是别的会话来信引起的不算给你的新消息
@@ -365,6 +425,8 @@ class Store:
                 # 能后台运行 Claude Code 才带：远端按设备开，本机默认开（hostedLocal）
                 on = m.get("hostedLocal", True) if s.kind == "local" else s.id in hosted_on
                 item["hosted"] = "on" if on else "off"
+                if on and current_hosted_issue(s.id):
+                    item["hostedIssue"] = current_hosted_issue(s.id)   # 最近一次后台启动没成功的原因
         return {
             "ok": True, "host": host, "version": version, "submitOnSend": m["submitOnSend"],
             "quickReplies": m["quickReplies"], "watch": m["watch"], "me": me, "muted": m["mutedSessions"],

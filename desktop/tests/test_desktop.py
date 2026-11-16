@@ -1426,6 +1426,9 @@ try:
     result = _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
     check("后台起不来：改开 VS Code，并说明原因", _hs_editor and "后台启动未成功：Claude Code 没有启动起来" in result["message"]
           and "XYZ" not in result["message"], result)   # 只带第一句，不带后面的画面
+    _issue = _app.HOSTED_ISSUES.get("srv") or {}
+    check("后台起不来：记下原因和办法（会话页顶上显示）", _issue.get("kind") == "login" and "首次设置" in _issue.get("reason", "")
+          and "claude" in _issue.get("fix", ""), _issue)
     _hs_editor.clear()
     # 停在要人操作的画面上（登录、首次设置）：这台先记 10 分钟，这期间的新任务直接开 VS Code，不再每次白等
     src = _HostSource({"sessionId": "new-2", "hosted": "x9", "submitted": True})
@@ -1436,6 +1439,20 @@ try:
     result = _app.launch_session("/srv/p", "再来一个", True, None, "ssh", "服务器", source=src)
     check("检测过出口（用户多半处理过了）：重新试后台", "srv" not in _app.HOSTED_BLOCKED and src.calls[-1].get("cmd") == "hosted_start" and not _hs_editor,
           (src.calls, _hs_editor))
+    check("后台起来了：清掉这台的「后台运行未成功」", "srv" not in _app.HOSTED_ISSUES, _app.HOSTED_ISSUES)
+    # 首次设置时的联网检查没过（11-15 192.168.1.11 实际遇到的）：也认出来、说清楚，并暂停一阵
+    src = _HostSource(RuntimeError("Claude Code 启动后退出了（退出码 1）：\n✻Checkingconnectivity...\nUnable to connect to Anthropic services"))
+    _app.launch_session("/srv/p", "做个功能", True, None, "ssh", "服务器", source=src)
+    _issue = _app.HOSTED_ISSUES.get("srv") or {}
+    check("联网检查没过：原因写明连不上 Claude 服务，并暂停后台 10 分钟", _issue.get("kind") == "network" and "srv" in _app.HOSTED_BLOCKED, _issue)
+    _sess = _Record("srv", "服务器", "ssh", {"sessionId": "v-1", "name": "v-1", "activity": "idle", "entrypoint": "claude-vscode", "cwd": "/srv/p"})
+    _store_probe = _app.Store.__new__(_app.Store)
+    _store_probe.sources = {"srv": type("S", (), {"kind": "ssh", "features": ("hosted",)})()}
+    _store_probe.cfg = type("C", (), {"sources": [{"id": "srv", "hostedOn": True}]})()
+    check("远端开着后台运行的判断（会话数据据此带上原因）", _store_probe._hosted_on("srv", {}) and _app.HOSTED_ISSUES.get("srv"), _sess)
+    _app.HOSTED_BLOCKED.pop("srv", None)
+    _app.HOSTED_ISSUES.pop("srv", None)
+    _hs_editor.clear()
     src = _HostSource(RuntimeError("HOSTED_ACCESS：Kiteline 尚未获准读取此文件夹，请在这台电脑上允许 Kiteline 访问它"))
     result = _app.launch_session("/srv/p", "做个功能", True, None, "local", "本机", source=src)
     check("读不了项目文件夹：改开 VS Code，并告诉用户原因", _hs_editor and "尚未获准读取此文件夹" in result["message"]

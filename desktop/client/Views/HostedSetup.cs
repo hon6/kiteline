@@ -141,6 +141,32 @@ public static class HostedSetup
         try { return new RegionInfo(code).DisplayName; } catch (ArgumentException) { return code; }
     }
 
+    /// 对话页顶上「知道了」收起过的问题（来源 id@时间）：只在这台电脑这次运行里记，下次起不来又会出现
+    static readonly HashSet<string> dismissedIssues = new();
+
+    /// 对话页顶上的提示：所在电脑开着后台运行，这次却没起来、改在 VS Code 中打开了——说清楚原因和怎么办（同 iOS 版 HostedIssueTip，11-16 起）。
+    /// 「重试」打开后台运行面板（能把当前会话转到后台）；「知道了」收起。不该显示时返回 null
+    public static Control? IssueTip(SessionInfo session, Action changed)
+    {
+        if (session.HostedIssue is not HostedIssue issue) return null;
+        var mark = $"{session.SourceId}@{(long)issue.At}";
+        if (dismissedIssues.Contains(mark)) return null;
+        Control Line(string label, string text) =>
+            Ui.H(6, Ui.Text(label, 11.5, FontWeight.SemiBold, "Text2"), Ui.Text(text, 11.5, lines: 4).Shrink());
+        var reason = L(issue.Reason) + (string.IsNullOrEmpty(issue.Detail) ? "" : $"（{issue.Detail}）");
+        var ok = new Tap(Ui.Text(L("知道了"), 11.5, color: "Text2"), () => { dismissedIssues.Add(mark); changed(); }, 6);
+        var retry = new Tap(Ui.Text(L("重试"), 11.5, FontWeight.SemiBold, "Added"), () => Open(session.SourceId, session.Key), 6);
+        var buttons = Ui.H(10, ok, retry);
+        buttons.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right;
+        var body = Ui.V(6,
+            Ui.H(8, Ui.Sym("exclamationmark.triangle", 13, "Orange"),
+                 Ui.Text(L("后台运行 Claude Code 未成功，此会话已改在 VS Code 中运行"), 12, FontWeight.SemiBold, lines: 2).Shrink()),
+            Line(L("原因"), reason), Line(L("解决"), L(issue.Fix)), buttons);
+        var box = Ui.Box(body, new Avalonia.Thickness(14, 10), "Glass", 14, "Separator", 0.5);
+        box.MaxWidth = 560;
+        return box;
+    }
+
     /// 对话页顶上的提示「当前会话支持后台托管 Claude」：所在设备没开后台运行时一直显示，点「不再提示」才不再出现（存在电脑上，各端一起）。
     /// 不该显示时返回 null
     public static Control? Tip(SessionInfo session)

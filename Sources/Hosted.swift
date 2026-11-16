@@ -36,6 +36,74 @@ enum Hosted {
     private(set) static var blocked: [String: (until: Date, reason: String)] = [:]
     static let blockedFor: TimeInterval = 600
 
+    /// 每台电脑最近一次后台启动 Claude Code 没成功的原因（已改在 VS Code 中打开）：会话页顶上照这个告诉用户为什么、怎么办
+    /// （11-16 反馈：「要在会话详情里显示什么原因无法使用，否则用户都不知道该怎么办」）。下次在那台起成功、关掉开关时清掉，一天后过期
+    struct Issue {
+        /// login（没走完首次设置）/ network（连不上 Claude 服务）/ netcheck（网络设置对不上）/ access（读不了文件夹）/
+        /// folder（项目文件夹不存在）/ missing（没装）/ other
+        var kind: String
+        var reason: String
+        var fix: String
+        /// 原始报错的第一行（路径这类，不翻译）
+        var detail: String?
+        var at: Date
+        var payload: [String: Any] {
+            var item: [String: Any] = ["kind": kind, "reason": reason, "fix": fix, "at": at.timeIntervalSince1970]
+            if let detail, !detail.isEmpty { item["detail"] = detail }
+            return item
+        }
+    }
+    private(set) static var issues: [String: Issue] = [:]
+
+    /// 这台电脑当前要告诉用户的后台运行问题（开着后台运行、一天内）
+    static func issue(_ sourceId: String) -> Issue? {
+        guard on(sourceId), let issue = issues[sourceId], Date().timeIntervalSince(issue.at) < 86_400 else { return nil }
+        return issue
+    }
+
+    /// 后台启动的报错 → 给用户看的原因和办法（整句写出来，英文按整句查表）；本来就该开 VS Code 的（不支持、离线、旧组件、会话正开在 VS Code 里）回 nil
+    static func classify(_ text: String) -> Issue? {
+        let first = text.split(separator: "\n").first.map(String.init) ?? text
+        func make(_ kind: String, _ reason: String, _ fix: String, _ detail: String? = nil) -> Issue {
+            Issue(kind: kind, reason: reason, fix: fix, detail: detail, at: Date())
+        }
+        if text.hasPrefix("HOSTED_UNSUPPORTED") || text.hasPrefix("HOSTED_OPEN") || text.contains("未知请求") || text.contains("离线") { return nil }
+        if text.contains("停在了需要操作的画面上") {
+            return make("login", "这台电脑上的 Claude Code 命令行还没有完成首次设置（停在登录或首次设置画面）",
+                        "请在这台电脑的终端中运行一次 claude，按提示完成首次设置（需要时登录），再点「重试」。")
+        }
+        if text.contains("Unable to connect to Anthropic") || text.contains("Checkingconnectivity") || text.contains("Checking connectivity") {
+            return make("network", "后台启动的 Claude Code 连接 Claude 服务超时，启动时的联网检查没有通过",
+                        "请在这台电脑的终端中运行一次 claude，确认能正常连接并完成首次设置；若终端中也连不上，请检查这台电脑的网络或代理设置。")
+        }
+        if text.hasPrefix("HOSTED_NETWORK：") {
+            return make("netcheck", "无法确认后台运行的 Claude Code 与 VS Code 中的使用同一套网络设置",
+                        "请在 VS Code 中打开一次 Claude Code 后再点「重试」，或在设置 → 来源中重新检测出口。", String(first.dropFirst("HOSTED_NETWORK：".count)))
+        }
+        if text.hasPrefix("HOSTED_ACCESS：") {
+            return make("access", "Kiteline 没有读取这个项目文件夹的权限",
+                        "请回到这台电脑，在系统弹出的提示中允许 Kiteline 访问该文件夹（或在系统设置 → 隐私与安全性 → 文件与文件夹中打开），再点「重试」。",
+                        String(first.dropFirst("HOSTED_ACCESS：".count)))
+        }
+        if text.hasPrefix("HOSTED_NO_CLAUDE") {
+            return make("missing", "这台电脑上找不到 Claude Code 命令行",
+                        "请在这台电脑上安装 Claude Code（或在 VS Code 中安装 Claude Code 扩展），再点「重试」。")
+        }
+        if text.contains("目录不存在") {
+            return make("folder", "在这台电脑上找不到项目文件夹", "请确认项目文件夹存在、所在的磁盘或网络共享已挂载，再点「重试」。",
+                        first.replacingOccurrences(of: "目录不存在：", with: ""))
+        }
+        return make("other", "Claude Code 在后台没有启动起来", "请在这台电脑的终端中运行一次 claude 查看具体情况，处理后再点「重试」。", first)
+    }
+
+    /// 记下 / 清掉某台的问题，刷新各端（会话页的提示跟着出现、消失）
+    static func setIssue(_ sourceId: String, _ issue: Issue?) {
+        guard issues[sourceId]?.at != issue?.at else { return }
+        issues[sourceId] = issue
+        if issue == nil { blocked[sourceId] = nil }   // 起成功了：暂停也不必了
+        DispatchQueue.main.async { KitelineModel.shared.refresh() }
+    }
+
     /// 那台电脑能不能后台运行（不是 Windows、watcher 是有这功能的版本）
     static func supported(_ sourceId: String) -> Bool {
         AppState.shared.source(withId: sourceId)?.hostFeatures.contains("hosted") == true
@@ -46,6 +114,13 @@ enum Hosted {
         let snap = record.snapshot
         return record.kind != .kiteline && snap.hosted == nil && snap.agentID == "claude-code" && snap.isVSCode
             && snap.readOnly != true && supported(record.sourceId)
+    }
+
+    /// 会话页顶上要不要说「后台运行未成功」：这台开着后台运行、最近起不来，而这个会话是在 VS Code 里跑的 Claude Code
+    static func issue(for record: SessionRecord) -> Issue? {
+        let snap = record.snapshot
+        guard record.kind != .kiteline, snap.hosted == nil, snap.agentID == "claude-code", snap.isVSCode, snap.readOnly != true else { return nil }
+        return issue(record.sourceId)
     }
 
     /// VS Code 设置里给 Claude Code 配的环境变量：VS Code 里没有在运行的 Claude Code 时，watcher 照终端环境再叠上这些（只取网络相关的）
@@ -103,6 +178,7 @@ enum Hosted {
                 state.store.applySourceConfigs(state.config.sources)
             }
             blocked[sourceId] = nil
+            issues[sourceId] = nil
             Log.write("\(state.config.sources[index].displayName)：后台运行 Claude Code \(on ? "已开启（检测过出口、用户确认）" : "已关闭")")
         }
         if let tipOff {
@@ -129,9 +205,11 @@ enum Hosted {
         connection.request(payload, timeout: 90) { result in
             switch result {
             case .success:
+                setIssue(record.sourceId, nil)
                 completion(.init(ok: true, submitted: false, openedWindow: false, message: "已转到后台运行"))
             case .failure(let error):
                 Log.write("转到后台运行未成功：\(error.description)")
+                if let issue = classify(error.description) { setIssue(record.sourceId, issue) }
                 fail("未能转到后台运行：\(error.description.replacingOccurrences(of: "HOSTED_NETWORK：", with: ""))")
             }
         }
@@ -192,13 +270,18 @@ enum Hosted {
                     message = sessionId == nil ? "已在后台新建会话，内容已填入输入框" : "已在后台恢复对话，内容已填入输入框"
                 }
                 Log.write("新会话：后台会话 \(reply["hosted"] as? String ?? "?") 已就绪（\(reply["sessionId"] as? String ?? "")）")
+                if agent == nil { setIssue(source.id, nil) }
                 completion(.success(NewSession.Outcome(ok: true, submitted: submitted, openedWindow: false, message: message)))
             case .failure(let error):
                 Log.write(agent == nil ? "新会话：后台启动失败（\(error.description)），改在 VS Code 中打开"
                                        : "新会话：后台启动 \(agent ?? "")失败（\(error.description)）")
-                if agent == nil, error.description.contains("停在了需要操作的画面上") {
+                // 记下原因，会话页顶上告诉用户为什么改在 VS Code 中打开、怎么办
+                let issue = agent == nil ? classify(error.description) : nil
+                if let issue { setIssue(source.id, issue) }
+                // 要人到电脑上处理的（停在首次设置 / 登录、首次设置时的联网检查没过）：先暂停一阵，不然每次都先白等十来秒
+                if let kind = issue?.kind, kind == "login" || kind == "network" {
                     blocked[source.id] = (Date().addingTimeInterval(blockedFor), error.description)
-                    Log.write("\(source.displayName)：后台运行暂停 \(Int(blockedFor / 60)) 分钟（Claude Code 停在要人操作的画面上），这期间的新任务直接在 VS Code 中打开")
+                    Log.write("\(source.displayName)：后台运行暂停 \(Int(blockedFor / 60)) 分钟（Claude Code 要人到电脑上处理），这期间的新任务直接在 VS Code 中打开")
                 }
                 completion(.failure(error))
             }

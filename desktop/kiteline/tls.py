@@ -117,11 +117,19 @@ def ensure_ca():
     log.write("已生成本机根证书")
 
 
+def _a_label(name):
+    """证书里的域名只能是 ASCII：中文等电脑名（Windows 允许）转成 xn-- 形式，转不了就不写进证书（否则整张证书生成失败、手机连不上）"""
+    try:
+        return name.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return ""
+
+
 def ensure_leaf(ips, names):
     if _ca_constrained(_load_cert(_p("ca.pem"))):
         # 超出约束的地址有一个，整张证书都会被拒：只签约束范围内的
         ips, names = [i for i in ips if permitted_ip(i)], [n for n in names if permitted_name(n)]
-    sans = sorted(set(ips)), sorted(set(names))
+    sans = sorted(set(ips)), sorted({a for a in map(_a_label, names) if a})
     signature = json.dumps(sans)
     leaf = _p("server.pem")
     try:

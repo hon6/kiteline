@@ -48,6 +48,56 @@ struct HostedTip: View {
     }
 }
 
+/// 会话页顶上的提示：所在电脑开着后台运行，这次却没起来、改在 VS Code 中打开了——说清楚原因和怎么办
+/// （11-16 反馈：「要在会话详情里显示什么原因无法使用，否则用户都不知道该怎么办」）。
+/// 点「重试」打开后台运行面板（能把当前会话转到后台，就是再试一次）；「知道了」只在这台设备上收起这一次的（下次起不来又会出现）
+struct HostedIssueTip: View {
+    let session: SessionInfo
+    let retry: () -> Void
+    @AppStorage("kiteline.hostedIssueDismissed") private var dismissed = ""
+
+    var body: some View {
+        if let issue = session.hostedIssue, dismissed != Self.mark(session.sourceId, issue) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Text("后台运行 Claude Code 未成功，此会话已改在 VS Code 中运行")
+                        .font(.ui(.footnote).weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                }
+                line(L("原因"), L(issue.reason) + (issue.detail.map { "（\($0)）" } ?? ""))
+                line(L("解决"), L(issue.fix))
+                HStack(spacing: 14) {
+                    Spacer(minLength: 0)
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) { dismissed = Self.mark(session.sourceId, issue) }
+                    } label: { Text("知道了").font(.ui(.caption)).foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
+                    Button(action: retry) {
+                        Text("重试").font(.ui(.caption).weight(.semibold)).foregroundStyle(Theme.added)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .frame(maxWidth: 560, alignment: .leading)
+            .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+            .padding(.horizontal, 14)
+            .transition(.opacity)
+        }
+    }
+
+    private func line(_ label: String, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label).font(.ui(.caption).weight(.semibold)).foregroundStyle(.secondary)
+            Text(text).font(.ui(.caption)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    static func mark(_ sourceId: String, _ issue: HostedIssue) -> String { "\(sourceId)@\(Int(issue.at))" }
+}
+
 /// 一台远端电脑的出口检测结果（/api/hosted/probe）
 struct HostedProbe {
     var ip: String?
@@ -147,6 +197,13 @@ struct HostedSetupSheet: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background((on ? Theme.added : Color.secondary).opacity(0.12), in: Capsule())
                 Spacer(minLength: 0)
+            }
+            if on, let issue = machine.hostedIssue {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("最近一次后台启动未成功").font(.ui(.caption).weight(.semibold)).foregroundStyle(.orange)
+                    Text(L(issue.reason) + (issue.detail.map { "（\($0)）" } ?? "")).font(.ui(.caption)).textSelection(.enabled)
+                    Text(L(issue.fix)).font(.ui(.caption)).foregroundStyle(.secondary)
+                }
             }
             if let probe {
                 if let error = probe.error {

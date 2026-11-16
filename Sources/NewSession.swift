@@ -28,6 +28,7 @@ enum NewSession {
     static func start(source: SourceConfig, cwd: String, prompt: String, submit: Bool, sessionId: String? = nil,
                       returnFocus: Bool = true, inEditor: Bool = false,
                       accepted: ((Outcome) -> Void)? = nil, completion reply: @escaping (Outcome) -> Void) {
+        EditorAlerts.shared.noteOpened(cwd: cwd)   // 接下来 Claude Code 问信任此文件夹的话，替用户答（用户自己选的项目）
         // 远端项目默认不开 VS Code：在那台电脑上后台运行 Claude Code；起不来再照旧开 VS Code
         if !inEditor, Hosted.wanted(source) {
             // 先回过手机的，退回 VS Code 时就别再回第二次

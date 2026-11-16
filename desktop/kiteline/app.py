@@ -32,11 +32,11 @@ from .schedules import Schedules
 from .server import MobileServer
 from .stats import UsageStats
 from .updater import Updater
-from .store import Store, display_title
+from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.42"
+VERSION = "1.0.43"
 
 
 class App:
@@ -595,6 +595,8 @@ class App:
         self.cfg.update(change)
         if source_id:
             HOSTED_BLOCKED.pop(source_id, None)
+            if on is not None:
+                HOSTED_ISSUES.pop(source_id, None)
         if source_id and on is not None:
             log.write("%s：后台运行 Claude Code %s" % (source_id, "已开启（检测过出口、用户确认）" if on else "已关闭"))
         if tip_off:
@@ -1024,6 +1026,7 @@ class App:
         cwd = str(body.get("cwd") or "").strip()
         if not cwd or len(cwd) > 1024 or "\n" in cwd or "\0" in cwd:
             return Response.error("项目路径无效", 400)
+        delivery.note_opened(cwd)   # 扩展接着问「信任此文件夹」的话替用户答（用户自己选的项目）
         text = body.get("text") or ""
         attachments = delivery.attachments_of(body)
         if not text.strip() and not attachments:
@@ -1536,7 +1539,12 @@ def move_to_background(record, source, siblings):
             log.write("转到后台运行：关闭 VS Code 中的标签未成功：%s" % outcome["message"])
     worker.join(95)
     if "reply" in box:
+        HOSTED_ISSUES.pop(source.id, None)
+        HOSTED_BLOCKED.pop(source.id, None)
         return True, "已转到后台运行"
+    issue = hosted_issue(box.get("error"))
+    if issue:
+        HOSTED_ISSUES[source.id] = issue
     error = str(box.get("error") or "超时").replace("HOSTED_NETWORK：", "")
     log.write("转到后台运行未成功：%s" % error)
     return False, "未能转到后台运行：%s" % error
@@ -1560,9 +1568,14 @@ def launch_hosted(cwd, prompt, submit, session_id, source, agent=None):
         reply = source.request(payload, timeout=70)
     except Exception as exc:  # noqa: BLE001
         log.write("新会话：后台启动%s失败（%s）%s" % (agent or "", exc, "" if agent else "，改在 VS Code 中打开"))
-        if not agent and "停在了需要操作的画面上" in str(exc):
+        # 记下原因，会话页顶上告诉用户为什么改在 VS Code 中打开、怎么办
+        issue = None if agent else hosted_issue(exc)
+        if issue:
+            HOSTED_ISSUES[source.id] = issue
+        # 要人到电脑上处理的（停在首次设置 / 登录、首次设置时的联网检查没过）：先暂停一阵，不然每次都先白等十来秒
+        if issue and issue["kind"] in ("login", "network"):
             HOSTED_BLOCKED[source.id] = time.time() + HOSTED_BLOCKED_FOR
-            log.write("%s：后台运行暂停 %d 分钟（Claude Code 停在要人操作的画面上），这期间的新任务直接在 VS Code 中打开"
+            log.write("%s：后台运行暂停 %d 分钟（Claude Code 要人到电脑上处理），这期间的新任务直接在 VS Code 中打开"
                       % (getattr(source, "name", ""), HOSTED_BLOCKED_FOR // 60))
         return None, str(exc)
     submitted = bool(reply.get("submitted"))
@@ -1573,6 +1586,8 @@ def launch_hosted(cwd, prompt, submit, session_id, source, agent=None):
     else:
         message = "已在后台恢复对话，内容已填入输入框" if session_id else "已在后台新建会话，内容已填入输入框"
     log.write("新会话：后台会话 %s 已就绪（%s）" % (reply.get("hosted"), reply.get("sessionId")))
+    if not agent:
+        HOSTED_ISSUES.pop(source.id, None)   # 起来了：会话页的「后台运行未成功」提示不用了
     return {"ok": True, "submitted": submitted, "openedWindow": False, "message": message, "error": "", "cwd": cwd,
             "sessionId": reply.get("sessionId")}, None
 

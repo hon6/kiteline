@@ -62,8 +62,8 @@
  ],
  "speaker": "Muse",
  "caps": [],
- "notes": "改进 Windows 上找会话的办法；从手机操作 Windows 上的会话在实测通过前暂不开放，设置 → 插件中有说明。",
- "notesEn": "Better session detection on Windows; controlling Windows sessions from your phone stays off until tested, as noted in Settings → Plugins.",
+ "notes": "新建任务时可以选 Muse Code，由 Kiteline 在后台运行（Mac、Linux 电脑上的项目），不用先在 tmux 里启动也能从手机回复和中断；它已结束的会话也可以直接发消息接着进行。需要电脑上的 Kiteline 为 Mac 3.49.36、Windows / Linux 1.0.41 及以上。",
+ "notesEn": "Choose Muse Code when starting a new task and Kiteline runs it in the background (projects on Mac and Linux computers), so you can reply and interrupt from your phone without starting it in tmux first; you can also message its finished sessions to continue them. Requires Kiteline 3.49.36 on Mac or 1.0.41 on Windows / Linux, or later.",
  "gaps": [
   {
    "kind": "untested",

@@ -120,7 +120,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.3"
+WATCHER_VERSION = "2.38.4"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -6642,6 +6642,44 @@ def transcript_cwd(path):
     except OSError:
         return None
     return None
+
+
+def _inside(path, folder):
+    """path 是 folder 本身或在它下面（Windows 不分大小写、两种斜杠都认）"""
+    if os.name == "nt":
+        path, folder = path.replace("\\", "/").lower(), folder.replace("\\", "/").lower()
+    return (path.rstrip("/") + "/").startswith(folder.rstrip("/") + "/")
+
+
+def folder_used(directory):
+    """这个文件夹（或它下面的子文件夹）在本机跑过 Claude Code 会话没有：~/.claude/projects 里有对应的对话记录就算。
+    Claude Code 扩展问「Trust this folder in Claude Code?」时 Kiteline 用它判断：用户在这里用过 Claude，就替他点信任"""
+    directory = os.path.expanduser((directory or "").strip()).rstrip("/\\") or "/"
+    if not os.path.isabs(directory):
+        return {"used": False, "sessions": 0}
+    name = project_dir_name(directory)
+    count = 0
+    try:
+        projects = os.listdir(PROJECTS_DIR)
+    except OSError:
+        return {"used": False, "sessions": 0}
+    for project in projects:
+        if project != name and not project.startswith(name + "-"):
+            continue
+        folder = os.path.join(PROJECTS_DIR, project)
+        try:
+            logs = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".jsonl")]
+        except OSError:
+            continue
+        if not logs:
+            continue
+        if project != name:
+            # 转义后同名前缀的未必是子文件夹（/a/mpwechat-old 也是 -a-mpwechat-old）：读一份记录里的 cwd 核对
+            cwd = transcript_cwd(max(logs, key=lambda path: os.path.getmtime(path)))
+            if not cwd or not _inside(cwd, directory):
+                continue
+        count += len(logs)
+    return {"used": count > 0, "sessions": count}
 
 
 def list_projects(limit=60, since=None):
@@ -17157,6 +17195,8 @@ class Watcher:
             return {"results": results, "truncated": truncated}
         if cmd == "projects":
             return {"projects": list_projects(int(request.get("limit") or 60))}
+        if cmd == "folder_used":
+            return folder_used(request.get("dir") or "")
         if cmd == "project_overview":
             since = request.get("since")
             return {"projects": project_overview(int(request.get("limit") or 40), int(since) if since else None,
