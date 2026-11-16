@@ -30,13 +30,14 @@ from .idleclose import IdleClose
 from .records import Audit, Favorites, Inbox, MediaCache, TabGroupStore, Todos, VoiceStore
 from .schedules import Schedules
 from .server import MobileServer
+from .termrelay import TermRelay
 from .stats import UsageStats
 from .updater import Updater
 from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.44"
+VERSION = "1.0.45"
 
 
 class App:
@@ -74,6 +75,8 @@ class App:
         self.store.on_lost = self._sessions_lost
         delivery.LOOKUP = self.store.record
         self.server = MobileServer(self)
+        self.terms = TermRelay(self)   # 会话终端的设备名、agent 的 term run 跨电脑转发
+        self.store.term_count = self.terms.count
         self.todos = Todos(self.store, self.server.publish)
         self.todos.push_agents = self._push_agent_todos
         self.favorites = Favorites(self.store, self.server.publish)
@@ -81,7 +84,9 @@ class App:
         self.groups = Groups(self)   # 会话群：跨设备、跨项目的会话互相发消息
         self.schedules = Schedules(self)
         self.stuck = reminders.StuckWatch(self)
-        self.idle_close = IdleClose(self)   # 24 小时没在 Kiteline 里打开过详情的会话：自动关掉，进历史会话
+        self.idle_close = IdleClose(self)
+        from .restart import SessionRestart
+        self.restarter = SessionRestart(self)   # 重启会话（会话菜单、批量重启）   # 24 小时没在 Kiteline 里打开过详情的会话：自动关掉，进历史会话
         self.alerts = alerts.Alerts(self)
         self.faces = faces.AgentFaces()   # 对话里 agent 的头像、昵称
         self.waiting = reminders.WaitingReminder(self)
@@ -111,6 +116,9 @@ class App:
         agent_skill.TEST_ENABLED = bool(self.cfg.mobile.get("installTestSkill", True))
         agent_skill.TODO_ENABLED = bool(self.cfg.mobile.get("installTodoSkill", True))
         agent_skill.STAGE_ENABLED = bool(self.cfg.mobile.get("installStageSkill", True))
+        watcher_module.BROWSER.update(on=self.cfg.mobile.get("browserOn") or "client", max=int(self.cfg.mobile.get("browserMax") or 4),
+                                      idle=int(self.cfg.mobile.get("browserIdle") or 10),
+                                      record=bool(self.cfg.mobile.get("browserRecord", True)))
         for source_config in self.cfg.sources:
             if not source_config.get("enabled", True):
                 continue
@@ -482,13 +490,34 @@ class App:
             links = self._ingest_peers(source.id, event.get("links") or [])
             if links:
                 self.server.publish("peers", {"links": links})
-        elif kind in ("term", "term_exit"):
-            # 会话里的终端：输出、结束直接转给手机和客户端，键与会话列表里的 key 一致
+        elif kind in ("term", "term_exit", "term_open", "term_meta"):
+            # 会话里的终端：输出、结束、agent 新开的（term run）转给手机和客户端，键与会话列表里的 key 一致；
+            # 开在别的电脑上的（term run --on）归到发起的会话下、输出转回发起那台（见 termrelay.py）
+            self.terms.event(kind, event, source)
+        elif kind == "browser_state":
+            # 本机 watcher 开着的浏览器：远端会话（浏览器开在这台电脑上）的小窗靠它补地址、标题（见 store.browser_payload）
+            if source.kind == "local":
+                self.store.browser_states = dict(event.get("browsers") or {})
+                self.server.publish_state()
+        elif kind in ("browser_frame", "browser_ask"):
+            # 会话浏览器：画面（有人在看时才有）原样转给手机和客户端；agent 请用户接管时按「需要确认」提醒。
+            # 远端会话的画面是本机 watcher 推的：按会话 id 找到它的 key
             session_id = event.get("sessionId")
-            if session_id:
-                payload = {k: v for k, v in event.items() if k not in ("event", "sessionId")}
-                payload["key"] = "%s#%s" % (source.id, session_id)
-                self.server.publish(kind, payload)
+            if not session_id:
+                return
+            key = self.store.key_for_session(source.id, session_id)
+            payload = {k: v for k, v in event.items() if k not in ("event", "sessionId")}
+            payload["key"] = key
+            self.server.publish(kind, payload)
+            if kind == "browser_ask":
+                record = self.store.record(key)
+                note = (event.get("note") or "").strip()
+                self.server.notify("attention", display_title(record.snap) if record else "会话",
+                                   "请接管浏览器：%s" % note if note else "请接管浏览器", key)
+        elif kind == "term_run":
+            self.terms.run(event, source)
+        elif kind == "term_run_cancel":
+            self.terms.cancel(event, source)
         elif kind in ("entries", "reset"):
             session_id = event.get("sessionId")
             if not session_id:
@@ -725,7 +754,7 @@ class App:
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
         # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource"]
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart"]
         payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff"))}
         return payload
 

@@ -217,8 +217,20 @@ public sealed class GroupsPage : Panel
         var scroll = new ScrollViewer { Content = list, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         Children.Add(PageBar.Page(bar, new Panel { Children = { scroll, empty } }));
         void Changed(object? s, PropertyChangedEventArgs e) => Dispatcher.UIThread.Post(Rebuild);
-        AttachedToVisualTree += (_, _) => { GroupState.Shared.PropertyChanged += Changed; AppModel.Shared.PropertyChanged += Changed; Rebuild(); _ = GroupState.Shared.Load(); };
+        AttachedToVisualTree += (_, _) => { GroupState.Shared.PropertyChanged += Changed; AppModel.Shared.PropertyChanged += Changed; Rebuild(); Fetch(); };
         DetachedFromVisualTree += (_, _) => { GroupState.Shared.PropertyChanged -= Changed; AppModel.Shared.PropertyChanged -= Changed; };
+        Rebuild();
+    }
+
+    /// 这次打开从电脑读过一回（之前空着是「正在读取」，画骨架，不说「暂无」）
+    bool fetched;
+
+    async void Fetch()
+    {
+        try { await GroupState.Shared.Load(); } catch { /* 读不到也收起骨架，显示空状态 */ }
+        // 骨架换成内容时列表淡入
+        if (empty.Content is StackPanel { Children: [_, SkeletonView] }) list.FadeIn();
+        fetched = true;
         Rebuild();
     }
 
@@ -244,7 +256,9 @@ public sealed class GroupsPage : Panel
         }
         Section(L("进行中"), items.Where(g => g.Live));
         Section(L("历史群"), items.Where(g => !g.Live), L("成员会话都已关闭的群。在群里发消息，会在原来的项目里恢复它们接着协作。"));
-        empty.Content = items.Count == 0
+        empty.Content = items.Count == 0 && !fetched
+            ? Skeleton.Page(SkeletonKind.Groups, count: 6).Margin(20, 0, 20, 0).VAlign(VerticalAlignment.Top)
+            : items.Count == 0
             ? EmptyHint.Make("person.2", L("还没有会话群"), L("把一个会话拖到另一个会话上，或在会话的菜单里选「拉群协作」，让不同设备、不同项目里的会话互相沟通。")).VAlign(VerticalAlignment.Center)
             : null;
     }

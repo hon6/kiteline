@@ -57,7 +57,8 @@ struct StorageView: View {
                 }
             }
         }
-        .overlay { if rows == nil { ProgressView() } }
+        .overlay { if rows == nil { SkeletonPage(style: .form(6)) } }
+        .animation(.skeletonFade, value: rows == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("存储空间")
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }

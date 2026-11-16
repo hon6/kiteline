@@ -208,6 +208,7 @@ class Store:
         self.lock = threading.RLock()
         self.records = []
         self.sources = {}          # id → 来源对象
+        self.term_count = None     # 会话 key → 开在别的电脑上的终端个数（App 装上 TermRelay.count）
         self._previous = {}
         self._notified_needs = {}
         self._notified_conclusions = {}
@@ -324,6 +325,34 @@ class Store:
 
     # MARK: 查询
 
+    def browser_payload(self, record):
+        """会话数据里的 browser：本机会话（或设置成浏览器开在 agent 所在的电脑）用快照里的；远端会话只在本机真开着它的浏览器时
+        才有——地址、标题取本机 watcher 报的（browser_state），指令、请接管取远端整理的（同 Mac 版 BrowserRelay.payload）"""
+        from . import watcher as watcher_module
+        snap = record.snap
+        own = snap.get("browser") if isinstance(snap.get("browser"), dict) else None
+        fields = ("url", "title", "last", "actions", "ask", "since", "closed", "recs")
+        if record.kind == "local" or watcher_module.BROWSER["on"] == "server":
+            return {k: own[k] for k in fields if k in own} if own else None
+        mine = (getattr(self, "browser_states", None) or {}).get(snap.get("sessionId"))
+        if not mine:
+            return None
+        out = {k: own[k] for k in fields if own and k in own}
+        out.update({k: mine.get(k) for k in ("url", "title", "since", "closed", "recs") if mine.get(k) is not None})
+        out.setdefault("url", "")
+        out.setdefault("title", "")
+        return out
+
+    def key_for_session(self, source_id, session_id):
+        """本机 watcher 推来的浏览器画面：会话可能在别的电脑上，按会话 id 找到它的 key"""
+        own = "%s#%s" % (source_id, session_id)
+        if self.record(own):
+            return own
+        for record in list(self.records):
+            if record.snap.get("sessionId") == session_id:
+                return record.key
+        return own
+
     def record(self, key):
         with self.lock:
             for record in self.records:
@@ -398,8 +427,14 @@ class Store:
             if (issue and record.kind in ("ssh", "local") and not snap.get("hosted") and is_vscode(snap) and not snap.get("readOnly")
                     and (snap.get("agent") or "claude-code") == "claude-code" and self._hosted_on(record.source_id, m)):
                 item["hostedIssue"] = issue
-            if snap.get("terminals"):
-                item["terminals"] = snap["terminals"]
+            # 开着的终端：会话所在那台上的 + 开在别的电脑上、挂在这个会话下的（term run --on，见 termrelay.py）
+            terminals = (snap.get("terminals") or 0) + (self.term_count(record.key) if self.term_count else 0)
+            if terminals:
+                item["terminals"] = terminals
+            # agent 在用 Kiteline 的浏览器：对话页浮出实时画面小窗（watcher 的 BrowserPool.annotate）
+            browser = self.browser_payload(record)
+            if browser:
+                item["browser"] = browser
             # 新消息怎么算（各端，同 Mac）：最后一次在任何一端看过的时间；最近一轮是别的会话来信引起的不算给你的新消息
             seen = viewed_at(record.key) if viewed_at else None
             if seen is not None:

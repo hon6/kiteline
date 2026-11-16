@@ -177,7 +177,7 @@ public sealed class FolderPicker
             rows.Children.Add(row);
         }
         if (truncated && q.Length == 0) rows.Children.Add(Ui.Text(L("此目录文件夹过多，仅列出前 2000 个。"), 11.5, color: "Text3").Pad(10, 6));
-        if (path.Length == 0) { if (overlay.Content is not TextBlock) overlay.Content = new Spinner(18); }
+        if (path.Length == 0) { if (overlay.Content is not TextBlock) overlay.Content = Skeleton.Page(SkeletonKind.IconRows, count: 9).Margin(16, 0, 16, 0); }
         else overlay.Content = shown.Count == 0 ? Ui.Text(q.Length == 0 ? L("此文件夹中没有子文件夹") : L("没有匹配的文件夹"), 13, color: "Text2") : null;
     }
 

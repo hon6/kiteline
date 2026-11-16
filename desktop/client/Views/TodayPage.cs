@@ -30,7 +30,7 @@ public sealed class TodayPage : Panel
         ]);
         var scroll = new ScrollViewer { Content = new Border { Child = body, MaxWidth = 900, Padding = new Thickness(28, 22) }, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         Children.Add(PageBar.Page(bar, scroll));
-        body.Children.Add(new Spinner(20).HAlign(HorizontalAlignment.Center).Margin(0, 80, 0, 0));
+        body.Children.Add(Skeleton.Page(SkeletonKind.Today, L("正在汇总…")));
         AttachedToVisualTree += (_, _) =>
         {
             Load();
@@ -83,6 +83,8 @@ public sealed class TodayPage : Panel
 
     void Show(JsonNode? report)
     {
+        // 头一回从骨架换成内容时整块淡入（之后定时刷新不再闪）
+        if (body.Children.FirstOrDefault() is StackPanel { Children: [_, SkeletonView] } or StackPanel { Children: [SkeletonView] }) body.FadeIn();
         body.Children.Clear();
         var totals = report.Obj("totals");
         var sessions = report.Arr("sessions").Items().ToList();

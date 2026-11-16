@@ -138,7 +138,7 @@ struct CodeFileScreen: View {
             } else if let error = session?.error {
                 LoadFailed(error: error) { await load() }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonPage(style: .code(20))
             }
         }
         .navigationTitle((dirty ? "● " : "") + CodePaths.name(path))
@@ -321,7 +321,7 @@ struct GitDiffScreen: View {
                 } else if let error {
                     LoadFailed(error: error) { await load() }
                 } else {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    SkeletonPage(style: .code(20))
                 }
             }
             .onChange(of: geo.size.width, initial: true) { _, value in

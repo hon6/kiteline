@@ -148,6 +148,102 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
      */
     public var allowMouseReporting: Bool = true
 
+    /// Kiteline 改：手机上的触控方式（用户 11-16 定）。打开时：
+    /// - 拖动不再当成「按住鼠标拖」发给程序（Claude Code 开了鼠标模式，一拖它就选中文字）；
+    /// - 单指轻点当鼠标单击发给程序（定位、插入）；单指拖动选中文字，松手交给 onTouchSelection（App 弹「拷贝」框）；
+    /// - 双指上下滑翻看历史：不用滚动视图自己的滚动（滚的时候程序在重画，只重画了一部分行，新旧内容叠在一起），
+    ///   按行调 scrollUp / scrollDown 整屏重画；程序在全屏界面（备用缓冲区）里时没有历史可翻，改成发滚轮给程序；
+    /// - 长按照旧是选中复制。
+    public var touchScrollsInsteadOfDragging: Bool = false {
+        didSet {
+            if touchScrollsInsteadOfDragging {
+                disableMousePanGesture()
+                isScrollEnabled = false
+                if twoFingerPan == nil {
+                    let pan = UIPanGestureRecognizer(target: self, action: #selector(twoFingerScroll(_:)))
+                    pan.minimumNumberOfTouches = 2
+                    pan.maximumNumberOfTouches = 2
+                    addGestureRecognizer(pan)
+                    twoFingerPan = pan
+                }
+                if oneFingerSelect == nil {
+                    let pan = UIPanGestureRecognizer(target: self, action: #selector(oneFingerSelectHandler(_:)))
+                    pan.minimumNumberOfTouches = 1
+                    pan.maximumNumberOfTouches = 1
+                    addGestureRecognizer(pan)
+                    oneFingerSelect = pan
+                }
+            } else {
+                isScrollEnabled = true
+                if let pan = twoFingerPan { removeGestureRecognizer(pan); twoFingerPan = nil }
+                if let pan = oneFingerSelect { removeGestureRecognizer(pan); oneFingerSelect = nil }
+                mouseModeChanged(source: terminal)
+            }
+        }
+    }
+    private var twoFingerPan: UIPanGestureRecognizer?
+    private var oneFingerSelect: UIPanGestureRecognizer?
+    /// Kiteline 改：单指拖动选完、松手时把选中的文字交给 App（弹「拷贝 / 取消」框）
+    public var onTouchSelection: ((String) -> Void)?
+
+    @objc func oneFingerSelectHandler(_ gesture: UIPanGestureRecognizer) {
+        let hit = calculateTapHit(gesture: gesture).grid
+        switch gesture.state {
+        case .began:
+            selection.setSoftStart(bufferPosition: hit)
+            selection.startSelection()
+            queuePendingDisplay()
+        case .changed:
+            selection.dragExtend(bufferPosition: hit)
+            queuePendingDisplay()
+        case .ended:
+            let text = selection.active ? selection.getSelectedText() : ""
+            if !text.isEmpty, let handler = onTouchSelection { handler(text) } else { selection.selectNone(); queuePendingDisplay() }
+        default:
+            selection.selectNone()
+            queuePendingDisplay()
+        }
+    }
+
+    /// Kiteline 改：拷贝框关掉后清掉选区
+    public func clearTouchSelection() {
+        selection.selectNone()
+        queuePendingDisplay()
+    }
+    private var twoFingerCarry: CGFloat = 0
+
+    @objc func twoFingerScroll(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            twoFingerCarry = 0
+        case .changed:
+            twoFingerCarry += gesture.translation(in: self).y
+            gesture.setTranslation(.zero, in: self)
+            let step = max(cellDimension.height, 1)
+            let lines = Int(twoFingerCarry / step)
+            guard lines != 0 else { return }
+            twoFingerCarry -= CGFloat(lines) * step
+            if terminal.isDisplayBufferAlternate {
+                // 全屏界面没有历史可翻：交给程序自己滚（开了鼠标模式发滚轮，没开发上下方向键）
+                let up = lines > 0
+                for _ in 0..<min(abs(lines), 20) {
+                    if terminal.mouseMode != .off {
+                        let flags = terminal.encodeButton(button: up ? 4 : 5, release: false, shift: false, meta: false, control: false)
+                        terminal.sendEvent(buttonFlags: flags, x: terminal.buffer.x, y: terminal.buffer.y)
+                    } else if terminal.alternateScrollMode {
+                        send(up ? EscapeSequences.moveUpNormal : EscapeSequences.moveDownNormal)
+                    }
+                }
+            } else if lines > 0 {
+                scrollUp(lines: lines)      // 手指往下滑 = 看上面的历史
+            } else {
+                scrollDown(lines: -lines)
+            }
+        default:
+            break
+        }
+    }
+
     /// Controls how link tracking resolves hovered links:
     /// `.explicit` = OSC 8 only, `.implicit` = explicit + implicit fallback, `.none` = off.
     public var linkReporting: LinkReporting = .implicit
@@ -264,6 +360,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     // Attribute dictionary, maps a console attribute (color, flags) to the corresponding dictionary
     // of attributes for an NSAttributedString
+    /// Kiteline 改：文字和背景的最低对比度（同 VS Code 终端的 minimumContrastRatio，它默认 4.5）。
+    /// 程序按深色背景配的浅灰「次要文字」（Claude Code 的行号、改动上下文、SGR 2 淡色）放到白底上几乎看不见：
+    /// 对比度不够时把文字往黑（浅色背景）或往白（深色背景）推，推到够为止（见 kitelineEnsureContrast）。1 = 不调
+    public var minimumContrastRatio: CGFloat = 1 {
+        didSet { if minimumContrastRatio != oldValue { colorsChanged() } }
+    }
     var attributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
     var urlAttributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
 
@@ -3362,7 +3464,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     open func mouseModeChanged(source: Terminal) {
-        if source.mouseMode != .off {
+        if source.mouseMode != .off && !touchScrollsInsteadOfDragging {   // Kiteline 改：见 touchScrollsInsteadOfDragging
             enableMousePanGesture()
         } else {
             disableMousePanGesture()

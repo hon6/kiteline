@@ -103,6 +103,8 @@ struct SessionSnapshot: Codable, Equatable {
     var stage: StageSnapshot?
     /// 目标（/goal）：agent 围着它跨多轮一直做、每轮结束检查一次（watcher 给；没设目标、老 watcher 没有）
     var goal: GoalSnapshot?
+    /// 会话浏览器（agent 正在用 Kiteline 的浏览器时才有，老 watcher 没有）：地址、标题、最近一条指令、请用户接管的说明
+    var browser: BrowserSnapshot?
 
     var act: Activity { Activity(raw: activity) }
 
@@ -181,6 +183,42 @@ struct PendingOption: Codable, Equatable {
 struct QueuedMessage: Codable, Equatable {
     var id: String
     var text: String
+}
+
+/// 会话浏览器（watcher 的 BrowserPool.annotate）：手机和主窗口据此在对话页浮出实时画面小窗。字段缺了、类型不对都不抛错
+struct BrowserSnapshot: Codable, Equatable {
+    var since: Double?
+    var url = ""
+    var title = ""
+    var last = ""
+    var actions = 0
+    var ask: String?
+    /// 浏览器已关、留着录像（小窗变成「回放」卡片）
+    var closed = false
+    var recs = 0
+
+    private enum CodingKeys: String, CodingKey { case since, url, title, last, actions, ask, closed, recs }
+
+    init(from decoder: Decoder) throws {
+        guard let c = try? decoder.container(keyedBy: CodingKeys.self) else { return }
+        since = try? c.decode(Double.self, forKey: .since)
+        url = (try? c.decode(String.self, forKey: .url)) ?? ""
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        last = (try? c.decode(String.self, forKey: .last)) ?? ""
+        actions = (try? c.decode(Int.self, forKey: .actions)) ?? 0
+        ask = (try? c.decode(String.self, forKey: .ask)).flatMap { $0.isEmpty ? nil : $0 }
+        closed = (try? c.decode(Bool.self, forKey: .closed)) ?? false
+        recs = (try? c.decode(Int.self, forKey: .recs)) ?? 0
+    }
+
+    /// 给手机的会话数据（/api/state）
+    var payload: [String: Any] {
+        var out: [String: Any] = ["url": url, "title": title, "last": last, "actions": actions]
+        if let since { out["since"] = since }
+        if let ask { out["ask"] = ask }
+        if closed { out["closed"] = true; out["recs"] = recs }
+        return out
+    }
 }
 
 struct StageSnapshot: Codable, Equatable {

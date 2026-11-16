@@ -65,7 +65,7 @@ print("== 技能（交给 watcher 装，这里只带开关）")
 os.environ["KITELINE_SKILL_TEST"] = "1"
 agent_skill.ENABLED, agent_skill.TEST_ENABLED, agent_skill.TODO_ENABLED, agent_skill.STAGE_ENABLED = True, False, True, True
 env = agent_skill.local_env("/x/ccpulse-watch.py")
-check("开着的技能经 CCPULSE_SKILLS 带给 watcher", env.get("CCPULSE_SKILLS") == "screenshots,todos,stages", str(env))
+check("开着的技能经 CCPULSE_SKILLS 带给 watcher", env.get("CCPULSE_SKILLS") == "screenshots,terminal,browser,todos,stages", str(env))
 check("远端：python 不是 python3 时告诉它", agent_skill.remote_env("python3.11").get("CCPULSE_PYTHON") == "python3.11")
 agent_skill.ENABLED = agent_skill.TODO_ENABLED = agent_skill.STAGE_ENABLED = False
 check("全关：远端也带空值（让它删掉）", agent_skill.remote_env("python3") == {"CCPULSE_SKILLS": "''"})

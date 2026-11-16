@@ -319,6 +319,12 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     // Attribute dictionary, maps a console attribute (color, flags) to the corresponding dictionary
     // of attributes for an NSAttributedString
+    /// Kiteline 改：文字和背景的最低对比度（同 VS Code 终端的 minimumContrastRatio，它默认 4.5）。
+    /// 程序按深色背景配的浅灰「次要文字」（Claude Code 的行号、改动上下文、SGR 2 淡色）放到白底上几乎看不见：
+    /// 对比度不够时把文字往黑（浅色背景）或往白（深色背景）推，推到够为止（见 kitelineEnsureContrast）。1 = 不调
+    public var minimumContrastRatio: CGFloat = 1 {
+        didSet { if minimumContrastRatio != oldValue { colorsChanged() } }
+    }
     var attributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
     var urlAttributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
     

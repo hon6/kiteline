@@ -23,7 +23,7 @@ struct CodeIDEView: View {
             if let ws {
                 IDELayout(ws: ws, options: options)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonPage(style: .code(20))
             }
         }
         .navigationTitle(ws?.repo.overview?.name ?? ws?.explorer.rootName ?? L("代码"))
@@ -443,7 +443,7 @@ private struct IDELayout: View {
                 if let error = session.error {
                     LoadFailed(error: error) { await session.load(into: ws.editor, id: tab.id, readOnly: false, options: ws.options) }
                 } else if session.file == nil {
-                    ProgressView()
+                    SkeletonPage(nil, style: .code(20))
                 } else if !session.isText {
                     FileView(key: ws.key, path: path).background(Theme.chatBackground)
                 }
@@ -465,7 +465,7 @@ private struct IDELayout: View {
                     .background(Theme.chatBackground)
                 }
             } else {
-                ProgressView()
+                SkeletonPage(nil, style: .code(20))
             }
         case .history(let path):
             GitHistoryView(store: ws.repo, openCommit: { ws.openTab(CodeTab(kind: .commit($0))) }, path: path, wide: true)

@@ -45,8 +45,20 @@ public sealed class TodosPage : Panel
         Children.Add(PageBar.Page(bar, new Panel { Children = { scroll, empty } }));
         var state = TodoState.Shared;
         void Changed(object? s, PropertyChangedEventArgs e) => Rebuild();
-        AttachedToVisualTree += (_, _) => { state.PropertyChanged += Changed; Rebuild(); _ = state.Refresh(); };
+        AttachedToVisualTree += (_, _) => { state.PropertyChanged += Changed; Rebuild(); Fetch(); };
         DetachedFromVisualTree += (_, _) => state.PropertyChanged -= Changed;
+        Rebuild();
+    }
+
+    /// 这次打开从电脑读过一回（之前空着是「正在读取」，画骨架，不说「暂无」）
+    bool fetched;
+
+    async void Fetch()
+    {
+        try { await TodoState.Shared.Refresh(); } catch { /* 读不到也收起骨架，显示空状态 */ }
+        // 骨架换成内容时列表淡入
+        if (empty.Content is StackPanel { Children: [_, SkeletonView] }) list.FadeIn();
+        fetched = true;
         Rebuild();
     }
 
@@ -59,7 +71,9 @@ public sealed class TodosPage : Panel
         var agentAll = state.Items.Where(i => !i.Done && i.AgentTask).ToList();
         var agentTasks = SortAgentTasks(agentAll.Where(i => ActiveSource is not { } only || TodoState.Place(i).SourceId == only.Id)).ToList();
         var done = state.Items.Where(i => i.Done).OrderByDescending(i => i.DoneAt ?? 0).ToList();
-        empty.Content = state.Items.Count == 0 && state.Suggestions.Count == 0
+        empty.Content = state.Items.Count == 0 && state.Suggestions.Count == 0 && !fetched
+            ? Skeleton.Page(SkeletonKind.Todos, count: 6).Margin(20, 0, 20, 0).VAlign(VerticalAlignment.Top)
+            : state.Items.Count == 0 && state.Suggestions.Count == 0
             ? EmptyHint.Make("checklist", L("暂无待办"), L("编程 agent 遇到只有你能做的事（如注册账号、申请密钥）时会提醒你，可以现在处理或加入待办；它自己以后要做的事会记在「agent 的待办」中。右键任意消息也可手动加入。")).VAlign(VerticalAlignment.Center)
             : null;
         if (state.Suggestions.Count > 0)

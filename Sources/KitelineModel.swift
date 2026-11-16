@@ -184,6 +184,8 @@ final class KitelineModel: ObservableObject {
     @Published var query = ""
     /// 「新任务」面板；preset = 预先选中的项目（从某个会话的菜单里点进来）
     @Published var showNewTask = false
+    /// 批量重启会话的面板（会话「⋯」、菜单栏「会话」里的「批量重启会话…」）
+    @Published var showBatchRestart = false
     /// 正在看哪个会话的 Agent 详情 / 哪台机器的设备详情（侧栏右键菜单、组头点开的，在窗口正中弹面板）
     @Published var agentDetail: String?
     @Published var machineDetail: String?
@@ -424,6 +426,17 @@ final class KitelineModel: ObservableObject {
     }
 
     /// 关闭会话（先确认）：VS Code 里关掉它的标签页、终端里发 /exit，会话进「历史会话」，之后可以恢复
+    /// 重启会话（单个或批量，见 SessionRestart）：做完在窗口底部提示一句
+    func restart(_ keys: [String]) {
+        SessionRestart.shared.restart(keys: keys) { result in
+            var parts: [String] = []
+            if !result.restarted.isEmpty { parts.append(L("正在重启 %d 个会话", result.restarted.count)) }
+            if !result.queued.isEmpty { parts.append(L("%d 个正在工作，这一轮做完后自动重启", result.queued.count)) }
+            if let first = result.failed.first { parts.append(L("%d 个未能重启：%@", result.failed.count, first.error)) }
+            MainActor.assumeIsolated { KitelineKit.flash(parts.joined(separator: L("；"))) }
+        }
+    }
+
     func close(_ sessionKey: String) {
         guard let record = record(sessionKey) else { return }
         let alert = NSAlert()

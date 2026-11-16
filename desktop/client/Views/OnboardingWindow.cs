@@ -286,7 +286,7 @@ public sealed class OnboardingWindow : Window
         var stack = new StackPanel { Spacing = 0 };
         stack.Children.Add(Header(L("检查运行环境"),
             L("Kiteline 需要以下组件和权限，才能把你在手机上发送的消息和确认操作送到电脑上的会话中。未就绪的项目下方会说明处理方法。")));
-        var cards = new ContentControl { Content = new Spinner(16).HAlign(HorizontalAlignment.Left).Margin(0, 16, 0, 0) };
+        var cards = new ContentControl { Content = Skeleton.Page(SkeletonKind.IconRows, L("正在检测…"), 5) };
         stack.Children.Add(cards);
         var autostart = new ContentControl();
         stack.Children.Add(autostart);

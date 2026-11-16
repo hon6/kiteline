@@ -44,12 +44,13 @@ struct TodayView: View {
                 } else if let error {
                     LoadFailed(error: error) { await load() }.padding(.top, 40)
                 } else {
-                    ProgressView("正在汇总…").frame(maxWidth: .infinity).padding(.top, 60)
+                    SkeletonPage("正在汇总…", style: .today, padded: false)
                 }
             }
             .padding(16)
         }
         .background(Theme.pageBackground)
+        .animation(.skeletonFade, value: payload == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle(title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -266,12 +267,13 @@ struct UsageView: View {
                 } else if let error {
                     LoadFailed(error: error) { await load() }.padding(.top, 40)
                 } else {
-                    ProgressView("正在统计各机器的用量…").frame(maxWidth: .infinity).padding(.top, 60)
+                    SkeletonPage("正在统计各机器的用量…", style: devices.isEmpty ? .usage : .usageStats, padded: false)
                 }
             }
             .padding(16)
         }
         .background(Theme.pageBackground)
+        .animation(.skeletonFade, value: payload == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("用量")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -483,7 +485,7 @@ struct HistoryView: View {
         #endif
         .overlay {
             if !loaded {
-                ProgressView(query.isEmpty ? "正在读取历史会话…" : "正在搜索…")
+                SkeletonPage(query.isEmpty ? "正在读取历史会话…" : "正在搜索…", style: query.isEmpty ? .history : .list(8)).background(Theme.pageBackground)
             } else if sessions.isEmpty {
                 ContentUnavailableView(query.isEmpty ? "暂无历史会话" : "未找到「\(query)」", systemImage: "clock.arrow.circlepath")
             } else if shown.isEmpty {
@@ -494,6 +496,7 @@ struct HistoryView: View {
                 }
             }
         }
+        .animation(.skeletonFade, value: loaded)   // 读回来时骨架淡出、内容淡入
         #if os(iOS)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索标题、项目名称和对话内容")
         #else
@@ -813,7 +816,8 @@ struct ProjectsView: View {
         }
         .tabBarScrollWatch()
         .background(Theme.pageBackground)
-        .overlay { if !loaded { ProgressView("正在读取各机器上的项目…") } }
+        .overlay { if !loaded { SkeletonPage("正在读取各机器上的项目…", style: .projects(7)).background(Theme.pageBackground) } }
+        .animation(.skeletonFade, value: !loaded)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("项目")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

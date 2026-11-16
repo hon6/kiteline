@@ -127,7 +127,7 @@ struct TodayView: View {
                     Text("生成于 \(Format.short(report.generatedAt))，统计所有在线来源，包括已关闭的会话。")
                         .font(.app(size: 11)).foregroundStyle(.tertiary)
                 } else {
-                    ProgressView("正在汇总…").frame(maxWidth: .infinity).padding(.top, 80)
+                    SkeletonPage("正在汇总…", style: .today, padded: false)
                 }
             }
             .padding(.horizontal, 28)
@@ -135,6 +135,7 @@ struct TodayView: View {
             .frame(maxWidth: 900)
             .frame(maxWidth: .infinity)
         }
+        .animation(.skeletonFade, value: model.report == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("今日动态")
         .navigationSubtitle(subtitle)
         .toolbar {

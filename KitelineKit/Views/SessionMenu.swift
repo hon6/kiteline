@@ -7,6 +7,7 @@ struct SessionMenuSheet: View {
     let key: String
     /// 关掉菜单以后再做（推页面、弹别的面板）
     let perform: (SessionAction) -> Void
+    @State private var showBatch = false
 
     var body: some View {
         let session = model.session(key)
@@ -90,6 +91,17 @@ struct SessionMenuSheet: View {
                         }
                         MenuRow(symbol: "person.crop.circle", title: L("Agent 详情"), note: L("头像、昵称，所在设备的 IP 和配置")) { run(.agentInfo) }
                     }
+                    // 重启会话：关掉再接着这段对话打开，让 Agent 读到新的设置和技能（如 Kiteline 浏览器）；正在工作的等这一轮做完
+                    if model.hostFeatures.contains("restart"), let session, session.canReply, session.can("close") {
+                        MenuRow(symbol: "arrow.clockwise", title: L("重启会话"),
+                                note: L("对话不丢，Agent 重新读取设置和技能（如 Kiteline 浏览器）；正在工作的等这一轮做完")) {
+                            Task { await model.restartSessions([key]) }
+                            dismiss()
+                        }
+                        MenuRow(symbol: "arrow.triangle.2.circlepath", title: L("批量重启会话"), note: L("选几个或全部会话一起重启"), chevron: true) {
+                            showBatch = true
+                        }
+                    }
                     // 关闭会话（电脑端给 close 才有，目前是 Claude Code）：关掉电脑上 VS Code 里的标签页（终端里 /exit），会话进历史
                     if let session, session.canReply, session.can("close") {
                         MenuRow(symbol: "xmark", title: L("关闭会话"), note: L("结束此会话，之后可在历史会话中恢复"), danger: true) { run(.close) }
@@ -108,6 +120,7 @@ struct SessionMenuSheet: View {
         #endif
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showBatch) { BatchRestartSheet(onDone: { dismiss() }) }
     }
 
     private func run(_ action: SessionAction) {
@@ -367,3 +380,82 @@ struct ModelSheet: View {
         return L("思考等级和 Ultracode 仅作用于此会话（发送 /effort 命令）。")
     }
 }
+
+/// 批量重启会话：列出所有在跑、能重启的会话（默认全选），勾掉不要的，一起重启；正在工作的等这一轮做完再重启
+struct BatchRestartSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    var onDone: () -> Void = {}
+    @State private var chosen: Set<String>? = nil
+
+    private var candidates: [SessionInfo] { model.sessions.filter { $0.canReply && $0.can("close") } }
+
+    var body: some View {
+        let list = candidates
+        let picked = chosen ?? Set(list.map(\.key))
+        VStack(spacing: 0) {
+            HStack {
+                Text("批量重启会话").font(.ui(.headline))
+                Spacer()
+                Button(picked.count == list.count ? L("全不选") : L("全选")) {
+                    chosen = picked.count == list.count ? [] : Set(list.map(\.key))
+                }
+                .font(.ui(.subheadline))
+            }
+            .padding(16)
+            Text("重启后对话不丢，Agent 会重新读取设置和技能（如 Kiteline 浏览器）。正在工作的会话等这一轮做完后自动重启，不会打断。")
+                .font(.ui(.caption)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16).padding(.bottom, 8)
+            List(list) { session in
+                Button {
+                    var next = picked
+                    if next.contains(session.key) { next.remove(session.key) } else { next.insert(session.key) }
+                    chosen = next
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: picked.contains(session.key) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(picked.contains(session.key) ? Theme.claude : Color.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.title).font(.ui(.subheadline)).lineLimit(1)
+                            Text([session.sourceName, session.cwdShort ?? "", session.isBusy ? L("正在工作") : (session.isWaiting ? L("等你确认") : "")]
+                                .filter { !$0.isEmpty }.joined(separator: " · "))
+                                .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.plain)
+            Button {
+                let keys = list.map(\.key).filter { picked.contains($0) }
+                Task { await model.restartSessions(keys) }
+                dismiss()
+                onDone()
+            } label: {
+                Text(L("重启所选（%d）", picked.count)).font(.ui(.body).weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent).tint(Theme.claude)
+            .disabled(picked.isEmpty)
+            .padding(16)
+        }
+        .background(Theme.pageBackground)
+        #if os(macOS)
+        .frame(minWidth: 460, minHeight: 520)
+        #endif
+        .presentationDetents([.large])
+    }
+}
+
+#if KITELINE_MAC
+extension KitelineKit {
+    /// Mac 主窗口的「批量重启会话…」面板（标题栏「⋯」、菜单栏「会话」里点开）
+    public struct BatchRestartView: View {
+        public init() {}
+        public var body: some View {
+            if let model = KitelineKit.model { BatchRestartSheet().environment(model) }
+        }
+    }
+}
+#endif

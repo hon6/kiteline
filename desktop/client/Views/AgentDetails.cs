@@ -376,7 +376,7 @@ public static class AgentDetails
             }
             else
             {
-                stack.Children.Add(new Spinner(18).HAlign(HorizontalAlignment.Center).Margin(0, 30, 0, 0));
+                stack.Children.Add(new SkeletonView(SkeletonKind.Form, 5).Margin(0, 12, 0, 0));
             }
             body.Content = stack;
         }

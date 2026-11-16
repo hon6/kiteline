@@ -41,6 +41,9 @@ public sealed class HistoryPage : Panel
     static List<PastItem> sessions = [];
     static List<PastItem>? results;
     static string query = "";
+    /// 列表读回来过一次（之前空着是「正在读取」，不是「没有会话」）
+    static bool loaded;
+    bool skeletonShown;
     readonly PageBar bar;
     readonly StackPanel list = new();
     readonly Panel filters = new();
@@ -105,6 +108,8 @@ public sealed class HistoryPage : Panel
         }
         catch (Exception e) { AppModel.Shared.Flash(e.Message); }
         finally { if (current == seq) spinner.IsVisible = false; }
+        if (current != seq) return;
+        loaded = true;
         Build();
         LoadProject();
     }
@@ -189,11 +194,23 @@ public sealed class HistoryPage : Panel
 
     void Build()
     {
-        bar.Subtitle = results is not null ? L("找到 %@ 个会话", Filtered(results).Count) : L("%@ 个会话", sessions.Count);
+        bar.Subtitle = results is not null ? L("找到 %@ 个会话", Filtered(results).Count) : loaded ? L("%@ 个会话", sessions.Count) : L("正在读取…");
         filters.Children.Clear();
         if (sessions.Count > 0 || IsFiltering) filters.Children.Add(FilterRow());
         list.Children.Clear();
         if (results is not null) { SearchList(results); return; }
+        // 头一回读：各设备的列表要一会儿才回来，空白容易当成出问题了
+        if (sessions.Count == 0 && !loaded) { list.Children.Add(Skeleton.Page(SkeletonKind.History, L("正在读取各设备上的历史会话…"))); skeletonShown = true; return; }
+        if (skeletonShown) { skeletonShown = false; list.FadeIn(); }   // 骨架换成内容时淡入
+        if (sessions.Count == 0)
+        {
+            list.Children.Add(Ui.Stack(Orientation.Vertical, 10, Align.Center, [
+                Ui.Sym("clock.arrow.circlepath", 28, "Text3"), Ui.Text(L("暂无历史会话"), 15, FontWeight.SemiBold),
+                Ui.Text(L("在电脑上和 Agent 聊过的会话会出现在这里"), 12.5, FontWeight.Normal, "Text2"),
+                new GlassButton(L("重新读取"), null, Load, height: 26),
+            ]).HAlign(HorizontalAlignment.Center).Margin(0, 80, 0, 0));
+            return;
+        }
         var shown = Filtered(sessions);
         if (shown.Count == 0 && sessions.Count > 0)
         {

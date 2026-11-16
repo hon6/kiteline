@@ -47,6 +47,10 @@ DEFAULT_MOBILE = {
     "installTodoSkill": True,     # 待办与关键信息技能
     "installStageSkill": True,    # 任务阶段技能（会话列表的「2/4 开发中」）
     "installOpenCodePlugin": True,
+    "browserOn": "client",         # agent 浏览器开在哪：client 用户这台电脑（远端会话经 ssh 反向转发用它）/ server agent 所在的电脑
+    "browserMax": 4,               # 最多同时开几个浏览器（再按可用内存往下压）
+    "browserIdle": 10,             # 空闲多少分钟回收
+    "browserRecord": True,         # 录下浏览器操作，可以回放
     "httpsEnabled": True,
     "httpsPort": 0,
     "mpEnabled": True,             # 微信小程序入口（加密隧道，见 mpgate.py）

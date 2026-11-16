@@ -6,6 +6,40 @@ import UIKit
 import AppKit
 #endif
 
+// MARK: 拖动改大小
+
+/// 正在拖窗口边缘改大小、拖分屏分隔条：这期间对话页的消息先按开始拖时的宽度摆着（多出来的裁掉、不够的露底色），松手再按新宽度排一次（同 Xcode）。
+/// 不这样的话每拖一个像素，每一列的每条消息都要重新折行、量高度：开五六列、几百行的会话时拖起来一顿一顿（11-16）。
+/// 标题条、标签栏、输入框照样实时跟着变（它们排版很便宜）
+@Observable @MainActor
+final class PaneResize {
+    static let shared = PaneResize()
+
+    private(set) var active = false
+    private var window = false
+    private var divider = false
+
+    private init() {
+        #if os(macOS)
+        let center = NotificationCenter.default
+        center.addObserver(forName: NSWindow.willStartLiveResizeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { PaneResize.shared.setWindow(true) }
+        }
+        center.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { PaneResize.shared.setWindow(false) }
+        }
+        #endif
+    }
+
+    func setWindow(_ on: Bool) { window = on; update() }
+    func setDivider(_ on: Bool) { divider = on; update() }
+
+    private func update() {
+        let now = window || divider
+        if active != now { active = now }
+    }
+}
+
 // MARK: 模型
 
 /// 分屏（同 VS Code 的编辑器分组）：一块一块放会话，可以左右分、上下分，一层层嵌套。
@@ -1295,6 +1329,9 @@ private struct SplitView<Content: View>: View {
                 }
             }
         }
+        // 拖分隔条期间消息不重新折行，松手再排（见 PaneResize）
+        .onChange(of: dragStart != nil) { _, dragging in PaneResize.shared.setDivider(dragging) }
+        .onDisappear { if dragStart != nil { PaneResize.shared.setDivider(false) } }
     }
 }
 
@@ -1643,13 +1680,13 @@ private struct PaneHeader: View {
                 }
                 .accessibilityLabel(marked ? "已标记，轻点取消标记" : "标记会话")
             }
-            if room >= 340 || Speaker.shared.speaking != nil {
+            if room >= 340 || Speaker.shared.speakingKey == key {
                 Button { model.externalAction = (key, .speak, UUID()) } label: {
-                    Image(systemName: Speaker.shared.speaking != nil ? "speaker.wave.2.fill" : "speaker.wave.2")
-                        .symbolEffect(.variableColor.iterative, isActive: Speaker.shared.speaking != nil)
+                    Image(systemName: Speaker.shared.speakingKey == key ? "speaker.wave.2.fill" : "speaker.wave.2")
+                        .symbolEffect(.variableColor.iterative, isActive: Speaker.shared.speakingKey == key)
                         .frame(width: 30, height: 30).contentShape(Rectangle())
                 }
-                .accessibilityLabel(Speaker.shared.speaking != nil ? "停止朗读" : "朗读最新回复")
+                .accessibilityLabel(Speaker.shared.speakingKey == key ? "停止朗读" : "朗读最新回复")
             }
             Button { model.externalAction = (key, .menu, UUID()) } label: {
                 Image(systemName: "ellipsis").frame(width: 30, height: 30).contentShape(Rectangle())
@@ -2965,7 +3002,7 @@ public struct TarsPanesView: View, Equatable {
             .environment(\.paneAccessory, accessory)
             .environment(model)
         } else {
-            ProgressView()
+            SkeletonPage(style: .messages())
         }
     }
 }

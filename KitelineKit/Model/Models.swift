@@ -74,6 +74,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     var viewedAt: Double?
     /// 最近一轮是别的会话来信引起的（会话之间的往来、群消息）：不算给你的新消息
     var fromPeer: Bool
+    /// agent 正在用 Kiteline 的浏览器（对话页浮出实时画面小窗，见 Browser/BrowserViews.swift）；没在用、老版本电脑端没有
+    var browser: BrowserInfo? = nil
 
     var id: String { key }
     var isWaiting: Bool { activity == "waiting" }
@@ -93,6 +95,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         case key, title, name, sourceId, sourceName, sourceKind, activity, activityText, blocking, reason, preview
         case pendingTool, canReply, cwd, updatedAt, startedAt, usage, error, effort, ultracode, permissionMode, cwdShort, subagents, terminals
         case agent, readOnly, readOnlyReason, caps, pendingOptions, sessionId, branch, worktree, stage, goal, hostable, hostedIssue, viewedAt, fromPeer, queue
+        case browser
     }
 
     init(from decoder: Decoder) throws {
@@ -136,6 +139,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         hostedIssue = (try? c.decodeIfPresent(HostedIssue.self, forKey: .hostedIssue)) ?? nil
         viewedAt = try? c.decodeIfPresent(Double.self, forKey: .viewedAt)
         fromPeer = ((try? c.decodeIfPresent(Bool.self, forKey: .fromPeer)) ?? nil) ?? false
+        browser = (try? c.decodeIfPresent(BrowserInfo.self, forKey: .browser)) ?? nil
     }
 }
 

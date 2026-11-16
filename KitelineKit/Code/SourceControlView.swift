@@ -25,7 +25,7 @@ struct SourceControlPanel: View {
             } else if let error = store.loadError {
                 LoadFailed(error: error) { await store.refresh() }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonPage(style: .changes(8))
             }
         }
         .codeAsks($ask, $nameAsk)

@@ -21,7 +21,7 @@ enum NewSession {
     private(set) static var lastStarted: (sourceId: String, cwd: String, prompt: String)?
 
     /// sessionId 非空 = 恢复这段旧对话（扩展 createPanel(sessionId, prompt) 会在标签里接着这段对话）。
-    /// 要自动提交时，得等新标签加载好、内容填进输入框才能按发送（最多等 45 秒）：给了 accepted 的，标签开出来就先回一次 accepted
+    /// 要自动提交时，得等新标签加载好、内容填进输入框才能按发送（本机最多等 1 分钟，远端 2 分钟）：给了 accepted 的，标签开出来就先回一次 accepted
     /// （手机那边的请求只等 12 秒），提交的结果再走 completion；没给的照旧只在最后回 completion
     /// returnFocus：做完把前台还给用户原来在用的程序（开窗口、开标签都会让 VS Code 跳到前台；新标签加载完它还会再抢一次，多守 8 秒）
     /// inEditor：一定在 VS Code 里开（不走后台托管，见 Hosted）
@@ -200,8 +200,11 @@ enum NewSession {
             }
             guard let app = Delivery.Editor.running()?.app else { fail("VS Code 未运行"); return }
             // 新标签把内容预填进输入框、却不把光标放进去，模拟回车会落空：在这个项目的窗口里找到填着这段话的输入框，按它旁边的「发送」
-            ClaudeInput.submit(prompt: prompt, app: app, project: project, remote: source.kind == .ssh,
-                               deadline: Date().addingTimeInterval(45)) { result in
+            // 等多久：远端的会话面板从远端加载，那个窗口里别的会话正忙（远端扩展进程卡顿）时要一分多钟
+            //（11-16 实测 69 秒：17:28:37 发链接，17:29:46 才填好），原来只等 45 秒就放弃了
+            let remote = source.kind == .ssh
+            ClaudeInput.submit(prompt: prompt, app: app, project: project, remote: remote,
+                               deadline: Date().addingTimeInterval(remote ? 120 : 60)) { result in
                 switch result {
                 case .sent:
                     Log.write("新会话：已按发送")
@@ -216,9 +219,12 @@ enum NewSession {
                     }
                 case .notFound:
                     // 新开的窗口没信任过：VS Code 先问信任，答之前 Claude Code 扩展不运行（Mac 上多半已被上面的 .blocked 认出来）
-                    fail(opened && EditorSettings.workspaceTrustEnabled(scheme: scheme)
-                         ? "45 秒内未在 VS Code 中找到已填入内容的新标签页（如果 VS Code 以受限模式打开了此项目，请点击顶部横幅中的「管理」并信任此文件夹：Claude Code 扩展只在受信任的文件夹中运行）"
-                         : "45 秒内未在 VS Code 中找到已填入内容的新标签页")
+                    let trustHint = opened && EditorSettings.workspaceTrustEnabled(scheme: scheme)
+                    fail(remote
+                         ? (trustHint ? "2 分钟内未在 VS Code 中找到已填入内容的新标签页（如果 VS Code 以受限模式打开了此项目，请点击顶部横幅中的「管理」并信任此文件夹：Claude Code 扩展只在受信任的文件夹中运行）"
+                                      : "2 分钟内未在 VS Code 中找到已填入内容的新标签页")
+                         : (trustHint ? "1 分钟内未在 VS Code 中找到已填入内容的新标签页（如果 VS Code 以受限模式打开了此项目，请点击顶部横幅中的「管理」并信任此文件夹：Claude Code 扩展只在受信任的文件夹中运行）"
+                                      : "1 分钟内未在 VS Code 中找到已填入内容的新标签页"))
                 case .restricted:
                     keepFront = true   // 前台留在 VS Code：用户回到电脑前一眼就能看到那条横幅
                     Log.write("新会话：项目窗口是受限模式（文件夹没信任过），Claude Code 扩展不运行，没有自动提交")

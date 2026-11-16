@@ -83,6 +83,17 @@ static class SelfTest
                     if (model.Sessions.FirstOrDefault(x => x.Title == arg) is SessionInfo t) SessionMenu.OpenSplit(t.Key, name == "splitdown");
                     break;
                 case "query": main.Query = arg; break;
+                // 会话浏览器画面放多大：browser:half / session / app / fullscreen / mini（对当前选中的会话）；browser:control 接管；collapse / expand 小窗收起成小圆钮、恢复
+                case "browser":
+                    if (main.Selection is string bkey)
+                    {
+                        if (arg == "control") _ = Views.BrowserStore.Shared.TakeOver(bkey);
+                        else if (arg == "collapse") Views.BrowserStore.Shared.Dismiss(bkey, model.Session(bkey)?.Browser);
+                        else if (arg == "expand") Views.BrowserStore.Shared.Expand(bkey);
+                        else if (arg == "replay") _ = Views.BrowserReplayBar.Last?.TogglePlay();
+                        else if (Enum.TryParse<Views.BrowserSize>(arg, true, out var bsize)) Views.BrowserStore.Shared.SetSize(bkey, bsize);
+                    }
+                    break;
                 case "theme": Look.SetTheme(LookTheme.Named(arg)); break;
                 // 改一项界面偏好（只在这次自测的内存里）：pref:todosGrouping=project，等号后面空着 = 删掉
                 case "pref": var pref = arg.Split('=', 2); Prefs.Set(pref[0], pref.Length > 1 && pref[1].Length > 0 ? pref[1] : null); break;
@@ -105,6 +116,19 @@ static class SelfTest
                     });
                     break;
                 case "updatedialog": Views.UpdateDialog.Open(); break;
+                case "skeletonshot":   // 骨架屏自测：skeletonshot:History:/tmp/x.png（每种 SkeletonKind 单独开窗截一张）
+                {
+                    var sk = arg.Split(':', 2);
+                    var kind = Enum.Parse<Views.SkeletonKind>(sk[0]);
+                    var win = new Window { Width = 820, Height = 760, Content = new Border { Padding = new Thickness(20, 8), Child = Views.Skeleton.Page(kind) }.Res(Border.BackgroundProperty, "Window") };
+                    win.Show();
+                    Pump(0.9);
+                    Shot(win, sk[1]);
+                    // 再连拍几帧（文件名加 -1、-2…）：看扫光有没有在移动
+                    for (var f = 1; f <= 5; f++) { Pump(0.2); Shot(win, sk[1].Replace(".png", $"-{f}.png")); }
+                    win.Close();
+                    break;
+                }
                 case "phonedialog": Views.PhoneUpdateDialog.Open(auto: false); break;
                 case "closeupdate": Views.UpdateDialog.Current?.Close(); break;
                 case "dialogshot": Pump(0.4); if ((Views.Dialog.Last ?? Views.UpdateDialog.Current ?? Views.PhoneUpdateDialog.Current) is Window dialog) Shot(dialog, arg); break;

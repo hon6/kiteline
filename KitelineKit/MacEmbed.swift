@@ -250,7 +250,7 @@ public struct TarsTodosView: View {
             })
             .panelAnchor(key: "todos")   // 加待办、改待办、看截图的面板对着待办页居中
         } else {
-            ProgressView()
+            SkeletonPage(style: .todos(6))
         }
     }
 }
@@ -267,7 +267,7 @@ public struct TarsHostedSetupView: View {
                 .tint(Theme.claude)
                 .environment(model)
         } else {
-            ProgressView().padding(40)
+            SkeletonPage(nil, style: .form(5))
         }
     }
 }
@@ -289,7 +289,7 @@ public struct TarsFavoritesView: View {
             })
             .panelAnchor(key: "favorites")   // 看大图的面板对着收藏页居中
         } else {
-            ProgressView()
+            SkeletonPage(style: .favorites(4))
         }
     }
 }
@@ -515,7 +515,7 @@ public struct TarsGroupsView: View {
             .environment(\.openRoute, KitelineKit.groupRoutes)
             .panelAnchor(key: "groups")
         } else {
-            ProgressView()
+            SkeletonPage(style: .list(5, sections: true))
         }
     }
 }
@@ -605,7 +605,7 @@ public struct TarsConversationView: View {
         if let model = KitelineKit.model {
             MacConversation(key: key).environment(model).id(key)
         } else {
-            ProgressView()
+            SkeletonPage(style: .messages())
         }
     }
 }
@@ -665,7 +665,7 @@ public struct TarsSessionCard: View {
             .environment(\.paneAccessory, accessory)
             .environment(model)
         } else {
-            ProgressView()
+            SkeletonPage(style: .messages())
         }
     }
 }

@@ -129,17 +129,17 @@ public sealed class NewTaskSheet
         var tomorrow = DateTime.Today.AddDays(1);
         datePicker.SelectedDate = tomorrow;
         timePicker.SelectedTime = new TimeSpan(9, 0, 0);
-        isolated = new CheckBox { Content = Ui.Text(L("在独立分支中进行（git worktree）"), 12), VerticalAlignment = VerticalAlignment.Center }
+        isolated = new CheckBox { Content = Ui.Text(L("在独立分支中进行（git worktree）"), 12), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left }
             .Tip(L("在仓库旁新建 worktree 及以 tars/ 开头的分支，Claude 仅在其中修改，不影响主目录中正在进行的改动"));
         agentBox.SelectionChanged += (_, _) => Update();
-        var options = Ui.H(10, timing, datePicker, timePicker, new Spacer(), agentBox, isolated);
+        var options = Ui.H(10, timing, datePicker, timePicker, new Spacer(), agentBox);   // 独立分支单独一行，挤在一起窄窗口放不下
 
         startButton = new Tap(startLabel.Pad(18, 0), Start, 7) { Height = 30, MinWidth = 88 }.Keys("Action", "Action");
         var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), () => window!.Close(), 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
             .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
         var footer = Ui.H(10, warning, status.Shrink(), new Spacer(), cancel, startButton);
 
-        var stack = new StackPanel { Spacing = 12, Children = { header, scopes, listBox, field, options, footer } };
+        var stack = new StackPanel { Spacing = 12, Children = { header, scopes, listBox, field, options, isolated, footer } };
         window = Dialog.Make(stack.Pad(20), 600, L("新任务"));
         window.KeyDown += (_, e) => { if (e.Key == Key.Escape) window.Close(); };
         window.Closed += (_, _) => { shown = null; MainModel.Shared.NewTaskPreset = null; };
@@ -253,7 +253,7 @@ public sealed class NewTaskSheet
             if (on) selectedRow = row;
             rows.Children.Add(row);
         }
-        listOverlay.Content = loading ? new Spinner(18) : null;
+        listOverlay.Content = loading ? new SkeletonView(SkeletonKind.Rows, 4).Margin(12, 10, 12, 0).VAlign(VerticalAlignment.Top) : null;
         if (loading) return;
         if (projects.Count == 0 || shownList.Count == 0)
             rows.Children.Add(Ui.Text(projects.Count == 0 ? L("暂无使用过 Claude Code 的项目") : L("没有匹配的项目"), 13, color: "Text2").Pad(10, 8));

@@ -82,7 +82,7 @@ struct TracePanel: View {
                 LoadFailed(error: error) { await load() }.padding(.top, 40)
                 Spacer(minLength: 0)
             } else {
-                ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                SkeletonPage(style: .list(8, lead: .icon, lines: 1))
                 Spacer(minLength: 0)
             }
         }

@@ -102,6 +102,8 @@ public sealed class TermView : Panel, ITermSink, ITerminalDelegate
     /// 清屏重来：ESC c（终端的完全复位）
     public void Restart() => Feed([0x1B, 0x63], 0);
 
+    public (int Cols, int Rows) CellGrid => (terminal.Cols, terminal.Rows);
+
     void Redraw()
     {
         if (redrawQueued) return;
@@ -571,8 +573,34 @@ sealed class TermColors
         var fg = fgIndex < 256 ? palette[fgIndex] : Foreground;
         IBrush? bg = bgIndex < 256 ? palette[bgIndex] : null;
         if (flags.HasFlag(FLAGS.INVERSE)) (fg, bg) = (bg ?? Background, fg);
-        if (flags.HasFlag(FLAGS.DIM) && fg is ISolidColorBrush solid)
-            fg = new ImmutableSolidColorBrush(solid.Color, 0.6);
-        return (fg, bg);
+        // 淡色（SGR 2）往底色混一半；再保证和底色的对比度不低于 4.5（同 VS Code 终端的 minimumContrastRatio）：
+        // 程序按深色背景配的浅灰次要文字（Claude Code 的行号、改动上下文）在白底上才看得清
+        var key = (fg, bg ?? Background, flags.HasFlag(FLAGS.DIM));
+        if (!readable.TryGetValue(key, out var final))
+        {
+            var f = (fg as ISolidColorBrush)?.Color ?? Colors.Gray;
+            var b = ((bg ?? Background) as ISolidColorBrush)?.Color ?? Colors.White;
+            if (key.Item3) f = Avalonia.Media.Color.FromRgb((byte)((f.R + b.R) / 2), (byte)((f.G + b.G) / 2), (byte)((f.B + b.B) / 2));
+            final = readable[key] = new ImmutableSolidColorBrush(EnsureContrast(f, b, 4.5));
+        }
+        return (final, bg);
+    }
+
+    readonly Dictionary<(IBrush, IBrush, bool), IBrush> readable = new();
+
+    static Avalonia.Media.Color EnsureContrast(Avalonia.Media.Color fg, Avalonia.Media.Color bg, double ratio)
+    {
+        static double Lin(byte v) { var c = v / 255.0; return c <= 0.03928 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4); }
+        static double Lum(Avalonia.Media.Color c) => 0.2126 * Lin(c.R) + 0.7152 * Lin(c.G) + 0.0722 * Lin(c.B);
+        static double Contrast(double a, double b) => (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+        var bl = Lum(bg);
+        if (Contrast(Lum(fg), bl) >= ratio) return fg;
+        var target = bl > 0.5 ? 0 : 255;
+        for (var step = 0.1; step <= 1.0001; step += 0.1)
+        {
+            var c = Avalonia.Media.Color.FromRgb((byte)(fg.R + (target - fg.R) * step), (byte)(fg.G + (target - fg.G) * step), (byte)(fg.B + (target - fg.B) * step));
+            if (Contrast(Lum(c), bl) >= ratio || step >= 0.99) return c;
+        }
+        return fg;
     }
 }

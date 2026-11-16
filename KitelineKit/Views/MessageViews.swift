@@ -9,7 +9,7 @@ struct MessageRow<Content: View>: View {
     /// Mac 上（同网页版）：每条下面一行小字时间
     var time: Double? = nil
     /// Mac 上：Claude 的文字回复，时间旁边一个小喇叭，点了朗读
-    var speak: (text: String, id: String)? = nil
+    var speak: (text: String, id: String, key: String)? = nil
     /// 能翻译的文字消息：下面带「翻译」角标（见 TranslateViews.swift）
     var translate: (text: String, id: String)? = nil
     /// 下面那行的「复制」：默认复制能翻译的那段文字（显示着译文时复制译文）
@@ -125,7 +125,7 @@ struct MessageRow<Content: View>: View {
                 if let time { Text(Format.clock(time)) }
                 copyButton
                 if let speak {
-                    Button { Speaker.shared.toggle(speak.text, id: speak.id) } label: {
+                    Button { Speaker.shared.toggle(speak.text, id: speak.id, key: speak.key) } label: {
                         Image(systemName: Speaker.shared.speaking == speak.id ? "speaker.wave.2.fill" : "speaker.wave.2")
                     }
                     .buttonStyle(.plain)
@@ -509,7 +509,7 @@ struct BotText: View {
               model.forwardFilesAction(key: key, paths: files) { picking = files },
               model.favoriteAction(key: key, item: item, mine: false)].compactMap { $0 } + [
             MenuAction(title: Speaker.shared.speaking == item.id ? L("停止朗读") : L("朗读"), symbol: "speaker.wave.2") {
-                Speaker.shared.toggle(text, id: item.id)
+                Speaker.shared.toggle(text, id: item.id, key: key)
             },
         ], selectable: true) {
             // 气泡贴着字走（同微信）：一两句的回复不再拉成一整行的灰条；有代码块、分隔线的照样撑满

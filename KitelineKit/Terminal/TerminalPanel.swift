@@ -59,6 +59,22 @@ struct TerminalPanel: View {
     @State private var dragStart: Double?
     /// 终端那一块的大小（新开终端时按它算行列数）
     @State private var area: CGSize = .zero
+    /// 终端列表（同 VS Code）：右边一列，开着两个以上终端才显示；中间的分隔条拖动改宽度（记住）、双击恢复默认；
+    /// 拖窄到放不下文字只剩图标。面板宽度用来限制列表最多占一半
+    @State private var width: CGFloat = 0
+    @AppStorage("terminalListWidth") private var storedList: Double = TerminalPanel.defaultList
+    @State private var listDragStart: Double?
+    static let defaultList: Double = 176
+    static let minList: Double = 44
+    private var listWidth: CGFloat { CGFloat(min(max(storedList, Self.minList), max(Self.minList, Double(width) * 0.5))) }
+    /// 窄到只放得下图标
+    private var listCompact: Bool { listWidth < 96 }
+    /// 重命名框
+    @State private var renaming: TermInfo?
+    @State private var renameText = ""
+    /// 手机上打开终端时的手势引导（轻点 / 滑动 / 长按）；点「不再显示」后不再出现
+    @AppStorage("terminalGestureGuideOff") private var guideOff = false
+    @State private var guideShown = false
 
     var body: some View {
         let store = model.terminals
@@ -68,49 +84,166 @@ struct TerminalPanel: View {
         VStack(spacing: 0) {
             grip
             header(terms, current)
+            if let current { place(current) }
+            HStack(spacing: 0) {
             ZStack {
                 TerminalColors.background(scheme)
                 if let current {
-                    TermScreen(key: key, id: current.id, fontSize: fontSize, dark: scheme == .dark)
-                        .id("\(current.id)-\(scheme == .dark)")
-                        .padding(.leading, 6)
+                    panes(terms, current)
                 } else if store.opening.contains(key) || store.lists[key] == nil {
                     ProgressView().controlSize(.small)
                 } else {
                     VStack(spacing: 10) {
                         Text("没有开着的终端").font(.ui(.subheadline)).foregroundStyle(.secondary)
                         Button { Task { await openNew() } } label: {
-                            Label("新建终端", systemImage: "plus").font(.ui(.subheadline))
+                            if let device = store.devices[key] {
+                                Label("在「\(device)」上新建终端", systemImage: "plus").font(.ui(.subheadline))
+                            } else {
+                                Label("新建终端", systemImage: "plus").font(.ui(.subheadline))
+                            }
                         }
                         .buttonStyle(.bordered)
                     }
                 }
             }
-            .frame(height: height)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { area = $0 }
+            .overlay { if guideShown { gestureGuide } }
+            if terms.count > 1 {
+                sash
+                titleList(terms, current)
+            }
+            }
+            .frame(height: height)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .background(Theme.inputBar)
         .task(id: key) {
+            #if canImport(UIKit)
+            if !guideOff { withAnimation(.easeOut(duration: 0.2)) { guideShown = true } }
+            #endif
             await store.refresh(key)
             if store.lists[key]?.isEmpty == true { await openNew() }
+        }
+        .alert("重命名终端", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("名称", text: $renameText)
+            Button("确定") {
+                if let term = renaming { Task { await store.rename(key, term.id, renameText) } }
+                renaming = nil
+            }
+            Button("取消", role: .cancel) { renaming = nil }
+        } message: {
+            Text("留空则恢复默认名称")
+        }
+    }
+
+    /// 终端区：正在看的那个，和与它拆分在一起的并排（同 VS Code 的拆分）；点哪个就切到哪个
+    @ViewBuilder
+    private func panes(_ terms: [TermInfo], _ current: TermInfo) -> some View {
+        let members = current.group.map { group in terms.filter { $0.group == group } } ?? [current]
+        HStack(spacing: 0) {
+            ForEach(Array(members.enumerated()), id: \.element.id) { index, term in
+                if index > 0 { Rectangle().fill(SwiftUI.Color.primary.opacity(0.12)).frame(width: 1) }
+                TermScreen(key: key, id: term.id, fontSize: fontSize, dark: scheme == .dark)
+                    .id("\(term.id)-\(scheme == .dark)")
+                    .padding(.leading, 6)
+                    .overlay {
+                        if members.count > 1 && term.id == current.id {
+                            Rectangle().strokeBorder(Theme.claude.opacity(0.35), lineWidth: 1).allowsHitTesting(false)
+                        }
+                    }
+                    .simultaneousGesture(TapGesture().onEnded { model.terminals.selected[key] = term.id })
+            }
+        }
+    }
+
+    /// 手机上的手势引导：盖在终端上的半透明遮罩，「知道了」只关这一次，「不再显示」以后都不出现
+    private var gestureGuide: some View {
+        ZStack {
+            SwiftUI.Color.black.opacity(0.55)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("终端手势").font(.ui(.headline))
+                guideRow("hand.tap", L("单指轻点"), L("相当于鼠标单击：定位光标、插入"))
+                guideRow("hand.point.up.left.and.text", L("单指拖动"), L("选中文字，松手后可拷贝"))
+                guideRow("hand.draw", L("双指上下滑"), L("翻看终端里的历史输出"))
+                guideRow("hand.point.up.left", L("长按"), L("显示拷贝、粘贴等菜单"))
+                HStack(spacing: 10) {
+                    Button { withAnimation(.easeOut(duration: 0.2)) { guideOff = true; guideShown = false } } label: {
+                        Text("不再显示").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    Button { withAnimation(.easeOut(duration: 0.2)) { guideShown = false } } label: {
+                        Text("知道了").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.claude)
+                }
+                .font(.ui(.subheadline))
+                .padding(.top, 2)
+            }
+            .padding(16)
+            .frame(maxWidth: 340)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(16)
+        }
+        .transition(.opacity)
+    }
+
+    private func guideRow(_ icon: String, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon).font(.app(size: 17)).frame(width: 24).foregroundStyle(Theme.claude)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.ui(.subheadline).weight(.semibold))
+                Text(detail).font(.ui(.caption)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 按面板（或其中一块）的宽高算行列数（同 SwiftTerm 的算法）
+    private func grid(width: CGFloat, height: CGFloat) -> (cols: Int, rows: Int) {
+        #if canImport(UIKit)
+        let font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let scroller: CGFloat = 0
+        #else
+        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let scroller: CGFloat = 16
+        #endif
+        let ct = font as CTFont
+        let line = ceil((CTFontGetAscent(ct) + CTFontGetDescent(ct) + CTFontGetLeading(ct)) * scale) / scale
+        let cell = (("W" as NSString).size(withAttributes: [.font: font]).width * scale).rounded() / scale
+        guard width >= 1 else { return (80, 24) }
+        return (max(Int((width - 6 - scroller) / max(cell, 1)), 20), max(Int(height / max(line, 1)), 5))
+    }
+
+    private func split(_ term: TermInfo) {
+        let size = grid(width: area.width / 2, height: area.height)
+        Task { await model.terminals.split(key, term.id, cols: size.cols, rows: size.rows) }
+    }
+
+    /// 终端的右键 / 长按菜单（同 VS Code）：重命名、改颜色、拆分、关闭
+    @ViewBuilder
+    private func termMenu(_ term: TermInfo) -> some View {
+        Button { renameText = term.customName; renaming = term } label: { Label("重命名…", systemImage: "pencil") }
+        Menu {
+            ForEach(TermColor.all, id: \.id) { color in
+                Button { Task { await model.terminals.setColor(key, term.id, color.id) } } label: {
+                    if term.color == color.id { Label(color.name, systemImage: "checkmark") } else { Text(color.name) }
+                }
+            }
+        } label: { Label("更改颜色", systemImage: "paintpalette") }
+        if !term.hosted && !term.isRun {
+            Button { split(term) } label: { Label("拆分终端", systemImage: "square.split.2x1") }
+        }
+        if !term.hosted {
+            Divider()
+            Button(role: .destructive) { Task { await model.terminals.close(key, term.id) } } label: { Label("关闭终端", systemImage: "trash") }
         }
     }
 
     /// 新开一个终端，一开始就按面板的大小（同 SwiftTerm 的算法）：先按 80 列开再缩小的话，zsh 会在第一行留下一个「%」
     private func openNew() async {
         for _ in 0..<20 where area.width < 1 { try? await Task.sleep(for: .milliseconds(50)) }
-        #if canImport(UIKit)
-        let font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let scroller: CGFloat = 0
-        #else
-        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let scroller: CGFloat = 16   // Mac 上右边留给滚动条
-        #endif
-        let ct = font as CTFont
-        let line = ceil((CTFontGetAscent(ct) + CTFontGetDescent(ct) + CTFontGetLeading(ct)) * scale) / scale
-        let cell = (("W" as NSString).size(withAttributes: [.font: font]).width * scale).rounded() / scale
-        let cols = Int((area.width - 6 - scroller) / max(cell, 1)), rows = Int(area.height / max(line, 1))
-        await model.terminals.open(key, cols: area.width < 1 ? 80 : max(cols, 20), rows: area.width < 1 ? 24 : max(rows, 5))
+        let size = grid(width: area.width, height: area.height)
+        await model.terminals.open(key, cols: size.cols, rows: size.rows)
     }
 
     private func clamped(_ value: Double) -> CGFloat {
@@ -143,29 +276,38 @@ struct TerminalPanel: View {
     private func header(_ terms: [TermInfo], _ current: TermInfo?) -> some View {
         let store = model.terminals
         return HStack(spacing: 6) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(terms.enumerated()), id: \.element.id) { index, term in
-                        tab(term, title: tabTitle(terms, index), selected: term.id == current?.id)
-                    }
+            // 同 VS Code：标题栏只写「终端」；几个终端在右边一列切换（只有一个时不显示那列，名字写在这里）
+            Group {
+                if terms.count == 1, let only = terms.first {
+                    Text(only.device.isEmpty ? only.name : "\(only.device) · \(only.name)")
+                } else {
+                    Text(terms.isEmpty ? L("所有终端") : "\(L("所有终端")) · \(terms.count)")
                 }
-                .padding(.horizontal, 10)
             }
-            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
+            .font(.ui(.caption).weight(.semibold))
+            .lineLimit(1)
+            .padding(.leading, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             Button { Task { await openNew() } } label: {
                 Image(systemName: "plus").frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(store.opening.contains(key))
             .accessibilityLabel(L("新建终端"))
+            // 拆分（同 VS Code 标题栏上的拆分按钮）：在正在看的终端旁边再开一个
+            if let current, !current.hosted, !current.isRun {
+                Button { split(current) } label: {
+                    Image(systemName: "square.split.2x1").frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("拆分终端"))
+            }
             Menu {
                 Button { fontSize = min(fontSize + 1, 20) } label: { Label("放大字号", systemImage: "textformat.size.larger") }
                 Button { fontSize = max(fontSize - 1, 9) } label: { Label("缩小字号", systemImage: "textformat.size.smaller") }
                 if let current {
                     Divider()
-                    Button(role: .destructive) { Task { await store.close(key, current.id) } } label: {
-                        Label("关闭当前终端", systemImage: "xmark")
-                    }
+                    termMenu(current)
                 }
             } label: {
                 Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
@@ -191,36 +333,111 @@ struct TerminalPanel: View {
         .padding(.bottom, 6)
     }
 
-    /// 同一种 shell 开了几个：zsh、zsh 2、zsh 3（同 VS Code）
+    /// 同一台设备上同一种 shell 开了几个：zsh、zsh 2、zsh 3（同 VS Code）
     private func tabTitle(_ terms: [TermInfo], _ index: Int) -> String {
-        let name = terms[index].name
-        let same = terms[..<index].filter { $0.name == name }.count
-        return same == 0 ? name : "\(name) \(same + 1)"
+        let term = terms[index]
+        let same = terms[..<index].filter { $0.name == term.name && $0.device == term.device }.count
+        return same == 0 ? term.name : "\(term.name) \(same + 1)"
     }
 
-    private func tab(_ term: TermInfo, title: String, selected: Bool) -> some View {
-        let store = model.terminals
-        return HStack(spacing: 5) {
-            Image(systemName: "apple.terminal").font(.app(size: 10, weight: .semibold))
-            Text(title).font(.ui(.caption)).lineLimit(1)
-            if selected {
-                Button { Task { await store.close(key, term.id) } } label: {
-                    Image(systemName: "xmark").font(.app(size: 9, weight: .bold)).frame(width: 16, height: 16).contentShape(Rectangle())
+    /// 标签下面一行：这个终端在哪台设备上、agent 跑的是什么命令、跑完没有。设备名放最前面加粗，一眼分清是哪台
+    private func place(_ term: TermInfo) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: deviceIcon(term)).font(.app(size: 10, weight: .semibold))
+            Text(term.device.isEmpty ? L("电脑") : term.device).font(.ui(.caption).weight(.semibold)).lineLimit(1)
+                .foregroundStyle(.primary)
+            if term.isRun {
+                Text(term.run).font(.app(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 6)
+                if term.ended {
+                    if let code = term.exitCode, code != 0 {
+                        Text("已结束，退出码 \(code)").font(.ui(.caption2)).foregroundStyle(Theme.claude)
+                    } else {
+                        Text("已完成").font(.ui(.caption2))
+                    }
+                } else {
+                    Text("Agent 运行中").font(.ui(.caption2))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L("关闭终端"))
+            } else {
+                Text(term.cwd).font(.ui(.caption2)).lineLimit(1).truncationMode(.head)
+                Spacer(minLength: 0)
             }
         }
-        .foregroundStyle(selected ? AnyShapeStyle(Theme.claude) : AnyShapeStyle(.primary.opacity(0.7)))
-        .padding(.leading, 9).padding(.trailing, selected ? 4 : 9)
-        .frame(height: 24)
-        .background(selected ? Theme.claude.opacity(0.12) : Theme.field, in: Capsule(style: .circular))
-        .overlay { if selected { Capsule(style: .circular).hairlineBorder(Theme.claude.opacity(0.45)) } }
-        .contentShape(Capsule(style: .circular))
-        .onTapGesture { store.selected[key] = term.id }
-        .contextMenu {
-            Button(role: .destructive) { Task { await store.close(key, term.id) } } label: { Label("关闭终端", systemImage: "xmark") }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 5)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 拆分组在列表里的连线（同 VS Code）：组里第一个 ┌、中间 ├、最后 └；不在组里的空
+    private func connector(_ terms: [TermInfo], _ index: Int) -> String {
+        guard let group = terms[index].group else { return "" }
+        let members = terms.indices.filter { terms[$0].group == group }
+        guard members.count > 1 else { return "" }
+        return index == members.first ? "┌" : index == members.last ? "└" : "├"
+    }
+
+    /// 开在会话所在那台以外的设备上：换个图标提醒
+    private func deviceIcon(_ term: TermInfo) -> String {
+        let home = model.terminals.devices[key]
+        return home == nil || home == term.device ? "desktopcomputer" : "arrow.triangle.branch"
+    }
+
+    private func tabIcon(_ term: TermInfo) -> String {
+        guard term.isRun else { return "apple.terminal" }
+        if !term.ended { return "play.circle" }
+        return (term.exitCode ?? 0) == 0 ? "checkmark.circle" : "exclamationmark.circle"
+    }
+
+    /// 终端和列表之间的分隔条（同 VS Code 的 sash）：拖动改列表宽度，双击恢复默认
+    private var sash: some View {
+        Rectangle()
+            .fill(SwiftUI.Color.primary.opacity(listDragStart == nil ? 0.1 : 0.35))
+            .frame(width: 1)
+            .frame(width: 7)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { drag in
+                        let start = listDragStart ?? Double(listWidth)
+                        listDragStart = start
+                        storedList = min(max(start - drag.translation.width, Self.minList), max(Self.minList, Double(width) * 0.5))
+                    }
+                    .onEnded { _ in listDragStart = nil }
+            )
+            .simultaneousGesture(TapGesture(count: 2).onEnded { storedList = Self.defaultList })
+            #if os(macOS)
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            #endif
+            .padding(.horizontal, -3)
+            .zIndex(1)
+            .accessibilityLabel(L("拖动调整终端列表宽度"))
+    }
+
+    /// 右边一列：终端列表（同 VS Code）。每行图标 + 设备名（加粗）+ 名字；窄到放不下只剩图标。正在看的那行淡色底加细边，悬停出现删除
+    private func titleList(_ terms: [TermInfo], _ current: TermInfo?) -> some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 1) {
+                ForEach(Array(terms.enumerated()), id: \.element.id) { index, term in
+                    TermTitleRow(term: term, title: tabTitle(terms, index), icon: tabIcon(term), selected: term.id == current?.id,
+                                 compact: listCompact, connector: connector(terms, index),
+                                 select: { model.terminals.selected[key] = term.id },
+                                 close: { Task { await model.terminals.close(key, term.id) } })
+                        .contextMenu { termMenu(term) }
+                        // 拖动排序（同 VS Code）：拖到哪一行上就放到它前面
+                        .draggable(term.id)
+                        .dropDestination(for: String.self) { ids, _ in
+                            guard let moving = ids.first, moving != term.id else { return false }
+                            Task { await model.terminals.move(key, moving, before: term.id) }
+                            return true
+                        }
+                }
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 4)
         }
+        .frame(width: listWidth)
+        .background(TerminalColors.background(scheme).opacity(0.6))
     }
 }
 
@@ -250,6 +467,8 @@ enum TerminalColors {
     #endif
 
     static func style(_ view: TerminalView, dark: Bool) {
+        // 文字和背景对比度不到 4.5 就自动调深 / 调浅（同 VS Code 终端默认）：Claude 按深色背景配的浅灰次要文字在白底上才看得清
+        view.minimumContrastRatio = 4.5
         view.installColors(palette(dark: dark))
         view.nativeBackgroundColor = native(dark ? 0x181818 : 0xFFFFFF)
         view.nativeForegroundColor = native(dark ? 0xCCCCCC : 0x3B3B3B)
@@ -273,6 +492,21 @@ struct TermScreen: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TerminalView {
         let view = TerminalView(frame: .zero, font: UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular))
+        // 双指上下滑翻看历史（单指拖动不做事，也不当成按住鼠标拖动发给 Claude，否则一滑就变成选中文字）；轻点是鼠标单击，长按选中复制
+        view.touchScrollsInsteadOfDragging = true
+        // 单指拖动选中，松手弹「拷贝 / 取消」（同小程序、同引导里写的交互）
+        view.onTouchSelection = { [weak view] text in
+            let shown = text.count > 300 ? String(text.prefix(300)) + "…" : text
+            let alert = UIAlertController(title: L("选中的文字"), message: shown, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: L("取消"), style: .cancel) { _ in view?.clearTouchSelection() })
+            alert.addAction(UIAlertAction(title: L("拷贝"), style: .default) { _ in
+                UIPasteboard.general.string = text
+                view?.clearTouchSelection()
+            })
+            var top = view?.window?.rootViewController
+            while let next = top?.presentedViewController { top = next }
+            top?.present(alert, animated: true)
+        }
         TerminalColors.style(view, dark: dark)
         context.coordinator.attach(view)
         return view
@@ -337,6 +571,11 @@ final class TermLink: NSObject, TerminalViewDelegate, TermSink {
     /// 清屏重来：ESC c（终端的完全复位）
     func restart() { view?.feed(byteArray: [0x1B, 0x63][...]) }
 
+    var grid: (cols: Int, rows: Int)? {
+        guard let terminal = view?.getTerminal(), terminal.cols > 0, terminal.rows > 0 else { return nil }
+        return (terminal.cols, terminal.rows)
+    }
+
     // MARK: TerminalViewDelegate
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -373,5 +612,93 @@ final class TermLink: NSObject, TerminalViewDelegate, TermSink {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         #endif
+    }
+}
+
+/// 终端标题列表里的一行（两列布局的右边那列）
+private struct TermTitleRow: View {
+    let term: TermInfo
+    let title: String
+    let icon: String
+    let selected: Bool
+    /// 列表窄到只放得下图标（同 VS Code）
+    let compact: Bool
+    /// 拆分组的连线（┌ ├ └）
+    let connector: String
+    let select: () -> Void
+    let close: () -> Void
+    @State private var hover = false
+
+    /// 删除按钮：电脑上悬停出现（同 VS Code）；手机没有悬停，正在看的那行常显
+    private var showDelete: Bool {
+        #if os(macOS)
+        hover && !term.hosted
+        #else
+        selected && !term.hosted
+        #endif
+    }
+
+    private var label: String { term.device.isEmpty ? title : "\(term.device) · \(title)" }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if !connector.isEmpty && !compact {
+                Text(connector).font(.app(size: 12, design: .monospaced)).foregroundStyle(.tertiary).frame(width: 8)
+            }
+            Image(systemName: icon).font(.app(size: 11, weight: .semibold)).frame(width: 14)
+                .foregroundStyle(TermColor.swatch(term.color) ?? (selected ? Theme.claude : SwiftUI.Color.primary.opacity(0.8)))
+            if !compact {
+                if !term.device.isEmpty {
+                    Text(term.device).font(.ui(.caption).weight(.semibold)).lineLimit(1).layoutPriority(1)
+                }
+                Text(title).font(.ui(.caption)).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(selected ? AnyShapeStyle(Theme.claude) : AnyShapeStyle(.secondary))
+                Spacer(minLength: 0)
+                // 删除按钮（同 VS Code 悬停出现的垃圾桶）常驻占位、只改透明度：悬停时不增删控件，行高不变
+                Button(action: close) {
+                    Image(systemName: "trash").font(.app(size: 10, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(showDelete ? 1 : 0)
+                .allowsHitTesting(showDelete)
+                .accessibilityLabel(L("关闭终端"))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
+        .foregroundStyle(selected ? AnyShapeStyle(Theme.claude) : AnyShapeStyle(.primary.opacity(0.8)))
+        .padding(.leading, compact ? 0 : 8).padding(.trailing, compact ? 0 : 4)
+        .frame(height: 24)
+        .background(selected ? Theme.claude.opacity(0.12) : (hover ? SwiftUI.Color.primary.opacity(0.06) : .clear),
+                    in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay { if selected { RoundedRectangle(cornerRadius: 5, style: .continuous).hairlineBorder(Theme.claude.opacity(0.45)) } }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        #if os(macOS)
+        .onHover { hover = $0 }
+        #endif
+        .help(term.hosted ? "\(label)\n" + L("Claude 主终端（后台运行），不能关闭") : "\(label)\n" + (term.isRun ? term.run : term.cwd))
+        .accessibilityLabel(label)
+    }
+}
+
+/// 终端的颜色（同 VS Code 终端的「更改颜色」，取终端调色板里不刺眼的几种）
+enum TermColor {
+    struct Choice { let id: String; let name: String }
+    static let all: [Choice] = [
+        Choice(id: "", name: L("默认")), Choice(id: "red", name: L("红色")), Choice(id: "green", name: L("绿色")),
+        Choice(id: "yellow", name: L("黄色")), Choice(id: "blue", name: L("蓝色")), Choice(id: "magenta", name: L("紫色")),
+        Choice(id: "cyan", name: L("青色")),
+    ]
+
+    static func swatch(_ id: String) -> SwiftUI.Color? {
+        switch id {
+        case "red": SwiftUI.Color(hex: 0xD9534F)
+        case "green": SwiftUI.Color(hex: 0x3FA66B)
+        case "yellow": SwiftUI.Color(hex: 0xC9A227)
+        case "blue": SwiftUI.Color(hex: 0x3B82C4)
+        case "magenta": SwiftUI.Color(hex: 0xA25CC4)
+        case "cyan": SwiftUI.Color(hex: 0x2A9DB0)
+        default: nil
+        }
     }
 }

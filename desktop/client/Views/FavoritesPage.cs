@@ -44,8 +44,20 @@ public sealed class FavoritesPage : Panel
         Children.Add(PageBar.Page(bar, dock));
         var state = FavoriteState.Shared;
         void Changed(object? s, PropertyChangedEventArgs e) => Dispatcher.UIThread.Post(Rebuild);
-        AttachedToVisualTree += (_, _) => { state.PropertyChanged += Changed; Rebuild(); _ = state.Refresh(); };
+        AttachedToVisualTree += (_, _) => { state.PropertyChanged += Changed; Rebuild(); Fetch(); };
         DetachedFromVisualTree += (_, _) => state.PropertyChanged -= Changed;
+        Rebuild();
+    }
+
+    /// 这次打开从电脑读过一回（之前空着是「正在读取」，画骨架，不说「暂无」）
+    bool fetched;
+
+    async void Fetch()
+    {
+        try { await FavoriteState.Shared.Refresh(); } catch { /* 读不到也收起骨架，显示空状态 */ }
+        // 骨架换成内容时列表淡入
+        if (empty.Content is StackPanel { Children: [_, SkeletonView] }) list.FadeIn();
+        fetched = true;
         Rebuild();
     }
 
@@ -60,7 +72,9 @@ public sealed class FavoritesPage : Panel
         }).ToList();
         list.Children.Clear();
         foreach (var item in shown) list.Children.Add(Row(item));
-        empty.Content = all.Count == 0
+        empty.Content = all.Count == 0 && !fetched
+            ? Skeleton.Page(SkeletonKind.Favorites, count: 4).Margin(20, 0, 20, 0).VAlign(VerticalAlignment.Top)
+            : all.Count == 0
             ? EmptyHint.Make("star", L("暂无收藏"), L("在对话中右键点击一条消息，选择「加入收藏」即可收藏。收藏的内容保存在电脑上，手机和电脑都能查看。")).VAlign(VerticalAlignment.Center)
             : shown.Count == 0 ? EmptyHint.Make("magnifyingglass", L("无匹配的收藏"), L("换个关键词试试。")).VAlign(VerticalAlignment.Center) : null;
     }

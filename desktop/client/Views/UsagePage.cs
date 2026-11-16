@@ -29,7 +29,7 @@ public sealed class UsagePage : Panel
         bar = new PageBar(L("用量"), Subtitle, segmented, [PageBar.Button("arrow.clockwise", L("刷新"), () => Load(fresh: true))]);
         var scroll = new ScrollViewer { Content = new Border { Child = body, MaxWidth = 900, Padding = new Thickness(28, 22) }, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         Children.Add(PageBar.Page(bar, scroll));
-        if (payload is not null) Show(); else body.Children.Add(Ui.Stack(Orientation.Vertical, 10, Align.Center, [new Spinner(20), Ui.Text(L("正在统计各机器的用量…"), 13, color: "Text2")]).HAlign(HorizontalAlignment.Center).Margin(0, 80, 0, 0));
+        if (payload is not null) Show(); else body.Children.Add(Skeleton.Page(SkeletonKind.Usage, L("正在统计各机器的用量…")).HAlign(HorizontalAlignment.Center).Margin(0, 80, 0, 0));
         AttachedToVisualTree += (_, _) =>
         {
             Load();
@@ -88,6 +88,8 @@ public sealed class UsagePage : Panel
 
     void Show()
     {
+        // 头一回从骨架换成内容时整块淡入（之后定时刷新不再闪）
+        if (body.Children.FirstOrDefault() is StackPanel { Children: [_, SkeletonView] } or StackPanel { Children: [SkeletonView] }) body.FadeIn();
         body.Children.Clear();
         // 订阅额度（各台电脑的 5 小时 / 本周）：侧栏卡片上那几条，这里字大一号、一台电脑一栏并排放
         if (limits.Count > 0)

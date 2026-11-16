@@ -169,6 +169,18 @@ final class DemoServer: @unchecked Sendable {
                 }
                 state["sessions"] = sessions
             }
+            // 截图版测列表滚动（底栏收起 / 展开）：TARS_DEMO_MANY=N 把会话复制成 N 份，列表够长、翻得动
+            if let n = Int(ProcessInfo.processInfo.environment["TARS_DEMO_MANY"] ?? ""), n > 1,
+               let sessions = state["sessions"] as? [[String: Any]] {
+                state["sessions"] = (0..<n).flatMap { copy in
+                    sessions.map { s -> [String: Any] in
+                        guard copy > 0 else { return s }
+                        var s = s
+                        if let key = s["key"] as? String { s["key"] = key + "-c\(copy)" }
+                        return s
+                    }
+                }
+            }
             // 截图版看换过头像的样子：TARS_DEMO_FACES={"sessions":{…},"agents":{…}}（会话按标题写，换成 key）
             if let raw = ProcessInfo.processInfo.environment["TARS_DEMO_FACES"],
                var faces = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] {

@@ -18,7 +18,7 @@ public sealed partial class CodeWindow
     Control BranchesPanel()
     {
         var o = repo.Overview;
-        if (o is null) return Centered(new Spinner(16));
+        if (o is null) return new SkeletonView(SkeletonKind.IconRows, 8).Margin(12, 12, 12, 0);
         if (o.Repo is null) return Centered(Ui.Text(o.Reason ?? L("不是 Git 仓库"), 12.5, color: "Text2"));
         var stack = new StackPanel();
         var groups = repo.SessionGroups();
@@ -352,7 +352,7 @@ public sealed partial class CodeWindow
 
     Control CommitView(string hash)
     {
-        var host = new ContentControl { Content = Centered(new Spinner(18)) };
+        var host = new ContentControl { Content = Skeleton.Page(SkeletonKind.Changes, count: 10).Margin(16, 0, 16, 0) };
         async void Load()
         {
             try

@@ -12,6 +12,9 @@ import os
 import shutil
 import subprocess
 import sys
+import platform
+import re
+import zlib
 import threading
 import time
 
@@ -54,9 +57,25 @@ PLUGINS_ON = ""
 # 用户打开了的插件单项开关「插件 id.开关 id」（同上；如 cursor.usage 查 Cursor 月用量）
 PLUGIN_OPTIONS_ON = ""
 
+# 会话浏览器（设置 → Agent 浏览器，app 按配置设置）：开在哪、最多几个、空闲几分钟回收。开在这台电脑（client）时连远端带一条
+# ssh 反向转发（-R 0），远端 watcher 的入口经它接到本机入口；分到的端口从 ssh 的输出里读出来告诉远端（同 Mac 版 RemoteSession）
+BROWSER = {"on": "client", "max": 4, "idle": 10, "record": True}
+BROWSER_GATE_PORT = 9339
+
 # 插件变了要换个 watcher 进程才载入（LocalSource.restart）：这么久内新进程就绪就不算断线；换之前手上的请求最多等这么久答完
 RESTART_GRACE = 30
 RESTART_DRAIN = 5
+
+
+def browser_tunnel(ssh, source_config):
+    """连远端的 ssh 命令和远端环境变量（浏览器开在这台电脑上时）：加一条反向转发，远端的入口经它接到本机入口；
+    端口按这台电脑和远端算出固定值（同 Mac 版 RemoteSession.browserTunnelPort），经环境变量直接告诉远端。→ (ssh 命令, 环境变量)"""
+    if BROWSER["on"] == "server":
+        return ssh, {}
+    port = 20000 + zlib.crc32(("%s|%s|%s" % (platform.node(), source_config.get("sshHost", ""),
+                                            source_config.get("sshPort") or 22)).encode("utf-8")) % 30000
+    return ssh[:-1] + ["-R", "%d:127.0.0.1:%d" % (port, BROWSER_GATE_PORT)] + ssh[-1:], \
+        {"CCPULSE_BROWSER_REMOTE": "1", "CCPULSE_BROWSER_TUNNEL": str(port)}
 
 
 def watcher_env():
@@ -67,6 +86,9 @@ def watcher_env():
         env["CCPULSE_PLUGINS_ON"] = PLUGINS_ON
     if PLUGIN_OPTIONS_ON:
         env["CCPULSE_PLUGIN_OPTIONS_ON"] = PLUGIN_OPTIONS_ON
+    env["CCPULSE_BROWSER_MAX"] = str(BROWSER["max"])
+    env["CCPULSE_BROWSER_IDLE"] = str(BROWSER["idle"])
+    env["CCPULSE_BROWSER_REC"] = "1" if BROWSER.get("record", True) else "0"
     return env
 
 
@@ -446,8 +468,10 @@ class SSHSource(LocalSource):
             from . import agent_skill, plugins
             # 本机同步过去的插件在远端单独的目录里（plugins.REMOTE_DIR_ENV）；技能由远端 watcher 自己装（告诉它哪些开着）
             env = dict(watcher_env(), **agent_skill.remote_env(python))
+            ssh, extra = browser_tunnel(self._ssh(), self.config)
+            env.update(extra)
             prefix = "".join("%s=%s " % item for item in env.items()) + plugins.REMOTE_DIR_ENV + " "
-            proc = subprocess.Popen(self._ssh() + ["%s%s %s" % (prefix, python, remote_path)], stdin=subprocess.PIPE,
+            proc = subprocess.Popen(ssh + ["%s%s %s" % (prefix, python, remote_path)], stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, **NO_WINDOW)
         except OSError as exc:
             self._schedule_restart(str(exc))

@@ -68,10 +68,13 @@ struct MainView: View {
         .searchable(text: $model.query, placement: .sidebar, prompt: "搜索会话")
         // 会话之间互发消息：纸鸢从发信会话飞到收信会话（开在分屏里时在标签之间飞），侧栏左边的风筝线连起最近有往来的会话
         .overlay { KitelineKit.PeerStageView(order: model.filtered.map(\.id)) }
+        // 会话浏览器放到「整个应用 / 全屏」：盖满整个窗口
+        .overlay { KitelineKit.BrowserAppView() }
         // 系统翻译的常驻宿主（看不见）：对话里所有消息的系统翻译排队交给它
         .background { TranslateAppleHost() }
         .frame(minWidth: 820, minHeight: 520)
-        .sheetPanel(isPresented: $model.showNewTask) { NewTaskSheet() }   // 能拖动、改大小的面板，在窗口正中
+        .sheetPanel(isPresented: $model.showNewTask) { NewTaskSheet() }
+        .sheetPanel(isPresented: $model.showBatchRestart) { KitelineKit.BatchRestartView() }   // 能拖动、改大小的面板，在窗口正中
         .sheetPanel(isPresented: Binding(get: { model.agentDetail != nil }, set: { if !$0 { model.agentDetail = nil } })) {
             if let key = model.agentDetail { TarsAgentInfoView(key: key) }
         }
@@ -1091,6 +1094,11 @@ struct SessionMenu: View {
         }
         if item.activity == .busy { Button("中断 \(Agents.info(item.agent).speaker)") { model.press("esc", on: item.id) } }
         // 关闭会话（caps 有 close，目前是 Claude Code）：关掉 VS Code 里的标签页 / 终端里 /exit
+        // 重启会话：关掉再接着这段对话打开，让 Agent 读到新的设置和技能（如 Kiteline 浏览器）；正在工作的等这一轮做完
+        if item.canReply, item.can("close") {
+            Button("重启会话") { model.restart([item.id]) }
+            Button("批量重启会话…") { model.showBatchRestart = true }
+        }
         if item.canReply, item.can("close") { Button("关闭会话…") { model.close(item.id) } }
         Divider()
         if item.can("subagents") {

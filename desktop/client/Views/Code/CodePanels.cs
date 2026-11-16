@@ -62,7 +62,7 @@ public sealed partial class CodeWindow
             }
         }
         Walk("", 0);
-        if (!listings.ContainsKey("")) rows.Children.Add(new Spinner(16).Margin(0, 20, 0, 0).HAlign(HorizontalAlignment.Center));
+        if (!listings.ContainsKey("")) rows.Children.Add(new SkeletonView(SkeletonKind.IconRows, 8).Margin(8, 8, 8, 0));
         var head = Ui.H(4, Ui.Text((rootName.Length > 0 ? rootName : L("项目")).ToUpperInvariant(), 11.5, FontWeight.SemiBold, "Text2").Trim().Shrink(), new Spacer(),
             IconButton("doc.badge.plus", L("新建文件"), () => NewItem("", false)),
             IconButton("folder", L("新建文件夹"), () => NewItem("", true)),
@@ -294,7 +294,7 @@ public sealed partial class CodeWindow
     Control ScmPanel()
     {
         var o = repo.Overview;
-        if (o is null) return repo.LoadError is { } error ? Centered(Ui.Text(error, 12.5, color: "Text2", lines: 0).Wrap()) : Centered(new Spinner(16));
+        if (o is null) return repo.LoadError is { } error ? Centered(Ui.Text(error, 12.5, color: "Text2", lines: 0).Wrap()) : new SkeletonView(SkeletonKind.Changes, 8).Margin(12, 12, 12, 0);
         if (o.Repo is null)
             return Centered(Ui.Stack(Orientation.Vertical, 10, Align.Center, [
                 Ui.Text(L("不是 Git 仓库"), 14, FontWeight.SemiBold),

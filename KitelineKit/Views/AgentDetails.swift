@@ -447,7 +447,7 @@ struct AgentInfoSheet: View {
             } else if let error {
                 LoadFailed(error: error) { await load() }.padding(.top, 10)
             } else {
-                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30)
+                SkeletonShape(style: .form(5)).padding(.vertical, 12)
             }
         }
         .task { await load() }
@@ -764,7 +764,7 @@ struct MachineInfoSheet: View {
             } else if let error {
                 LoadFailed(error: error) { await load() }.padding(.top, 20)
             } else {
-                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                SkeletonShape(style: .form(6)).padding(.vertical, 12)
             }
         }
         .task { await load() }

@@ -56,6 +56,8 @@ struct ChatView: View {
     @State private var bottomRequest = 0
     /// 对话区多宽（分列时一列可能很窄）：消息气泡按它留边
     @State private var chatWidth: CGFloat = 0
+    /// 正在拖窗口边缘、拖分隔条（见 PaneResize）：消息先按开始拖时的宽度摆着，松手再按新宽度排一次（同 Xcode）
+    @State private var frozen: FrozenWidth?
     /// 对话页多高（分屏上下分时一块可能很矮）：确认卡片里能滚的那段跟着缩，别把输入框挤出去
     @State private var chatHeight: CGFloat = 0
     /// 对话页底下实际贴着多高的安全区（输入栏按它往 Home 条里挪；浮动卡片里是 0）
@@ -138,8 +140,10 @@ struct ChatView: View {
                     }
                     Color.clear.frame(height: 6).id("bottom")
                 }
+                // 头一回读回消息时骨架淡出、消息淡入（只在 loaded 变的那一下）
+                .animation(.skeletonFade, value: chat.loaded)
                 .padding(.bottom, 4)
-                .environment(\.chatWidth, messageWidth)
+                .environment(\.chatWidth, rowsWidth)
                 .environment(\.chatAgent, slot.agent)
                 .environment(\.chatFace, slot.face)
                 .environment(\.openAgentInfo, AgentInfoOpener { showAgentInfo = true })
@@ -150,7 +154,7 @@ struct ChatView: View {
                 #if os(iOS)
                 // 内容宽度钉成外面给这一块的宽（量法见下面的 chatWidth，不随内容变，不会互相依赖）：哪一行比屏幕宽也撑不宽整页，
                 // 页面只能上下滑（10-22 反馈：加载几次更早的消息后能左右拖、松手弹回来）
-                .frame(width: chatWidth > 0 ? chatWidth : nil, alignment: .leading)
+                .frame(width: (frozen?.chat ?? chatWidth) > 0 ? (frozen?.chat ?? chatWidth) : nil, alignment: .leading)
                 // 再把底下系统滚动区的横向回弹关掉（见 VerticalOnlyScroll）
                 .background(VerticalOnlyScroll())
                 #endif
@@ -177,7 +181,19 @@ struct ChatView: View {
             #endif
             .modifier(ChatScrollFollow(scroll: scroll, window: window, freeze: freeze, newPill: $newPill, proxy: proxy) { thaw += 1 })
             .onChange(of: rows.map(\.id), initial: true) { _, ids in window.setOrder(ids) }
-            .onChange(of: messageWidth, initial: true) { _, width in
+            .onChange(of: PaneResize.shared.active) { _, on in
+                if on {
+                    guard chatWidth > 0, scroll.outer.width > 0, scroll.outer.height > 0 else { return }
+                    frozen = FrozenWidth(outer: scroll.outer.width, height: scroll.outer.height, chat: chatWidth, message: messageWidth)
+                    window.park()
+                } else if frozen != nil {
+                    // 松手：滚动区放开、远处的行换回来，按现在的宽排一次（换宽度前记下顶上那一行，见 setChatWidth）
+                    setChatWidth(scroll.outer.width)
+                    window.unpark()
+                    frozen = nil
+                }
+            }
+            .onChange(of: rowsWidth, initial: true) { _, width in
                 // 宽度变了：换行跟着变、内容变高变矮，系统不挪滚动位置——贴底的会停在内容外面（整块空白，要碰一下才弹回来），
                 // 往上翻着的会跳到别处（10-24 反馈 iPad 收起、拉出左栏时）。排完版再滚回去：贴底的回到底，
                 // 翻着的回到原来顶上那一行（宽度刚量到、内容还按原来的宽排着时记下的，见下面量 chatWidth 的地方）
@@ -224,20 +240,18 @@ struct ChatView: View {
                 DeviceBench.ready = true
             }
             #endif
+            // 拖动改大小期间整个滚动区钉在开始拖时的大小（见 frozen）：多出来的在右边、下边裁掉，不够的露出底色。
+            // 只钉里面的内容不够：滚动区自己一变宽，系统照样把每条消息的文字控件挨个重新摆一遍；
+            // 高度不钉的话，底下输入区那一层每帧都要问滚动区最矮能多矮，又把几列几百行消息量一遍（5 列长会话每帧 130 ms）
+            .frame(width: frozen?.outer, height: frozen?.height, alignment: .topLeading)
             // 量外面给这一块多宽，不量滚动区自己：哪一行比可用宽度宽会把滚动区撑宽，量到的宽又反过来定气泡留边、内容多宽……
             // 来回改个不停（10-22 Mac 分屏的窄列里死循环：CPU 占满，布局停在半路，左列钻到侧栏底下、右边空一大块）。
             // 最小宽写 0：这一层始终是外面给的宽，撑宽的内容靠左放、多出来的在右边被裁掉
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { geo in
-                #if os(macOS)
-                min(geo.size.width, 880)   // Mac 上内容最宽 880
-                #else
-                geo.size.width
-                #endif
-            } action: { width in
-                // 要换宽度了：内容这时还按原来的宽排着，行高都是准的，记下可视区顶上那一行（排完新宽度再滚回它）
-                if chatWidth > 0, abs(width - chatWidth) > 0.5 { scroll.widthAnchor = window.rowAtTop() }
-                chatWidth = width
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { outer in
+                scroll.outer = outer   // 不放 @State：拖动期间每帧都变，别为它重算整页
+                // 拖动改大小期间先不换（整页不跟着每帧重算），松手时一次换上（见 onChange(of: PaneResize.shared.active)）
+                if frozen == nil { setChatWidth(outer.width) }
             }
             #if os(macOS)
             .coordinateSpace(.named("chatScroll"))
@@ -357,6 +371,8 @@ struct ChatView: View {
         }
         // 右上角悬浮：打开 / 收起执行过程（在忙时按钮上一个呼吸的小点）
         .overlay(alignment: .topTrailing) { if TraceFeature.enabled { TraceButton(isOn: $showTrace, running: activity == "busy") } }
+        // agent 在用 Kiteline 的浏览器：右上角浮出实时画面小窗，点开放大到半个 / 整个会话（整个应用、全屏的画在窗口根上）
+        .overlay { BrowserDock(key: key, info: slot.info?.browser, available: chatHeight).animation(.snappy, value: model.browsers.size(key)) }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chatHeight = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { homeBottom = $0 }
         .environment(\.homeBottom, homeBottom)
@@ -617,6 +633,21 @@ struct ChatView: View {
         }
     }
 
+    /// 量到外面给滚动区的宽：换成对话区的宽（Mac 最宽 880）。要换宽度时内容还按原来的宽排着、行高都是准的，
+    /// 先记下可视区顶上那一行（排完新宽度再滚回它）
+    private func setChatWidth(_ outer: CGFloat) {
+        #if os(macOS)
+        let width = min(outer, 880)   // Mac 上内容最宽 880
+        #else
+        let width = outer
+        #endif
+        if chatWidth > 0, abs(width - chatWidth) > 0.5 { scroll.widthAnchor = window.rowAtTop() }
+        chatWidth = width
+    }
+
+    /// 消息排版用的宽：拖动改大小期间是开始拖时的宽（见 frozen），平时是 messageWidth
+    private var rowsWidth: CGFloat { frozen?.message ?? messageWidth }
+
     /// 消息区的宽：竖着的折痕把对话页分成左右两块时，消息只占左边那块
     private var messageWidth: CGFloat {
         guard let fold, !fold.horizontal else { return chatWidth }
@@ -673,12 +704,12 @@ struct ChatView: View {
 
     /// 朗读：在读就停；没在读就读 Claude 最新的一条回复
     private func speakLatest() {
-        if Speaker.shared.speaking != nil { Speaker.shared.stop(); return }
+        if Speaker.shared.speakingKey == key { Speaker.shared.stop(); return }
         guard let latest = model.chat(key).items.values.filter({ $0.t == "text" && !($0.text ?? "").isEmpty }).max(by: ChatItem.ordered) else {
             model.flash(L("暂无可朗读的回复"))
             return
         }
-        Speaker.shared.speak(latest.text ?? "", id: latest.id)
+        Speaker.shared.speak(latest.text ?? "", id: latest.id, key: key)
     }
 
     private func isPending(_ row: ChatRow) -> Bool {
@@ -689,7 +720,10 @@ struct ChatView: View {
     @ViewBuilder
     private func historyHeader(_ chat: ChatStore, loadOlder: @escaping () async -> Void) -> some View {
         Group {
-            if chat.loading {
+            if chat.loading, chat.items.isEmpty, !chat.loaded {
+                // 头一回打开（尤其是已结束的会话要从电脑上读记录）：先画几条消息的骨架，别一片空白
+                SkeletonPage("正在读取对话…", style: .messages(4))
+            } else if chat.loading {
                 ProgressView().padding(10)
             } else if chat.hasMore && chat.loaded {
                 Button("查看更早的消息") { Task { await loadOlder() } }
@@ -744,7 +778,7 @@ struct ChatRowView: View {
             }
         case .bot(let item, let first):
             MessageRow(side: .bot, first: first, time: item.ts,
-                       speak: item.t == "text" ? (item.text ?? "", item.id) : nil,
+                       speak: item.t == "text" ? (item.text ?? "", item.id, key) : nil,
                        translate: BotText.translatable(item)) {
                 if item.peer != nil {
                     PeerCard(key: key, item: item)
@@ -789,6 +823,8 @@ final class ScrollState {
     var userScrolling = false
     /// 宽度要变时可视区顶上那一行：换完宽度滚回它（见 ChatView 里的 onChange(of: messageWidth)）
     var widthAnchor: String?
+    /// 外面给滚动区的大小（Mac 上 chatWidth 最多 880，这个不限）：拖动改大小时按它钉住滚动区（见 ChatView.frozen）
+    var outer: CGSize = .zero
     /// Mac：上一次量到的内容高度、可视区高度（见 ChatView.follow）
     var contentHeight: CGFloat = 0
     var viewport: CGFloat = 0
@@ -830,6 +866,8 @@ final class RowWindow {
     @Observable @MainActor
     final class Slot {
         var live = true
+        /// 拖动改大小期间（见 park）：远处的行换成同样高的空白
+        var parked = false
     }
 
     private var slots: [String: Slot] = [:]
@@ -878,6 +916,27 @@ final class RowWindow {
         guard ChatRowsMode.current == .gone else { return }
         heights.removeAll()
         for slot in slots.values where !slot.live { slot.live = true }
+    }
+
+    /// 拖动窗口边缘、分隔条期间（见 PaneResize）：远处那些透明的行换成同样高的空白，松手再换回来。
+    /// 透明的行照样在视图树里：分列一挪动、一变大小，每一行的悬停区、背景、显示列表都要跟着更新位置，
+    /// 5 列长会话每帧 100 多毫秒，几乎全花在看不见的行上。换成空白后总高度不变，滚动位置不动
+    /// 拖的时候不能滚动，只留可视区里的行（不留平时上下预备的那几屏和最新那十几行）
+    func park() {
+        var y = headerHeight
+        for id in order {
+            guard let slot = slots[id] else { continue }
+            let height = heights[id]
+            let visible = height.map { y + $0 >= top - 40 && y <= top + viewport + 40 } ?? true
+            y += height ?? 120
+            if !visible, height != nil, !slot.parked { slot.parked = true }
+        }
+    }
+
+    /// 松手：都换回来，和新宽度一起排一次。
+    /// 试过从近到远每轮换回一小批：每换一批整列几百行都要重排一遍，前后卡三四秒，比一次换回来更久
+    func unpark() {
+        for slot in slots.values where slot.parked { slot.parked = false }
     }
 
     /// 消息行上面「查看更早的消息」那一条的高度
@@ -1052,7 +1111,11 @@ private struct WindowedRow: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.measured(row.id, $0) }
             }
         case .opacity:
-            opacityRow
+            if slot.parked, let height = window.height(row.id) {
+                Color.clear.frame(height: height)   // 拖动改大小期间远处的行（见 RowWindow.park）
+            } else {
+                opacityRow
+            }
         }
     }
 
@@ -1458,3 +1521,10 @@ private struct ChatScrollBar: ViewModifier {
 }
 #endif
 
+/// 拖动改大小期间钉住的对话宽度（见 ChatView.frozen、PaneResize）
+private struct FrozenWidth: Equatable {
+    let outer: CGFloat
+    let height: CGFloat
+    let chat: CGFloat
+    let message: CGFloat
+}

@@ -450,6 +450,27 @@ struct GeneralPane: View {
                 Text("技能会装给这台电脑和远端电脑上的各个编程 agent（Claude Code、Codex、OpenCode、DeepSeek Harness 等）。截图技能使 agent 回复时尽量附带相关截图；网页测试技能使 agent 完成网页功能后在浏览器中实际操作一遍，并发来带截图的测试报告；待办与关键信息技能使 agent 把需要以后处理的事加入待办，并把账号、密码等关键信息单独发来，方便收藏；任务阶段技能使 agent 按任务的实际做法规划步骤，并在进入每一步时主动报告，会话列表据此显示「2/4 开发中」；Claude Code 进入下一步却没有报告时，Kiteline 会提醒它补报（未安装时按 agent 的操作自动识别）。各 agent 的接入、开关和兼容情况在「插件」页查看和管理。")
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Picker("浏览器运行在", selection: binding(\.mobile.browserOn)) {
+                    Text("这台电脑").tag("client")
+                    Text("Agent 所在的电脑").tag("server")
+                }
+                Stepper(value: binding(\.mobile.browserMax), in: 1...16) {
+                    LabeledContent("最多同时打开", value: L("%d 个", config.mobile.browserMax))
+                }
+                Toggle("录下浏览器操作，可以回放", isOn: binding(\.mobile.browserRecord))
+                Picker("空闲多久后关闭", selection: binding(\.mobile.browserIdle)) {
+                    Text("5 分钟").tag(5)
+                    Text("10 分钟").tag(10)
+                    Text("30 分钟").tag(30)
+                    Text("1 小时").tag(60)
+                }
+            } header: {
+                Text("Agent 浏览器")
+            } footer: {
+                Text("Agent 操作网页时使用 Kiteline 提供的浏览器，会话中会显示实时画面，可以放大查看，也可以接管操作。选择「这台电脑」时，远端服务器上的会话也使用这台电脑上的浏览器，网页的登录状态保存在这台电脑上，服务器上不运行浏览器；选择「Agent 所在的电脑」时，浏览器运行在会话所在的电脑上。浏览器在 Agent 首次使用时打开，空闲到设定时间后自动关闭，同时打开的数量还会根据可用内存自动减少。录下的操作可以倍速回放、跳过等待，只保存画面有变化的部分，保留 3 天。")
+                    .foregroundStyle(.secondary)
+            }
             Section("启动") {
                 Toggle("登录时自动打开 Kiteline", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in

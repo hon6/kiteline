@@ -323,7 +323,7 @@ struct InboundShareView: View {
     }
 
     @ViewBuilder private var loadingView: some View {
-        if let loadError { Text(loadError).foregroundStyle(.secondary).padding() } else { ProgressView().padding() }
+        if let loadError { Text(loadError).foregroundStyle(.secondary).padding() } else { SkeletonPage(style: .list(5, trail: .none)) }
     }
 
     // MARK: 取数据、发送

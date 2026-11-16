@@ -43,6 +43,8 @@ public sealed record SessionInfo
     public int Subagents { get; init; }
     /// 会话里开着几个终端（终端按钮的角标）
     public int Terminals { get; init; }
+    /// agent 正在用 Kiteline 的浏览器（对话页浮出实时画面小窗，见 Views/BrowserViews.cs）；没在用、老版本后台没有
+    public BrowserInfo? Browser { get; init; }
     /// 只能看、不能远程操作（Proma 这类没有对外接口的）
     public bool ReadOnly { get; init; }
     /// 只读时给用户看的一句话（插件给）
@@ -126,6 +128,7 @@ public sealed record SessionInfo
             CwdShort = n.Str("cwdShort"),
             Subagents = n.Int("subagents") ?? 0,
             Terminals = n.Int("terminals") ?? 0,
+            Browser = BrowserInfo.Parse(n.Get("browser")),
             ReadOnly = n.Bool("readOnly") ?? false,
             ReadOnlyReason = n.Str("readOnlyReason") is { Length: > 0 } reason ? reason : null,
             Agent = string.IsNullOrEmpty(agent) ? Agents.DefaultId : agent,
@@ -521,4 +524,17 @@ public sealed record PastSession(string Key, string Title, string? Cwd, string S
     }
 
     public string DisplayTitle => Title;
+}
+
+/// 会话浏览器（同 iOS 版 BrowserInfo）：地址、标题、最近一条浏览器指令、指令条数、agent 请你接管时的说明
+public sealed record BrowserInfo(string Url, string Title, string Last, int Actions, string? Ask, double? Since, bool Closed = false, int Recs = 0)
+{
+    public static BrowserInfo? Parse(JsonNode? n) =>
+        n is JsonObject
+            ? new BrowserInfo(n.Str("url") ?? "", n.Str("title") ?? "", n.Str("last") ?? "", n.Int("actions") ?? 0,
+                              n.Str("ask") is { Length: > 0 } ask ? ask : null, n.Num("since"), n.Bool("closed") == true, n.Int("recs") ?? 0)
+            : null;
+
+    /// 地址栏上显示的：去掉协议
+    public string ShortUrl => Url.Replace("https://", "").Replace("http://", "");
 }

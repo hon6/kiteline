@@ -204,7 +204,7 @@ extension AppModel {
                 }
             }
             applyCombined()
-        case "entries", "reset", "notify", "peers", "term", "term_exit":
+        case "entries", "reset", "notify", "peers", "term", "term_exit", "term_open", "term_meta", "browser_frame", "browser_ask":
             guard var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
             if event == "notify" { object.removeValue(forKey: "inbox") }   // 通知收件箱只在主电脑上（铃铛数不跟着加）
             let mapped = DeviceHub.outward(object, prefix: host.prefix, own: host.own)

@@ -173,7 +173,8 @@ struct HistoryView: View {
                     .onChange(of: model.query) { _, value in
                         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { model.search() } else { model.searchSoon() }
                     }
-                if model.loading { ProgressView().controlSize(.small) }
+                // 头一回读的时候下面有骨架和「正在读取」，这里不再转一个
+                if model.loading, model.loaded || !model.query.isEmpty { ProgressView().controlSize(.small) }
                 if !model.query.isEmpty {
                     Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
                         .buttonStyle(.plain)
@@ -188,7 +189,7 @@ struct HistoryView: View {
                 searchList(results)
             } else if model.sessions.isEmpty, !model.loaded {
                 // 头一回读：各设备的列表要一会儿才回来，空白容易当成出问题了
-                HistoryLoadingView()
+                SkeletonPage("正在读取各设备上的历史会话…", style: .history)
             } else if model.sessions.isEmpty {
                 ContentUnavailableView {
                     Label("暂无历史会话", systemImage: "clock.arrow.circlepath")
@@ -209,6 +210,7 @@ struct HistoryView: View {
                 sessionList
             }
         }
+        .animation(.skeletonFade, value: model.loaded)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("历史会话")
         .navigationSubtitle(model.results.map { L("找到 %lld 个会话", count: filtered($0).count) }
                             ?? (model.loaded ? L("%lld 个会话", count: model.sessions.count) : L("正在读取…")))
@@ -481,41 +483,3 @@ struct PastRow: View {
     }
 }
 
-/// 历史会话头一回读取时的占位：几行骨架一起呼吸，上面一句「正在读取」
-struct HistoryLoadingView: View {
-    @State private var dim = false
-    /// 骨架行标题、摘要的宽度（错开一点，像真的列表）
-    private static let widths: [(CGFloat, CGFloat)] = [(180, 420), (120, 300), (220, 520), (150, 360), (200, 460), (130, 280), (170, 400), (110, 330)]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("正在读取各设备上的历史会话…").font(.app(size: 12.5)).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 20).padding(.vertical, 10)
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(Self.widths.indices, id: \.self) { i in
-                    HStack(spacing: 10) {
-                        Circle().fill(.quaternary).frame(width: 30, height: 30)
-                        VStack(alignment: .leading, spacing: 6) {
-                            RoundedRectangle(cornerRadius: 3).fill(.quaternary).frame(width: Self.widths[i].0, height: 11)
-                            RoundedRectangle(cornerRadius: 3).fill(.quaternary.opacity(0.7)).frame(width: Self.widths[i].1, height: 9)
-                        }
-                        Spacer(minLength: 6)
-                        RoundedRectangle(cornerRadius: 3).fill(.quaternary.opacity(0.7)).frame(width: 30, height: 9)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding(.horizontal, 28)
-            .opacity(dim ? 0.45 : 1)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("正在读取历史会话"))
-        .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true } }
-        .transition(.opacity)
-    }
-}

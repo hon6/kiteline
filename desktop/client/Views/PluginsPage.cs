@@ -23,13 +23,16 @@ public static class PluginsPage
 
     public static Control Build()
     {
-        var host = new ContentControl { Content = new Spinner(18).HAlign(HorizontalAlignment.Center).Margin(0, 60, 0, 0) };
+        var host = new ContentControl { Content = Skeleton.Page(SkeletonKind.Rows, count: 6).Margin(20, 0, 20, 0) };
+        var shown = false;
         async void Load(bool check)
         {
             try
             {
                 var state = check ? await Api.Post("/api/desktop/plugins/check", new JsonObject()) : await Api.Get("/api/desktop/plugins");
-                host.Content = Page(state, () => Load(false), () => Load(true));
+                var page = Page(state, () => Load(false), () => Load(true));
+                host.Content = shown ? page : page.FadeIn();   // 头一回从骨架换成内容时淡入，之后刷新不再闪
+                shown = true;
             }
             catch (Exception e) { host.Content = Form.Section(null, [], e.Message); }
         }

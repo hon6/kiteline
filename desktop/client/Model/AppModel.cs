@@ -328,8 +328,12 @@ public sealed partial class AppModel : ObservableObject
             case "group_msg":
                 Avalonia.Threading.Dispatcher.UIThread.Post(() => GroupState.Shared.Receive(json));
                 break;
-            case "term" or "term_exit":
+            case "term" or "term_exit" or "term_open" or "term_meta":
                 Terminal.TerminalStore.Shared.Receive(name, json);
+                break;
+            case "browser_frame":
+                // 会话浏览器的画面（见 Views/BrowserViews.cs）；browser_ask 由会话数据里的 ask 反映
+                Views.BrowserStore.Shared.Receive(name, json);
                 break;
             case "world_intent":
                 // 浏览器窗口里的世界点了屏幕 / 卫星 / 门（网页经后台转回来，见 Views/WorldView.cs）

@@ -250,7 +250,8 @@ struct ChangesView: View {
                 }
             }
         }
-        .overlay { if report == nil { if let error { LoadFailed(error: error) { await load() } } else { ProgressView() } } }
+        .overlay { if report == nil { if let error { LoadFailed(error: error) { await load() } } else { SkeletonPage(style: .changes(8)) } } }
+        .animation(.skeletonFade, value: report == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("改动报告")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -324,7 +325,7 @@ struct GitDiffView: View {
             } else if let error {
                 LoadFailed(error: error) { await load() }.padding(.top, 40)
             } else {
-                ProgressView().padding(.top, 60)
+                SkeletonPage(style: .code(18))
             }
         }
         .navigationTitle(title)
@@ -401,7 +402,8 @@ struct TestsView: View {
                 }
             }
         }
-        .overlay { if runs == nil { if let error { LoadFailed(error: error) { await load() } } else { ProgressView() } } }
+        .overlay { if runs == nil { if let error { LoadFailed(error: error) { await load() } } else { SkeletonPage(style: .list(5, lead: .icon)) } } }
+        .animation(.skeletonFade, value: runs == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("测试报告")
         .navigationDestination(item: $opened) { TestRunDetail(run: $0) }
         #if os(iOS)
@@ -523,7 +525,8 @@ struct FilesView: View {
         }
         // 去掉分组列表给第一组留的那一大截上边距：路径紧跟在搜索框下面
         .contentMargins(.top, 4, for: .scrollContent)
-        .overlay { if list == nil, query.isEmpty { if let error { LoadFailed(error: error) { await load() } } else { ProgressView() } } }
+        .overlay { if list == nil, query.isEmpty { if let error { LoadFailed(error: error) { await load() } } else { SkeletonPage(style: .files(10)) } } }
+        .animation(.skeletonFade, value: list == nil)   // 读回来时骨架淡出、内容淡入
         .panelSearch($query, prompt: L("按文件名搜索（多个关键词以空格分隔）"))
         .navigationTitle("项目文件")
         #if os(iOS)
@@ -627,7 +630,7 @@ struct FileView: View {
                 } else if let error {
                     LoadFailed(error: error) { await load(reveal: false) }.padding(.top, 40)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                    SkeletonPage(style: .code(20))
                 }
             }
             .padding(14)
@@ -892,7 +895,8 @@ struct NewTaskView: View {
                 .font(.ui(.footnote))
             }
         }
-        .overlay { if projects == nil { if let error { Text(error).foregroundStyle(.secondary) } else { ProgressView("正在读取项目…") } } }
+        .overlay { if projects == nil { if let error { Text(error).foregroundStyle(.secondary) } else { SkeletonPage("正在读取项目…", style: .list(5, trail: .none)) } } }
+        .animation(.skeletonFade, value: projects == nil)   // 读回来时骨架淡出、内容淡入
         .panelSearch($query, prompt: L("搜索项目"))
         .navigationTitle(scheduleOnly ? "定时任务 · 选择项目" : "新任务 · 选择项目")
         #if os(iOS)

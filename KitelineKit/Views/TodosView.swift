@@ -11,6 +11,8 @@ struct TodosView: View {
     @Environment(\.openRoute) private var open
     @AppStorage("todosShowDone") private var showDone = false
     @State private var adding: AddTodosRequest?
+    /// 这次打开从电脑读过一回（之前空着是「正在读取」，不是「暂无待办」）
+    @State private var fetched = false
     /// 记一条 / 修改：多行文字、按住说话、附截图（TodoEditor）
     @State private var editor: TodoEditor.Target?
     /// 「创建会话」：打开新建会话，内容带上这条待办
@@ -110,7 +112,8 @@ struct TodosView: View {
             }
         }
         .tabBarScrollWatch()
-        .overlay { if state.items.isEmpty, state.suggestions.isEmpty { emptyState } }
+        .overlay { if state.items.isEmpty, state.suggestions.isEmpty { if fetched { emptyState } else { SkeletonPage(style: .todos(6)) } } }
+        .animation(.skeletonFade, value: fetched)   // 读回来时骨架淡出、内容淡入
         // 别处（电脑、网页）勾掉 / 加了一条，推过来时行平滑挪动，不是一下跳过去
         .animation(.snappy, value: state.items.map { "\($0.id)\($0.done)" } + state.suggestions.map(\.id) + agentTasks.map(\.id))
         .navigationTitle("待办")
@@ -123,7 +126,7 @@ struct TodosView: View {
                     .help("新建待办")
             }
         }
-        .task { await model.refreshTodos() }
+        .task { await model.refreshTodos(); fetched = true }
         .refreshable { await model.refreshTodos() }
         .sheetPanel(item: $adding) { AddTodosSheet(request: $0) }
         .sheetPanel(item: $editor) { TodoEditor(target: $0) }
@@ -355,19 +358,23 @@ struct TodosView: View {
 
     /// 「agent 的待办」这一块的标题，右边是「显示方式」（两条以上、或改过默认的才出现）
     private func agentHeader(_ all: [TodoItem]) -> some View {
-        HStack(spacing: 8) {
-            sectionTitle(L("agent 的待办 · 它会自己处理")).lineLimit(1)
-            Spacer(minLength: 8)
+        // 标题和「显示方式」一行；「收起久未更新的」单独放下一行（挤在一行时窄屏会折行、把标题和菜单截掉）
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                sectionTitle(L("agent 的待办 · 它会自己处理")).lineLimit(1)
+                Spacer(minLength: 8)
+                if all.count > 1 || !isDefaultView { viewMenu(all).fixedSize() }
+            }
             let stale = all.filter(Self.isStale).count
             if stale > 0 {
                 // 收起久未更新的：确认后全部标为已完成（agent 那边 todo list 也会看到）
                 Button { confirmStale = true } label: {
                     Text(L("收起久未更新的 %lld 条", count: stale)).font(.ui(.footnote).weight(.medium)).foregroundStyle(Theme.claude)
+                        .lineLimit(1)
                 }
                 .buttonStyle(.steady(.plain))
                 .textCase(nil)
             }
-            if all.count > 1 || !isDefaultView { viewMenu(all) }
         }
     }
 

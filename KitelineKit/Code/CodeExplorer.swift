@@ -207,7 +207,7 @@ struct ExplorerTree: View {
                         if let error = explorer.errors[""] {
                             LoadFailed(error: error) { await explorer.load("") }
                         } else {
-                            ProgressView().frame(maxWidth: .infinity)
+                            SkeletonShape(style: .list(8, lead: .icon, lines: 1, trail: .none)).padding(.horizontal, 12).padding(.vertical, 6)
                         }
                     } else if explorer.listings[""]?.isEmpty == true {
                         Text("空目录").foregroundStyle(.secondary)

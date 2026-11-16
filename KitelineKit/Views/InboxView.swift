@@ -57,7 +57,8 @@ struct InboxView: View {
         }
         // 筛选条是第一行：去掉分组列表给第一组留的那一大截上边距
         .contentMargins(.top, 4, for: .scrollContent)
-        .overlay { if entries == nil { if let error { LoadFailed(error: error) { await load() } } else { ProgressView() } } }
+        .overlay { if entries == nil { if let error { LoadFailed(error: error) { await load() } } else { SkeletonPage(style: .list(7, lead: .icon)) } } }
+        .animation(.skeletonFade, value: entries == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("通知")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

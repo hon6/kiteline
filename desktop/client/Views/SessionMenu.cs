@@ -1,3 +1,6 @@
+using Avalonia.Layout;
+using Avalonia;
+using System.Text.Json.Nodes;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Kiteline.Model;
@@ -57,6 +60,12 @@ public static class SessionMenu
                 yield return Ui.Item(L("压缩上下文（/compact）") + (item.Usage?.Percent is int p ? L(" · 已用 %@%", p) : "") + "…", () => ChatActions.Perform(key, SessionAction.Compact));
         }
         if (item.IsBusy) yield return Ui.Item(L("中断 %@", item.Speaker), () => _ = model.Press(key, "esc", L("已中断")));
+        // 重启会话：关掉再接着这段对话打开，让 Agent 读到新的设置和技能（如 Kiteline 浏览器）；正在工作的等这一轮做完（同 Mac 版）
+        if (model.Features.Contains("restart") && item.CanReply && item.Can("close"))
+        {
+            yield return Ui.Item(L("重启会话"), () => _ = Restart(model, [key]));
+            yield return Ui.Item(L("批量重启会话…"), () => BatchRestart(model));
+        }
         // 关闭会话（后台给 close 才有，目前是 Claude Code）：关掉 VS Code 里的标签页 / 终端里 /exit
         if (item.CanReply && item.Can("close")) yield return Ui.Item(L("关闭会话…"), () => Close(model, key));
         yield return Ui.Divider();
@@ -71,6 +80,57 @@ public static class SessionMenu
         yield return Ui.Divider();
         yield return Ui.Item(L("复制工作目录"), () => Copy(item.Cwd ?? ""));
         yield return Ui.Item(L("复制会话名"), () => Copy(item.Title));
+    }
+
+    /// 重启会话（单个或批量）：电脑端关掉再接着这段对话打开；正在工作的等这一轮做完
+    public static async Task Restart(AppModel model, IReadOnlyList<string> keys)
+    {
+        if (keys.Count == 0) return;
+        try
+        {
+            var reply = await model.Api.Post("/api/restart", new JsonObject { ["keys"] = new JsonArray(keys.Select(k => (JsonNode?)k).ToArray()) });
+            var now = reply.Arr("restarted")?.Count ?? 0;
+            var later = reply.Arr("queued")?.Count ?? 0;
+            var failed = reply.Arr("failed")?.Items().ToList() ?? [];
+            var parts = new List<string>();
+            if (now > 0) parts.Add(L("正在重启 %d 个会话", now));
+            if (later > 0) parts.Add(L("%d 个正在工作，这一轮做完后自动重启", later));
+            if (failed.Count > 0) parts.Add(L("%d 个未能重启：%@", failed.Count, failed[0].Str("error") ?? ""));
+            model.Flash(string.Join(L("；"), parts));
+        }
+        catch (Exception e) { model.Flash(e.Message); }
+    }
+
+    /// 批量重启：列出所有在跑、能重启的会话（默认全选），勾掉不要的，一起重启
+    public static void BatchRestart(AppModel model)
+    {
+        var list = model.Sessions.Where(s => s.CanReply && s.Can("close")).ToList();
+        var boxes = list.Select(s => new CheckBox
+        {
+            IsChecked = true,
+            Content = Ui.V(2, Ui.Text(s.Title, 13).Trim(),
+                           Ui.Text(string.Join(" · ", new[] { s.SourceName, s.CwdShort ?? "", s.IsBusy ? L("正在工作") : s.IsWaiting ? L("等你确认") : "" }
+                               .Where(x => x.Length > 0)), 11.5, color: "Text2").Trim()),
+            Tag = s.Key, Margin = new Thickness(0, 4),
+        }).ToList();
+        var all = new Tap(Ui.Text(L("全选 / 全不选"), 12, color: "Accent").Pad(8, 4), () =>
+        {
+            var on = boxes.Any(b => b.IsChecked != true);
+            foreach (var b in boxes) b.IsChecked = on;
+        }, 6);
+        var content = Ui.VFill(8,
+            Ui.Text(L("重启后对话不丢，Agent 会重新读取设置和技能（如 Kiteline 浏览器）。正在工作的会话等这一轮做完后自动重启，不会打断。"), 12, color: "Text2", lines: 3).Wrap(),
+            all.HAlign(HorizontalAlignment.Left),
+            Ui.VFill(0, boxes.ToArray<Control?>())).Pad(16);
+        Window? window = null;
+        var go = new Button { Content = L("重启所选"), Classes = { "accent" } };
+        go.Click += (_, _) =>
+        {
+            var keys = boxes.Where(b => b.IsChecked == true).Select(b => (string)b.Tag!).ToList();
+            window?.Close();
+            _ = Restart(model, keys);
+        };
+        window = Sheets.Show(L("批量重启会话"), content, 520, 560, [go]);
     }
 
     /// 关闭会话（先确认）：会话越开越多、VS Code 里标签越开越多时用（同 Mac 版 KitelineModel.close）

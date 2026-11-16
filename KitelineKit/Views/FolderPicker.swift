@@ -140,9 +140,10 @@ struct FolderPicker: View {
         .contentMargins(.top, 4, for: .scrollContent)
         .overlay {
             if listing == nil {
-                if let error { LoadFailed(error: error) { await load(start) } } else { ProgressView() }
+                if let error { LoadFailed(error: error) { await load(start) } } else { SkeletonPage(style: .files(8)) }
             }
         }
+        .animation(.skeletonFade, value: listing == nil)   // 读回来时骨架淡出、内容淡入
         .panelSearch($query, prompt: L("筛选文件夹"), active: $searching)
         .navigationTitle(L("选择文件夹 · %@", machine))
         #if os(iOS)

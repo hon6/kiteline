@@ -1117,6 +1117,8 @@ struct GroupsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openRoute) private var open
     @State private var showPicker = false
+    /// 这次打开从电脑读过一回（之前空着是「正在读取」，不是「还没有会话群」）
+    @State private var groupsFetched = false
     @State private var deleting: GroupInfo?
 
     var body: some View {
@@ -1137,7 +1139,9 @@ struct GroupsView: View {
             }
         }
         .overlay {
-            if model.groups.items.isEmpty {
+            if model.groups.items.isEmpty, !groupsFetched {
+                SkeletonPage(style: .list(5, sections: true))
+            } else if model.groups.items.isEmpty {
                 ContentUnavailableView {
                     Label(L("还没有会话群"), systemImage: "person.2")
                 } description: {
@@ -1147,13 +1151,14 @@ struct GroupsView: View {
                 }
             }
         }
+        .animation(.skeletonFade, value: groupsFetched)   // 读回来时骨架淡出、内容淡入
         .navigationTitle(L("会话群"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showPicker = true } label: { Label(L("拉群协作"), systemImage: "person.2.badge.plus") }
             }
         }
-        .task { await model.groups.load(model.api) }
+        .task { await model.groups.load(model.api); groupsFetched = true }
         // 面板里显式带上 model：从推进来的页面弹出时，系统不一定把环境里的对象传进面板（截图版实测会崩）
         .sheetPanel(isPresented: $showPicker) { GroupPickerSheet(mode: .create([])) { open(.group($0)) }.environment(model) }
         .confirmPanel(GroupDisband.message,
@@ -1181,7 +1186,7 @@ struct GroupMenuItems: View {
     let disband: () -> Void
 
     var body: some View {
-        Button { model.markGroup(group.id, !group.marked) } label: {
+        Button { let id = group.id, on = !group.marked; afterRowAction(lift: GroupKey.make(id)) { model.markGroup(id, on) } } label: {
             Label(group.marked ? L("取消标记") : L("标记"), systemImage: group.marked ? "star.slash" : "star")
         }
         Button { model.muteGroup(group.id, !group.muted) } label: {
@@ -1191,6 +1196,104 @@ struct GroupMenuItems: View {
         Button(role: .destructive, action: disband) { Label(L("解散群"), systemImage: "trash") }
     }
 }
+
+/// 从列表行的左右滑按钮、长按菜单里改会让这一行换位置的开关（标记、置顶）：等滑出的按钮收回、菜单收起（约 0.35 秒）再改，
+/// 这一行带动画滑过去（标记滑到顶上、取消标记滑回原处），别的行同时让位。
+/// 滑动按钮还在往回收时就挪走，列表会把它和挪过去那一格的行画在同一个位置、原位空一块（用户 11-13、11-16 截图）；
+/// 系统列表自己的挪动动画也不行：这一行内容同时变了（星标、底色），它当成删掉再插入，原位直接消失、从别处冒出来、
+/// 还画在别的行底下。所以这一行由 RowLift 拍快照浮在最上层滑过去，落地后再换回真的那一行
+/// lift：这一行的标识（会话 key / 群 key，和 rowLift(_:) 对应），没有就只是延后带动画改
+@MainActor func afterRowAction(lift: String? = nil, _ change: @escaping @MainActor () -> Void) {
+    Task { @MainActor in
+        try? await Task.sleep(for: .milliseconds(350))
+        #if os(iOS)
+        if let lift, await RowLift.shared.fly(lift, change) { return }
+        #endif
+        withAnimation(.easeInOut(duration: 0.45)) { change() }
+    }
+}
+
+/// 正在挪位置的那一行：真的那一行先藏起来（rowLift），快照浮在列表上从原位置滑到新位置
+@MainActor @Observable final class RowLift {
+    static let shared = RowLift()
+    /// 藏起来的那一行
+    var hidden: String?
+    #if os(iOS)
+    /// 每一行垫着的标记视图（key → 视图），用它找到这一行现在在列表里的哪一格
+    @ObservationIgnored private var markers: [String: WeakView] = [:]
+    final class WeakView { weak var view: UIView?; init(_ v: UIView) { view = v } }
+
+    func register(_ key: String, _ view: UIView) { markers[key] = WeakView(view) }
+
+    /// 这一行现在所在的列表格子和列表
+    private func locate(_ key: String) -> (UIView, UIScrollView)? {
+        guard let marker = markers[key]?.view, marker.window != nil else { return nil }
+        var v: UIView? = marker.superview
+        while let cur = v, !(cur is UICollectionViewCell || cur is UITableViewCell) { v = cur.superview }
+        guard let cell = v, cell.superview != nil else { return nil }
+        var list: UIView? = cell.superview
+        while let cur = list, !(cur is UIScrollView) { list = cur.superview }
+        guard let list = list as? UIScrollView else { return nil }
+        return (cell, list)
+    }
+
+    /// 拍快照、改、把快照滑到新位置；这一行不在屏幕上（找不到格子）时返回 false，交给系统动画
+    func fly(_ key: String, _ change: @MainActor () -> Void) async -> Bool {
+        guard let (cell, list) = locate(key), let shot = cell.snapshotView(afterScreenUpdates: false) else { return false }
+        let start = cell.frame
+        let card = UIView(frame: start)
+        card.backgroundColor = .systemBackground
+        card.layer.zPosition = 1000
+        card.layer.shadowColor = UIColor.black.cgColor
+        card.layer.shadowOpacity = 0
+        card.layer.shadowRadius = 10
+        card.layer.shadowOffset = CGSize(width: 0, height: 3)
+        shot.frame = card.bounds
+        card.addSubview(shot)
+        list.addSubview(card)
+        hidden = key
+        withAnimation(.easeInOut(duration: 0.45)) { change() }
+        // 等列表排好新顺序，再看这一行落到哪一格
+        try? await Task.sleep(for: .milliseconds(40))
+        var target = start
+        if let (newCell, newList) = locate(key), newList === list {
+            target = newCell.frame
+        } else {
+            // 新位置滚出屏幕了：往那个方向滑出可见区域
+            let visible = list.bounds
+            target.origin.y = start.minY > visible.midY ? visible.maxY : visible.minY - start.height
+        }
+        UIView.animate(withDuration: 0.12) { card.layer.shadowOpacity = 0.18 }
+        UIView.animate(withDuration: 0.45, delay: 0, options: [.curveEaseInOut]) {
+            card.frame.origin.y = target.minY
+        } completion: { _ in
+            if self.hidden == key { self.hidden = nil }
+            UIView.animate(withDuration: 0.15, animations: { card.alpha = 0 }) { _ in card.removeFromSuperview() }
+        }
+        return true
+    }
+    #endif
+}
+
+extension View {
+    /// 列表行：挪位置期间藏起来（快照替它滑，见 afterRowAction），并垫个标记视图让快照找得到这一行在哪一格
+    @ViewBuilder func rowLift(_ key: String) -> some View {
+        #if os(iOS)
+        self.opacity(RowLift.shared.hidden == key ? 0 : 1)
+            .background { RowMarker(key: key) }
+        #else
+        self
+        #endif
+    }
+}
+
+#if os(iOS)
+private struct RowMarker: UIViewRepresentable {
+    let key: String
+    func makeUIView(context: Context) -> UIView { let v = UIView(); v.isUserInteractionEnabled = false; return v }
+    func updateUIView(_ view: UIView, context: Context) { RowLift.shared.register(key, view) }
+}
+#endif
 
 extension View {
     /// 群那一行的左右滑和长按菜单，交互同会话行：右滑标记（主题色）/ 取消标记（红，要点）；左滑解散（红）、免打扰（橙）
@@ -1215,7 +1318,7 @@ private struct GroupRowActions: ViewModifier {
                     .tint(Color(hex: 0xF2A33A))
             }
             .swipeActions(edge: .leading, allowsFullSwipe: !group.marked) {
-                Button { model.markGroup(group.id, !group.marked) } label: {
+                Button { let id = group.id, on = !group.marked; afterRowAction(lift: GroupKey.make(id)) { model.markGroup(id, on) } } label: {
                     Label(group.marked ? "取消标记" : "标记", systemImage: group.marked ? "star.slash.fill" : "star.fill")
                 }
                 .tint(group.marked ? Theme.removed : Theme.claude)

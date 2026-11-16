@@ -51,6 +51,8 @@ final class AppModel {
     let peers = PeerBoard()
     /// 会话里的终端
     let terminals = TerminalStore()
+    /// 会话浏览器的实时画面、接管（见 Browser/BrowserStore.swift）
+    let browsers = BrowserStore()
     /// 会话群（跨设备、跨项目的会话互相发消息，Model/Groups.swift）
     let groups = GroupBoard()
     private(set) var me: Me?
@@ -160,6 +162,7 @@ final class AppModel {
         tabGroupShared.api = api
         tabGroupShared.loadCached()
         terminals.model = self
+        browsers.model = self
     }
 
     func setDraft(_ key: String, _ text: String) {
@@ -751,7 +754,7 @@ final class AppModel {
                     let fresh = Date().timeIntervalSince1970 * 1000 - 120_000
                     for item in entries.items.sorted(by: ChatItem.ordered)
                     where item.t == "text" && chat.items[item.id] == nil && (item.ts ?? 0) > fresh && !(item.text ?? "").isEmpty {
-                        Speaker.shared.enqueue(item.text ?? "", id: item.id)
+                        Speaker.shared.enqueue(item.text ?? "", id: item.id, key: entries.key)
                     }
                 }
                 PerfTrace.measure("合并 \(entries.items.count) 条") { chat.add(entries.items) }
@@ -770,7 +773,7 @@ final class AppModel {
                 // 整句交给翻译（英文语序不同）：「标题，需要你确认。正文」/「Title needs your approval. Body」
                 let title = note.title ?? "", body = String((note.body ?? "").prefix(80))
                 Speaker.shared.enqueue(note.kind == "attention" ? L("%@，需要你确认。%@", title, body) : L("%@，有结论了。%@", title, body),
-                                       id: "notify-\(Date().timeIntervalSince1970)")
+                                       id: "notify-\(Date().timeIntervalSince1970)", key: note.key)
             }
             if note.key.map(isOpen) != true, viewingGroup.map({ note.route == "group:" + $0 }) != true { banner = note }
         case "todos":
@@ -787,8 +790,10 @@ final class AppModel {
             if let sys = try? decoder.decode(MachineStatsEvent.self, from: data) { machineStats[sys.id] = sys.stats }
         case "peers":
             if let event = try? decoder.decode(PeersEvent.self, from: data) { peers.receive(event.links, backfill: event.backfill == true) }
-        case "term", "term_exit":
+        case "term", "term_exit", "term_open", "term_meta":
             terminals.receive(event, data)
+        case "browser_frame", "browser_ask":
+            browsers.receive(event, data)
         default:
             break
         }
@@ -1245,6 +1250,24 @@ final class AppModel {
     }
 
     /// 关闭会话：电脑上关掉它在 VS Code 里的标签页（终端里发 /exit），会话进「历史会话」
+    /// 重启会话（单个或批量）：关掉再接着这段对话打开，Agent 重新读设置、技能、MCP；正在工作的等这一轮做完再重启（电脑端做）
+    func restartSessions(_ keys: [String]) async {
+        guard !keys.isEmpty else { return }
+        do {
+            let reply = try await api.post("/api/restart", [:], body: ["keys": keys])
+            let now = (reply["restarted"] as? [Any])?.count ?? 0
+            let later = (reply["queued"] as? [Any])?.count ?? 0
+            let failed = (reply["failed"] as? [[String: Any]]) ?? []
+            var parts: [String] = []
+            if now > 0 { parts.append(L("正在重启 %d 个会话", now)) }
+            if later > 0 { parts.append(L("%d 个正在工作，这一轮做完后自动重启", later)) }
+            if let first = failed.first { parts.append(L("%d 个未能重启：%@", failed.count, first["error"] as? String ?? "")) }
+            flash(parts.joined(separator: L("；")))
+        } catch {
+            show(error)
+        }
+    }
+
     func closeSession(_ key: String) async -> Bool {
         do {
             let reply = try await api.post("/api/close", ["key": key], body: [:])

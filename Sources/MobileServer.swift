@@ -491,7 +491,7 @@ final class MobileServer {
         lock.unlock()
         var english: Data?
         for (stream, lang) in all {
-            guard lang == "en", event != "peers", event != "term" else { stream.send(original); continue }   // 终端输出原样转（没有界面文字）
+            guard lang == "en", event != "peers", event != "term", event != "term_open", event != "term_meta", event != "browser_frame" else { stream.send(original); continue }   // 终端输出、浏览器画面原样转（没有界面文字）
             if english == nil {
                 let body = event == "entries" ? ServerLang.localizeEvents(json: Data(json.utf8)) : ServerLang.localize(json: Data(json.utf8))
                 english = Data("event: \(event)\ndata: \(String(decoding: body, as: UTF8.self))\n\n".utf8)
@@ -675,6 +675,17 @@ final class MobileServer {
                 self.key(request, respond: respond)
             case ("POST", "/api/close"):
                 self.close(request, respond: respond)
+            case ("POST", "/api/restart"):
+                // 重启会话（单个用 ?key=，批量用 {keys: [...]}）：空闲的马上重启，正在工作的等这一轮做完（见 SessionRestart）
+                var keys = (request.jsonBody?["keys"] as? [String]) ?? []
+                if keys.isEmpty, let key = request.query["key"] { keys = [key] }
+                DispatchQueue.main.async {
+                    SessionRestart.shared.restart(keys: keys) { result in
+                        respond(.json(["ok": result.failed.isEmpty, "restarted": result.restarted, "queued": result.queued,
+                                       "failed": result.failed.map { ["key": $0.key, "error": $0.error] },
+                                       "error": result.failed.first?.error ?? ""]))
+                    }
+                }
             case ("POST", "/api/queue"):
                 self.queue(request, respond: respond)
             case ("POST", "/api/hosted/probe"):
@@ -946,7 +957,12 @@ final class MobileServer {
                 // 会话里的终端：开、列、读最近的输出、按键、改大小、关（开在会话所在的机器上，见 watcher 的 term）
                 var body = request.jsonBody ?? [:]
                 body["cmd"] = "term"
-                self.sessionGit(request, body, timeout: 20, respond: respond)
+                self.sessionTerm(request, body, respond: respond)
+            case ("POST", "/api/browser"):
+                // 会话浏览器：看画面（watch 每 5 秒续）、接管时的点击和按键、切标签页、接管 / 交还、指令列表（见 watcher 的 BrowserPool）
+                var body = request.jsonBody ?? [:]
+                body["cmd"] = "browser"
+                self.sessionBrowser(request, body, respond: respond)
             case ("GET", "/api/download"):
                 self.download(request, respond: respond)
             case ("GET", "/api/files/find"):
@@ -1776,6 +1792,108 @@ final class MobileServer {
                     respond(.json(response))
                 case .failure(let error):
                     respond(.error(error.description, status: 502))
+                }
+            }
+        }
+    }
+
+    /// 会话浏览器：转给会话所在那台的 watcher（浏览器开在那台上）。接管时带上是哪台设备在操作
+    private func sessionBrowser(_ request: HTTPRequest, _ payload: [String: Any], respond: @escaping (HTTPResponse) -> Void) {
+        guard let target = resolveAny(request) else { respond(.error("会话不存在，或其所在机器离线", status: 404)); return }
+        var body = payload
+        body["sessionId"] = target.sessionId
+        if body["op"] as? String == "control", body["device"] == nil { body["device"] = request.headers["x-device-name"] ?? "" }
+        let op = body["op"] as? String ?? ""
+        // 远端会话、浏览器开在这台电脑上：画面、点击、标签页找本机 watcher；指令列表找会话所在那台（它有对话记录）；
+        // 接管 / 交还两边都发（本机记谁在操作，远端把留言交给在等的 agent）
+        if AgentSkill.browserOnClient, target.connection.config.kind != .local, op != "actions" {
+            guard let local = BrowserRelay.shared.localSource, local.state.isLive else { respond(.error("这台电脑上的浏览器没在运行", status: 502)); return }
+            if op == "control" { target.connection.request(body, timeout: 10) { _ in } }
+            local.request(body, timeout: op == "watch" ? 20 : 10) { result in
+                switch result {
+                case .success(var response):
+                    response.removeValue(forKey: "event")
+                    response.removeValue(forKey: "id")
+                    guard op == "watch" else { respond(.json(response)); return }
+                    target.connection.request(["cmd": "browser", "op": "actions", "sessionId": target.sessionId], timeout: 10) { remote in
+                        if case .success(let other) = remote, let rows = other["actions"] { response["actions"] = rows }
+                        respond(.json(response))
+                    }
+                case .failure(let error):
+                    respond(.error(error.description, status: 502))
+                }
+            }
+            return
+        }
+        target.connection.request(body, timeout: op == "watch" ? 20 : 10) { result in
+            switch result {
+            case .success(var response):
+                response.removeValue(forKey: "event")
+                response.removeValue(forKey: "id")
+                respond(.json(response))
+            case .failure(let error):
+                respond(.error(error.description, status: 502))
+            }
+        }
+    }
+
+    /// 会话终端：开在会话所在那台上的照常转；开在别的电脑上、挂在这个会话下的（agent 的 term run --on）按终端 id 转到实际那台，
+    /// 列表把两边的合起来。每个终端都补上设备名（device），客户端标签上写清在哪台设备上跑
+    private func sessionTerm(_ request: HTTPRequest, _ payload: [String: Any], respond: @escaping (HTTPResponse) -> Void) {
+        let key = request.query["key"] ?? ""
+        if let termId = payload["term"] as? String, let sourceId = TermRelay.shared.route(termId) {
+            guard let connection = AppState.shared.source(withId: sourceId), connection.state.isLive else {
+                respond(.error("终端所在的「\(TermRelay.deviceName(sourceId))」没连上", status: 502)); return
+            }
+            connection.request(payload, timeout: 20) { result in
+                switch result {
+                case .success(var response):
+                    response.removeValue(forKey: "event")
+                    response.removeValue(forKey: "id")
+                    if let term = TermRelay.label(response["term"], sourceId: sourceId) { response["term"] = term }
+                    respond(.json(response))
+                case .failure(let error):
+                    respond(.error(error.description, status: 502))
+                }
+            }
+            return
+        }
+        withSessionCwd(request, respond: respond) { target, cwd in
+            var body = payload
+            body["sessionId"] = target.sessionId
+            body["cwd"] = cwd
+            let own = target.connection.config.id
+            target.connection.request(body, timeout: 20) { result in
+                guard case .success(var response) = result else {
+                    if case .failure(let error) = result { respond(.error(error.description, status: 502)) }
+                    return
+                }
+                response.removeValue(forKey: "event")
+                response.removeValue(forKey: "id")
+                response["device"] = TermRelay.deviceName(own)
+                if let term = TermRelay.label(response["term"], sourceId: own) { response["term"] = term }
+                guard payload["op"] as? String ?? "list" == "list" else { respond(.json(response)); return }
+                var terms = (response["terms"] as? [Any] ?? []).compactMap { TermRelay.label($0, sourceId: own) }
+                let elsewhere = TermRelay.shared.foreignTerms(for: key.isEmpty ? target.key : key)
+                guard !elsewhere.isEmpty else { response["terms"] = terms; respond(.json(response)); return }
+                // 开在别的电脑上的：问那几台要（一般就一台），合进来按开的先后排
+                let group = DispatchGroup()
+                let merge = NSLock()
+                for (sourceId, ids) in elsewhere {
+                    guard let connection = AppState.shared.source(withId: sourceId), connection.state.isLive else { continue }
+                    group.enter()
+                    connection.request(["cmd": "term", "op": "list", "sessionId": target.sessionId], timeout: 10) { result in
+                        if case .success(let other) = result {
+                            let rows = (other["terms"] as? [[String: Any]] ?? []).filter { ids.contains($0["term"] as? String ?? "") }
+                            merge.lock(); terms += rows.compactMap { TermRelay.label($0, sourceId: sourceId) }; merge.unlock()
+                        }
+                        group.leave()
+                    }
+                }
+                group.notify(queue: .main) {
+                    func rank(_ t: [String: Any]) -> Double { (t["order"] as? Double) ?? (t["createdAt"] as? Double) ?? 0 }
+                    response["terms"] = terms.sorted { rank($0) < rank($1) }
+                    respond(.json(response))
                 }
             }
         }

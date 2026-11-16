@@ -19,6 +19,8 @@ ccpulse-watch — Claude Code 会话观察器 + 会话内容通道
   sys       本机性能，每 5 秒一条：cpu（0～1）、cores、memTotal / memUsed（字节）、netIn / netOut（字节每秒）
   term      会话里的终端有输出：{term, sessionId, seq（这段在整条输出里的字节位置）, data（base64）}
   term_exit 终端结束了：{term, sessionId, code}
+  browser_frame 会话浏览器的一帧画面（有人在看时才推）：{sessionId, seq, data（JPEG base64）, cssW, cssH（网页尺寸）, url, title, level}
+  browser_ask   agent 请用户接管浏览器（browser ask）：{sessionId, note}
   peers     会话之间的消息（Claude Code 的 SendMessage）有新的或状态变了：links [{id, from, to, fromName, toName,
             fromTitle, toTitle, summary, text, sentAt, readAt, ok}]，from / to 是 sessionId（对不上时为空，只有名字）
   response  对 stdin 请求的应答（带同一个 id）
@@ -37,6 +39,9 @@ ccpulse-watch — Claude Code 会话观察器 + 会话内容通道
   hosted_stop {sessionId, ifIdle?}           结束托管会话（转到 VS Code 接着做之前）
   hosted_probe {netEnv?}                     出口检测：照后台运行时的网络设置查出口 IP → {source, settings, egress {ip, country, region, city, org, site}}
   machine_info                               设备详情：主机名、系统、CPU 型号、内存、IP、开机时长、磁盘
+  browser   {op, sessionId, …}               会话浏览器：watch {viewer, level thumb|full, first?}（每 5 秒续）/ unwatch /
+                                             input {type click|down|move|up|wheel|text|key|nav, x, y（0～1）…} / tab / control {on, text?} /
+                                             actions / status / close
   term      {op, sessionId, cwd?, term?, …}  会话里的终端：open {cols, rows} / list / read（最近的输出，接上画面）/
                                              input {data, base64?} / resize {cols, rows} / close
   ping
@@ -102,6 +107,7 @@ import os
 import queue
 import signal
 import re
+import shlex
 import shutil
 import socket
 import sqlite3
@@ -120,8 +126,8 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.5"
-FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid"]
+WATCHER_VERSION = "2.38.8"
+FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 MESSAGE_MAX_CHARS = 600
@@ -224,6 +230,97 @@ if IS_WINDOWS:
             return None
         finally:
             _k32.CloseHandle(snapshot)
+
+    def _win_processes():
+        """所有进程 → [(pid, 父进程 pid)]"""
+        out = []
+        snapshot = _k32.CreateToolhelp32Snapshot(0x2, 0)
+        if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+            return out
+        try:
+            entry = _PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+            ok = _k32.Process32FirstW(snapshot, ctypes.byref(entry))
+            while ok:
+                out.append((entry.th32ProcessID, entry.th32ParentProcessID))
+                ok = _k32.Process32NextW(snapshot, ctypes.byref(entry))
+        finally:
+            _k32.CloseHandle(snapshot)
+        return out
+
+    def _win_working_set(pid):
+        """进程占的物理内存（字节），读不了返回 0"""
+        class _PMC(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+        handle = _win_open(pid)
+        if not handle:
+            return 0
+        try:
+            counters = _PMC()
+            counters.cb = ctypes.sizeof(_PMC)
+            if ctypes.WinDLL("psapi").GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+                return counters.WorkingSetSize
+            return 0
+        finally:
+            _k32.CloseHandle(handle)
+
+    def _win_environ(pid):
+        """别的进程启动时的环境变量（读它的 PEB → ProcessParameters → Environment；64 位进程）。读不了返回 None。
+        浏览器入口认会话要用：agent-browser 的后台进程脱离了父进程链，但环境变量里带着 CLAUDE_CODE_SESSION_ID"""
+        if ctypes.sizeof(ctypes.c_void_p) != 8:
+            return None
+        handle = _k32.OpenProcess(0x0410, False, pid)   # PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
+        if not handle:
+            return None
+        try:
+            class _PBI(ctypes.Structure):
+                _fields_ = [("Reserved1", ctypes.c_void_p), ("PebBaseAddress", ctypes.c_void_p), ("Reserved2", ctypes.c_void_p * 2),
+                            ("UniqueProcessId", ctypes.c_void_p), ("Reserved3", ctypes.c_void_p)]
+            info = _PBI()
+            _k32.ReadProcessMemory.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+                                               ctypes.POINTER(ctypes.c_size_t)]
+            ntdll = ctypes.WinDLL("ntdll")
+            ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p]
+            if ntdll.NtQueryInformationProcess(handle, 0, ctypes.byref(info), ctypes.sizeof(info), None) != 0:
+                return None
+
+            def read(address, size):
+                buf = ctypes.create_string_buffer(size)
+                got = ctypes.c_size_t(0)
+                if not _k32.ReadProcessMemory(handle, ctypes.c_void_p(address), buf, size, ctypes.byref(got)):
+                    return None
+                return buf.raw[:got.value]
+
+            raw = read(info.PebBaseAddress + 0x20, 8)          # PEB.ProcessParameters
+            if not raw:
+                return None
+            params = struct.unpack("<Q", raw)[0]
+            raw = read(params + 0x80, 8)                         # RTL_USER_PROCESS_PARAMETERS.Environment
+            size_raw = read(params + 0x3F0, 8)                   # .EnvironmentSize（Windows 8 起有）
+            if not raw:
+                return None
+            address = struct.unpack("<Q", raw)[0]
+            size = struct.unpack("<Q", size_raw)[0] if size_raw else 0
+            if not 0 < size < 1048576:
+                size = 65536
+            data = read(address, size)
+            if not data:
+                return None
+            env = {}
+            for item in data.decode("utf-16-le", "replace").split("\0"):
+                if not item:
+                    break
+                key, sep, value = item.partition("=")
+                if sep and key:
+                    env[key] = value
+            return env
+        except Exception:
+            return None
+        finally:
+            _k32.CloseHandle(handle)
 
     # 打包成窗口程序的 Kiteline 起 git 这类命令行程序时，别每次闪一个黑框；
     # 子进程的 stdin 也别继承：主线程正阻塞读着 Kiteline 接过来的管道，Git for Windows 一碰这个句柄就卡死
@@ -1369,6 +1466,9 @@ def signature(snap):
         snap.get("bridge"), json.dumps(snap.get("queue"), ensure_ascii=False),
         # 只读 ↔ 可操作、是不是在后台运行：别家 agent 的会话进了 tmux / 后台伪终端才可操作，变了各端要跟着换界面
         snap.get("readOnly"), snap.get("hosted"),
+        # 会话浏览器：开 / 关、换了网页、agent 发了新指令、请用户接管
+        bool(snap.get("browser")), (snap.get("browser") or {}).get("url"), (snap.get("browser") or {}).get("title"),
+        (snap.get("browser") or {}).get("last"), (snap.get("browser") or {}).get("ask"),
     ))
 
 
@@ -3906,6 +4006,92 @@ description: 待办分两种：你自己以后要接着做的事（这次做不�
 - 只发用户需要知道的、你生成的或用户给你的信息；不要从用户电脑里翻找别的密码发出来。
 """
 
+_SKILL_TERMINAL = """---
+name: tars-terminal
+description: 要开终端窗口跑命令时（签名打包这类要桌面会话 / 登录钥匙串的、要让用户看着跑的长任务、交互式程序），不要 open -a Terminal、osascript 开终端、写 .command 双击，也不要在桌面上弹任何终端窗口：用 `{{cmd}} term run -- 命令`，命令在 Kiteline 里这个会话的终端面板新开一个标签跑，标签上写着在哪台设备上；要在另一台电脑上跑加 `--on 设备名`。
+---
+
+<!-- tars-terminal v1 -->
+
+# 在会话终端里跑命令
+
+用户在手机和电脑上的 Kiteline 里跟进好几个会话。你在桌面上另开终端窗口，用户既看不到是哪个会话开的，手机上也看不见；
+交给 Kiteline 跑，命令出现在**这个会话**的终端面板里（标签写着「Mac Studio · build.sh」这样的设备名和命令名），
+用户在手机、电脑上都能看实时输出、敲字、按 Ctrl+C；命令一结束终端就退出、标签自动收掉。
+
+```bash
+{{cmd}} term run -- bash ios/build.sh device                       # 在会话所在的电脑上跑，目录是当前目录
+{{cmd}} term run --title 打包 -- "make release && ls dist"          # 一个参数就整串交给 shell；--title 改标签名
+{{cmd}} term run --on mac --cwd ~/项目 -- bash ios/release.sh        # 到另一台电脑上跑（Kiteline 里来源的名字，或 mac / 本机）
+{{cmd}} term run --timeout 1800 -- npm run e2e                     # 超时停掉（退出码 124）
+```
+
+- 输出原样打回给你（去掉颜色），命令结束后带它的退出码退出：照常看输出、判断成败。
+- 退出码 125 = Kiteline 没接手（这台电脑上没在运行、设备名不对、那台没连上），原因写在输出里；这时才考虑别的办法。
+- 平常的命令照常在你自己的 Bash 里跑，**只有原本要开终端窗口的才用这个**。
+- 经 ssh 到另一台电脑上调这个命令时，带上会话：`ssh 主机 "KITELINE_SESSION=$CLAUDE_CODE_SESSION_ID {{cmd}} term run -- …"`，
+  不然标签不会出现在会话的终端面板里；能直接用 `--on` 的就别经 ssh。
+"""
+
+
+_SKILL_BROWSER = """---
+name: kiteline-browser
+description: 要操作网页时（打开网页看效果、测网页功能、点按钮填表单、登录后台、抓网页内容、截网页图）一律用 Kiteline 的浏览器，不要自己另起浏览器（不要 playwright 的 launch()、不要 npx playwright open、不要自己开无界面 Chrome）。连固定入口 http://127.0.0.1:9339：agent-browser 用 `{{ab}} --session <会话> --cdp 9339 open 网址`，playwright-cli 用 `attach --cdp=http://127.0.0.1:9339`，脚本用 connectOverCDP；Playwright MCP 已经指到这里，直接用。用户在手机和电脑上能看到实时画面和你的每条指令；遇到登录、验证码、滑块用 `{{cmd}} browser ask --note "说明"` 请用户接管。
+---
+
+<!-- kiteline-browser v1 -->
+
+# 用 Kiteline 的浏览器操作网页
+
+用户在手机和电脑上的 Kiteline 里跟进这个会话：你一用浏览器，会话里就浮出一个小窗口，实时显示你正在操作的网页和每条指令，
+用户可以放大看、可以接管（替你登录、过验证码）。你自己另起的浏览器用户看不到，还会多占几百 MB 内存，**所以不要自己开浏览器**。
+
+浏览器由 Kiteline 调度：每个会话一个（无界面的 Chrome / Edge），第一次连上时自动打开，空闲 10 分钟自动回收；
+登录状态存在硬盘上，回收后再用还在。电脑内存紧张、同时用浏览器的会话太多时会排队（命令会多等一会儿，不是出错）。
+
+## 首选 agent-browser（快、省 token）
+
+```bash
+AB={{ab}}                                   # 没有就先装：{{cmd}} browser setup（下载约 20 MB，装好打印路径）
+S="$CLAUDE_CODE_SESSION_ID"                 # 不是 Claude Code 的话，换成这个任务独有的短名字
+$AB --session "$S" --cdp 9339 open https://example.com
+$AB --session "$S" --cdp 9339 snapshot -i          # 网页压成短文本，可操作的元素编号 @e1、@e2……
+$AB --session "$S" --cdp 9339 click @e3
+$AB --session "$S" --cdp 9339 fill @e5 "hello"
+$AB --session "$S" --cdp 9339 press Enter
+$AB --session "$S" --cdp 9339 screenshot /tmp/page.png
+```
+
+- `--cdp 9339` 连 Kiteline 的固定入口，Kiteline 自己认出是哪个会话、接到这个会话的浏览器上。**`--session` 一定要带**：
+  不带的话几个会话共用 agent-browser 的同一个后台，会操作到别的会话的浏览器。
+- 操作完、网页变了要重新 `snapshot -i` 拿新编号。更多命令看 `$AB --help`。
+
+## 其他写法
+
+- playwright-cli：`playwright-cli attach --cdp=http://127.0.0.1:9339`，之后照常用它的命令。
+- 自己写 Playwright 脚本：`const browser = await chromium.connectOverCDP('http://127.0.0.1:9339'); const context = browser.contexts()[0];`
+  （Python：`p.chromium.connect_over_cdp("http://127.0.0.1:9339")`），用已有的 context 开页面，**不要 `chromium.launch()`**。
+- Playwright MCP（`mcp__playwright__*` 工具）：Kiteline 已经让它连到这个浏览器了，直接用。
+- chrome-devtools-mcp：启动参数里带 `--browserUrl http://127.0.0.1:9339`。
+
+## 遇到要人来做的：请用户接管
+
+登录（尤其要短信、扫码、二次验证）、验证码、滑块、付款确认这类你过不去或不该替用户做的，不要硬试：
+
+```bash
+{{cmd}} browser ask --note "请登录 GitHub，登好后点交还"
+```
+
+用户手机上会收到提醒，在实时画面里自己操作，点「交还」后这条命令返回（带着用户的留言），你接着做。默认最多等 15 分钟（`--timeout 秒`）。
+
+## 其他
+
+- 用完了可以 `{{cmd}} browser close` 马上释放；不关也会自动回收。
+- `{{cmd}} browser status` 看这台电脑上开着几个浏览器、各占多少内存。
+- 连 9339 连不上（Kiteline 没在这台电脑上运行）时才考虑别的办法。
+"""
+
+
 _SKILL_STAGES = """---
 name: tars-stages
 description: 做任务时报告进度阶段。用户在手机和电脑上的 Kiteline 里同时看好几个会话，每个会话名下显示做到哪一步（如「2/4 开发中」「iPhone · 3/4 测试中」）。接到要动手的任务先按这件事实际怎么做规划步骤：`{{cmd}} stage --steps "复现,定位,修复,验证,汇报"`（分几个端、几个模块的再加 --parts "Mac,iPhone,Windows/Linux"）；进入每一步时 `{{cmd}} stage <第几步> [--part 哪部分] --note "在做什么"`；做完 `{{cmd}} stage done`。
@@ -3982,7 +4168,7 @@ _SKILL_SCREEN = {
 }
 
 SKILLS_BUILTIN = {
-    "version": "1.0.4",   # 整份数据的版本（同插件版本号）：下发的技能包版本更高才换
+    "version": "1.0.6",   # 整份数据的版本（同插件版本号）：下发的技能包版本更高才换
     # 各家 agent 读技能的目录（当前用户的）；when：这个目录在，说明这台电脑装了这家；unless：这个在就不用另装（别家已经读到）
     "targets": [
         {"agent": "claude-code", "dir": "~/.claude/skills", "when": "~/.claude"},          # OpenCode 也读这里
@@ -3996,6 +4182,8 @@ SKILLS_BUILTIN = {
         {"id": "playwright", "name": "tars-playwright-report", "marker": "tars-playwright v", "content": _SKILL_PLAYWRIGHT},
         {"id": "todos", "name": "tars-todos", "marker": "tars-todos v", "content": _SKILL_TODOS},
         {"id": "stages", "name": "tars-stages", "marker": "tars-stages v", "content": _SKILL_STAGES},
+        {"id": "terminal", "name": "tars-terminal", "marker": "tars-terminal v", "content": _SKILL_TERMINAL},
+        {"id": "browser", "name": "kiteline-browser", "marker": "kiteline-browser v", "content": _SKILL_BROWSER},
     ],
     # 早期版本的技能目录：带我们标记的删掉
     "legacy": [{"name": "ccpulse-send-image", "marker": "send-image"}],
@@ -4049,9 +4237,19 @@ def self_command():
     return '%s "%s"' % (python, path) if " " in path else "%s %s" % (python, path)
 
 
+def agent_browser_command():
+    """技能里 agent-browser 的写法：装在 ~/.ccpulse/bin 的（browser setup 装的）"""
+    path = os.path.join(DATA_DIR, "bin", "agent-browser.exe" if IS_WINDOWS else "agent-browser")
+    if path.startswith(HOME + os.sep) and not IS_WINDOWS and " " not in path:
+        return "~" + path[len(HOME):]
+    path = path.replace("\\", "/")
+    return '"%s"' % path if " " in path else path
+
+
 def render_skill(skill):
     platform = "mac" if sys.platform == "darwin" else ("windows" if os.name == "nt" else "linux")
-    return str(skill.get("content") or "").replace("{{cmd}}", self_command()).replace("{{screen}}", _SKILL_SCREEN[platform])
+    return str(skill.get("content") or "").replace("{{cmd}}", self_command()).replace("{{screen}}", _SKILL_SCREEN[platform]) \
+        .replace("{{ab}}", agent_browser_command())
 
 
 def skill_targets(data):
@@ -4100,6 +4298,10 @@ def sync_skills(enabled=None, data=None):
             if old.get("name") and current and str(old.get("marker") or "") in current:
                 shutil.rmtree(folder, ignore_errors=True)
                 result["removed"].append(folder)
+    try:
+        sync_browser_env("browser" in enabled)   # Playwright MCP 连 Kiteline 的浏览器（跟着浏览器技能开关）
+    except Exception as exc:
+        log("同步浏览器环境变量出错：%r" % exc)
     for path in result["installed"]:
         log("已安装技能：%s" % path)
     for path in result["removed"]:
@@ -6107,6 +6309,160 @@ def _stage_match_part(text, parts):
             return p["name"]
     hits = [p["name"] for p in parts if low and (p["name"].lower().startswith(low) or low in p["name"].lower())]
     return hits[0] if len(hits) == 1 else None
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
+
+
+def command_term(argv):
+    """在 Kiteline 的会话终端里跑命令（不在桌面上另开终端窗口）：
+    term run [--on 设备] [--cwd 目录] [--title 名字] [--session 会话id] [--timeout 秒] -- 命令 [参数…]
+      命令在这个会话的终端面板里新开一个标签跑，标签上写着在哪台设备上跑；手机、电脑上都能看实时输出、敲字、按 Ctrl+C。
+      这边原样打出输出，命令结束后带它的退出码退出；终端随之退出、标签收掉。
+      --on：在另一台设备上跑（Kiteline 里来源的名字，或 本机 / mac）。比如虚拟机上的会话要在 Mac 上签名打包：
+            term run --on mac --cwd ~/项目 -- bash ios/build.sh device
+      在 ssh 进来的 shell 里（认不出会话）用 --session 或环境变量 KITELINE_SESSION 指定挂在哪个会话下。
+    退出码：命令自己的；125 = Kiteline 没接手（这台电脑上没在运行）；124 = 超时"""
+    if not argv or argv[0] in ("-h", "--help"):
+        print(command_term.__doc__)
+        return 0 if argv else 2
+    if argv[0] != "run":
+        print("用法：ccpulse-watch.py term run [--on 设备] [--cwd 目录] [--title 名字] -- 命令", file=sys.stderr)
+        return 2
+    argv = argv[1:]
+    on = cwd = title = session = None
+    timeout = 0.0
+    words = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        value = argv[index + 1] if index + 1 < len(argv) else None
+        if arg == "--":
+            words = argv[index + 1:]
+            break
+        if arg in ("--on", "--cwd", "--title", "--session", "--timeout") and value is not None:
+            if arg == "--on":
+                on = value
+            elif arg == "--cwd":
+                cwd = value
+            elif arg == "--title":
+                title = value
+            elif arg == "--session":
+                session = value
+            else:
+                timeout = float(value)
+            index += 2
+            continue
+        if "--" in argv[index:]:
+            # 「--title iPhone 安装 -- 命令」：选项值里有空格没加引号，多出来的词会被当成命令
+            print("「%s」不是选项：带空格的值要加引号（如 --title \"iPhone 安装\"），命令写在 -- 后面" % arg, file=sys.stderr)
+            return 2
+        words = argv[index:]
+        break
+    if not words:
+        print("要跑的命令写在 -- 后面", file=sys.stderr)
+        return 2
+    command = words[0] if len(words) == 1 else " ".join(shlex.quote(w) for w in words)
+    session = session or os.environ.get("KITELINE_SESSION") or None
+    if session:
+        session_id, _ = target_session(session)
+    else:
+        found = find_calling_session()
+        session_id = found["sessionId"] if found else ""
+    if session is not None and not session_id:
+        return 2
+    if not session_id:
+        print("（认不出是哪个会话：命令照样在 Kiteline 里跑，但不会出现在会话的终端面板里；可以用 --session 指定）", file=sys.stderr)
+    if not on and not cwd:
+        cwd = os.getcwd()
+    try:
+        cols, rows = os.get_terminal_size(sys.stdout.fileno())
+    except OSError:
+        cols, rows = 120, 32
+    rid = uuid.uuid4().hex[:16]
+    os.makedirs(TERM_RUN_DIR, exist_ok=True)
+    base = os.path.join(TERM_RUN_DIR, rid)
+    request = {"sessionId": session_id, "run": command, "cwd": cwd or "", "on": on or "", "title": title or "",
+               "cols": max(cols, 80), "rows": max(rows, 24), "at": _now_ms()}
+    with open(base + ".tmp", "w", encoding="utf-8") as handle:
+        json.dump(request, handle, ensure_ascii=False)
+    os.replace(base + ".tmp", base + ".req")
+    started = time.time()
+    state = None
+    while state is None:
+        if os.path.exists(base + ".state"):
+            state = _read_json(base + ".state", {})
+        elif time.time() - started > 10 and os.path.exists(base + ".req"):
+            _remove_quiet(base + ".req")
+            print("Kiteline 没接手：这台电脑上的 Kiteline 没在运行（或版本太旧）", file=sys.stderr)
+            return 125
+        else:
+            time.sleep(0.2)
+    if state.get("relayed") and not state.get("term"):
+        # 转给别的电脑了：等那边开起来
+        while True:
+            state = _read_json(base + ".state", {}) or {}
+            if state.get("term") or state.get("error"):
+                break
+            if time.time() - started > 30:
+                print("「%s」上的 Kiteline 没回应：设备名对吗？电脑端连着它吗？" % on, file=sys.stderr)
+                open(base + ".cancel", "w").close()
+                return 125
+            time.sleep(0.2)
+    if state.get("error"):
+        print("没开起来：%s" % state["error"], file=sys.stderr)
+        return 125
+    print("[Kiteline] 在「%s」上运行（会话终端里的「%s」标签）：%s" % (state.get("host") or on or "本机", title or run_title(command), command),
+          file=sys.stderr)
+    sys.stderr.flush()
+    plain = not sys.stdout.isatty()
+    offset = 0
+    out = sys.stdout.buffer
+    pending = b""
+    code = None
+    try:
+        while True:
+            done = os.path.exists(base + ".exit")
+            try:
+                with open(base + ".out", "rb") as handle:
+                    handle.seek(offset)
+                    chunk = handle.read()
+            except OSError:
+                chunk = b""
+            if chunk:
+                offset += len(chunk)
+                if plain:
+                    # 给 agent 看的：去掉颜色、光标控制，回车覆盖的进度行只留最后那次
+                    text = _ANSI_RE.sub("", (pending + chunk).decode("utf-8", "replace"))
+                    lines = text.split("\n")
+                    pending = lines.pop().encode("utf-8")
+                    for line in lines:
+                        out.write((line.rstrip("\r").split("\r")[-1] + "\n").encode("utf-8"))
+                else:
+                    out.write(chunk)
+                out.flush()
+            if done and not chunk:
+                break
+            if timeout and time.time() - started > timeout:
+                open(base + ".cancel", "w").close()
+                print("\n[Kiteline] 超过 %d 秒，已停止" % timeout, file=sys.stderr)
+                return 124
+            time.sleep(0.15 if chunk else 0.3)
+        if pending:
+            out.write(pending.split(b"\r")[-1] + b"\n")
+            out.flush()
+        raw = (read_text(base + ".exit") or "").strip()
+        code = int(raw) if raw.lstrip("-").isdigit() else 1
+    except KeyboardInterrupt:
+        open(base + ".cancel", "w").close()
+        print("\n[Kiteline] 已打断", file=sys.stderr)
+        return 130
+    finally:
+        if code is not None:
+            for ext in (".out", ".exit", ".state", ".taken"):
+                _remove_quiet(base + ext)
+    print("[Kiteline] 结束，退出码 %d" % code, file=sys.stderr)
+    return code if 0 <= code < 256 else 1
 
 
 def command_stage(argv):
@@ -14759,10 +15115,47 @@ TERM_BUFFER = 256 * 1024
 TERM_PER_SESSION = 8
 TERM_TOTAL = 32
 TERM_RATE = 512 * 1024   # 每秒最多推这么多：输出再快就先不读，让程序在伪终端上等着（同真终端被拖慢），免得把手机的连接灌满
+TERM_RUN_KEEP = 30 * 60  # 兜底：跑完还没收掉的 agent 终端最多留这么久（正常跑完立刻收，见 Terminals.gone）
+TERM_RUN_DIR = os.path.join(DATA_DIR, "term-run")   # term run 子命令和 watcher 之间的交接目录（见 command_term）
+
+
+def host_label():
+    """这台电脑的名字（终端标签上标「在哪台设备上跑」用；电脑端会换成用户起的来源名）"""
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=3).stdout.strip()
+            if name:
+                return name
+        except Exception:
+            pass
+    return (os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME") or "").split(".")[0] or "电脑"
+
+
+_HOST_LABEL = []
+
+# 终端的名字、颜色、排在第几、和谁拆分在一起（同 VS Code 的终端列表：拖动排序、重命名、改颜色、拆分）。
+# 按终端 id 记在这里而不是终端对象上：托管会话的「claude」终端每次列表都会重新接上，换了对象也不丢
+TERM_META = {}
+TERM_COLORS = ("red", "green", "yellow", "blue", "magenta", "cyan")
+
+
+def term_meta(tid, info):
+    meta = TERM_META.get(tid) or {}
+    info["order"] = meta.get("order", info.get("createdAt") or 0)   # 列表按它排；拖动排序改它（客户端给两个邻居中间的值）
+    for field in ("name", "color", "group"):
+        if meta.get(field):
+            info[field] = meta[field]
+    return info
+
+
+def this_host():
+    if not _HOST_LABEL:
+        _HOST_LABEL.append(host_label())
+    return _HOST_LABEL[0]
 
 
 class Term:
-    def __init__(self, tid, session_id, cwd, cols, rows):
+    def __init__(self, tid, session_id, cwd, cols, rows, run=None, title=None, rid=None, relay=None):
         self.id, self.session_id, self.cwd = tid, session_id, cwd
         self.cols, self.rows = cols, rows
         self.created = time.time()
@@ -14774,10 +15167,28 @@ class Term:
         self.proc = None
         self.fd = None            # Unix：伪终端主端
         self.win = None           # Windows：ConPTY 句柄们
+        # agent 跑的命令（term run）：不开交互 shell，用登录 shell 跑这条命令；跑完标签留着（ended）给用户回看
+        self.run = run
+        self.title = title
+        self.rid = rid            # 本机 term run 的交接号：输出、退出码写进 TERM_RUN_DIR 给等着的子命令
+        self.relay = relay        # 别的电脑上的会话请这台跑的：{"rid", "from"}，原样带在事件里，电脑端照着转回去
+        self.ended = None         # 跑完的时间
 
     def info(self):
-        return {"term": self.id, "sessionId": self.session_id, "cwd": self.cwd, "shell": os.path.basename(self.shell),
-                "cols": self.cols, "rows": self.rows, "createdAt": int(self.created * 1000), "end": self.end}
+        out = {"term": self.id, "sessionId": self.session_id, "cwd": self.cwd, "shell": os.path.basename(self.shell),
+               "cols": self.cols, "rows": self.rows, "createdAt": int(self.created * 1000), "end": self.end, "host": this_host()}
+        if self.run:
+            out.update(run=self.run, title=self.title or run_title(self.run))
+        if self.ended:
+            out.update(ended=int(self.ended * 1000), exitCode=self.exit_code)
+        if self.relay:
+            out["relay"] = self.relay
+        return term_meta(self.id, out)
+
+    def _event(self, payload):
+        if self.relay:
+            payload["relay"] = self.relay
+        emit(payload)
 
     # --- 启动 ---
 
@@ -14791,6 +15202,9 @@ class Term:
     def _env(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("CCPULSE_")}
         env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "Kiteline"})
+        if self.session_id:
+            env["KITELINE_SESSION"] = self.session_id   # 里面再跑 term run（脚本里的）也挂到同一个会话
+        env["KITELINE_TERM"] = "1"
         if not IS_WINDOWS and "UTF-8" not in (env.get("LC_ALL") or env.get("LC_CTYPE") or env.get("LANG") or "").upper().replace("UTF8", "UTF-8"):
             env["LANG"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"   # 不然中文文件名、输出是乱码
         return env
@@ -14818,7 +15232,8 @@ class Term:
                 signal.signal(sig, signal.SIG_DFL)
 
         # 登录 shell：读 .profile / .zprofile，PATH、conda 这些和自己开终端时一样（watcher 是 ssh 非交互起的，环境不全）
-        self.proc = subprocess.Popen([shell, "-l"], stdin=slave, stdout=slave, stderr=slave, cwd=self.cwd, env=self._env(),
+        argv = [shell, "-l", "-c", self.run] if self.run else [shell, "-l"]
+        self.proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, cwd=self.cwd, env=self._env(),
                                      preexec_fn=child, close_fds=True)
         os.close(slave)
         self.fd = master
@@ -14889,7 +15304,11 @@ class Term:
         info.lpAttributeList = ctypes.cast(attrs, ctypes.c_void_p)
         shell = shutil.which("pwsh.exe") or shutil.which("powershell.exe") or os.environ.get("COMSPEC") or "cmd.exe"
         self.shell = shell
-        command = ctypes.create_unicode_buffer('"%s"%s' % (shell, " -NoLogo" if "powershell" in shell.lower() or "pwsh" in shell.lower() else ""))
+        posh = "powershell" in shell.lower() or "pwsh" in shell.lower()
+        line = '"%s"%s' % (shell, " -NoLogo" if posh else "")
+        if self.run:
+            line += (' -NoProfile -Command "%s"' % self.run.replace('"', '\\"')) if posh else " /d /s /c \"%s\"" % self.run
+        command = ctypes.create_unicode_buffer(line)
         env = "".join("%s=%s\0" % kv for kv in sorted(self._env().items(), key=lambda kv: kv[0].upper())) + "\0"
         env_block = ctypes.create_unicode_buffer(env)
         process = PROCESS_INFORMATION()
@@ -14962,10 +15381,12 @@ class Term:
                     del self.buffer[:len(self.buffer) - TERM_BUFFER]
                 self.end += len(chunk)
             try:
-                emit({"event": "term", "term": self.id, "sessionId": self.session_id, "seq": seq,
-                      "data": base64.b64encode(chunk).decode("ascii")})
+                self._event({"event": "term", "term": self.id, "sessionId": self.session_id, "seq": seq,
+                             "data": base64.b64encode(chunk).decode("ascii")})
             except Exception:
                 pass
+            if self.rid:
+                run_file_append(self.rid, chunk)
             sent += len(chunk)
             now = time.time()
             if now - window >= 1.0:
@@ -15010,6 +15431,8 @@ class Term:
 
     def resize(self, cols, rows):
         self.cols, self.rows = cols, rows
+        if self.ended:
+            return
         if self.win:
             self.win["k32"].ResizePseudoConsole(self.win["hpc"], self.win["COORD"](cols, rows))
             return
@@ -15021,7 +15444,11 @@ class Term:
         except OSError:
             pass
 
-    def close(self):
+    def close(self, keep=False):
+        if self.ended:
+            TERMS.drop(self)
+            return
+        self.closing = not keep   # 用户点了关：跑到一半的也直接收掉标签（keep：子命令被打断，标签留着看）
         if self.win:
             # 进程一结束，watch_exit 关伪终端、读输出那边读到结尾，收尾同自己退出
             self.win["k32"].TerminateProcess(self.win["process"], 1)
@@ -15046,6 +15473,7 @@ class Terminals:
     def __init__(self):
         self.terms = {}
         self.lock = threading.Lock()
+        self.runner = None
 
     def count(self, session_id):
         return sum(1 for t in self.terms.values() if t.session_id == session_id)
@@ -15058,13 +15486,39 @@ class Terminals:
                 snap["terminals"] = n
 
     def gone(self, term):
+        """终端里的程序退出了：直接收掉（11-16 起：agent 跑完的命令同步退出，不留着占资源；输出已交给等着的子命令）"""
+        log("终端 %s 结束了（%s）" % (term.id, term.exit_code))
+        if getattr(term, "rid", None):
+            run_file_done(term.rid, term.exit_code)
+        if getattr(term, "run", None):
+            term.ended = time.time()
         with self.lock:
             self.terms.pop(term.id, None)
-        log("终端 %s 结束了（%s）" % (term.id, term.exit_code))
+        self.ungroup(term.id)
         try:
-            emit({"event": "term_exit", "term": term.id, "sessionId": term.session_id, "code": term.exit_code})
+            payload = {"event": "term_exit", "term": term.id, "sessionId": term.session_id, "code": term.exit_code}
+            if getattr(term, "relay", None):
+                payload["relay"] = term.relay   # 跨电脑跑的：电脑端照着把退出码转回发起那台
+            emit(payload)
         except Exception:
             pass
+
+    def drop(self, term):
+        """收掉一个跑完了的（用户点关、或留够了时间）"""
+        with self.lock:
+            if self.terms.pop(term.id, None) is None:
+                return
+        self.ungroup(term.id)
+        try:
+            term._event({"event": "term_exit", "term": term.id, "sessionId": term.session_id, "code": term.exit_code})
+        except Exception:
+            pass
+
+    def prune(self):
+        now = time.time()
+        for term in list(self.terms.values()):
+            if getattr(term, "ended", None) and now - term.ended > TERM_RUN_KEEP:
+                self.drop(term)
 
     def get(self, tid):
         term = self.terms.get(tid or "")
@@ -15072,24 +15526,43 @@ class Terminals:
             raise RuntimeError("终端已关闭")
         return term
 
+    def open(self, session_id, cwd, cols=80, rows=24, run=None, title=None, rid=None, relay=None, meta=None):
+        self.prune()
+        live = [t for t in self.terms.values() if not getattr(t, "ended", None)]
+        if sum(1 for t in live if t.session_id == session_id) >= TERM_PER_SESSION or len(live) >= TERM_TOTAL:
+            raise RuntimeError("这个会话已开了 %d 个终端，请先关掉不用的" % self.count(session_id))
+        if not cwd or not os.path.isdir(cwd):
+            cwd = HOME
+        term = Term(("r-" if run else "k-") + uuid.uuid4().hex[:10], session_id, cwd, cols, rows,
+                    run=run, title=title, rid=rid, relay=relay)
+        if meta:
+            TERM_META[term.id] = dict(meta)
+        term.start()
+        with self.lock:
+            self.terms[term.id] = term
+        log("开了终端 %s（%s）：%s%s" % (term.id, term.shell, cwd, "，跑 %s" % run[:200] if run else ""))
+        if run or meta:
+            # agent 跑的、拆分出来的：手机、电脑上已经打开着终端面板的，直接多出这个标签
+            term._event({"event": "term_open", "term": term.id, "sessionId": session_id, "info": term.info()})
+        return term
+
     def handle(self, request, cwd):
         op = request.get("op") or "list"
         session_id = request.get("sessionId") or ""
         if op == "list":
-            terms = [t for t in self.terms.values() if not session_id or t.session_id == session_id]
-            return {"terms": [t.info() for t in sorted(terms, key=lambda t: t.created)]}
+            self.prune()
+            terms = [t.info() for t in self.terms.values() if not session_id or t.session_id == session_id]
+            return {"terms": sorted(terms, key=lambda t: (t.get("order") or 0, t.get("createdAt") or 0)), "host": this_host()}
         if op == "open":
-            if self.count(session_id) >= TERM_PER_SESSION or len(self.terms) >= TERM_TOTAL:
-                raise RuntimeError("这个会话已开了 %d 个终端，请先关掉不用的" % self.count(session_id))
-            if not cwd or not os.path.isdir(cwd):
-                cwd = HOME
             cols = max(20, min(int(request.get("cols") or 80), 500))
             rows = max(5, min(int(request.get("rows") or 24), 300))
-            term = Term("k-" + uuid.uuid4().hex[:10], session_id, cwd, cols, rows)
-            term.start()
-            with self.lock:
-                self.terms[term.id] = term
-            log("开了终端 %s（%s）：%s" % (term.id, term.shell, cwd))
+            run = request.get("run") if isinstance(request.get("run"), str) and request.get("run").strip() else None
+            relay = request.get("relay") if isinstance(request.get("relay"), dict) else None
+            if run:
+                # 电脑端转来的「别的电脑上的会话请这台跑」：目录是这台上的（给了就用，没给用主目录）
+                given = os.path.expanduser(request.get("cwd") or "")
+                cwd = given if given and os.path.isdir(given) else cwd
+            term = self.open(session_id, cwd, cols, rows, run=run, title=request.get("title") or None, relay=relay)
             return {"term": term.info()}
         term = self.get(request.get("term"))
         if op == "read":
@@ -15106,10 +15579,2147 @@ class Terminals:
         if op == "close":
             term.close()
             return {}
+        if op in ("rename", "color", "order"):
+            meta = TERM_META.setdefault(term.id, {})
+            if op == "rename":
+                name = re.sub(r"\s+", " ", str(request.get("name") or "")).strip()[:60]
+                meta["name"] = name    # 空 = 恢复默认名字
+            elif op == "color":
+                color = str(request.get("color") or "")
+                if color and color not in TERM_COLORS:
+                    raise RuntimeError("不支持的颜色：%s" % color)
+                meta["color"] = color
+            else:
+                meta["order"] = float(request.get("order"))
+            self.changed(term)
+            return {"term": term.info()}
+        if op == "split":
+            # 拆分（同 VS Code）：在这个终端旁边再开一个，同一目录，和它并排显示在同一组里
+            group = (TERM_META.get(term.id) or {}).get("group") or term.id
+            TERM_META.setdefault(term.id, {})["group"] = group
+            cols = max(20, min(int(request.get("cols") or term.cols), 500))
+            rows = max(5, min(int(request.get("rows") or term.rows), 300))
+            base = term.info().get("order") or 0
+            later = [t.info().get("order") or 0 for t in self.terms.values() if t.session_id == term.session_id]
+            after = min([o for o in later if o > base] or [base + 2])
+            fresh = self.open(term.session_id, term.cwd, cols, rows, meta={"group": group, "order": (base + after) / 2.0})
+            self.changed(term)
+            return {"term": fresh.info()}
         raise RuntimeError("未知的终端操作：%s" % op)
+
+    def changed(self, term):
+        """名字、颜色、位置、分组变了：开着面板的各端跟着改"""
+        try:
+            emit({"event": "term_meta", "term": term.id, "sessionId": term.session_id, "info": term.info()})
+        except Exception:
+            pass
+
+    def ungroup(self, gone_id):
+        """拆分组里关掉一个：组里只剩一个时它就不算拆分了"""
+        group = (TERM_META.pop(gone_id, None) or {}).get("group")
+        if not group:
+            return
+        left = [t for t in self.terms.values() if (TERM_META.get(t.id) or {}).get("group") == group]
+        if len(left) == 1:
+            TERM_META[left[0].id].pop("group", None)
+            self.changed(left[0])
+
+    # --- term run：agent 在 Bash 里请 Kiteline 开终端跑命令 ---
+
+    def start_runner(self):
+        if self.runner:
+            return
+        os.makedirs(TERM_RUN_DIR, exist_ok=True)
+        self.runner = threading.Thread(target=self._runner, name="term-run", daemon=True)
+        self.runner.start()
+
+    def _runner(self):
+        while True:
+            try:
+                self._scan()
+            except Exception as exc:
+                log("term run 出错：%r" % exc)
+            time.sleep(0.4)
+
+    def _scan(self):
+        try:
+            names = os.listdir(TERM_RUN_DIR)
+        except OSError:
+            return
+        now = time.time()
+        for name in names:
+            path = os.path.join(TERM_RUN_DIR, name)
+            if name.endswith(".cancel"):
+                rid = name[:-7]
+                for term in list(self.terms.values()):
+                    if getattr(term, "rid", None) == rid and not term.ended:
+                        log("term run %s：子命令被打断，结束终端 %s" % (rid, term.id))
+                        term.close(keep=True)
+                if rid in _RUN_RELAYED:
+                    emit({"event": "term_run_cancel", "rid": rid})
+                    _RUN_RELAYED.discard(rid)
+                _remove_quiet(path)
+                continue
+            if not name.endswith(".req"):
+                try:
+                    if now - os.path.getmtime(path) > 24 * 3600:   # 一天前的交接文件
+                        os.remove(path)
+                except OSError:
+                    pass
+                continue
+            rid = name[:-4]
+            taken = os.path.join(TERM_RUN_DIR, rid + ".taken")
+            try:
+                os.rename(path, taken)   # 占下这一单（同一台上有两个 watcher 时只一个接）
+            except OSError:
+                continue
+            try:
+                with open(taken, encoding="utf-8") as handle:
+                    req = json.load(handle)
+                self._start_run(rid, req)
+            except Exception as exc:
+                run_file_state(rid, {"error": str(exc) or repr(exc)})
+
+    def _start_run(self, rid, req):
+        session_id = req.get("sessionId") or ""
+        on = (req.get("on") or "").strip()
+        if on and not host_matches(on):
+            # 开到别的电脑上：请电脑端转给那台的 Kiteline（输出、退出码经 term_run_feed 回来）
+            _RUN_RELAYED.add(rid)
+            emit({"event": "term_run", "rid": rid, "sessionId": session_id, "on": on, "run": req["run"],
+                  "cwd": req.get("cwd") or "", "title": req.get("title") or "", "cols": req.get("cols") or 120, "rows": req.get("rows") or 32})
+            run_file_state(rid, {"relayed": True, "on": on})
+            return
+        cwd = os.path.expanduser(req.get("cwd") or "") or None
+        term = self.open(session_id, cwd, int(req.get("cols") or 120), int(req.get("rows") or 32),
+                         run=req["run"], title=req.get("title") or None, rid=rid)
+        run_file_state(rid, {"term": term.id, "host": this_host(), "cwd": term.cwd})
+
+    def feed(self, request):
+        """电脑端转回来的：别的电脑上替这台的会话跑的那条命令的进展（started / data / exit / error）"""
+        rid = str(request.get("rid") or "")
+        if not re.match(r"^[0-9a-f]{12,32}$", rid):
+            raise RuntimeError("交接号不对")
+        if request.get("error"):
+            run_file_state(rid, {"error": request["error"]})
+            _RUN_RELAYED.discard(rid)
+        if request.get("started"):
+            run_file_state(rid, {"term": request.get("term") or "", "host": request.get("device") or "", "relayed": True,
+                                 "cwd": request.get("cwd") or ""})
+        if request.get("data"):
+            run_file_append(rid, base64.b64decode(request["data"]))
+        if "exit" in request:
+            run_file_done(rid, request.get("exit"))
+            _RUN_RELAYED.discard(rid)
+        return {}
+
+
+_RUN_RELAYED = set()
+
+
+def _remove_quiet(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def run_title(command):
+    """终端标签上的名字：命令里第一个像样的词（脚本名、程序名）"""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    for word in words:
+        if "=" in word.split("/")[0] or word in ("env", "sudo", "bash", "sh", "zsh", "python3", "python", "node", "exec", "-c", "-l"):
+            continue
+        return os.path.basename(word.rstrip("/"))[:40] or "run"
+    return (words[-1] if words else "run")[:40]
+
+
+def host_matches(on):
+    """--on 写的是不是这台电脑（本机 / local / 主机名 / 电脑名）"""
+    want = on.strip().lower()
+    names = {"local", "本机", "localhost", this_host().lower()}
+    if hasattr(os, "uname"):
+        names.add(os.uname().nodename.lower())
+        names.add(os.uname().nodename.split(".")[0].lower())
+    return want in names
+
+
+def run_file_append(rid, chunk):
+    try:
+        with open(os.path.join(TERM_RUN_DIR, rid + ".out"), "ab") as handle:
+            handle.write(chunk)
+    except OSError:
+        pass
+
+
+def run_file_state(rid, state):
+    try:
+        os.makedirs(TERM_RUN_DIR, exist_ok=True)
+        tmp = os.path.join(TERM_RUN_DIR, rid + ".state.tmp")
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False)
+        os.replace(tmp, os.path.join(TERM_RUN_DIR, rid + ".state"))
+    except OSError:
+        pass
+
+
+def run_file_done(rid, code):
+    try:
+        with open(os.path.join(TERM_RUN_DIR, rid + ".exit"), "w", encoding="utf-8") as handle:
+            handle.write("" if code is None else str(code))
+    except OSError:
+        pass
 
 
 TERMS = Terminals()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 会话浏览器（11-16 用户要的）：agent 操作网页用的浏览器，每个会话一个（电脑上已有的 Chrome / Edge / Chromium，无界面），
+# 开着 CDP 调试端口。agent-browser（--cdp 端口）、playwright-cli（attach --cdp=地址）、Playwright MCP（--cdp-endpoint）都连它；
+# watcher 自己也连上去：把实时画面推给手机和电脑（Page.startScreencast），用户接管时把点击、按键送进去。
+#   子命令 browser cdp 在 agent 的 Bash 里认出会话、经交接目录向 watcher 要浏览器（调度器决定开 / 排队），拿到端口打印出来。
+#   调度器（BrowserPool）：用时才开、空闲回收（10 分钟没有指令也没人看）、会话结束 2 分钟后关、同时开的数量按可用内存定（最多 4 个）、
+#   满了先回收最久没用的空闲浏览器、都在忙就排队；可用内存低于 1 GB 时空闲的马上回收。登录状态在硬盘上（profile），重开不丢。
+# 一个无界面浏览器实测空白页约 390 MB、开两个网页约 470 MB（11-16 虚拟机），所以不能每个会话常驻一个。
+BROWSER_DIR = os.path.join(DATA_DIR, "browser")
+BROWSER_SIZE = (1280, 800)
+# 下面两项用户可在电脑端设置里改（经环境变量 CCPULSE_BROWSER_IDLE 分钟数 / CCPULSE_BROWSER_MAX 带来，改了经 browser_config 当场生效）
+BROWSER_IDLE = int(float(os.environ.get("CCPULSE_BROWSER_IDLE") or 10) * 60)   # 没有指令、没人看画面多久回收
+BROWSER_GONE_GRACE = 120        # 会话结束后多久关
+BROWSER_MAX = int(os.environ.get("CCPULSE_BROWSER_MAX") or 4)   # 同时开着的上限（再按可用内存往下压）
+BROWSER_EST_MB = 500            # 估算每个浏览器占多少
+BROWSER_LOW_MEM_MB = 1024       # 可用内存低于这个：空闲的马上回收、不开新的（除非一个都没开）
+BROWSER_LEASE = 15              # 看画面的客户端每 5 秒续一次，15 秒没续就当没人看
+BROWSER_QUEUE_WAIT = 600        # browser cdp 排队最多等多久
+# 画面档位：缩略（小窗）/ 大画面。宽度上限、每秒帧数上限、JPEG 质量
+BROWSER_LEVELS = {"thumb": (560, 2.0, 55), "rec": (800, 2.0, 45), "full": (1440, 10.0, 72)}
+# 录制（11-16 用户要的：浏览器操作全程录下来，回放时可以加速、可以跳过长时间等待）：浏览器开着就一直录（没人看也录），
+# 尽量省空间（11-16）：网页有变化才有新帧、和上一帧一模一样的不存、最多每秒 2 帧、800 宽、JPEG 质量 45；
+# 所有帧追加进一个 frames.bin（不一帧一个文件，省掉每个小文件占满一个磁盘块的浪费），index.jsonl 一行一帧
+# {t 毫秒, o 偏移, n 字节数, w, h 网页尺寸, u 地址}；不存「没变化」的帧，相邻两帧的时间差就是画面停了多久，
+# 回放时按它停留（或「跳过等待」时压短）；录制结束写一行 {t, end: true}，最后一段停了多久也有数。存在开浏览器的那台电脑上 <浏览器目录>/rec/<开始毫秒>/。
+# 保留 3 天、总量超过 2 GB 删最早的；设置里可关。有人放大看时推的是大画面，这期间录到的帧也是大的
+BROWSER_REC = os.environ.get("CCPULSE_BROWSER_REC", "1") != "0"
+BROWSER_REC_FPS = 2.0
+BROWSER_REC_KEEP = 72 * 3600
+BROWSER_REC_TOTAL_MB = 2048
+BROWSER_REC_ONE_MB = 500
+BROWSER_LEVEL_ORDER = {None: 0, "thumb": 1, "rec": 2, "full": 3}
+# 认作浏览器操作的工具：Bash 里的命令行工具，和各家浏览器 MCP 的工具名前缀
+BROWSER_CLI_WORDS = ("agent-browser", "playwright-cli", "ccpulse-watch.py browser")
+BROWSER_MCP_PREFIXES = ("mcp__playwright", "mcp__chrome-devtools", "mcp__chrome_devtools", "mcp__browser", "mcp__puppeteer")
+
+
+def browser_folder(session_id):
+    return os.path.join(BROWSER_DIR, re.sub(r"[^A-Za-z0-9._-]", "_", session_id or "shared"))
+
+
+def _json_file(path):
+    try:
+        data = json.loads(read_text(path) or "null")
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_json(path, data):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".%d.tmp" % os.getpid()
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def _http_json(port, path, method="GET", timeout=3):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        conn.request(method, path)
+        response = conn.getresponse()
+        return json.loads(response.read().decode("utf-8", "replace") or "null")
+    finally:
+        conn.close()
+
+
+def _free_mem_mb():
+    probe = _SYS_PROBES.get("mem")
+    if not probe:
+        return None
+    try:
+        total, used = probe()
+        return (total - used) / 1048576.0
+    except Exception:
+        return None
+
+
+def _tree_rss_mb(root):
+    """一个进程连同所有子孙进程的常驻内存（MB）"""
+    if not root:
+        return None
+    if IS_WINDOWS:
+        kids = {}
+        for pid, parent in _win_processes():
+            kids.setdefault(parent, []).append(pid)
+        total, todo, seen = 0, [root], set()
+        while todo:
+            pid = todo.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            total += _win_working_set(pid)
+            todo.extend(kids.get(pid, []))
+        return round(total / 1048576.0) if total else None
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,rss="], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=5).stdout.decode("utf-8", "replace")
+    except Exception:
+        return None
+    kids, rss = {}, {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            pid, ppid, size = int(parts[0]), int(parts[1]), int(parts[2])
+        except ValueError:
+            continue
+        kids.setdefault(ppid, []).append(pid)
+        rss[pid] = size
+    total, todo, seen = 0, [root], set()
+    while todo:
+        pid = todo.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        total += rss.get(pid, 0)
+        todo.extend(kids.get(pid, []))
+    return round(total / 1024.0) if total else None
+
+
+def _kill_browser(pid):
+    if not isinstance(pid, int) or pid <= 0:
+        return
+    try:
+        if IS_WINDOWS:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=10, creationflags=0x08000000)
+        else:
+            try:
+                os.killpg(pid, signal.SIGTERM)   # 起的时候 start_new_session：浏览器是自己那组的组长
+            except OSError:
+                os.kill(pid, signal.SIGTERM)
+            if not _reaped(pid, 3.0):
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except OSError:
+                    os.kill(pid, signal.SIGKILL)
+                _reaped(pid, 2.0)
+    except Exception:
+        pass
+
+
+def _reaped(pid, wait):
+    """等进程退出。浏览器是 watcher 起的子进程：退出后要 waitpid 收掉，不然一直是僵尸（pid_alive 还当它活着、僵尸越积越多）"""
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        try:
+            done, _ = os.waitpid(pid, os.WNOHANG)
+            if done == pid:
+                return True
+        except ChildProcessError:
+            pass                    # 不是我们起的（watcher 重启后接管的）：只看活没活
+        except OSError:
+            pass
+        if not pid_alive(pid):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def _browser_user_agent(path):
+    """无界面 Chrome 的 UA 里写着 HeadlessChrome，不少网站会拦：换成同版本的普通 Chrome。按浏览器程序记在文件里，第一次要先起一次读出来"""
+    cache = _json_file(os.path.join(BROWSER_DIR, "ua.json")) or {}
+    try:
+        stamp = "%s|%d" % (path, int(os.path.getmtime(path)))
+    except OSError:
+        stamp = path
+    return cache.get(stamp), stamp, cache
+
+
+def browser_start(session_id):
+    """起这个会话的浏览器（watcher 的调度器调）→ {pid, port}。失败抛 RuntimeError"""
+    path, kind = find_browser()
+    if not path or kind == "firefox":
+        raise RuntimeError("这台电脑上没找到 Chrome / Edge / Chromium（agent 浏览器要用 Chromium 内核的浏览器）")
+    folder = browser_folder(session_id)
+    profile = os.path.join(folder, "profile")
+    os.makedirs(profile, exist_ok=True)
+    ua, stamp, cache = _browser_user_agent(path)
+    last_error = "浏览器没有起来"
+    for no_sandbox in _sandbox_attempts(kind):
+        marker = os.path.join(profile, "DevToolsActivePort")
+        _remove_quiet(marker)
+        cmd = [path, "--headless=new" if kind == "chrome" else "--headless", "--remote-debugging-port=0",
+               "--remote-debugging-address=127.0.0.1", "--user-data-dir=" + profile, "--no-first-run",
+               "--no-default-browser-check", "--mute-audio", "--disable-extensions", "--disable-background-networking",
+               "--disable-component-update", "--disable-sync",
+               # Linux：Ubuntu 23.10+ 用 AppArmor 限制非特权用户命名空间，网络服务的沙箱起不来时不报错、所有 http 网页一直加载不出来
+               # （11-16 虚拟机实测，--no-sandbox 也不管用），这一层沙箱在 Linux 上关掉
+               "--disable-features=Translate,MediaRouter,LocalNetworkAccessChecks,HttpsUpgrades,OptimizationHints,LensOverlay,"
+               "CertificateTransparencyComponentUpdater,DialMediaRouteProvider"
+               + (",NetworkServiceSandbox" if sys.platform.startswith("linux") else ""),
+               "--renderer-process-limit=4", "--window-size=%d,%d" % BROWSER_SIZE, "--hide-scrollbars",
+               # 和 Playwright 自己起浏览器时一样：不做实验配置、不在后台降速、不弹默认浏览器 / 搜索引擎选择、不碰系统钥匙串
+               "--disable-field-trial-config", "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+               "--disable-backgrounding-occluded-windows", "--disable-client-side-phishing-detection", "--disable-default-apps",
+               "--disable-hang-monitor", "--disable-popup-blocking", "--disable-prompt-on-repost", "--metrics-recording-only",
+               "--no-service-autorun", "--password-store=basic", "--use-mock-keychain", "--disable-search-engine-choice-screen"]
+        if ua:
+            cmd.append("--user-agent=" + ua)
+        if no_sandbox or (hasattr(os, "geteuid") and os.geteuid() == 0):
+            cmd.append("--no-sandbox")
+        cmd.append("about:blank")
+        kwargs = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if IS_WINDOWS:
+            kwargs["creationflags"] = 0x00000200 | 0x08000000   # 新进程组、不开控制台窗口
+        else:
+            kwargs["start_new_session"] = True
+        try:
+            proc = subprocess.Popen(cmd, **kwargs)
+        except OSError as exc:
+            raise RuntimeError("起浏览器失败：%s" % exc)
+        port = None
+        deadline = time.time() + 30   # 内存紧张的机器上（虚拟机实测）要十几秒
+        while time.time() < deadline and proc.poll() is None:
+            text = read_text(marker)
+            if text and text.split("\n", 1)[0].strip().isdigit():
+                port = int(text.split("\n", 1)[0])
+                break
+            time.sleep(0.1)
+        if not port:
+            last_error = "浏览器启动后退出了（退出码 %s）" % proc.poll()
+            _kill_browser(proc.pid)
+            continue
+        if not ua:
+            try:
+                agent = (_http_json(port, "/json/version") or {}).get("User-Agent") or ""
+            except Exception:
+                agent = ""
+            if "HeadlessChrome" in agent:
+                cache[stamp] = agent.replace("HeadlessChrome", "Chrome")
+                _write_json(os.path.join(BROWSER_DIR, "ua.json"), cache)
+                _kill_browser(proc.pid)
+                return browser_start(session_id)   # 带上普通 UA 重开一次（只第一次）
+        return {"pid": proc.pid, "port": port, "browser": os.path.basename(path)}
+    raise RuntimeError(last_error)
+
+
+def _short_browser_command(text):
+    """agent-browser --cdp 9222 --session x click @e3 → click @e3（去掉程序路径和连接参数）"""
+    words = text.strip().split()
+    out, skip = [], False
+    for index, word in enumerate(words):
+        if skip:
+            skip = False
+            continue
+        if index == 0 and (word.endswith("agent-browser") or word.endswith("playwright-cli") or word in ("npx", "bunx")):
+            continue
+        if word in ("agent-browser", "playwright-cli", "@playwright/cli", "@playwright/cli@latest", "-y"):
+            continue
+        if word in ("--cdp", "--session", "-s", "--port"):
+            skip = True
+            continue
+        if word.startswith(("--cdp=", "--session=", "-s=")) or re.match(r"^\$\(.*browser (cdp|port).*\)$", word):
+            continue
+        out.append(word)
+    return " ".join(out)[:300]
+
+
+def _split_shell(command):
+    return [part.strip() for part in re.split(r"&&|\|\|?|;|\n", command or "") if part.strip()]   # 管道后面的 grep 这些不算
+
+
+def _tool_calls(obj, found):
+    """从一行对话记录里找工具调用 → [(名字, 参数 dict)]：Claude 的 tool_use、Codex 的 function_call"""
+    if isinstance(obj, dict):
+        kind = obj.get("type")
+        if kind == "tool_use" and isinstance(obj.get("name"), str):
+            found.append((obj["name"], obj.get("input") if isinstance(obj.get("input"), dict) else {}))
+            return
+        if kind in ("function_call", "custom_tool_call") and isinstance(obj.get("name"), str):
+            args = obj.get("arguments") or obj.get("input") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {"command": args}
+            found.append((obj["name"], args if isinstance(args, dict) else {}))
+            return
+        for value in obj.values():
+            if isinstance(value, (dict, list)):
+                _tool_calls(value, found)
+    elif isinstance(obj, list):
+        for value in obj:
+            _tool_calls(value, found)
+
+
+def browser_actions(path, since=0, limit=60):
+    """会话对话记录末尾里的浏览器操作 → [{t, tool, text}]（新的在后）。since：秒，早于它的不要"""
+    if not path or not os.path.isfile(path):
+        return []
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            handle.seek(max(0, size - 1024 * 1024))
+            blob = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    out = []
+    for line in blob.splitlines():
+        if not any(w in line for w in BROWSER_CLI_WORDS) and "mcp__" not in line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        stamp = row.get("timestamp") if isinstance(row, dict) else None
+        t = parse_iso_ts(stamp) if isinstance(stamp, str) else None
+        if t and since and t < since - 30:
+            continue
+        calls = []
+        _tool_calls(row, calls)
+        for name, args in calls:
+            if name.startswith(BROWSER_MCP_PREFIXES):
+                verb = name.split("__")[-1]
+                detail = args.get("url") or args.get("element") or args.get("text") or args.get("selector") or args.get("key") or ""
+                out.append({"t": t, "tool": "mcp", "text": ("%s %s" % (verb, detail)).strip()[:300]})
+                continue
+            command = args.get("command") or args.get("cmd")
+            if isinstance(command, list):
+                command = command[-1] if command else ""
+            if not isinstance(command, str):
+                continue
+            for part in _split_shell(command):
+                if "ccpulse-watch.py browser" in part:
+                    if not re.search(r"browser\s+(ask|close)\b", part):
+                        continue   # cdp / port / status / setup 只是查询，不算对网页的操作
+                    out.append({"t": t, "tool": "kiteline", "text": part.split("browser", 1)[1].strip()[:300]})
+                elif "agent-browser" in part or "playwright-cli" in part:
+                    text = _short_browser_command(part)
+                    if text:
+                        out.append({"t": t, "tool": "agent-browser" if "agent-browser" in part else "playwright-cli",
+                                    "text": text})
+    return out[-limit:]
+
+
+def parse_iso_ts(text):
+    """2026-11-16T08:01:02.345Z → 秒"""
+    try:
+        main = text.rstrip("Z").split(".")[0]
+        return calendar.timegm(time.strptime(main, "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError):
+        return None
+
+
+_KEY_CODES = {"Enter": 13, "Backspace": 8, "Tab": 9, "Escape": 27, "Delete": 46, "ArrowLeft": 37, "ArrowUp": 38,
+              "ArrowRight": 39, "ArrowDown": 40, "Home": 36, "End": 35, "PageUp": 33, "PageDown": 34, " ": 32}
+
+
+class BrowserLink:
+    """watcher 连到一个会话浏览器的 CDP：跟着 agent 正在用的标签页推画面、送输入"""
+
+    def __init__(self, pool, session_id, port):
+        self.pool, self.sid, self.port = pool, session_id, port
+        self.ws = None
+        self.lock = threading.Lock()
+        self.next_id = 0
+        self.waiting = {}            # 调用 id → [Event, 结果]
+        self.targets = {}            # targetId → {url, title, touched}
+        self.page = None             # 正在看的标签页
+        self.page_session = None     # 附着在它上面的 CDP 会话
+        self.attaching = None        # 正在附着的标签页
+        self.casting = None          # 正在推的档位（录制时至少 rec）
+        self.viewing = None          # 有人在看的档位（没人看为空：只录不发）
+        self.rec = None              # 录制：{dir, handle, last, count, bytes}；没在录为空
+        self.ready = False           # 连上、拿到已有标签页之后才算「agent 在用」
+        self.rec_seq = 0
+        self.frame = None            # 最近一帧 {data, w, h, ...}
+        self.frame_seq = 0
+        self.sent_seq = 0
+        self.alive = True
+        self.closed = threading.Event()
+
+    # --- CDP ---
+    def connect(self):
+        info = _http_json(self.port, "/json/version")
+        url = (info or {}).get("webSocketDebuggerUrl") or ""
+        path = "/" + url.split("/", 3)[3] if url.count("/") >= 3 else ""
+        if not path:
+            raise RuntimeError("浏览器没给出调试地址")
+        self.ws = WebSocket(SocketPipe(("127.0.0.1", self.port)), path, host="127.0.0.1:%d" % self.port)
+        threading.Thread(target=self._reader, name="browser-cdp", daemon=True).start()
+        threading.Thread(target=self._pump, name="browser-frames", daemon=True).start()
+        self.call("Target.setDiscoverTargets", {"discover": True})
+        for target in (self.call("Target.getTargets") or {}).get("targetInfos") or []:
+            self._target(target, created=True)
+        self._follow()
+        deadline = time.time() + 3   # 等附着上标签页再交出去：马上就要送输入、推画面
+        while self.targets and not self.page_session and time.time() < deadline and self.alive:
+            time.sleep(0.03)
+        threading.Timer(1.0, lambda: setattr(self, "ready", True)).start()
+
+    def _send(self, method, params=None, session=None):
+        with self.lock:
+            self.next_id += 1
+            ident = self.next_id
+        message = {"id": ident, "method": method, "params": params or {}}
+        if session:
+            message["sessionId"] = session
+        return ident, message
+
+    def call(self, method, params=None, session=None, timeout=8):
+        ident, message = self._send(method, params, session)
+        slot = [threading.Event(), None]
+        self.waiting[ident] = slot
+        try:
+            self.ws.send(json.dumps(message))
+            if not slot[0].wait(timeout):
+                raise RuntimeError("浏览器没有响应：%s" % method)
+        finally:
+            self.waiting.pop(ident, None)
+        reply = slot[1] or {}
+        if reply.get("error"):
+            raise RuntimeError((reply["error"] or {}).get("message") or str(reply["error"]))
+        return reply.get("result") or {}
+
+    def post(self, method, params=None, session=None):
+        """不等回应（按键、确认帧这类连着发的）"""
+        _, message = self._send(method, params, session)
+        try:
+            self.ws.send(json.dumps(message))
+        except Exception:
+            pass
+
+    def _reader(self):
+        try:
+            while True:
+                message = json.loads(self.ws.recv())
+                ident = message.get("id")
+                if ident is not None:
+                    slot = self.waiting.get(ident)
+                    if slot:
+                        slot[1] = message
+                        slot[0].set()
+                    continue
+                self._event(message.get("method"), message.get("params") or {}, message.get("sessionId"))
+        except Exception as exc:
+            if self.alive:
+                log("浏览器 %s 的调试连接断了：%r" % (self.sid[:8], exc))
+        self.alive = False
+        self.closed.set()
+        for slot in list(self.waiting.values()):
+            slot[0].set()
+        self.pool.link_gone(self)
+
+    def _target(self, info, created=False):
+        if info.get("type") != "page" or (info.get("url") or "").startswith("devtools://"):
+            return False
+        tid = info.get("targetId")
+        old = self.targets.get(tid)
+        row = {"url": info.get("url") or "", "title": info.get("title") or "", "touched": (old or {}).get("touched", 0)}
+        if (created or not old or old["url"] != row["url"]) and row["url"] not in ("about:blank", ""):
+            row["touched"] = time.time()   # 浏览器自带的空白页不算「在用」：别盖过 agent 刚开的网页（11-16 实测小窗停在 about:blank）
+        self.targets[tid] = row
+        return created or not old or old["url"] != row["url"]
+
+    def _event(self, method, params, session):
+        if method == "Page.screencastFrame":
+            self.post("Page.screencastFrameAck", {"sessionId": params.get("sessionId")}, session)
+            if session != self.page_session:
+                return
+            meta = params.get("metadata") or {}
+            self.frame_seq += 1
+            self.frame = {"data": params.get("data") or "", "cssW": meta.get("deviceWidth"),
+                          "cssH": meta.get("deviceHeight"), "top": meta.get("offsetTop") or 0}
+            return
+        if method in ("Target.targetCreated", "Target.targetInfoChanged"):
+            info = params.get("targetInfo") or {}
+            if self._target(info, created=method == "Target.targetCreated"):
+                if self.ready:
+                    self.pool.touch(self.sid)   # 新开标签页、跳转：agent 在用（页面自己改标题不算；刚连上时浏览器把已有的标签页报一遍，也不算）
+                self._follow()
+            return
+        if method == "Target.targetDestroyed":
+            if self.targets.pop(params.get("targetId"), None) is not None:
+                if params.get("targetId") == self.page:
+                    self.page = self.page_session = None
+                self._follow()
+            return
+        if method == "Page.frameNavigated" and session == self.page_session \
+                and not (params.get("frame") or {}).get("parentId"):
+            self.recast()
+            return
+        if method in ("Page.domContentEventFired", "Page.loadEventFired", "Page.navigatedWithinDocument") \
+                and session == self.page_session:
+            # 标题：Chrome 只在地址变的时候发 targetInfoChanged，网页加载完才有的标题、单页应用里换的标题要自己取
+            threading.Thread(target=self._refresh_title, args=(session,), daemon=True).start()
+            return
+        if method == "Target.detachedFromTarget" and params.get("sessionId") == self.page_session:
+            self.page_session = None
+            threading.Thread(target=self._follow, daemon=True).start()
+
+    def _follow(self, target=None):
+        """看 agent 最近在用的那个标签页（最新打开或刚跳转的）；给了 target 就看它"""
+        if not self.targets:
+            return
+        pick = target if target in self.targets else max(self.targets, key=lambda k: self.targets[k]["touched"])
+        with self.pool.lock:
+            if (pick == self.page and self.page_session) or pick == self.attaching:
+                return
+            self.attaching = pick   # 正在附着：跳转时事件一连来好几个，别同时附着好几次（会话互相顶掉，推不出画面）
+        threading.Thread(target=self._attach, args=(pick,), daemon=True).start()
+
+    def _attach(self, tid):
+        try:
+            self._attach_once(tid)
+        finally:
+            with self.pool.lock:
+                if self.attaching == tid:
+                    self.attaching = None
+
+    def _attach_once(self, tid):
+        with self.pool.lock:
+            if tid == self.page and self.page_session:
+                return
+            old = self.page_session
+            self.page, self.page_session = tid, None
+        try:
+            if old:
+                self.post("Target.detachFromTarget", {"sessionId": old})
+            session = self.call("Target.attachToTarget", {"targetId": tid, "flatten": True}).get("sessionId")
+            self.page_session = session
+            self.post("Page.enable", None, session)
+            self._refresh_title(session)   # 附着前已经加载完的网页收不到加载事件
+            if self.casting:
+                level, self.casting = self.casting, None
+                self.cast(level)
+        except Exception as exc:
+            log("浏览器 %s 附着标签页失败：%r" % (self.sid[:8], exc))
+        self.pool.changed(self.sid)
+
+    def cast(self, level):
+        """开始 / 换档 / 停止推画面（level 为 None 是停）"""
+        if level == self.casting:
+            return
+        session = self.page_session
+        if session and self.casting:
+            self.post("Page.stopScreencast", None, session)
+        self.casting = level
+        if level and session:
+            width, _, quality = BROWSER_LEVELS[level]
+            params = {"format": "jpeg", "quality": quality, "maxWidth": width, "maxHeight": int(width * 1.6), "everyNthFrame": 1}
+
+            threading.Thread(target=self._start_cast, args=(params, session), daemon=True).start()
+
+    def _start_cast(self, params, session):
+        # 网页正在跳转（已提交、还没加载完）时会回「Not attached to an active page」：隔一会儿再试，最多 5 秒
+        for attempt in range(20):
+            if session != self.page_session or not self.casting:
+                return
+            try:
+                self.call("Page.startScreencast", params, session)
+                return
+            except Exception as exc:
+                if "already active" in str(exc):
+                    return   # Edge 上跳转后推送还在（Chrome 会停）：已经在推了，当成成功
+                if "active page" not in str(exc) or attempt == 19:
+                    log("浏览器 %s 推画面失败：%r" % (self.sid[:8], exc))
+                    return
+            time.sleep(0.25)
+
+    def _refresh_title(self, session):
+        try:
+            value = self.call("Runtime.evaluate", {"expression": "[document.title, location.href]", "returnByValue": True},
+                              session, timeout=3).get("result", {}).get("value")
+        except Exception:
+            return
+        row = self.targets.get(self.page)
+        if row is not None and session == self.page_session and isinstance(value, list) and len(value) == 2:
+            if row["title"] != value[0] or row["url"] != value[1]:
+                row["title"], row["url"] = value[0] or value[1], value[1]
+                self.pool.changed(self.sid)
+
+    def recast(self):
+        """主框架跳转完：重新开推（跳转换了渲染进程时原来的推送会停）"""
+        level, session = self.casting, self.page_session
+        if level and session:
+            width, _, quality = BROWSER_LEVELS[level]
+            threading.Thread(target=self._start_cast, args=({"format": "jpeg", "quality": quality, "maxWidth": width,
+                                                             "maxHeight": int(width * 1.6), "everyNthFrame": 1}, session),
+                             daemon=True).start()
+
+    def _pump(self):
+        """按看的档位的帧率把最新一帧发出去（一阵里连着来的帧只发最后的，停下来的那一帧一定会发）；录制按录制的帧率另存"""
+        last_sent = 0.0
+        while self.alive:
+            now = time.time()
+            view = self.viewing
+            if view and self.frame and self.frame_seq != self.sent_seq and now - last_sent >= 1.0 / BROWSER_LEVELS[view][1]:
+                self.sent_seq = self.frame_seq
+                last_sent = now
+                self.send_frame()
+            if self.rec and self.frame and self.frame_seq != self.rec_seq and now - self.rec["last"] >= 1.0 / BROWSER_REC_FPS:
+                self.rec_seq = self.frame_seq
+                self.save_frame(now)
+            self.closed.wait(0.05)
+
+    def start_recording(self, folder):
+        """开始录（每个浏览器一段，浏览器关了这段就结束）"""
+        if self.rec or not BROWSER_REC:
+            return
+        try:
+            os.makedirs(folder, exist_ok=True)
+            data = open(os.path.join(folder, "frames.bin"), "ab")
+            self.rec = {"dir": folder, "handle": open(os.path.join(folder, "index.jsonl"), "a", encoding="utf-8"),
+                        "data": data, "last": 0.0, "count": 0, "bytes": data.tell(), "digest": None}
+        except OSError as exc:
+            log("浏览器 %s 开始录制失败：%s" % (self.sid[:8], exc))
+
+    def stop_recording(self):
+        rec, self.rec = self.rec, None
+        if rec:
+            # 结束时刻：最后一帧之后一直没变化的那段，回放时照样按实际时长停在最后一帧
+            try:
+                rec["handle"].write(json.dumps({"t": int(time.time() * 1000), "end": True}) + "\n")
+            except (OSError, ValueError):
+                pass
+            for handle in (rec["handle"], rec["data"]):
+                try:
+                    handle.close()
+                except OSError:
+                    pass
+
+    def save_frame(self, now):
+        rec, frame = self.rec, self.frame
+        if not rec or not frame or rec["bytes"] > BROWSER_REC_ONE_MB * 1048576:
+            return
+        try:
+            data = base64.b64decode(frame["data"])
+            digest = hashlib.sha1(data).digest()
+            if digest == rec["digest"]:
+                return   # 和上一帧一模一样（光标闪回原样、动画转回来）：不存
+            rec["digest"] = digest
+            offset = rec["bytes"]
+            rec["data"].write(data)
+            rec["data"].flush()
+            rec["count"] += 1
+            tab = self.targets.get(self.page) or {}
+            rec["handle"].write(json.dumps({"t": int(now * 1000), "o": offset, "n": len(data), "w": frame.get("cssW"),
+                                            "h": frame.get("cssH"), "u": tab.get("url") or ""}, ensure_ascii=False) + "\n")
+            rec["handle"].flush()
+            rec["bytes"] += len(data)
+            rec["last"] = now
+        except (OSError, ValueError) as exc:
+            log("浏览器 %s 录制写入失败：%s" % (self.sid[:8], exc))
+            self.stop_recording()
+
+    def send_frame(self):
+        frame = self.frame
+        if not frame:
+            return
+        tab = self.targets.get(self.page) or {}
+        emit({"event": "browser_frame", "sessionId": self.sid, "seq": self.frame_seq, "data": frame["data"],
+              "cssW": frame["cssW"], "cssH": frame["cssH"], "url": tab.get("url") or "", "title": tab.get("title") or "",
+              "level": self.viewing or self.casting})
+
+    # --- 用户接管时的输入 ---
+    def input(self, request):
+        session = self.page_session
+        if not session:
+            raise RuntimeError("浏览器还没有打开网页")
+        kind = request.get("type")
+        frame = self.frame or {}
+        width, height = frame.get("cssW") or BROWSER_SIZE[0], frame.get("cssH") or BROWSER_SIZE[1]
+        x = max(0.0, min(1.0, float(request.get("x") or 0))) * width
+        y = max(0.0, min(1.0, float(request.get("y") or 0))) * height
+        if kind == "click":
+            for event in ("mouseMoved", "mousePressed", "mouseReleased"):
+                self.post("Input.dispatchMouseEvent", {"type": event, "x": x, "y": y, "button": "left",
+                                                      "clickCount": 0 if event == "mouseMoved" else int(request.get("count") or 1)},
+                          session)
+        elif kind in ("down", "move", "up"):
+            # 拖动（滑块、拖拽）：按下 → 移动若干次 → 松开
+            event = {"down": "mousePressed", "move": "mouseMoved", "up": "mouseReleased"}[kind]
+            params = {"type": event, "x": x, "y": y, "button": "left" if kind != "move" else "none", "clickCount": 1}
+            if kind == "move" and request.get("pressed"):
+                params.update({"button": "left", "buttons": 1})
+            self.post("Input.dispatchMouseEvent", params, session)
+        elif kind == "wheel":
+            self.post("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": x, "y": y,
+                                                  "deltaX": float(request.get("dx") or 0),
+                                                  "deltaY": float(request.get("dy") or 0)}, session)
+        elif kind == "text":
+            self.post("Input.insertText", {"text": str(request.get("text") or "")}, session)
+        elif kind == "key":
+            key = str(request.get("key") or "")
+            code = _KEY_CODES.get(key, 0)
+            mods = int(request.get("modifiers") or 0)
+            base = {"key": key, "windowsVirtualKeyCode": code, "nativeVirtualKeyCode": code, "modifiers": mods}
+            if len(key) == 1 and not mods:
+                self.post("Input.dispatchKeyEvent", dict(base, type="keyDown", text=key), session)
+            else:
+                self.post("Input.dispatchKeyEvent", dict(base, type="rawKeyDown"), session)
+            self.post("Input.dispatchKeyEvent", dict(base, type="keyUp"), session)
+        elif kind == "nav":
+            action = request.get("action")
+            if action == "reload":
+                self.post("Page.reload", None, session)
+            elif action in ("back", "forward"):
+                self.post("Runtime.evaluate", {"expression": "history.%s()" % action}, session)
+            elif action == "goto" and request.get("url"):
+                url = str(request["url"]).strip()
+                if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url):
+                    url = "https://" + url
+                self.post("Page.navigate", {"url": url}, session)
+        else:
+            raise RuntimeError("不认识的输入：%s" % kind)
+        return {}
+
+    def tabs(self):
+        return [{"id": tid, "url": row["url"], "title": row["title"], "current": tid == self.page}
+                for tid, row in sorted(self.targets.items(), key=lambda kv: kv[1]["touched"])]
+
+    def shutdown(self):
+        self.alive = False
+        self.closed.set()
+        self.stop_recording()
+        try:
+            self.ws.close()
+        except Exception:
+            pass
+
+
+class BrowserPool:
+    """会话浏览器的调度器（见本节开头）。状态全在 watcher 里；agent 的子命令经 BROWSER_DIR/requests 交接"""
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.items = {}              # 会话 id → {pid, port, started, used, browser, link, viewers{viewer: (档位, 到期)}, ask}
+        self.queue = []              # 排队的请求 [(到达时间, rid, 会话 id)]
+        self.live = {}               # 在跑的会话 id → 对话记录路径（主循环每轮更新）
+        self.gone_at = {}            # 会话不在了的时刻
+        self.action_cache = {}       # 会话 id → (对话记录 mtime, 操作列表)
+        self.dirty = set()
+        self.runner = None
+        self.last_rss = {}
+        self.rss_at = 0.0
+        self.pids = {}               # 在跑的会话的进程号 → 会话 id（固定入口认会话用）
+        self.paths = {}              # 浏览器 / 标签页编号 → 会话 id（WebSocket 地址里带着）
+        self.gate = None
+        self.asks = {}               # 会话 id → agent 请用户接管 {note, at, rid}（browser ask）
+        # 远端模式（11-16 起：浏览器开在用户操作的那台电脑上，不开在 Remote-SSH 服务器上）：Kiteline 经 ssh 连远端时带
+        # CCPULSE_BROWSER_REMOTE=1，并开一条反向转发（-R），再把转发到的端口告诉这边（cmd browser_tunnel）。这边不起浏览器，
+        # 入口 9339 收到的连接认出会话后带着 /s/<会话> 转到那条通道，接到用户电脑上的入口；这边只整理指令、转达「请接管」
+        self.remote = os.environ.get("CCPULSE_BROWSER_REMOTE") == "1"
+        # 反向转发在这台上的端口：电脑端自己定好端口（-R 端口:127.0.0.1:9339）经环境变量带来；老写法是之后发 browser_tunnel
+        # （ssh 复用 ControlMaster 时不打印「Allocated port」，读不出 -R 0 分到的端口，11-16 实测）
+        self.tunnel = int(os.environ.get("CCPULSE_BROWSER_TUNNEL") or 0) or None
+        self.seen = {}               # 远端模式：经通道用过浏览器的会话 → {since, used}
+        self.last_state = None       # 本机模式：上次告诉电脑端的各浏览器状态（browser_state）
+        self.recent = {}             # 浏览器关了、有录像的会话 → {since, ended, url, title, recs}（小窗变成「回放」卡片，留 24 小时）
+        self.pruned_at = 0.0
+
+    # --- 调度 ---
+    def limit(self):
+        free = _free_mem_mb()
+        if free is None:
+            return BROWSER_MAX
+        running = len(self.items)
+        # 可用内存还能再装几个（已经开着的不算在内存里另扣，它们已经占着了）
+        room = running + int(max(0, free - BROWSER_LOW_MEM_MB) // BROWSER_EST_MB)
+        return max(1, min(BROWSER_MAX, room))
+
+    def idle(self, sid, now):
+        item = self.items.get(sid)
+        if not item:
+            return False
+        if self.viewers(sid) or sid in self.asks:
+            return False
+        return now - item["used"] >= BROWSER_IDLE
+
+    def viewers(self, sid):
+        item = self.items.get(sid) or {}
+        now = time.time()
+        return {v: lv for v, (lv, until) in (item.get("viewers") or {}).items() if until > now}
+
+    def acquire(self, sid, remote=False):
+        """给这个会话要一个浏览器 → item（已开着就直接给）；开不了（满了）返回 None，抛错是起不来。
+        remote：别的电脑（Remote-SSH 服务器）上的会话经通道来要的——这边认不出它在不在跑，不按「会话已结束」回收，只按空闲回收"""
+        with self.lock:
+            item = self.items.get(sid)
+            if item and pid_alive(item["pid"]):
+                item["used"] = time.time()
+                item["remote"] = item.get("remote") or remote
+                return item
+            if item:
+                self._drop(sid, "浏览器进程已退出")
+            if len(self.items) >= self.limit():
+                victim = self._lru_idle(force=True)
+                if victim is None:
+                    return None
+                self.close(victim, "腾出位置给别的会话")
+        info = browser_start(sid)
+        with self.lock:
+            now = time.time()
+            item = dict(info, started=now, used=now, viewers={}, link=None, remote=remote)
+            self.items[sid] = item
+            # 记下来：watcher 重启（Kiteline 更新、重连）后 adopt 接着管，不然浏览器成了没人回收的孤儿进程（11-16 实测）
+            _write_json(os.path.join(browser_folder(sid), "state.json"),
+                        {"sessionId": sid, "pid": info["pid"], "port": info["port"], "browser": info.get("browser"),
+                         "started": now, "remote": remote})
+            log("会话 %s 开了浏览器（端口 %s，%d 个在开）" % (sid[:8], info["port"], len(self.items)))
+        self.changed(sid)
+        return item
+
+    def _lru_idle(self, force=False):
+        """最久没用、也没人在看、没在等用户的那个；force 时不要求满 10 分钟（满了要腾位置）"""
+        now = time.time()
+        rows = [(item["used"], sid) for sid, item in self.items.items()
+                if not self.viewers(sid) and sid not in self.asks and (force and now - item["used"] > 60 or self.idle(sid, now))]
+        return min(rows)[1] if rows else None
+
+    def touch(self, sid):
+        item = self.items.get(sid)
+        if item:
+            item["used"] = time.time()
+        if sid in self.seen:
+            self.seen[sid]["used"] = time.time()
+
+    def close(self, sid, why=""):
+        with self.lock:
+            item = self.items.pop(sid, None)
+        if not item:
+            return
+        self.remember_closed(sid, item)
+        if item.get("link"):
+            item["link"].shutdown()
+        _kill_browser(item["pid"])
+        _remove_quiet(os.path.join(browser_folder(sid), "state.json"))
+        log("会话 %s 的浏览器关了%s" % (sid[:8], "：" + why if why else ""))
+        self.changed(sid)
+
+    def remember_closed(self, sid, item):
+        """浏览器关了：录到了东西就留一张「回放」卡片（24 小时）"""
+        link = item.get("link")
+        tab = (link.targets.get(link.page) if link and link.page else None) or {}
+        recs = len(self.recordings(sid)) if BROWSER_REC else 0
+        if recs:
+            self.recent[sid] = {"since": int(item["started"] * 1000), "ended": int(time.time() * 1000),
+                                "url": tab.get("url") or "", "title": tab.get("title") or "", "recs": recs}
+
+    def _drop(self, sid, why):
+        item = self.items.pop(sid, None)
+        if item:
+            self.remember_closed(sid, item)
+        if item and item.get("link"):
+            item["link"].shutdown()
+        log("会话 %s 的浏览器：%s" % (sid[:8], why))
+        self.changed(sid)
+
+    def link_gone(self, link):
+        with self.lock:
+            item = self.items.get(link.sid)
+            if item and item.get("link") is link:
+                item["link"] = None
+                if not pid_alive(item["pid"]):
+                    self._drop(link.sid, "浏览器进程已退出")
+
+    def link(self, sid):
+        with self.lock:
+            item = self.items.get(sid)
+            if not item:
+                raise RuntimeError("这个会话现在没有打开浏览器")
+            link = item.get("link")
+            if link and link.alive:
+                return link
+            link = BrowserLink(self, sid, item["port"])
+            item["link"] = link
+        link.connect()
+        return link
+
+    def changed(self, sid):
+        self.dirty.add(sid)
+
+    # --- 子命令交接：requests/<rid>.req → <rid>.ok / <rid>.wait / <rid>.err ---
+    def start(self):
+        if self.runner:
+            return
+        os.makedirs(os.path.join(BROWSER_DIR, "requests"), exist_ok=True)
+        self.adopt()
+        self.gate = BrowserGate(self)
+        self.gate.start()
+        self.runner = threading.Thread(target=self._loop, name="browser-pool", daemon=True)
+        self.runner.start()
+
+    def adopt(self):
+        """watcher 重启：上次开的浏览器还在就接着管（不然它们没人回收）"""
+        try:
+            names = os.listdir(BROWSER_DIR)
+        except OSError:
+            return
+        for name in names:
+            state = _json_file(os.path.join(BROWSER_DIR, name, "state.json"))
+            if not state or not state.get("sessionId"):
+                continue
+            if pid_alive(state.get("pid")):
+                now = time.time()
+                self.items[state["sessionId"]] = {"pid": state["pid"], "port": state["port"], "browser": state.get("browser"),
+                                                  "started": state.get("started") or now, "used": now, "viewers": {},
+                                                  "link": None, "remote": bool(state.get("remote"))}
+            else:
+                _remove_quiet(os.path.join(BROWSER_DIR, name, "state.json"))
+
+    def _loop(self):
+        while True:
+            try:
+                self._requests()
+                self._sweep()
+            except Exception as exc:
+                log("浏览器调度出错：%r" % exc)
+            time.sleep(0.3)
+
+    def _requests(self):
+        folder = os.path.join(BROWSER_DIR, "requests")
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            return
+        now = time.time()
+        for name in names:
+            path = os.path.join(folder, name)
+            if not name.endswith(".req"):
+                try:
+                    if now - os.path.getmtime(path) > 3600:
+                        os.remove(path)
+                except OSError:
+                    pass
+                continue
+            rid = name[:-4]
+            request = _json_file(path)
+            if not request:
+                continue
+            sid = request.get("sessionId") or "shared"
+            op = request.get("op") or "cdp"
+            if not os.path.exists(os.path.join(folder, rid + ".taken")):
+                _write_json(os.path.join(folder, rid + ".taken"), {"at": now})   # 告诉子命令：有人接了（起浏览器要几秒）
+            if now - (request.get("at") or now) > BROWSER_QUEUE_WAIT + 30:
+                _remove_quiet(path)
+                continue
+            try:
+                if self.remote and op in ("cdp", "close", "status"):
+                    result = self.remote_request(op, sid)
+                elif op == "cdp":
+                    item = self.acquire(sid)
+                    if item is None:
+                        _write_json(os.path.join(folder, rid + ".wait"), {"running": len(self.items), "limit": self.limit()})
+                        continue   # 排队：下一轮再看
+                    _write_json(os.path.join(browser_folder(sid), "state.json"),
+                                {"sessionId": sid, "pid": item["pid"], "port": item["port"], "browser": item.get("browser"),
+                                 "started": item["started"]})
+                    result = {"port": item["port"]}
+                    if self.gate and self.gate.server:
+                        result["gate"] = "%s/s/%s" % (BROWSER_GATE, sid)
+                elif op == "close":
+                    self.close(sid, "agent 要求")
+                    result = {}
+                elif op == "ask":
+                    if not (self.items.get(sid) or self.seen.get(sid)):
+                        raise RuntimeError("这个会话还没有打开浏览器，先用 browser cdp 打开")
+                    self.asks[sid] = {"note": request.get("note") or "", "at": now, "rid": rid}
+                    self.touch(sid)
+                    self.changed(sid)
+                    emit({"event": "browser_ask", "sessionId": sid, "note": request.get("note") or ""})
+                    result = {"asked": True}
+                elif op == "status":
+                    result = self.status()
+                else:
+                    raise RuntimeError("不认识的操作：%s" % op)
+                _write_json(os.path.join(folder, rid + ".ok"), result)
+            except Exception as exc:
+                _write_json(os.path.join(folder, rid + ".err"), {"error": str(exc) or repr(exc)})
+            _remove_quiet(path)
+            _remove_quiet(os.path.join(folder, rid + ".wait"))
+            _remove_quiet(os.path.join(folder, rid + ".taken"))
+
+    def _sweep(self):
+        now = time.time()
+        free = _free_mem_mb()
+        for sid in list(self.items):
+            item = self.items.get(sid)
+            if not item:
+                continue
+            if not pid_alive(item["pid"]):
+                with self.lock:
+                    self._drop(sid, "浏览器进程已退出")
+                continue
+            if sid in self.live or sid == "shared" or item.get("remote"):
+                self.gone_at.pop(sid, None)
+            else:
+                gone = self.gone_at.setdefault(sid, now)
+                if now - gone > BROWSER_GONE_GRACE:
+                    self.close(sid, "会话已结束")
+                    continue
+            if self.idle(sid, now):
+                self.close(sid, "空闲 %d 分钟" % (BROWSER_IDLE // 60))
+                continue
+            if free is not None and free < BROWSER_LOW_MEM_MB and not self.viewers(sid) and sid not in self.asks \
+                    and now - item["used"] > 60:
+                self.close(sid, "可用内存不足（%d MB）" % free)
+                free = _free_mem_mb()
+                continue
+            # 没人看就停推画面；有人看按最高档推
+            levels = set(self.viewers(sid).values())
+            view = "full" if "full" in levels else ("thumb" if levels else None)
+            want = self.cast_level(view)
+            link = item.get("link")
+            if link and link.alive:
+                link.viewing = view
+                if link.casting != want:
+                    link.cast(want)
+                if BROWSER_REC and not link.rec:
+                    link.start_recording(os.path.join(browser_folder(sid), "rec", str(int(item["started"] * 1000))))
+            if not (link and link.alive) and not item.get("linking"):
+                # 连上它的调试接口：知道 agent 正开着哪个网页（会话里的小窗标题、地址），有人看时马上能推画面
+                item["linking"] = True
+
+                def connect(sid=sid, item=item):
+                    try:
+                        self.link(sid)
+                    except Exception:
+                        pass
+                    item["linking"] = False
+
+                threading.Thread(target=connect, daemon=True).start()
+        for sid, row in list(self.seen.items()):
+            if now - row["used"] > BROWSER_IDLE + 60 and sid not in self.asks:
+                self.seen.pop(sid, None)
+        for sid, row in list(self.recent.items()):
+            if sid in self.items or now * 1000 - row["ended"] > 24 * 3600 * 1000:
+                self.recent.pop(sid, None)
+        if now - self.pruned_at > 600:
+            self.pruned_at = now
+            self.prune_recordings()
+        state = self.state()
+        if state != self.last_state:
+            self.last_state = state
+            emit({"event": "browser_state", "browsers": state})   # 电脑端拿它补别的电脑上会话的小窗（远端模式时为空）
+        if now - self.rss_at > 10:
+            self.rss_at = now
+            self.last_rss = {sid: _tree_rss_mb(item["pid"]) for sid, item in list(self.items.items())}
+
+    @staticmethod
+    def cast_level(view):
+        """推画面的档位：有人看按看的档位；在录制时至少录制档（没人看也推，只录不发）"""
+        if BROWSER_REC and BROWSER_LEVEL_ORDER.get(view, 0) < BROWSER_LEVEL_ORDER["rec"]:
+            return "rec"
+        return view
+
+    # --- 录像 ---
+    def recordings(self, sid):
+        """这个会话的录像 → [{id, started, ended, frames, durationMs, mb}]（新的在前）"""
+        root = os.path.join(browser_folder(sid), "rec")
+        out = []
+        try:
+            names = sorted(os.listdir(root), reverse=True)
+        except OSError:
+            return out
+        for name in names:
+            if not name.isdigit():
+                continue
+            rows = self.rec_index(sid, name)
+            if not rows:
+                continue
+            size = 0
+            try:
+                size = sum(e.stat().st_size for e in os.scandir(os.path.join(root, name)))
+            except OSError:
+                pass
+            out.append({"id": name, "started": rows[0]["t"], "ended": rows[-1]["t"], "frames": len([r for r in rows if "o" in r]),
+                        "durationMs": rows[-1]["t"] - rows[0]["t"], "mb": round(size / 1048576.0, 1),
+                        "live": bool((self.items.get(sid) or {}).get("link") and str(int(self.items[sid]["started"] * 1000)) == name)})
+        return out
+
+    def rec_index(self, sid, rid):
+        if not str(rid).isdigit():
+            raise RuntimeError("录像编号不对")
+        path = os.path.join(browser_folder(sid), "rec", str(rid), "index.jsonl")
+        rows = []
+        for line in (read_text(path) or "").splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+        return rows
+
+    def rec_frames(self, sid, rid, start, count):
+        rows = [r for r in self.rec_index(sid, rid) if "o" in r]
+        out = []
+        try:
+            handle = open(os.path.join(browser_folder(sid), "rec", str(rid), "frames.bin"), "rb")
+        except OSError:
+            return out
+        with handle:
+            for index in range(max(0, int(start)), min(len(rows), int(start) + max(1, min(40, int(count))))):
+                row = rows[index]
+                if not isinstance(row.get("o"), int) or not isinstance(row.get("n"), int):
+                    continue
+                handle.seek(row["o"])
+                out.append({"i": index, "data": base64.b64encode(handle.read(row["n"])).decode("ascii")})
+        return out
+
+    def prune_recordings(self):
+        """保留 3 天；总量超过 2 GB 先删最早的（正在录的不删）"""
+        now = time.time()
+        found = []
+        try:
+            sessions = os.listdir(BROWSER_DIR)
+        except OSError:
+            return
+        for sid in sessions:
+            root = os.path.join(BROWSER_DIR, sid, "rec")
+            if not os.path.isdir(root):
+                continue
+            for name in os.listdir(root):
+                path = os.path.join(root, name)
+                if not name.isdigit():
+                    continue
+                live = (self.items.get(sid) or {}).get("started") and str(int(self.items[sid]["started"] * 1000)) == name
+                try:
+                    size = sum(e.stat().st_size for e in os.scandir(path))
+                except OSError:
+                    size = 0
+                found.append((int(name) / 1000.0, path, size, bool(live)))
+        found.sort()
+        total = sum(row[2] for row in found)
+        for started, path, size, live in found:
+            if live:
+                continue
+            if now - started > BROWSER_REC_KEEP or total > BROWSER_REC_TOTAL_MB * 1048576:
+                shutil.rmtree(path, ignore_errors=True)
+                total -= size
+
+    def state(self):
+        """这台电脑上开着的浏览器 → {会话 id: {since, url, title}}（会话不在这台电脑上的，电脑端按会话 id 补进那个会话）"""
+        out = {}
+        for sid, item in list(self.items.items()):
+            link = item.get("link")
+            tab = (link.targets.get(link.page) if link and link.page else None) or {}
+            out[sid] = {"since": int(item["started"] * 1000), "url": tab.get("url") or "", "title": tab.get("title") or "",
+                        "remote": bool(item.get("remote"))}
+        for sid, row in list(self.recent.items()):
+            if sid not in out:
+                out[sid] = dict(row, closed=True)
+        return out
+
+    def remote_request(self, op, sid):
+        """远端模式的子命令：浏览器在用户的电脑上，这边经通道问那边的入口"""
+        if not self.tunnel:
+            raise RuntimeError("这台电脑上的会话用的是你操作的那台电脑上的浏览器，但 Kiteline 还没接通到它的通道"
+                               "（请确认那台电脑上的 Kiteline 已更新到最新版、连着这台电脑）")
+        if op == "cdp":
+            now = time.time()
+            row = self.seen.setdefault(sid, {"since": now, "used": now})
+            row["used"] = now
+            return {"port": BROWSER_GATE_PORT, "gate": "%s/s/%s" % (BROWSER_GATE, sid), "remote": True}
+        path = "/s/%s/kiteline/%s" % (sid, op)
+        result = _http_json(self.tunnel, path, timeout=30) or {}
+        if op == "close":
+            self.seen.pop(sid, None)
+        if op == "status":
+            result = dict(result, remote=True, tunnel=self.tunnel)
+        return result
+
+    # --- 主循环：快照带上浏览器 ---
+    def annotate(self, snapshots):
+        self.live = {s["sessionId"]: s.get("transcriptPath") for s in snapshots if s.get("sessionId")}
+        self.pids = {s["pid"]: s["sessionId"] for s in snapshots if isinstance(s.get("pid"), int) and s.get("sessionId")}
+        for snap in snapshots:
+            sid = snap.get("sessionId")
+            item = self.items.get(sid)
+            if not item:
+                continue
+            link = item.get("link")
+            tab = (link.targets.get(link.page) if link and link.page else None) or {}
+            actions = self.actions(sid)
+            info = {"since": int(item["started"] * 1000), "port": item["port"]}
+            if tab.get("url"):
+                info["url"], info["title"] = tab["url"], tab.get("title") or ""
+            if actions:
+                info["last"] = actions[-1]["text"]
+                info["actions"] = len(actions)
+            if sid in self.asks:
+                info["ask"] = self.asks[sid]["note"] or "请接管浏览器"
+            snap["browser"] = info
+        for snap in snapshots:
+            sid = snap.get("sessionId")
+            if sid in self.recent and sid not in self.items and not snap.get("browser"):
+                snap["browser"] = dict(self.recent[sid], closed=True)   # 浏览器关了：小窗变成「回放」卡片
+        if self.remote:
+            # 远端模式：浏览器在用户的电脑上（地址、标题由那边的电脑端补），这边给指令和「请接管」
+            for snap in snapshots:
+                sid = snap.get("sessionId")
+                row = self.seen.get(sid)
+                if not row:
+                    continue
+                info = {"since": int(row["since"] * 1000), "remote": True}
+                actions = self.actions(sid)
+                if actions:
+                    info["last"] = actions[-1]["text"]
+                    info["actions"] = len(actions)
+                if sid in self.asks:
+                    info["ask"] = self.asks[sid]["note"] or "请接管浏览器"
+                snap["browser"] = info
+
+    def session_for_pid(self, pid):
+        """连浏览器的进程属于哪个会话：沿父进程链往上，先看是不是某个会话的进程，再看环境变量
+        （agent-browser 的后台进程脱离了父进程链，但环境变量是从 agent 的 Bash 带下来的：CLAUDE_CODE_SESSION_ID / KITELINE_SESSION）"""
+        for index, current in enumerate([pid] + ancestors(pid)[1:]):
+            if current in self.pids:
+                return self.pids[current]
+            if index < 6:
+                env = process_environ(current) or {}
+                sid = env.get("KITELINE_SESSION") or env.get("CLAUDE_CODE_SESSION_ID")
+                if sid and re.match(r"^[A-Za-z0-9._-]+$", sid):
+                    return sid
+        return None
+
+    def remember_paths(self, sid, body):
+        for ident in re.findall(rb"/devtools/(?:browser|page)/([A-Za-z0-9-]+)", body or b""):
+            self.paths[ident.decode("ascii")] = sid
+
+    def owner_of_path(self, path):
+        match = re.search(r"/devtools/(?:browser|page)/([A-Za-z0-9-]+)", path or "")
+        if not match:
+            return None
+        ident = match.group(1)
+        if ident in self.paths and self.paths[ident] in self.items:
+            return self.paths[ident]
+        for sid, item in list(self.items.items()):   # 标签页编号：在哪个浏览器里
+            link = item.get("link")
+            if link and ident in link.targets:
+                return sid
+        return None
+
+    def actions(self, sid):
+        path = self.live.get(sid)
+        if not path:
+            return []
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return []
+        cached = self.action_cache.get(sid)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        item = self.items.get(sid) or {}
+        found = browser_actions(path, since=item.get("started") or (self.seen.get(sid) or {}).get("since") or 0)
+        if cached and found and (not cached[1] or cached[1][-1] != found[-1]):
+            self.touch(sid)   # agent 又发了浏览器指令：算在用
+        self.action_cache[sid] = (mtime, found)
+        return found
+
+    def status(self):
+        if not self.last_rss or set(self.last_rss) != set(self.items):
+            self.rss_at = time.time()
+            self.last_rss = {sid: _tree_rss_mb(item["pid"]) for sid, item in list(self.items.items())}
+        rows = []
+        for sid, item in list(self.items.items()):
+            rows.append({"sessionId": sid, "port": item["port"], "started": int(item["started"] * 1000),
+                         "used": int(item["used"] * 1000), "memMB": self.last_rss.get(sid), "viewers": len(self.viewers(sid)),
+                         "ask": sid in self.asks, "browser": item.get("browser"), "remote": bool(item.get("remote"))})
+        return {"browsers": rows, "limit": self.limit(), "max": BROWSER_MAX, "freeMB": _free_mem_mb(),
+                "gate": BROWSER_GATE if self.gate and self.gate.server else None,
+                "queued": len([n for n in os.listdir(os.path.join(BROWSER_DIR, "requests")) if n.endswith(".wait")])
+                if os.path.isdir(os.path.join(BROWSER_DIR, "requests")) else 0}
+
+    # --- 手机 / 电脑端的请求（cmd=browser） ---
+    def handle(self, request):
+        op = request.get("op")
+        sid = request.get("sessionId") or ""
+        if op == "status":
+            return self.status()
+        if op == "close":
+            self.close(sid, "用户在 Kiteline 里关掉")
+            return {}
+        if op == "actions":
+            return {"actions": self.actions(sid)}
+        if op == "recordings":
+            return {"recordings": self.recordings(sid)}
+        if op == "recording":
+            rows = self.rec_index(sid, request.get("rec"))
+            frames = [r for r in rows if "o" in r]
+            ends = [r["t"] for r in rows if r.get("end")]
+            # 帧：[时刻, 网页宽, 高, 地址]；end：录到什么时候（还在录就是现在）
+            return {"frames": [[r.get("t"), r.get("w"), r.get("h"), r.get("u") or ""] for r in frames],
+                    "end": ends[-1] if ends else int(time.time() * 1000)}
+        if op == "rframes":
+            return {"frames": self.rec_frames(sid, request.get("rec"), request.get("from") or 0, request.get("count") or 20)}
+        if op == "forget":
+            self.recent.pop(sid, None)   # 用户关掉了「回放」卡片
+            self.changed(sid)
+            return {}
+        if op == "control":
+            # 用户接管 / 交还。交还时如果 agent 在 browser ask 里等，把用户的留言带回去（远端会话：电脑端两边都发，各做各的）
+            on = bool(request.get("on"))
+            item = self.items.get(sid)
+            if item:
+                item["control"] = {"by": request.get("device") or "", "at": int(time.time() * 1000)} if on else None
+            if not on and sid in self.asks:
+                ask = self.asks.pop(sid)
+                _write_json(os.path.join(BROWSER_DIR, "requests", ask["rid"] + ".done"),
+                            {"text": str(request.get("text") or ""), "by": request.get("device") or ""})
+            self.touch(sid)
+            self.changed(sid)
+            return {}
+        item = self.items.get(sid)
+        if not item:
+            raise RuntimeError("这个会话现在没有打开浏览器")
+        if op == "watch":
+            # 看画面：viewer 是客户端自己起的标识（同一台手机开着小窗和大画面算一个），每 5 秒续一次
+            level = request.get("level") if request.get("level") in BROWSER_LEVELS else "thumb"
+            viewer = str(request.get("viewer") or "anon")[:64]
+            item["viewers"][viewer] = (level, time.time() + BROWSER_LEASE)
+            link = self.link(sid)
+            levels = set(self.viewers(sid).values())
+            link.viewing = "full" if "full" in levels else "thumb"
+            link.cast(self.cast_level(link.viewing))
+            if request.get("first") and link.frame:
+                link.send_frame()   # 刚打开：先给最近一帧，不用等页面再变
+            return {"tabs": link.tabs(), "actions": self.actions(sid), "ask": (self.asks.get(sid) or {}).get("note"),
+                    "control": item.get("control")}
+        if op == "unwatch":
+            item["viewers"].pop(str(request.get("viewer") or "anon")[:64], None)
+            return {}
+        if op == "input":
+            item["used"] = time.time()
+            return self.link(sid).input(request)
+        if op == "tab":
+            link = self.link(sid)
+            tid = request.get("tab")
+            if tid in link.targets:
+                link.post("Target.activateTarget", {"targetId": tid})
+                link.targets[tid]["touched"] = time.time()
+                link._follow(tid)
+            return {"tabs": link.tabs()}
+        raise RuntimeError("不认识的操作：%s" % op)
+
+
+
+# 会话浏览器的固定入口（11-16 用户要的：agent 不能再自己另开浏览器）：所有工具都连 http://127.0.0.1:9339，
+# 不用记端口。有程序连进来，按「哪个进程连的 → 它的环境变量 / 父进程链 → 哪个会话」认出会话，接到这个会话自己的浏览器上
+# （没开就让调度器开，满了排队）。Playwright MCP 经环境变量 PLAYWRIGHT_MCP_CDP_ENDPOINT 指到这里（sync_browser_env），
+# agent-browser / playwright-cli 由技能 kiteline-browser 教 agent 带 --cdp。只听本机地址。
+BROWSER_GATE_PORT = int(os.environ.get("CCPULSE_BROWSER_PORT") or 9339)
+BROWSER_GATE = "http://127.0.0.1:%d" % BROWSER_GATE_PORT
+
+
+def _socket_owner_linux(peer_port):
+    """本机 127.0.0.1:peer_port 这一头的连接是哪个进程的（读 /proc/net/tcp 找 inode，再找哪个进程开着它）"""
+    inode = None
+    want = ":%04X" % peer_port
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(table) as handle:
+                next(handle, None)
+                for line in handle:
+                    parts = line.split()
+                    if len(parts) > 9 and parts[1].endswith(want) and parts[2].endswith(":%04X" % BROWSER_GATE_PORT):
+                        inode = parts[9]
+                        break
+        except OSError:
+            continue
+        if inode:
+            break
+    if not inode or inode == "0":
+        return None
+    target = "socket:[%s]" % inode
+    me = os.getpid()
+    for name in os.listdir("/proc"):
+        if not name.isdigit() or int(name) == me:
+            continue
+        folder = "/proc/%s/fd" % name
+        try:
+            for fd in os.listdir(folder):
+                try:
+                    if os.readlink(os.path.join(folder, fd)) == target:
+                        return int(name)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return None
+
+
+def _socket_owner_mac(peer_port):
+    try:
+        out = subprocess.run(["lsof", "-nP", "-iTCP@127.0.0.1:%d" % peer_port, "-sTCP:ESTABLISHED", "-Fp"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5).stdout.decode()
+    except Exception:
+        return None
+    for line in out.splitlines():
+        if line.startswith("p") and line[1:].isdigit() and int(line[1:]) != os.getpid():
+            return int(line[1:])
+    return None
+
+
+def _socket_owner_windows(peer_port):
+    """GetExtendedTcpTable（TCP_TABLE_OWNER_PID_ALL）：本机端口 = peer_port、对端端口 = 入口端口的那一行的进程号"""
+    import ctypes
+    from ctypes import wintypes
+    iphlpapi = ctypes.WinDLL("iphlpapi")
+    size = wintypes.DWORD(0)
+    iphlpapi.GetExtendedTcpTable(None, ctypes.byref(size), False, 2, 5, 0)
+    buf = ctypes.create_string_buffer(size.value + 4096)
+    size = wintypes.DWORD(len(buf))
+    if iphlpapi.GetExtendedTcpTable(buf, ctypes.byref(size), False, 2, 5, 0) != 0:
+        return None
+    count = struct.unpack_from("<I", buf.raw, 0)[0]
+    for index in range(count):
+        state, laddr, lport, raddr, rport, pid = struct.unpack_from("<IIIIII", buf.raw, 4 + index * 24)
+        local = ((lport & 0xFF) << 8) | ((lport >> 8) & 0xFF)
+        remote = ((rport & 0xFF) << 8) | ((rport >> 8) & 0xFF)
+        if local == peer_port and remote == BROWSER_GATE_PORT and pid != os.getpid():
+            return pid
+    return None
+
+
+def socket_owner(peer_port):
+    try:
+        if IS_WINDOWS:
+            return _socket_owner_windows(peer_port)
+        if sys.platform == "darwin":
+            return _socket_owner_mac(peer_port)
+        return _socket_owner_linux(peer_port)
+    except Exception as exc:
+        log("认不出连浏览器入口的进程：%r" % exc)
+        return None
+
+
+class BrowserGate:
+    """固定入口：认会话、转发 CDP（HTTP 的 /json/* 改写里面的地址，WebSocket 原样双向转发）"""
+
+    def __init__(self, pool):
+        self.pool = pool
+        self.server = None
+        self.by_pid = {}          # 连过来的进程 → 会话（进程活着期间不变）
+
+    def start(self):
+        if self._bind():
+            return True
+        # 绑不上：多半是换 watcher 进程时旧进程还没退（Kiteline 更新、重连时常见，11-16 实测新进程绑定失败后入口一直没人听）。
+        # 隔几秒再试，直到绑上；别的程序一直占着就一直等（这期间浏览器照样能用端口直连）
+        def retry():
+            while not self.server:
+                time.sleep(3)
+                self._bind(quiet=True)
+            log("浏览器入口 %s 已开起来（重试后）" % BROWSER_GATE)
+
+        threading.Thread(target=retry, name="browser-gate-retry", daemon=True).start()
+        return False
+
+    def _bind(self, quiet=False):
+        try:
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if not IS_WINDOWS:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(("127.0.0.1", BROWSER_GATE_PORT))
+            server.listen(32)
+        except OSError as exc:
+            try:
+                server.close()
+            except Exception:
+                pass
+            if not quiet:
+                log("浏览器入口 %s 暂时没开起来（%s），稍后重试" % (BROWSER_GATE, exc))
+            return False
+        self.server = server
+        threading.Thread(target=self._accept, name="browser-gate", daemon=True).start()
+        return True
+
+    def _accept(self):
+        while True:
+            try:
+                conn, addr = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(conn, addr), daemon=True).start()
+
+    def session_of(self, peer_port, path):
+        """连进来的是哪个会话：URL 里写了（?session= 或 /s/<id>/）就用它；否则看连接的进程"""
+        match = re.search(r"[?&]session=([A-Za-z0-9._-]+)", path) or re.match(r"^/s/([A-Za-z0-9._-]+)/", path)
+        if match:
+            return match.group(1)
+        # WebSocket 地址里带着浏览器 / 标签页的编号：属于哪个会话的浏览器就是哪个（不用再认进程）
+        found = self.pool.owner_of_path(path)
+        if found:
+            return found
+        pid = socket_owner(peer_port)
+        if not pid:
+            return "shared"
+        if pid in self.by_pid and pid_alive(pid):
+            return self.by_pid[pid]
+        sid = self.pool.session_for_pid(pid) or "shared"
+        self.by_pid[pid] = sid
+        return sid
+
+    def _serve(self, conn, addr):
+        upstream = None
+        try:
+            conn.settimeout(30)
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    return
+                head += chunk
+                if len(head) > 65536:
+                    return
+            head, _, rest = head.partition(b"\r\n\r\n")
+            lines = head.decode("latin-1").split("\r\n")
+            method, path = (lines[0].split(" ") + ["", ""])[:2]
+            sid = self.session_of(addr[1], path)
+            if self.pool.remote:
+                self._forward(conn, sid, method, path, lines, rest)
+                return
+            special = re.match(r"^/s/[A-Za-z0-9._-]+/kiteline/(close|status)$", path)
+            if special:
+                # 远端模式的 watcher 经通道来关浏览器、查状态（agent 在服务器上跑 browser close / status）
+                if special.group(1) == "close":
+                    self.pool.close(sid, "agent 要求")
+                body = json.dumps(self.pool.status() if special.group(1) == "status" else {}, ensure_ascii=False).encode("utf-8")
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"
+                             % len(body) + body)
+                return
+            remote = any(line.lower().startswith("x-kiteline-remote:") for line in lines[1:])
+            item = self._acquire(sid, remote)
+            if item is None:
+                conn.sendall(b"HTTP/1.1 503 Busy\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"
+                             + "浏览器已满，排队超时".encode("utf-8"))
+                return
+            port = item["port"]
+            clean = re.sub(r"([?&])session=[A-Za-z0-9._-]+&?", r"\1", path).rstrip("?&")
+            clean = re.sub(r"^/s/[A-Za-z0-9._-]+", "", clean) or "/"
+            headers = [line for line in lines[1:] if line and not line.lower().startswith(("host:", "connection:", "x-kiteline-remote:"))]
+            # 工具接着按回应里的地址连 WebSocket：写成它连进来时用的那个地址（经通道来的是远端那台的入口）
+            host = next((line.split(":", 1)[1].strip() for line in lines[1:] if line.lower().startswith("host:")), "")
+            shown = host if re.match(r"^(127\.0\.0\.1|localhost|\[::1\]):\d+$", host) else "127.0.0.1:%d" % BROWSER_GATE_PORT
+            upgrade = any(line.lower().startswith("upgrade:") and "websocket" in line.lower() for line in lines[1:])
+            upstream = socket.create_connection(("127.0.0.1", port), timeout=10)
+            request = ["%s %s HTTP/1.1" % (method, clean), "Host: 127.0.0.1:%d" % port,
+                       "Connection: %s" % ("Upgrade" if upgrade else "close")] + headers
+            upstream.sendall(("\r\n".join(request) + "\r\n\r\n").encode("latin-1") + rest)
+            if upgrade:
+                conn.settimeout(None)
+                upstream.settimeout(None)
+                self.pool.touch(sid)
+                pump = threading.Thread(target=self._pipe, args=(upstream, conn), daemon=True)
+                pump.start()
+                self._pipe(conn, upstream, sid)
+                pump.join(5)
+                return
+            # /json/version、/json/list：读完整个回应，把里面浏览器自己的地址换成入口地址（工具接着按它连 WebSocket）
+            # 浏览器的调试服务回完不关连接：按 Content-Length 读够就停（等它关会一直等到超时）
+            data = b""
+            need = None
+            while need is None or len(data) < need:
+                chunk = upstream.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+                if need is None and b"\r\n\r\n" in data:
+                    top = data.split(b"\r\n\r\n", 1)[0]
+                    match = re.search(rb"(?im)^content-length:\s*(\d+)", top)
+                    if match:
+                        need = len(top) + 4 + int(match.group(1))
+            top, _, body = data.partition(b"\r\n\r\n")
+            body = body.replace(b"127.0.0.1:%d" % port, shown.encode("ascii")).replace(b"localhost:%d" % port, shown.encode("ascii"))
+            status = top.split(b"\r\n", 1)[0] or b"HTTP/1.1 200 OK"
+            kind = b"application/json; charset=UTF-8"
+            for line in top.split(b"\r\n")[1:]:
+                if line.lower().startswith(b"content-type:"):
+                    kind = line.split(b":", 1)[1].strip()
+            conn.sendall(status + b"\r\nContent-Type: " + kind + b"\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(body)
+                         + body)
+            self.pool.remember_paths(sid, body)
+        except Exception as exc:
+            log("浏览器入口转发出错：%r" % exc)
+        finally:
+            for sock in (conn, upstream):
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+
+    def _pipe(self, src, dst, sid=None):
+        last = 0.0
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+                if sid and time.time() - last > 5:   # agent 在发指令：算在用（空闲回收看这个）
+                    last = time.time()
+                    self.pool.touch(sid)
+        except OSError:
+            pass
+        for sock in (src, dst):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _forward(self, conn, sid, method, path, lines, rest):
+        """远端模式：认出会话后原样转到通道（接到用户电脑上的入口），路径前面加 /s/<会话>，带上「经通道来的」标记"""
+        if not self.pool.tunnel:
+            conn.sendall(b"HTTP/1.1 503 No Tunnel\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"
+                         + "浏览器开在你操作的电脑上，但 Kiteline 还没接通到它的通道".encode("utf-8"))
+            return
+        upstream = socket.create_connection(("127.0.0.1", self.pool.tunnel), timeout=15)
+        try:
+            if not path.startswith("/s/"):
+                path = "/s/%s%s" % (sid, path if path.startswith("/") else "/" + path)
+            head = ["%s %s HTTP/1.1" % (method, path)] + [line for line in lines[1:] if line] + ["X-Kiteline-Remote: 1"]
+            upstream.sendall(("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + rest)
+            now = time.time()
+            row = self.pool.seen.setdefault(sid, {"since": now, "used": now})
+            row["used"] = now
+            conn.settimeout(None)
+            upstream.settimeout(None)
+            pump = threading.Thread(target=self._pipe, args=(upstream, conn), daemon=True)
+            pump.start()
+            self._pipe(conn, upstream, sid)
+            pump.join(5)
+        finally:
+            try:
+                upstream.close()
+            except OSError:
+                pass
+
+    def _acquire(self, sid, remote=False):
+        deadline = time.time() + BROWSER_QUEUE_WAIT
+        while time.time() < deadline:
+            try:
+                item = self.pool.acquire(sid, remote)
+            except RuntimeError as exc:
+                log("会话 %s 起浏览器失败：%s" % (sid[:8], exc))
+                return None
+            if item is not None:
+                return item
+            time.sleep(1)
+        return None
+
+
+BROWSER_ENV_KEY = "PLAYWRIGHT_MCP_CDP_ENDPOINT"
+
+
+def sync_browser_env(enabled):
+    """Claude Code 的 Playwright MCP 连 Kiteline 的浏览器（不再自己另开）：在 ~/.claude/settings.json 的 env 里写
+    PLAYWRIGHT_MCP_CDP_ENDPOINT = 入口地址；关掉浏览器技能时只删我们写的（用户自己设了别的值不动）"""
+    root = claude_config_dir()
+    if not os.path.isdir(root):
+        return
+    path = os.path.join(root, "settings.json")
+    raw = read_text(path)
+    try:
+        data = json.loads(raw) if raw and raw.strip() else {}
+    except ValueError:
+        return   # 用户手写坏了的文件不碰
+    if not isinstance(data, dict):
+        return
+    env = data.get("env") if isinstance(data.get("env"), dict) else {}
+    current = env.get(BROWSER_ENV_KEY)
+    if enabled:
+        if current == BROWSER_GATE or (current and "127.0.0.1:%d" % BROWSER_GATE_PORT not in str(current)):
+            return   # 已经是了，或用户自己指了别的浏览器
+        env[BROWSER_ENV_KEY] = BROWSER_GATE
+    else:
+        if current != BROWSER_GATE:
+            return
+        env.pop(BROWSER_ENV_KEY, None)
+    if env:
+        data["env"] = env
+    else:
+        data.pop("env", None)
+    try:
+        tmp = path + ".kiteline.tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        os.replace(tmp, path)
+        log("Claude 设置里%s Playwright MCP 连 Kiteline 浏览器的环境变量" % ("加上了" if enabled else "去掉了"))
+    except OSError as exc:
+        log("改 Claude 设置失败：%s" % exc)
+
+
+BROWSERS = BrowserPool()
+
+
+def browser_fast(line):
+    """cmd=browser 的请求不进主循环排队：输入要跟手，其余的另开线程（连浏览器可能要等几秒，别堵住读线程）"""
+    try:
+        request = json.loads(line)
+    except ValueError:
+        return False
+    if isinstance(request, dict) and request.get("cmd") == "browser_config":
+        # 设置里改了「最多同时开几个」「空闲多久回收」
+        global BROWSER_MAX, BROWSER_IDLE
+        if request.get("max"):
+            BROWSER_MAX = max(1, min(16, int(request["max"])))
+        if request.get("idle"):
+            BROWSER_IDLE = max(60, int(float(request["idle"]) * 60))
+        if "record" in request:
+            global BROWSER_REC
+            BROWSER_REC = bool(request["record"])
+            if not BROWSER_REC:
+                for item in list(BROWSERS.items.values()):
+                    if item.get("link"):
+                        item["link"].stop_recording()
+        emit({"event": "response", "id": request.get("id"), "ok": True, "max": BROWSER_MAX, "idle": BROWSER_IDLE // 60})
+        return True
+    if isinstance(request, dict) and request.get("cmd") == "browser_tunnel":
+        # 电脑端经 ssh 开好了反向转发：这台上的入口把会话的浏览器连接转到这个端口（接到用户电脑上的浏览器）
+        BROWSERS.tunnel = int(request.get("port") or 0) or None
+        log("会话浏览器通道：本机端口 %s → 用户电脑上的浏览器" % BROWSERS.tunnel)
+        emit({"event": "response", "id": request.get("id"), "ok": True, "remote": BROWSERS.remote})
+        return True
+    if not isinstance(request, dict) or request.get("cmd") != "browser":
+        return False
+
+    def answer():
+        response = {"event": "response", "id": request.get("id"), "ok": True}
+        try:
+            response.update(BROWSERS.handle(request))
+        except Exception as exc:
+            response.update({"ok": False, "error": str(exc) or repr(exc)})
+        emit(response)
+
+    if request.get("op") == "input" and BROWSERS.items.get(request.get("sessionId") or "", {}).get("link"):
+        answer()   # 已连上：只是往 CDP 写一行，就地做，保证点击、按键的先后
+    else:
+        threading.Thread(target=answer, name="browser-op", daemon=True).start()
+    return True
+
+
+def _browser_request(op, session_id, extra=None, wait=30.0):
+    """子命令 → watcher 的调度器：写请求文件、等结果。→ (结果, 错误)。结果里带 rid（browser ask 用它等交还）"""
+    folder = os.path.join(BROWSER_DIR, "requests")
+    os.makedirs(folder, exist_ok=True)
+    rid = "%d-%s" % (int(time.time() * 1000), uuid.uuid4().hex[:6])
+    req = os.path.join(folder, rid + ".req")
+    _write_json(req, dict(extra or {}, op=op, sessionId=session_id, at=time.time()))
+    start = time.time()
+    deadline = start + wait
+    queued = False
+    while time.time() < deadline:
+        for ext in ("ok", "err"):
+            path = os.path.join(folder, "%s.%s" % (rid, ext))
+            data = _json_file(path)
+            if data is not None:
+                _remove_quiet(path)
+                if ext == "err":
+                    return None, data.get("error") or "失败"
+                data["rid"] = rid
+                return data, None
+        if not queued:
+            waiting = _json_file(os.path.join(folder, rid + ".wait"))
+            if waiting:
+                queued = True
+                deadline = time.time() + BROWSER_QUEUE_WAIT
+                print("浏览器已满（%s/%s 个在用），排队等空出来……" % (waiting.get("running"), waiting.get("limit")),
+                      file=sys.stderr)
+            elif time.time() - start > 10 and os.path.exists(req) and not _json_file(os.path.join(folder, rid + ".taken")):
+                # 10 秒没人接：Kiteline 没在这台电脑上运行（或是老版本 watcher）
+                _remove_quiet(req)
+                return None, "Kiteline 没在这台电脑上运行（或版本太旧），没人接手浏览器请求"
+        time.sleep(0.15)
+    _remove_quiet(req)
+    return None, "等太久了"
+
+
+AGENT_BROWSER_VERSION = "0.43.0"
+
+
+def _agent_browser_path():
+    name = "agent-browser.exe" if IS_WINDOWS else "agent-browser"
+    local = os.path.join(DATA_DIR, "bin", name)
+    if os.path.isfile(local):
+        return local
+    return shutil.which("agent-browser")
+
+
+def _agent_browser_package():
+    machine = (platform_machine() or "").lower()
+    arm = machine in ("arm64", "aarch64")
+    if sys.platform == "darwin":
+        return "@agent-browser/cli-darwin-%s" % ("arm64" if arm else "x64")
+    if IS_WINDOWS:
+        return "@agent-browser/cli-win32-x64-msvc"
+    musl = not glob_exists("/lib/ld-linux*") and glob_exists("/lib/ld-musl*")
+    return "@agent-browser/cli-linux-%s-%s" % ("arm64" if arm else "x64", "musl" if musl else "gnu")
+
+
+def platform_machine():
+    import platform
+    return platform.machine()
+
+
+def glob_exists(pattern):
+    return bool(globlib.glob(pattern))
+
+
+def browser_setup(quiet=False):
+    """把 agent-browser 装到 ~/.ccpulse/bin（npm 上它按平台出的预编译程序，不用装 Node）。→ 程序路径"""
+    import tarfile
+    existing = _agent_browser_path()
+    if existing:
+        return existing
+    package = _agent_browser_package()
+    last = None
+    for registry in ("https://registry.npmmirror.com", "https://registry.npmjs.org"):
+        try:
+            meta = json.loads(http_get("%s/%s/%s" % (registry, package, AGENT_BROWSER_VERSION), timeout=20))
+            tarball = meta["dist"]["tarball"]
+            if not quiet:
+                print("下载 %s（约 20 MB）……" % tarball, file=sys.stderr)
+            blob = http_get(tarball, timeout=300, raw=True)
+            break
+        except Exception as exc:
+            last = exc
+    else:
+        raise RuntimeError("下载 agent-browser 失败：%r" % last)
+    target_dir = os.path.join(DATA_DIR, "bin")
+    os.makedirs(target_dir, exist_ok=True)
+    name = "agent-browser.exe" if IS_WINDOWS else "agent-browser"
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+        members = [m for m in tar.getmembers() if m.isfile() and os.path.basename(m.name).startswith("agent-browser")]
+        if not members:
+            raise RuntimeError("安装包里没找到 agent-browser 程序")
+        member = max(members, key=lambda m: m.size)
+        data = tar.extractfile(member).read()
+    target = os.path.join(target_dir, name)
+    with open(target + ".tmp", "wb") as handle:
+        handle.write(data)
+    os.chmod(target + ".tmp", 0o755)
+    os.replace(target + ".tmp", target)
+    return target
+
+
+def http_get(url, timeout=20, raw=False):
+    import urllib.request
+    request = urllib.request.Request(url, headers={"User-Agent": "kiteline-watcher"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = response.read()
+    return data if raw else data.decode("utf-8", "replace")
+
+
+def command_browser(argv):
+    """agent 操作网页用的浏览器（Kiteline 调度，手机和电脑上能看到实时画面、能接管）：
+    browser cdp [--session 会话id]     打印这个会话浏览器的 CDP 地址（没开就开，满了会排队），如 http://127.0.0.1:9339/s/<会话id>
+                                        （一般不用：直接连固定入口 http://127.0.0.1:9339，Kiteline 自己认是哪个会话）
+    browser port                        这个会话浏览器自己的调试端口（绕过入口直连）
+    browser ask [--note 说明] [--timeout 秒]
+                                        请用户在 Kiteline 里接管浏览器（登录、验证码、滑块、付款确认），用户点「交还」后返回，
+                                        打印用户留言；超时（默认 900 秒）退出码 124
+    browser close                       用完了：关掉这个会话的浏览器（不关也会在空闲 10 分钟后自动回收）
+    browser status                      这台电脑上开着几个、各占多少内存、上限
+    browser setup                       装 agent-browser 到 ~/.ccpulse/bin 并打印路径（已装就直接打印）
+    用法：agent-browser --session "$CLAUDE_CODE_SESSION_ID" --cdp 9339 open https://example.com
+          playwright-cli attach --cdp=http://127.0.0.1:9339"""
+    if not argv or argv[0] in ("-h", "--help"):
+        print(command_browser.__doc__)
+        return 0 if argv else 2
+    op, rest = argv[0], argv[1:]
+    session = note = None
+    timeout = 900.0
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        value = rest[index + 1] if index + 1 < len(rest) else None
+        if arg in ("--session", "--note", "--timeout") and value is not None:
+            if arg == "--session":
+                session = value
+            elif arg == "--note":
+                note = value
+            else:
+                timeout = float(value)
+            index += 2
+            continue
+        print("不认识的参数：%s" % arg, file=sys.stderr)
+        return 2
+    if op == "setup":
+        try:
+            print(browser_setup())
+        except Exception as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    session = session or os.environ.get("KITELINE_SESSION") or None
+    if session:
+        session_id, _ = target_session(session)
+        if not session_id:
+            return 2
+    else:
+        found = find_calling_session()
+        session_id = found["sessionId"] if found else "shared"
+        if not found:
+            print("（认不出是哪个会话：浏览器照样能用，但不会显示在会话里。可用 --session 指定）", file=sys.stderr)
+    if op in ("cdp", "port"):
+        result, error = _browser_request("cdp", session_id, wait=90)
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+        print(result["port"] if op == "port" else (result.get("gate") or "http://127.0.0.1:%d" % result["port"]))
+        return 0
+    if op == "close":
+        _, error = _browser_request("close", session_id)
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+        return 0
+    if op == "status":
+        result, error = _browser_request("status", session_id)
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if op == "ask":
+        result, error = _browser_request("ask", session_id, {"note": note or ""})
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+        print("已请用户在 Kiteline 里接管浏览器，等用户交还……", file=sys.stderr)
+        done = os.path.join(BROWSER_DIR, "requests", result["rid"] + ".done")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            data = _json_file(done)
+            if data is not None:
+                _remove_quiet(done)
+                print("用户已交还浏览器。" + ("留言：%s" % data["text"] if data.get("text") else ""))
+                return 0
+            time.sleep(0.5)
+        print("等了 %d 秒用户还没交还" % timeout, file=sys.stderr)
+        return 124
+    print("不认识的操作：%s（见 browser --help）" % op, file=sys.stderr)
+    return 2
 
 
 # ---------------------------------------------------------------------------
@@ -15475,7 +18085,10 @@ for url in sys.argv[1:]:
 
 
 def process_environ(pid):
-    """同一用户的进程启动时的环境变量，读不到返回 None。Linux 读 /proc；macOS 用 sysctl KERN_PROCARGS2（ps -E 用的也是它）"""
+    """同一用户的进程启动时的环境变量，读不到返回 None。Linux 读 /proc；macOS 用 sysctl KERN_PROCARGS2（ps -E 用的也是它）；
+    Windows 读进程的 PEB（_win_environ）"""
+    if IS_WINDOWS:
+        return _win_environ(pid)
     raw = None
     try:
         with open("/proc/%d/environ" % pid, "rb") as handle:
@@ -16286,8 +18899,9 @@ class HostedTerm:
         self.conn = None
 
     def info(self):
-        return {"term": self.id, "sessionId": self.session_id, "cwd": self.cwd, "shell": self.shell, "hosted": True,
-                "cols": self.cols, "rows": self.rows, "createdAt": int(self.created * 1000), "end": self.end}
+        return term_meta(self.id, {"term": self.id, "sessionId": self.session_id, "cwd": self.cwd, "shell": self.shell, "hosted": True,
+                                   "cols": self.cols, "rows": self.rows, "createdAt": int(self.created * 1000), "end": self.end,
+                                   "host": this_host()})
 
     def start(self):
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -17193,6 +19807,8 @@ class Watcher:
             return {"diff": call_with_timeout(15, git_diff, cwd, request.get("path"), request.get("commit"))}
         if cmd in ("fs", "repo"):
             return self.defer(request)
+        if cmd == "term_run_feed":
+            return TERMS.feed(request)
         if cmd == "term":
             # 会话里的终端：目录用在跑的会话的工作目录，会话结束了用电脑端查到的
             snap = self.sessions.get(request.get("sessionId")) or {}
@@ -17880,7 +20496,8 @@ def stdin_reader(inbox):
     try:
         for line in stream:
             line = line.strip()
-            if line and not ('"term"' in line and term_fast(line)) and not fast_lane(line):
+            if line and not ('"term"' in line and term_fast(line)) and not ('"browser' in line and browser_fast(line)) \
+                    and not fast_lane(line):
                 inbox.put(line)
     except Exception as exc:
         log("stdin 读取结束：%r" % exc)
@@ -18064,6 +20681,8 @@ def main():
     plugins = AgentPlugins()
     plugins.start()
     watcher = Watcher(plugins)
+    TERMS.start_runner()   # agent 的 term run：在 Kiteline 的会话终端里跑命令（见 command_term）
+    BROWSERS.start()       # 会话浏览器的调度器（见 BrowserPool）
     _FAST["watcher"] = watcher
     try:
         sync_skills()
@@ -18089,6 +20708,7 @@ def main():
             snapshots = list({snap["sessionId"]: snap for snap in snapshots}.values())
             annotate_branches(snapshots)
             TERMS.annotate(snapshots)
+            BROWSERS.annotate(snapshots)
             HOSTED.annotate(snapshots)
             snapshots = [snap for snap in snapshots if not unused_session(snap)]
             STAGES.annotate(snapshots)
@@ -18777,6 +21397,10 @@ if __name__ == "__main__":
         sys.exit(command_keyinfo(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "stage":
         sys.exit(command_stage(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "term":
+        sys.exit(command_term(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "browser":
+        sys.exit(command_browser(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "group":
         sys.exit(command_group(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "limits":

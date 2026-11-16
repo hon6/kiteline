@@ -183,7 +183,8 @@ public sealed class MainWindow : Window
         grid.Children.Add(detailBox);
         grid.Children.Add(splitter);
         toast = new ToastLayer();
-        var body = new Panel { Children = { grid, toast } };
+        // 会话浏览器放到「整个应用 / 全屏」：盖满整个窗口（见 BrowserViews.cs）
+        var body = new Panel { Children = { grid, BrowserLayer.Shared, toast } };
         if (WindowChrome.Custom)
         {
             var buttons = new CaptionButtons(this, WindowChrome.Buttons)

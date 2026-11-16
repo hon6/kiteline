@@ -181,14 +181,14 @@ public sealed class ChangelogWindow : Window
 
     async void Load()
     {
-        body.Content = new Spinner(18).HAlign(HorizontalAlignment.Center).Margin(0, 80, 0, 0);
+        body.Content = Skeleton.Page(SkeletonKind.Text, count: 14);
         try
         {
             var reply = await AppModel.Shared.Api.Get("/api/changelog");
             var releases = Changelog.Parse(reply.Str("text") ?? "");
-            body.Content = releases.Count == 0
+            body.Content = (releases.Count == 0
                 ? Ui.Text(L(reply.Str("error") is { Length: > 0 } error ? error : "此版本未包含更新记录"), 14, color: "Text2").HAlign(HorizontalAlignment.Center).Margin(0, 80, 0, 0)
-                : Timeline(releases, reply.Str("version") ?? "");
+                : Timeline(releases, reply.Str("version") ?? "")).FadeIn();
         }
         catch (Exception e)
         {

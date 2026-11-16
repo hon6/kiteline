@@ -77,7 +77,7 @@ struct AgentMapSheet: View {
                 } else if let error {
                     LoadFailed(error: error) { await load() }.padding(.top, 40)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                    SkeletonPage(style: .cards(4))
                 }
             }
             .padding(16)
@@ -363,7 +363,7 @@ struct SubagentTranscriptView: View {
         let rows = chat.rows(session: nil)
         ScrollView {
             VStack(spacing: 0) {
-                if chat.loading { ProgressView().padding(20) }
+                if chat.loading { if rows.isEmpty { SkeletonPage("正在读取对话…", style: .messages(3)) } else { ProgressView().padding(20) } }
                 if let error { PageNote(text: error).padding() }
                 ForEach(rows) { row in ChatRowView(key: chatKey, row: row) }
                 Color.clear.frame(height: 12)

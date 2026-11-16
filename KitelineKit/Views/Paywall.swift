@@ -19,7 +19,11 @@ struct PaywallView: View {
                 costNote
                 VStack(spacing: 10) {
                     if plans.isEmpty {
-                        if store.loadingProducts { ProgressView().padding(.vertical, 30) } else {
+                        if store.loadingProducts {
+                            // 套餐卡片的骨架
+                            ForEach(0..<2, id: \.self) { _ in RoundedRectangle(cornerRadius: 16).fill(.quaternary).frame(height: 64) }
+                                .skeletonPulse()
+                        } else {
                             Button("订阅信息加载失败，轻点重试") { Task { await store.loadProducts() } }
                                 .font(.ui(.subheadline)).padding(.vertical, 24)
                         }

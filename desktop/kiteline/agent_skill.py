@@ -29,7 +29,8 @@ def _isolated():
 
 def skill_ids():
     """开着的技能（id 同 watcher 的技能数据）"""
-    return [name for name, on in (("screenshots", ENABLED), ("playwright", TEST_ENABLED), ("todos", TODO_ENABLED),
+    # 在会话终端里跑命令（term run）、用 Kiteline 的浏览器（browser，也让 Playwright MCP 连它）跟着主技能开关：不另设开关
+    return [name for name, on in (("screenshots", ENABLED), ("terminal", ENABLED), ("browser", ENABLED), ("playwright", TEST_ENABLED), ("todos", TODO_ENABLED),
                                                  ("stages", STAGE_ENABLED)) if on]
 
 

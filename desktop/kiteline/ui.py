@@ -206,6 +206,7 @@ class Console:
         "voiceLocale": ("zh-CN", "zh-HK", "zh-TW", "en-US"),
         "relayURL": "url", "installOpenCodePlugin": bool, "usageStats": bool, "installAgentSkill": bool,
         "installTestSkill": bool, "installTodoSkill": bool, "installStageSkill": bool,
+        "browserOn": ("client", "server"), "browserMax": (1, 2, 3, 4, 5, 6, 8, 10, 12, 16), "browserIdle": (5, 10, 30, 60), "browserRecord": bool,
     }
     TOP_LEVEL = ("notifyOnNeedsAttention", "notifyOnConclusion")
 
@@ -247,6 +248,28 @@ class Console:
                     agent_skill.TODO_ENABLED = bool(changes.get("installTodoSkill", agent_skill.TODO_ENABLED))
                     agent_skill.STAGE_ENABLED = bool(changes.get("installStageSkill", agent_skill.STAGE_ENABLED))
                     agent_skill.sync_live(app.store.sources.values())
+                if {"browserOn", "browserMax", "browserIdle", "browserRecord"} & set(changes):
+                    # 会话浏览器：开在哪变了要换远端的 watcher 进程（ssh 的反向转发、远端环境变量在启动时定）；上限、回收时间当场生效
+                    from . import watcher as watcher_module
+                    before = watcher_module.BROWSER["on"]
+                    watcher_module.BROWSER.update(on=app.cfg.mobile.get("browserOn") or "client",
+                                                  max=int(app.cfg.mobile.get("browserMax") or 4),
+                                                  idle=int(app.cfg.mobile.get("browserIdle") or 10),
+                                                  record=bool(app.cfg.mobile.get("browserRecord", True)))
+
+                    def push():
+                        for source in list(app.store.sources.values()):
+                            if before != watcher_module.BROWSER["on"] and source.kind != "local":
+                                source.restart()
+                            elif getattr(source, "live", False):
+                                try:
+                                    source.request({"cmd": "browser_config", "max": watcher_module.BROWSER["max"],
+                                                    "idle": watcher_module.BROWSER["idle"],
+                                                    "record": watcher_module.BROWSER["record"]}, timeout=10)
+                                except Exception:  # noqa: BLE001
+                                    pass
+
+                    threading.Thread(target=push, daemon=True).start()
                 if "relayURL" in changes and app.cfg.mobile["remoteEnabled"]:
                     app.p2p.stop()
                     app.p2p.start(app.cfg.relay(), app.cfg.https_port())

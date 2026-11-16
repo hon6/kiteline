@@ -59,6 +59,8 @@ final class ProjectsModel: ObservableObject {
     @Published private(set) var projects: [ProjectItem] = []
     @Published private(set) var errors: [String] = []
     @Published private(set) var loading = false
+    /// 读回来过一次（之前列表空着是「正在读取」）
+    @Published private(set) var loaded = false
     @Published private(set) var cost7: [String: Double] = [:]
     @Published private(set) var past: [String: [PastItem]] = [:]
     @Published var filter = "all"
@@ -75,6 +77,7 @@ final class ProjectsModel: ObservableObject {
                 .filter { $0.exists || self.live($0).count > 0 }
             self.errors = payload["errors"] as? [String] ?? []
             self.loading = false
+            self.loaded = true
         }
         UsageReport.collect(days: 7) { [weak self] payload in
             var map: [String: Double] = [:]
@@ -148,9 +151,12 @@ struct ProjectsView: View {
                     .frame(width: Lang.shared.isEnglish ? 330 : 240)   // 英文「Has Activity」放不进 240
                 Text(model.summary).font(.app(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                if model.loading { ProgressView().controlSize(.small) }
+                if model.loading, model.loaded { ProgressView().controlSize(.small) }
             }
             .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 8)
+            if model.projects.isEmpty, !model.loaded {
+                SkeletonPage("正在读取各设备上的项目…", style: .projects(7))
+            } else {
             List {
                 ForEach(model.shown) { project in
                     ProjectCard(project: project, live: model.live(project), cost: model.cost7[project.id] ?? 0,
@@ -164,7 +170,9 @@ struct ProjectsView: View {
                 ForEach(model.errors, id: \.self) { Label(ServerLang.ui($0), systemImage: "exclamationmark.triangle").font(.app(size: 11.5)).foregroundStyle(.secondary) }
             }
             .listStyle(.inset)
+            }
         }
+        .animation(.skeletonFade, value: model.loaded)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("项目")
         .navigationSubtitle(model.summary)
         .toolbar {
@@ -287,7 +295,7 @@ struct ProjectCard: View {
                     PastRow(item: item).contentShape(Rectangle()).onTapGesture { HistoryModel.shared.open(item) }
                 }
             } else {
-                ProgressView().controlSize(.small)
+                SkeletonShape(style: .list(3))
             }
         }
     }

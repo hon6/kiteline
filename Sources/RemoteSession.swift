@@ -228,7 +228,13 @@ final class RemoteSession: SourceConnection {
         let stderrPipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = sshArguments + ["--", remoteShellCommand()]
+        // 会话浏览器开在这台电脑上（设置里选「这台电脑」时）：开一条反向转发，远端的入口经它接到本机入口；
+        // 端口由 ssh 分配（-R 0），从输出里读出来再告诉远端 watcher（见 BrowserRelay、watcher 的 BrowserPool 远端模式）
+        var arguments = sshArguments
+        if AgentSkill.browserOnClient {
+            arguments.insert(contentsOf: ["-R", "\(browserTunnelPort):127.0.0.1:\(BrowserRelay.gatePort)"], at: arguments.count - 1)
+        }
+        process.arguments = arguments + ["--", remoteShellCommand()]
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         // stdin 经 ssh 接到远端 watcher：拉历史、取图片、落地手机图片都走这里
@@ -397,6 +403,15 @@ final class RemoteSession: SourceConnection {
         return args
     }
 
+    /// 会话浏览器反向转发在远端用的端口：按这台电脑和远端算出的固定值（20000～49999），重连时不变。
+    /// 不用 -R 0 让 ssh 分配：复用 ControlMaster 时 ssh 不打印分到的端口，读不出来
+    private var browserTunnelPort: Int {
+        let seed: String = (Host.current().localizedName ?? "mac") + "|" + (config.sshHost ?? "") + "|" + String(config.sshPort ?? 22)
+        var hash: UInt32 = 5381
+        for byte in seed.utf8 { hash = (hash &* 33) &+ UInt32(byte) }
+        return 20000 + Int(hash % 30000)
+    }
+
     private var controlPath: String {
         let dir = NSHomeDirectory() + "/.ssh/ccpulse"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -409,7 +424,9 @@ final class RemoteSession: SourceConnection {
         // 让远端 shell 展开 ~，并强制 UTF-8，保证中文目录名与结论文本不被破坏
         let extra = AgentSkill.watcherEnvironment.map { "\($0.key)=\($0.value) " }.joined()
         // 本机同步过去的插件放在远端单独的目录里，不碰远端自己装的 Kiteline 管的 ~/.ccpulse/plugins
-        return "LANG=C.UTF-8 \(extra)\(PluginStore.remoteDirEnvironment) \(python) \(remotePath(config.remoteWatcherPath))"
+        // 浏览器开在这台电脑上：远端 watcher 不起浏览器，入口的连接都经反向转发接回来
+        let browser = AgentSkill.browserOnClient ? "CCPULSE_BROWSER_REMOTE=1 CCPULSE_BROWSER_TUNNEL=\(browserTunnelPort) " : ""
+        return "LANG=C.UTF-8 \(extra)\(browser)\(PluginStore.remoteDirEnvironment) \(python) \(remotePath(config.remoteWatcherPath))"
     }
 
     private func runSSH(captureOutput: Bool,

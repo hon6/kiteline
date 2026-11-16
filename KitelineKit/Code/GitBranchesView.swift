@@ -19,7 +19,7 @@ struct GitBranchesView: View {
             } else if let error = store.loadError {
                 LoadFailed(error: error) { await store.refresh() }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonPage(style: .list(6, lead: .icon, lines: 1))
             }
         }
         .codeAsks($ask, $nameAsk)

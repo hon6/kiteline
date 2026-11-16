@@ -120,10 +120,10 @@ public sealed class SettingsWindow : Window
     /// 先放一个转圈，数据回来再画
     static Control Loading(Func<Task<Control>> build)
     {
-        var host = new ContentControl { Content = new Spinner(18).HAlign(HorizontalAlignment.Center).Margin(0, 60, 0, 0) };
+        var host = new ContentControl { Content = Skeleton.Page(SkeletonKind.Form, count: 6) };
         Dispatcher.UIThread.Post(async () =>
         {
-            try { host.Content = await build(); }
+            try { host.Content = (await build()).FadeIn(); }
             catch (Exception e) { host.Content = Form.Section(null, [], e.Message); }
         });
         return host;
@@ -201,6 +201,24 @@ public sealed class SettingsWindow : Window
             Form.Toggle(L("安装任务阶段技能"), config["installStageSkill"] is null || config.Truthy("installStageSkill"), on => Set("installStageSkill", on)),
             Form.Row(L("其他编程 agent"), Form.Button(L("在「插件」中管理"), () => Select("plugins"))),
         ], L("技能会装给这台电脑和远端电脑上的各个编程 agent（Claude Code、Codex、OpenCode、DeepSeek Harness 等）。截图技能使 agent 回复时尽量附带相关截图；网页测试技能使 agent 完成网页功能后在浏览器中实际操作一遍，并发来带截图的测试报告；待办与关键信息技能使 agent 把需要以后处理的事加入待办，并把账号、密码等关键信息单独发来，方便收藏；任务阶段技能使 agent 按任务的实际做法规划步骤，并在进入每一步时主动报告，会话列表据此显示「2/4 开发中」；Claude Code 进入下一步却没有报告时，Kiteline 会提醒它补报（未安装时按 agent 的操作自动识别）。各 agent 的接入、开关和兼容情况在「插件」页查看和管理。")));
+        // Agent 浏览器（同 Mac 版）：开在哪、最多几个、空闲多久关闭
+        var places = new[] { ("client", L("这台电脑")), ("server", L("Agent 所在的电脑")) };
+        var placeBox = new ComboBox { Width = 180, ItemsSource = places.Select(p => p.Item2).ToList(), SelectedIndex = config.Str("browserOn") == "server" ? 1 : 0 };
+        placeBox.SelectionChanged += (_, _) => { if (placeBox.SelectedIndex >= 0) Set("browserOn", places[placeBox.SelectedIndex].Item1); };
+        var counts = new[] { 1, 2, 3, 4, 5, 6, 8, 10, 12, 16 };
+        var countBox = new ComboBox { Width = 120, ItemsSource = counts.Select(n => string.Format(L("{0} 个"), n)).ToList(),
+                                      SelectedIndex = Math.Max(0, Array.IndexOf(counts, config.Int("browserMax") ?? 4)) };
+        countBox.SelectionChanged += (_, _) => { if (countBox.SelectedIndex >= 0) Set("browserMax", counts[countBox.SelectedIndex]); };
+        var idles = new[] { (5, L("5 分钟")), (10, L("10 分钟")), (30, L("30 分钟")), (60, L("1 小时")) };
+        var idleBox = new ComboBox { Width = 120, ItemsSource = idles.Select(i => i.Item2).ToList(),
+                                     SelectedIndex = Math.Max(0, Array.FindIndex(idles, i => i.Item1 == (config.Int("browserIdle") ?? 10))) };
+        idleBox.SelectionChanged += (_, _) => { if (idleBox.SelectedIndex >= 0) Set("browserIdle", idles[idleBox.SelectedIndex].Item1); };
+        form.Children.Add(Form.Section(L("Agent 浏览器"), [
+            Form.Row(L("浏览器运行在"), placeBox),
+            Form.Row(L("最多同时打开"), countBox),
+            Form.Row(L("空闲多久后关闭"), idleBox),
+            Form.Toggle(L("录下浏览器操作，可以回放"), config["browserRecord"] is null || config.Truthy("browserRecord"), on => Set("browserRecord", on)),
+        ], L("Agent 操作网页时使用 Kiteline 提供的浏览器，会话中会显示实时画面，可以放大查看，也可以接管操作。选择「这台电脑」时，远端服务器上的会话也使用这台电脑上的浏览器，网页的登录状态保存在这台电脑上，服务器上不运行浏览器；选择「Agent 所在的电脑」时，浏览器运行在会话所在的电脑上。浏览器在 Agent 首次使用时打开，空闲到设定时间后自动关闭，同时打开的数量还会根据可用内存自动减少。录下的操作可以倍速回放、跳过等待，只保存画面有变化的部分，保留 3 天。")));
         form.Children.Add(Form.Section(L("启动"), [
             Form.Toggle(OperatingSystem.IsWindows() ? L("开机时自动启动 Kiteline") : L("登录时自动启动 Kiteline"), status.Truthy("autostart"),
                 on => Post("/api/desktop/settings", new JsonObject { ["autostart"] = on })),

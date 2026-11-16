@@ -91,7 +91,7 @@ public sealed class NavSheet
         var host = new ContentControl();
         async void Run()
         {
-            host.Content = new Spinner(18).HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center);
+            host.Content = Skeleton.Page(SkeletonKind.Text, count: 10).Margin(16, 0, 16, 0);
             try { host.Content = await make(); }
             catch (Exception e)
             {

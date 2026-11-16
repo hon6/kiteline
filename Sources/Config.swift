@@ -95,6 +95,7 @@ enum ConfigKey: String, CodingKey {
     case sshHost, sshPort, sshIdentityFile, remotePython, remoteWatcherPath, peerId, peerSource
     // 手机访问
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
+    case browserOn, browserMax, browserIdle, browserRecord
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
     case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal
     case quietStart, quietEnd, mutedSessions, pinnedSessions, markedSessions, myName, avatar, remoteEnabled, relayURL, watch, usageStats
@@ -126,6 +127,13 @@ struct MobileConfig: Codable, Equatable {
     var installStageSkill: Bool = true
     /// 每台机器上装了 OpenCode 的，自动给它装 Kiteline 插件（手机才看得到、操作得了 OpenCode 的会话）；关掉时 watcher 会删掉装过的
     var installOpenCodePlugin: Bool = true
+    /// agent 用的浏览器开在哪：client = 用户操作的这台电脑（远端会话经 ssh 反向转发用它，默认）；server = agent 所在的电脑（Remote-SSH 服务器）
+    var browserOn: String = "client"
+    /// 最多同时开几个浏览器（再按可用内存往下压）、空闲多少分钟回收
+    var browserMax: Int = 4
+    var browserIdle: Int = 10
+    /// 录下浏览器操作，可以回放（只存画面变了的帧，保留 3 天）
+    var browserRecord: Bool = true
     /// 同时开一个 HTTPS 端口（本机签发证书）：iOS 网页推送必须走 HTTPS
     var httpsEnabled: Bool = true
     /// 0 = 普通端口 + 1
@@ -248,6 +256,10 @@ struct MobileConfig: Codable, Equatable {
         installTodoSkill = flag(.installTodoSkill, true)
         installStageSkill = flag(.installStageSkill, true)
         installOpenCodePlugin = flag(.installOpenCodePlugin, true)
+        browserOn = text(.browserOn, "client") == "server" ? "server" : "client"
+        browserMax = max(1, min(16, (try? c.decodeIfPresent(Int.self, forKey: .browserMax)) ?? nil ?? 4))
+        browserIdle = max(1, min(240, (try? c.decodeIfPresent(Int.self, forKey: .browserIdle)) ?? nil ?? 10))
+        browserRecord = flag(.browserRecord, true)
         httpsEnabled = flag(.httpsEnabled, true)
         httpsPort = (try? c.decodeIfPresent(Int.self, forKey: .httpsPort)) ?? nil ?? 0
         pushContact = text(.pushContact, "mailto:ccpulse@users.noreply.github.com")

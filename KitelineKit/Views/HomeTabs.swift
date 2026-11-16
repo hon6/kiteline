@@ -55,12 +55,22 @@ struct TabBadgeProbe: View {
             // 只在真的从圆钮展开时补动画：本来就展开着（没翻多远就往回滑）再揭开一遍会闪一下。
             // 系统没有「是否收起」的公开接口，比较切换前后底栏里看得见的图标、文字横跨多宽
             let before = Self.visibleSpan(bar.tabBar)
+            // 收起时底栏里只有圆钮（48×48 的一块），切换后换成整条的托盘，两个不是同一个视图
+            let from = Self.platter(bar.tabBar)?.frame
             bar.tabBarMinimizeBehavior = .never
             bar.tabBar.layoutIfNeeded()
             let after = Self.visibleSpan(bar.tabBar)
-            if Self.animated, after > before + 60 { Self.grow(bar.tabBar) }
+            let platter = Self.platter(bar.tabBar)
+            if Self.animated, after > before + 60 {
+                if let platter, let from, platter.frame.width > from.width + 60 {
+                    Self.stretch(platter, from: from)
+                } else {
+                    Self.grow(bar.tabBar)
+                }
+            }
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(450))
+                // 等展开动画（约 0.5 秒）走完再换回，别中途打断
+                try? await Task.sleep(for: .milliseconds(600))
                 if self.pulse == id { bar.tabBarMinimizeBehavior = .onScrollDown }
             }
             return
@@ -72,7 +82,28 @@ struct TabBadgeProbe: View {
         }
     }
 
-    /// 从左下角的圆钮往右揭开成整条（系统收起动画倒着放的样子）：遮罩从圆钮那么宽弹到整条，图标不变形；带一点淡入。
+    /// 底栏里那块玻璃托盘（装着五个页签按钮的那一块；玻璃底是它自己的图层画的，挂遮罩管不住，录屏看过）。
+    /// 收起时它缩成圆钮那么大，展开时撑满
+    static func platter(_ bar: UITabBar) -> UIView? {
+        bar.subviews.filter { !$0.isHidden && $0.bounds.height > 30 }.max { $0.bounds.width < $1.bounds.width }
+    }
+
+    /// 展开动画：托盘从圆钮的位置大小用弹簧撑回整条，玻璃形状跟着变，里面的按钮原地被揭开（内容层随托盘裁切）；
+    /// 弹簧略带过冲，到头弹一下，和系统收起成圆钮、点页签时的那一下一样（11-16：展开太快看不到、没有弹一下，
+    /// 收起和展开时长要一样）。（用户 11-16 第二次：还是太快，改慢到 0.9 秒；第三次定成 0.25 秒：撑满整条 0.25 秒，录屏量过）
+    static func stretch(_ view: UIView, from: CGRect) {
+        let to = view.frame
+        view.layer.removeAllAnimations()
+        // 不在这里重新排版：按钮一直排在整条的位置上，只是被托盘逐渐揭开（排版跟着窄的托盘走，图标会挤成一团，录屏看过）
+        UIView.performWithoutAnimation { view.frame = from }
+        // 用「感知时长 + 回弹」的弹簧：老接口 0.55 秒 / 阻尼 0.7 前 0.15 秒就撑满了，用户 11-16 仍嫌快
+        UIView.animate(springDuration: 0.55, bounce: 0.22, initialSpringVelocity: 0, delay: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            view.frame = to
+        }
+    }
+
+    /// 找不到托盘时的退路：从左下角的圆钮往右揭开成整条（系统收起动画倒着放的样子）：遮罩从圆钮那么宽弹到整条，图标不变形；带一点淡入。
     /// （直接压扁再弹开会把图标挤成细条，录屏看过不好看）
     static func grow(_ view: UIView) {
         let b = view.bounds

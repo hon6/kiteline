@@ -123,12 +123,13 @@ struct UsageReportView: View {
                         Label(ServerLang.ui(error), systemImage: "exclamationmark.triangle").font(.app(size: 11.5)).foregroundStyle(.secondary)
                     }
                 } else {
-                    ProgressView("正在统计各机器的用量…").frame(maxWidth: .infinity).padding(.top, 80)
+                    SkeletonPage("正在统计各机器的用量…", style: limits.isEmpty ? .usage : .usageStats, padded: false)
                 }
             }
             .padding(.horizontal, 28).padding(.vertical, 22)
             .frame(maxWidth: 900).frame(maxWidth: .infinity)
         }
+        .animation(.skeletonFade, value: model.payload == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("用量")
         .navigationSubtitle(model.days == 1 ? "今天" : "最近 \(model.days) 天")
         .toolbar {

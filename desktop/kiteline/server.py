@@ -222,7 +222,7 @@ class MobileServer:
 
     def publish(self, event, payload):
         # 对话增量、会话之间的消息全是内容：英文连接也原样发，只换其中电脑生成的事件提示（同 /api/history）
-        if event in ("peers", "term"):   # 终端输出原样转（没有界面文字）
+        if event in ("peers", "term", "term_open", "term_meta", "browser_frame"):   # 终端输出、浏览器画面原样转（没有界面文字）
             english = None
         elif event == "entries":
             english = (lambda: self._event_text(event, dict(payload, items=localize_events(payload.get("items") or [])))) \
@@ -1001,6 +1001,15 @@ def r_close(s, request, *_):
     return Response.json({"ok": outcome.ok, "message": outcome["message"]}, 200 if outcome.ok else 409)
 
 
+def r_restart(s, request, *_):
+    """重启会话（单个 ?key=，批量 {keys: [...]}）：空闲的马上重启，正在工作的等这一轮做完（见 restart.py）"""
+    keys = [k for k in (request.json or {}).get("keys") or [] if isinstance(k, str)]
+    if not keys and request.query.get("key"):
+        keys = [request.query["key"]]
+    result = s.app.restarter.restart(keys)
+    return Response.json(dict(result, ok=not result["failed"], error=(result["failed"][0]["error"] if result["failed"] else "")))
+
+
 def r_answer(s, request, *_):
     record, source = s.resolve(request)
     if not record:
@@ -1137,11 +1146,97 @@ def r_repo_post(s, request, *_):
     return _git(s, request, payload, timeout=200)
 
 
+def r_browser(s, request, *_):
+    """会话浏览器：看画面（watch 每 5 秒续）、接管时的点击和按键、切标签页、接管 / 交还、指令列表（浏览器开在会话所在那台上，
+    见 watcher 的 BrowserPool；同 Mac 的 MobileServer.sessionBrowser）"""
+    payload = dict(request.json or {})
+    payload["cmd"] = "browser"
+    target = s.app.store.resolve_any(request.query.get("key", ""))
+    if not target:
+        return Response.error("会话不存在，或其所在机器离线", 404)
+    session_id, source = target
+    payload["sessionId"] = session_id
+    op = payload.get("op") or ""
+    from . import watcher as watcher_module
+    if watcher_module.BROWSER["on"] != "server" and source.kind != "local" and op != "actions":
+        # 远端会话、浏览器开在这台电脑上：画面、点击、标签页找本机 watcher；指令列表找会话所在那台；接管 / 交还两边都发
+        local = next((x for x in s.app.store.sources.values() if x.kind == "local" and x.live), None)
+        if not local:
+            return Response.error("这台电脑上的浏览器没在运行", 502)
+        if op == "control":
+            try:
+                source.request(dict(payload), timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            response = local.request(payload, timeout=20 if op == "watch" else 10)
+        except Exception as exc:  # noqa: BLE001
+            return Response.error(str(exc), 502)
+        if op == "watch":
+            try:
+                response["actions"] = source.request({"cmd": "browser", "op": "actions", "sessionId": session_id}, timeout=10).get("actions") or []
+            except Exception:  # noqa: BLE001
+                pass
+        response.pop("event", None)
+        response.pop("id", None)
+        return Response.json(response)
+    try:
+        response = source.request(payload, timeout=20 if op == "watch" else 10)
+    except Exception as exc:  # noqa: BLE001
+        return Response.error(str(exc), 502)
+    response.pop("event", None)
+    response.pop("id", None)
+    return Response.json(response)
+
+
 def r_term(s, request, *_):
-    """会话里的终端：开、列、读最近的输出、按键、改大小、关（开在会话所在的电脑上，见 watcher 的 term）"""
+    """会话里的终端：开、列、读最近的输出、按键、改大小、关（开在会话所在的电脑上，见 watcher 的 term）。
+    开在别的电脑上、挂在这个会话下的（agent 的 term run --on）按终端 id 转到实际那台，列表把两边合起来；每个终端补上设备名"""
     payload = dict(request.json or {})
     payload["cmd"] = "term"
-    return _git(s, request, payload, timeout=20)
+    relay = s.app.terms
+    elsewhere = relay.route(payload.get("term"))
+    if elsewhere:
+        source = s.app.store.source(elsewhere)
+        if not source or not source.live:
+            return Response.error("终端所在的「%s」没连上" % relay.device_name(elsewhere), 502)
+        try:
+            response = source.request(payload, timeout=20)
+        except Exception as exc:  # noqa: BLE001
+            return Response.error(str(exc), 502)
+        response.pop("event", None)
+        response.pop("id", None)
+        if response.get("term"):
+            response["term"] = relay.label(response["term"], elsewhere)
+        return Response.json(response)
+    found = s.session_cwd(request)
+    if isinstance(found, Response):
+        return found
+    session_id, source, cwd = found
+    payload.update({"sessionId": session_id, "cwd": cwd})
+    try:
+        response = source.request(payload, timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        return Response.error(str(exc), 502)
+    response.pop("event", None)
+    response.pop("id", None)
+    response["device"] = relay.device_name(source.id)
+    if isinstance(response.get("term"), dict):
+        response["term"] = relay.label(response["term"], source.id)
+    if (payload.get("op") or "list") == "list":
+        terms = [relay.label(t, source.id) for t in response.get("terms") or []]
+        key = request.query.get("key", "")
+        for other_id, ids in relay.foreign_terms(key).items():
+            other = s.app.store.source(other_id)
+            if not other or not other.live:
+                continue
+            try:
+                listed = other.request({"cmd": "term", "op": "list", "sessionId": session_id}, timeout=10)
+            except Exception:  # noqa: BLE001
+                continue
+            terms += [relay.label(t, other_id) for t in listed.get("terms") or [] if t.get("term") in ids]
+        response["terms"] = sorted(terms, key=lambda t: t.get("order") or t.get("createdAt") or 0)
+    return Response.json(response)
 
 
 def r_fs(s, request, *_):
@@ -1945,7 +2040,7 @@ ROUTES = {
     ("POST", "/api/hosted/move"): r_hosted_move,
     ("POST", "/api/answer"): r_answer, ("POST", "/api/voice"): r_voice, ("GET", "/api/voices"): r_voices,
     ("GET", "/api/voice-audio"): r_voice_audio, ("GET", "/api/git"): r_git, ("GET", "/api/git/diff"): r_git_diff,
-    ("GET", "/api/repo"): r_repo_get, ("POST", "/api/repo"): r_repo_post, ("POST", "/api/fs"): r_fs, ("POST", "/api/term"): r_term,
+    ("GET", "/api/repo"): r_repo_get, ("POST", "/api/repo"): r_repo_post, ("POST", "/api/fs"): r_fs, ("POST", "/api/term"): r_term, ("POST", "/api/restart"): r_restart, ("POST", "/api/browser"): r_browser,
     ("GET", "/api/files"): r_files, ("GET", "/api/file"): r_file, ("GET", "/api/files/find"): r_files_find, ("GET", "/api/download"): r_download,
     ("GET", "/api/tests"): r_tests, ("GET", "/api/session-meta"): r_session_meta, ("GET", "/api/sessions"): r_sessions,
     ("GET", "/api/search"): r_search, ("GET", "/api/projects"): r_projects, ("GET", "/api/dirs"): r_dirs, ("POST", "/api/dirs"): r_dirs, ("GET", "/api/repo-info"): r_repo_info,

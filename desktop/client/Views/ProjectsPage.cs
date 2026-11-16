@@ -44,6 +44,7 @@ public sealed class ProjectsPage : Panel
     static List<ProjectItem> projects = [];
     static List<string> errors = [];
     static bool loading = true;
+    bool skeletonShown;
     static Dictionary<string, double> cost7 = [];
     static readonly Dictionary<string, List<PastItem>> past = [];
     static string filter = "all";
@@ -159,8 +160,11 @@ public sealed class ProjectsPage : Panel
     {
         summaryText.Text = Summary;
         bar.Subtitle = Summary;
-        spinner.IsVisible = loading;
+        spinner.IsVisible = loading && projects.Count > 0;
         list.Children.Clear();
+        // 头一回读：骨架（同真实的项目行）；读回来时淡入
+        if (projects.Count == 0 && loading) { list.Children.Add(Skeleton.Page(SkeletonKind.Projects, L("正在读取各设备上的项目…"))); skeletonShown = true; return; }
+        if (skeletonShown) { skeletonShown = false; list.FadeIn(); }
         var shown = Shown;
         for (var i = 0; i < shown.Count; i++)
         {
@@ -267,7 +271,7 @@ public sealed class ProjectsPage : Panel
             }
         }
         stack.Children.Add(Ui.Text(L("最近的会话"), 11, FontWeight.SemiBold, "Text2").Margin(0, 2, 0, 0));
-        if (recent is null) stack.Children.Add(new Spinner(14).HAlign(HorizontalAlignment.Left));
+        if (recent is null) stack.Children.Add(new SkeletonView(SkeletonKind.Rows, 3));
         else if (recent.Count == 0) stack.Children.Add(Ui.Text(L("没有已结束的会话"), 12, color: "Text3"));
         else foreach (var item in recent.Take(8)) stack.Children.Add(HistoryPage.Row(item));
         return stack;

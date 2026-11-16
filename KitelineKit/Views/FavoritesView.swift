@@ -6,6 +6,8 @@ struct FavoritesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openRoute) private var open
     @State private var query = ""
+    /// 这次打开从电脑读过一回（之前列表空着是「正在读取」，不是「暂无收藏」）
+    @State private var fetched = false
 
     var body: some View {
         let items = filtered
@@ -19,12 +21,15 @@ struct FavoritesView: View {
             }
         }
         .overlay {
-            if model.favorites.items.isEmpty {
+            if model.favorites.items.isEmpty, !fetched {
+                SkeletonPage(style: .favorites(4))
+            } else if model.favorites.items.isEmpty {
                 emptyState
             } else if items.isEmpty {
                 ContentUnavailableView.search(text: query)
             }
         }
+        .animation(.skeletonFade, value: fetched)   // 读回来时骨架淡出、内容淡入
         // 别处（手机、电脑）收藏 / 取消了一条，推过来时行平滑挪动
         .animation(.snappy, value: model.favorites.items.map(\.id))
         .panelSearch($query, prompt: L("搜索收藏的内容、会话"))
@@ -32,7 +37,7 @@ struct FavoritesView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task { await model.refreshFavorites() }
+        .task { await model.refreshFavorites(); fetched = true }
         .refreshable { await model.refreshFavorites() }
     }
 

@@ -241,7 +241,7 @@ struct BragShareSheet: View {
                             .frame(maxWidth: .infinity)
                         controls(rendered)
                     } else {
-                        ProgressView(L("正在统计各台电脑的数据…")).frame(maxWidth: .infinity).padding(.top, 60)
+                        SkeletonPage("正在统计各台电脑的数据…", style: .cards(4))
                     }
                 }
                 .padding(16)

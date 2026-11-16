@@ -746,6 +746,37 @@ extension TerminalView {
     /// 
     /// - Parameter colors: this should be an array of 16 values that correspond to the 16 ANSI colors,
     /// if the array does not contain 16 elements, it will not do anything
+    // Kiteline 改：最低对比度的属性 minimumContrastRatio 在 iOSTerminalView / MacTerminalView 里（扩展里不能放存储属性）
+    func kitelineEnsureContrast (_ fg: TTColor, on bg: TTColor, ratio: CGFloat) -> TTColor
+    {
+        guard let f = Self.kitelineRGB(fg), let b = Self.kitelineRGB(bg) else { return fg }
+        func lum (_ c: (CGFloat, CGFloat, CGFloat)) -> CGFloat {
+            func lin (_ v: CGFloat) -> CGFloat { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+            return 0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
+        }
+        func contrast (_ x: CGFloat, _ y: CGFloat) -> CGFloat { (max(x, y) + 0.05) / (min(x, y) + 0.05) }
+        let bl = lum(b)
+        if contrast(lum(f), bl) >= ratio { return fg }
+        let target: CGFloat = bl > 0.5 ? 0 : 1
+        var step: CGFloat = 0.1
+        while step <= 1.0 {
+            let c = (f.0 + (target - f.0) * step, f.1 + (target - f.1) * step, f.2 + (target - f.2) * step)
+            if contrast(lum(c), bl) >= ratio || step >= 1.0 {
+                return TTColor.make(red: c.0, green: c.1, blue: c.2, alpha: 1.0)
+            }
+            step += 0.1
+        }
+        return fg
+    }
+
+    static func kitelineRGB (_ color: TTColor) -> (CGFloat, CGFloat, CGFloat)?
+    {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let cg = color.cgColor.converted(to: space, intent: .defaultIntent, options: nil),
+              let parts = cg.components, parts.count >= 3 else { return nil }
+        return (parts[0], parts[1], parts[2])
+    }
+
     public func installColors (_ colors: [Color])
     {
         terminal.installPalette(colors: colors)
@@ -902,6 +933,10 @@ extension TerminalView {
         // Apply dim/faint attribute (SGR 2)
         if flags.contains (.dim) {
             fgColor = fgColor.dimmedColor (towards: bgColor)
+        }
+        // Kiteline 改：最低对比度（同 VS Code 的 terminal.integrated.minimumContrastRatio）
+        if minimumContrastRatio > 1 {
+            fgColor = kitelineEnsureContrast(fgColor, on: bgColor, ratio: minimumContrastRatio)
         }
         var nsattr: [NSAttributedString.Key:Any] = [
             .font: tf,

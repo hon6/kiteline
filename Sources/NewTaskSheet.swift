@@ -169,7 +169,8 @@ struct NewTaskSheet: View {
             // 理想高度按行数（最多约 6 行）：项目少时不留大片空白、多时不急着在里面滚；面板高度随之自适应（11-08）。
             // 面板拉高时多出来的给项目列表
             .frame(minHeight: 100, idealHeight: listIdealHeight, maxHeight: .infinity)
-            .overlay { if loading { ProgressView() } }
+            .overlay { if loading { SkeletonShape(style: .list(4, trail: .none)).padding(12).frame(maxHeight: .infinity, alignment: .top).transition(.opacity) } }
+            .animation(.skeletonFade, value: loading)   // 读回来时骨架淡出、内容淡入
             // 选中的被筛掉了就不选；筛得只剩一个时直接选上
             .onChange(of: shown.map(\.id)) { _, ids in
                 if let current = selection, !ids.contains(current) { selection = nil }
@@ -201,11 +202,16 @@ struct NewTaskSheet: View {
                     .fixedSize()
                     .help("除 Claude Code 外，也可选择这台电脑上已安装的其他命令行 Agent，由 Kiteline 在后台运行")
                 }
+            }
+            // 单独一行：和定时、Agent 挤在一行时 600 宽放不下，会被压成竖排
+            HStack {
                 Toggle("在独立分支中进行（git worktree）", isOn: $isolated)
                     .toggleStyle(.checkbox)
                     .font(.app(size: 12))
+                    .fixedSize()
                     .disabled(timing != "now")
                     .help("在仓库旁新建 worktree 及以 tars/ 开头的分支，Claude 仅在其中修改，不影响主目录中正在进行的改动")
+                Spacer()
             }
             HStack {
                 if let message = message {

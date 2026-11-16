@@ -30,6 +30,7 @@ final class AppState {
         AgentSkill.todoEnabled = config.mobile.installTodoSkill
         AgentSkill.stageEnabled = config.mobile.installStageSkill
         AgentSkill.openCodePlugin = config.mobile.installOpenCodePlugin
+        AgentSkill.browser = (config.mobile.browserOn, config.mobile.browserMax, config.mobile.browserIdle, config.mobile.browserRecord)
         store.delegate = self
         mobile.onClientsChange = { [weak self] in
             guard let self = self else { return }
@@ -139,6 +140,7 @@ final class AppState {
         AgentSkill.todoEnabled = newConfig.mobile.installTodoSkill
         AgentSkill.stageEnabled = newConfig.mobile.installStageSkill
         AgentSkill.openCodePlugin = newConfig.mobile.installOpenCodePlugin
+        AgentSkill.browser = (newConfig.mobile.browserOn, newConfig.mobile.browserMax, newConfig.mobile.browserIdle, newConfig.mobile.browserRecord)
         mobile.update(config: newConfig.mobile)
         // 端口、令牌可能变了：主窗口的原生对话页跟着重连（没变时什么也不做）
         DispatchQueue.main.async { NativeConversation.setUp() }
@@ -214,6 +216,7 @@ final class AppState {
         AgentSkill.todoEnabled = next.mobile.installTodoSkill
         AgentSkill.stageEnabled = next.mobile.installStageSkill
         AgentSkill.openCodePlugin = next.mobile.installOpenCodePlugin
+        AgentSkill.browser = (next.mobile.browserOn, next.mobile.browserMax, next.mobile.browserIdle, next.mobile.browserRecord)
         mobile.update(config: next.mobile)
         mobile.publishState()   // 快捷短语等设置要同步到已连着的手机
         onConfigChange?(next)
@@ -429,7 +432,11 @@ final class AppState {
             }
             // 终端（term）开在会话所在的机器上，哪家 agent 的会话都能开；只有这一版起的电脑端才有，手机见到才显示终端按钮
             item["caps"] = snap.capsPayload + ["term"]
-            if let count = snap.terminals, count > 0 { item["terminals"] = count }
+            // 开着的终端：会话所在那台上的 + 开在别的电脑上、挂在这个会话下的（term run --on）
+            let terminals = (snap.terminals ?? 0) + TermRelay.shared.count(record.key)
+            if terminals > 0 { item["terminals"] = terminals }
+            if let browser = BrowserRelay.shared.payload(snapshot: snap.browser, sessionId: snap.sessionId,
+                                                         local: record.kind == .local || !AgentSkill.browserOnClient) { item["browser"] = browser }   // agent 在用 Kiteline 的浏览器：对话页浮出实时画面小窗
             if let options = snap.pendingOptions, !options.isEmpty, snap.act == .waiting { item["pendingOptions"] = options.map(\.payload) }
             if let error = snap.error, snap.act == .idle {
                 item["error"] = error.display
@@ -480,7 +487,7 @@ final class AppState {
             // hostedSetup = 远端电脑上后台运行 Claude Code：按设备检测出口、开关，把会话转到后台（/api/hosted/*）
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
             // renameSource = 手机能给设备起别名（/api/sources/rename，记在设备所在的电脑上）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource"]
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart"]
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
             "hosted": ["tipOff": config.mobile.hostedTipOff],
         ]
@@ -606,14 +613,34 @@ extension AppState: SourceConnectionDelegate {
                 let links = PeerLinks.shared.ingest(sourceId: source.config.id, raw)
                 if !links.isEmpty { self.mobile.publish(event: "peers", payload: ["links": links]) }
             }
-        case "term", "term_exit":
-            // 会话里的终端：输出、结束直接转给手机（和 Mac 主窗口），键与会话列表里的 key 一致
+        case "term", "term_exit", "term_open", "term_meta":
+            // 会话里的终端：输出、结束、agent 新开的（term run）转给手机和主窗口，键与会话列表里的 key 一致；
+            // 开在别的电脑上的（term run --on）归到发起的会话下、输出转回发起那台（见 TermRelay）
+            TermRelay.shared.event(event.kind, event.raw, from: source)
+        case "browser_state":
+            // 本机 watcher 开着的浏览器：远端会话（浏览器开在这台电脑上）的小窗靠它补地址、标题
+            if source.config.kind == .local { BrowserRelay.shared.update(event.raw) }
+        case "browser_frame", "browser_ask":
+            // 会话浏览器：画面（有人在看时才有）原样转给手机和主窗口；agent 请用户接管时按「需要确认」提醒。
+            // 远端会话的画面是本机 watcher 推的：按会话 id 找到它的 key
             guard let sessionId = event.raw["sessionId"] as? String else { return }
+            let key = BrowserRelay.shared.key(source: source, sessionId: sessionId)
             var payload = event.raw
             payload.removeValue(forKey: "event")
             payload.removeValue(forKey: "sessionId")
-            payload["key"] = "\(source.config.id)#\(sessionId)"
-            DispatchQueue.main.async { self.mobile.publish(event: event.kind, payload: payload) }
+            payload["key"] = key
+            DispatchQueue.main.async {
+                self.mobile.publish(event: event.kind, payload: payload)
+                if event.kind == "browser_ask", let record = self.store.record(withKey: key) {
+                    let note = (event.raw["note"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.mobile.notify(kind: "attention", title: record.snapshot.displayTitle,
+                                       body: note.isEmpty ? "请接管浏览器" : "请接管浏览器：\(note)", key: key)
+                }
+            }
+        case "term_run":
+            TermRelay.shared.run(event.raw, from: source)
+        case "term_run_cancel":
+            TermRelay.shared.cancel(event.raw, from: source)
         case "entries", "reset":
             // 对话增量直接转给手机，键与会话列表里的 key 一致
             guard let sessionId = event.raw["sessionId"] as? String else { return }

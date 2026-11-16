@@ -278,6 +278,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add(L("模型和思考等级…"), #selector(menuModel), "", .reply)
         add(L("压缩上下文（/compact）…"), #selector(menuCompact), "", .reply)
         add(L("中断 %@…", "Claude"), #selector(menuStop), ".", .busy)
+        add(L("重启会话"), #selector(menuRestartSession), "", .reply)
+        add(L("批量重启会话…"), #selector(menuBatchRestart), "", .conversation)
         add(L("关闭会话…"), #selector(menuCloseSession), "", .reply)
         session.addItem(.separator())
         add(L("跳到最新"), #selector(menuBottom), "", .conversation)
@@ -392,6 +394,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuCompact() { if let key = current?.live?.id { KitelineModel.shared.compact(key) } }
     @objc private func menuJump() { if let key = current?.live?.id { KitelineModel.shared.jump(key) } }
     @objc private func menuCloseSession() { if let key = current?.live?.id { KitelineModel.shared.close(key) } }
+    @objc private func menuRestartSession() { if let key = current?.live?.id { KitelineModel.shared.restart([key]) } }
+    @objc private func menuBatchRestart() { MainWindowController.shared.show(); KitelineModel.shared.showBatchRestart = true }
 
     @objc private func menuNewTab() { if showingConversation { MainActor.assumeIsolated { _ = KitelineKit.tab(.new) } } }
     @objc private func menuNextTab() { if showingConversation { MainActor.assumeIsolated { _ = KitelineKit.tab(.next) } } }

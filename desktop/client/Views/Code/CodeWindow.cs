@@ -510,7 +510,7 @@ public sealed partial class CodeWindow
             { Kind: "diff" } when diffs.TryGetValue(tab.Id, out var payload) => Centered(Ui.Text(payload.Binary ? L("无法显示二进制文件的差异。") : L("无差异"), 13, color: "Text2")),
             { Kind: "history" } => HistoryView(tab.Path.Length > 0 ? tab.Path : null),
             { Kind: "commit" } => CommitView(tab.Commit ?? ""),
-            _ => Centered(new Spinner(18)),
+            _ => Skeleton.Page(SkeletonKind.Code, count: 20).Margin(16, 0, 16, 0),
         };
     }
 

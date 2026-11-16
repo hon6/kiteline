@@ -227,6 +227,15 @@ enum SelfTest {
             Limits.inject(fakeLimits())
             UsageReportModel.shared.inject(fakeUsage())
             root = AnyView(UsageReportView().frame(width: 880, height: 1100).background(Color(nsColor: .windowBackgroundColor)))
+        case "skeleton":
+            // 骨架屏自测：TARS_RENDER_SKELETON=history|today|usage|usageStats|projects|todos|favorites|files|changes|code|text|form|messages|cards|list
+            let styles: [String: SkeletonStyle] = [
+                "history": .history, "today": .today, "usage": .usage, "usageStats": .usageStats, "projects": .projects(), "todos": .todos(),
+                "favorites": .favorites(), "files": .files(), "changes": .changes(), "code": .code(), "text": .text(15), "form": .form(),
+                "messages": .messages(), "cards": .cards(), "list": .list(),
+            ]
+            let style = styles[ProcessInfo.processInfo.environment["TARS_RENDER_SKELETON"] ?? ""] ?? .list()
+            root = AnyView(SkeletonPage(style: style).frame(width: 820, height: 760).background(Color(nsColor: .windowBackgroundColor)))
         case "history":
             let now = Date().timeIntervalSince1970 * 1000
             let samples: [[String: Any]] = [
@@ -528,13 +537,32 @@ extension SelfTest {
                 let start = window.frame, from = window.contentRect(forFrameRect: start).size
                 let steps = 30
                 window.perform(NSSelectorFromString("_startLiveResize"))
+                // 每一帧改大小（含排版、重画）花了多久、松手后那一下多久：写进日志（[capture] live 帧 …），比较拖动卡不卡
+                var costs: [Double] = []
                 for i in 1...steps {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.025 * Double(i)) {
                         let t = CGFloat(i) / CGFloat(steps)
                         var frame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: from.width + (wh[0] - from.width) * t, height: from.height + (wh[1] - from.height) * t))
                         frame.origin = NSPoint(x: name == "liveleft" ? start.maxX - frame.width : start.minX, y: start.maxY - frame.height)
+                        let began = CACurrentMediaTime()
                         window.setFrame(frame, display: true)
-                        if i == steps { window.perform(NSSelectorFromString("_endLiveResize")) }
+                        window.contentView?.layoutSubtreeIfNeeded()
+                        costs.append((CACurrentMediaTime() - began) * 1000)
+                        if i == steps {
+                            let ended = CACurrentMediaTime()
+                            window.perform(NSSelectorFromString("_endLiveResize"))
+                            window.contentView?.layoutSubtreeIfNeeded()
+                            window.displayIfNeeded()
+                            // 松手后对话页要再按新宽度排一次：排到下一轮主线程空下来为止
+                            DispatchQueue.main.async {
+                                window.contentView?.layoutSubtreeIfNeeded()
+                                window.displayIfNeeded()
+                                let settle = (CACurrentMediaTime() - ended) * 1000
+                                let sorted = costs.sorted()
+                                Log.write(String(format: "[capture] live 帧 平均 %.1f ms，p90 %.1f，最长 %.1f；松手 %.1f ms",
+                                                 costs.reduce(0, +) / Double(costs.count), sorted[Int(Double(sorted.count - 1) * 0.9)], sorted.last ?? 0, settle))
+                            }
+                        }
                     }
                 }
                 delay = 0.025 * Double(steps) + 1

@@ -23,6 +23,7 @@ public sealed class ChatView : Grid
     readonly ChatStore chat;
     readonly ScrollViewer scroll;
     readonly StackPanel list = new();
+    bool skeletonShown;
     readonly Border header = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     readonly Panel working = new();
     readonly Border content;
@@ -34,6 +35,8 @@ public sealed class ChatView : Grid
     readonly GoalStrip goalStrip = new();
     /// 排队的消息（见 QueueStrip）：在任务进展条上面
     readonly QueueStrip queueStrip = new();
+    /// 会话浏览器的小窗 / 放大画面（见 BrowserViews.cs）
+    readonly BrowserDock browserDock;
     /// 顶上浮着的提示「当前会话支持后台托管 Claude」（见 HostedSetup.Tip）
     readonly Border hostedTip = new() { VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(14, 8, 14, 0) };
     string? hostedSignature;
@@ -57,6 +60,7 @@ public sealed class ChatView : Grid
     {
         Key = key;
         chat = model.Chat(key);
+        browserDock = new BrowserDock(key);
         RowDefinitions = new RowDefinitions("*,Auto");
         this.Res(BackgroundProperty, "ChatBackground");
         var column = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom };
@@ -107,6 +111,9 @@ public sealed class ChatView : Grid
         deckBox.Res(Border.BackgroundProperty, "ChatBackground");
         SetRow(deckBox, 1);
         Children.Add(deckBox);
+        // agent 在用 Kiteline 的浏览器：右上角浮出实时画面小窗，放大到半个 / 整个会话时盖在对话和输入区上面
+        SetRowSpan(browserDock, 2);
+        Children.Add(browserDock);
 
         chat.PropertyChanged += ChatChanged;
         model.PropertyChanged += ModelChanged;
@@ -189,10 +196,15 @@ public sealed class ChatView : Grid
         var rows = all.Count > limit ? all.GetRange(all.Count - limit, limit) : all;
         // 上面：（本地还有没显示的）查看更早的消息 / 加载中 / 查看更早的消息 / 已是最早的消息
         header.Child = rows.Count < all.Count ? new Tap(Ui.Text(L("查看更早的消息"), 12, color: "Accent").Pad(10), ShowEarlier, 6).HAlign(HorizontalAlignment.Center)
+            // 头一回打开（尤其是已结束的会话要从电脑上读记录）：先画几条消息的骨架，别一片空白
+            : chat.Loading && chat.Items.Count == 0 && !chat.Loaded ? Skeleton.Page(SkeletonKind.Messages, L("正在读取对话…"), 4).Margin(16, 6, 16, 0)
             : chat.Loading ? new Spinner(16).Pad(10).HAlign(HorizontalAlignment.Center)
             : chat.HasMore && chat.Loaded ? new Tap(Ui.Text(L("查看更早的消息"), 12, color: "Accent").Pad(10), LoadOlder, 6).HAlign(HorizontalAlignment.Center)
             : chat.Loaded && chat.Items.Count > 0 ? Ui.Text(L("— 已是最早的消息 —"), 11.5, color: "Text2").Pad(10).HAlign(HorizontalAlignment.Center)
             : null;
+        // 骨架换成消息时淡入（只在头一回读回来那一下）
+        if (header.Child is StackPanel { Children: [_, SkeletonView] }) skeletonShown = true;
+        else if (skeletonShown && rows.Count > 0) { skeletonShown = false; list.FadeIn(); }
         var next = new List<Control>(rows.Count);
         var used = new HashSet<string>();
         var agent = session?.Agent ?? Agents.DefaultId;
@@ -301,6 +313,7 @@ public sealed class ChatView : Grid
         stageStrip.Update(model.Connected ? session?.LiveStage : null, Bounds.Height);
         UpdateQueue();
         UpdateHostedTip();
+        browserDock.Update(session);
         var signature = session is null ? null : PromptCard.Current(Key, chat) + "|" + session.IsWaiting + session.CanReply + chat.AnsweredPrompt + session.Activity;
         if (signature == promptSignature && promptCard is not null == (session?.IsWaiting ?? false)) { UpdateWorking(session); return; }
         promptSignature = signature;

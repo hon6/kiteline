@@ -31,7 +31,7 @@ struct GuestShareSheet: View {
                         LookSegmented(selection: $hours, options: [(1, L("1 小时")), (24, L("24 小时")), (168, L("7 天"))])
                     }
                 } else {
-                    ProgressView().frame(maxWidth: .infinity)
+                    SkeletonShape(style: .form(3))
                 }
                 if let error {
                     Text(error).font(.ui(.footnote)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)

@@ -30,8 +30,10 @@ final class Speaker: NSObject {
 
     /// 正在读的消息 id（"sample" = 试听）
     private(set) var speaking: String?
+    /// 正在读的是哪个会话（会话列表在那一行标喇叭，看得出在读谁；试听、无归属的播报是 nil）
+    private(set) var speakingKey: String?
     weak var api: MacAPI?
-    private var queue: [(text: String, id: String)] = []
+    private var queue: [(text: String, id: String, key: String?)] = []
     private var run = 0
     /// 正在录音（按住说话、听写）：先不读，别和你说话撞在一起，读的声音也不会录进去
     private var listening = false
@@ -44,20 +46,20 @@ final class Speaker: NSObject {
     static var sample: String { L("首页卡片间距已调整为十六像素，测试全部通过。请查看截图，确认无误后我将提交。") }
 
     /// 点同一条：在读就停，没在读就读
-    func toggle(_ text: String, id: String) {
+    func toggle(_ text: String, id: String, key: String? = nil) {
         if speaking == id { stop(); return }
-        speak(text, id: id)
+        speak(text, id: id, key: key)
     }
 
-    func speak(_ text: String, id: String) {
+    func speak(_ text: String, id: String, key: String? = nil) {
         stop()
-        queue = [(text, id)]
+        queue = [(text, id, key)]
         next()
     }
 
     /// 排在后面读（自动朗读的新回复、别的会话的播报）
-    func enqueue(_ text: String, id: String) {
-        queue.append((text, id))
+    func enqueue(_ text: String, id: String, key: String? = nil) {
+        queue.append((text, id, key))
         if speaking == nil { next() }
     }
 
@@ -90,6 +92,7 @@ final class Speaker: NSObject {
     private func halt() {
         run += 1
         speaking = nil
+        speakingKey = nil
         #if os(iOS)
         player?.stop()
         player = nil
@@ -98,9 +101,10 @@ final class Speaker: NSObject {
     }
 
     private func next() {
-        guard !queue.isEmpty, !listening else { speaking = nil; return }
-        let (text, id) = queue.removeFirst()
+        guard !queue.isEmpty, !listening else { speaking = nil; speakingKey = nil; return }
+        let (text, id, key) = queue.removeFirst()
         speaking = id
+        speakingKey = key
         run += 1
         let current = run
         Task {

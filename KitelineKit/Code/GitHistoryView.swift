@@ -33,7 +33,7 @@ struct GitHistoryView: View {
                             .onAppear { if commit.id == commits.last?.id, more, !loading { Task { await load(more: true) } } }
                     }
                     if loading {
-                        ProgressView().padding()
+                        if commits.isEmpty { SkeletonShape(style: .list(8, lead: .avatar)).padding() } else { ProgressView().padding() }
                     } else if commits.isEmpty, error == nil {
                         Text(query.isEmpty ? L("还没有任何提交") : L("没有匹配的提交")).foregroundStyle(.secondary).padding(30)
                     }
