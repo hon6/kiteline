@@ -1,7 +1,7 @@
 {
  "id": "cursor",
  "name": "Cursor",
- "version": "1.0.1",
+ "version": "1.0.2",
  "summary": "Cursor 编辑器和命令行 agent：查看对话、状态和完整记录，从手机发消息、确认、拒绝和中断",
  "summaryEn": "Cursor editor and CLI agent: view chats, status and full history, and send, approve, reject or stop from your phone",
  "needs": [

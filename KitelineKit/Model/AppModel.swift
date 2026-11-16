@@ -9,6 +9,13 @@ import AppKit
 @Observable
 final class AppModel {
     let api: MacAPI
+    /// 手机直连的其他 Kiteline 电脑（设备维度里的「Kiteline 设备」，Model/LinkedHosts.swift）：请求按会话转给所在的那台
+    let hub = DeviceHub()
+    @ObservationIgnored var linkedHosts: [String: LinkedHost] = [:]
+    /// 设置里各台 Kiteline 设备的状态（名字、在线、版本）
+    var linkedStatus: [LinkedStatus] = []
+    /// 主电脑最近一份整份状态（和直连的电脑合成前）
+    @ObservationIgnored var primaryRaw: [String: Any]?
 
     // Mac 推来的状态（/api/state、事件流 state）
     private(set) var host = ""
@@ -101,7 +108,7 @@ final class AppModel {
     /// 输入框里没发出去的话：像微信一样留着，列表里显示「[草稿]」
     private(set) var drafts: [String: String]
     private var seen: [String: Double]
-    private var streamTask: Task<Void, Never>?
+    private(set) var streamTask: Task<Void, Never>?
     private var presenceTask: Task<Void, Never>?
     /// 开着的对话页定时报「打开过」（见 reportViewed）
     private var viewedTask: Task<Void, Never>?
@@ -118,7 +125,11 @@ final class AppModel {
     @ObservationIgnored private var stateRaw: [String: Any]?
     @ObservationIgnored private var stateSeq: Int?
     /// 世界模式打开时交给网页的整份状态（同 /api/state）
-    var stateJSON: Data? { stateRaw.flatMap { try? JSONSerialization.data(withJSONObject: $0) } }
+    var stateJSON: Data? {
+        guard let raw = stateRaw else { return nil }
+        // 有直连的其他电脑：给合成后的那份（世界里也看得到那几台的会话）
+        return try? JSONSerialization.data(withJSONObject: linkedHosts.isEmpty ? raw : combinedState(primary: raw).state)
+    }
     private var toastTask: Task<Void, Never>?
 
     /// 嵌在 Mac App 主窗口里（连 Mac 自己的服务）：不报「手机开着 App」（不然 Mac 不往手机推提醒）、不开远程访问、不测网速
@@ -135,6 +146,7 @@ final class AppModel {
     init(mac: PairedMac, embedded: Bool = false) {
         self.embedded = embedded
         api = MacAPI(mac: mac)
+        if !embedded { api.hub = hub }
         seen = UserDefaults.standard.dictionary(forKey: "seen") as? [String: Double] ?? [:]
         drafts = UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String] ?? [:]
         Speaker.shared.api = api
@@ -323,6 +335,7 @@ final class AppModel {
             // 离开超过 5 秒：Mac 那头 6 秒没收到包就当这条连接断了，手机这头却要等超时才知道，直接重连
             NetLog.note("foreground", ["away": backgroundAt.map { Int(Date().timeIntervalSince($0)) } ?? -1])
             PhoneP2P.shared.resume()
+            refreshLinkedForwards()
             if let away = backgroundAt, Date().timeIntervalSince(away) > 5 { PhoneP2P.shared.reconnect() }
             backgroundAt = nil
             PhoneP2P.shared.networkChanged()
@@ -339,6 +352,7 @@ final class AppModel {
         connect()
         startViewedReports()
         if embedded { return }
+        startLinked()
         #if !KITELINE_MAC
         if MacStore.shared.isDemo, !everConnected { flash(L("演示模式：使用示例数据，未连接电脑。可在设置中退出")) }
         #endif
@@ -365,6 +379,7 @@ final class AppModel {
 
     /// 重开远程访问在本机的监听端口（端口变了就告诉请求层）
     private func refreshRemoteForward() {
+        refreshLinkedForwards()
         guard PhoneP2P.shared.localURL != nil else { return }
         let before = PhoneP2P.shared.localURL
         PhoneP2P.shared.resume()
@@ -390,12 +405,18 @@ final class AppModel {
         NetLog.saveP2PLogs()
         PhoneP2P.shared.stop()
         api.useRemote(Task { await PhoneP2P.shared.connect(info) })
+        startLinkedRemotes()   // 另加电脑的通道跟着端点一起关了，重开（等主电脑的端点开好，不各开一个）
         api.networkChanged()
     }
 
     /// 订阅状态变了：订阅了就开远程访问；没订阅了（过期、开发版模拟免费）就关掉，只走局域网
     private func proChanged() {
-        if Store.shared.isPro { startRemote() } else { PhoneP2P.shared.stop() }
+        if Store.shared.isPro {
+            startRemote()
+            startLinkedRemotes()
+        } else {
+            PhoneP2P.shared.stop()
+        }
         networkChanged(force: true)
     }
 
@@ -409,6 +430,7 @@ final class AppModel {
         // 之后连本机端口直接被拒，在流量下又没有局域网可退，只能退出重开 App（11-13 用户出门时）。每次换网络、回到前台都重开一下（一般还是同一个端口）
         refreshRemoteForward()
         PhoneP2P.shared.networkChanged()
+        if restartStream { linkedNetworkChanged() }
         if !force, api.routeKind == .remote, ProGate.isUnlocked { return }
         api.networkChanged()
         guard restartStream, streamTask != nil else { return }
@@ -446,10 +468,15 @@ final class AppModel {
         lanTask?.cancel()
         lanTask = nil
         net.stop()
+        stopLinked()
         connected = false
         needResync = true
         let api = api
         Task { _ = try? await api.post("/api/presence", body: ["visible": false]) }
+        for host in linkedHosts.values {
+            let api = host.api
+            Task { _ = try? await api.post("/api/presence", body: ["visible": false]) }
+        }
     }
 
     private func connect() {
@@ -619,6 +646,10 @@ final class AppModel {
             while !Task.isCancelled {
                 guard let api = self?.api else { return }
                 _ = try? await api.post("/api/presence", body: ["visible": true])
+                // 另加的电脑也报：App 开着时它们也不推锁屏（App 里有横幅）
+                for linked in self?.linkedHosts.values.map(\.api) ?? [] {
+                    _ = try? await linked.post("/api/presence", body: ["visible": true])
+                }
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -637,6 +668,15 @@ final class AppModel {
             body["seen"] = seen.filter { $0.value > oldest }
         }
         let api = api
+        // 直连的其他电脑上的会话报给那台（它的「闲置自动关闭」按它算）；其余报给主电脑
+        var byHost: [String: [String]] = [:]
+        for key in keys { if let id = hub.computer(of: key) { byHost[id, default: []].append(key) } }
+        if !byHost.isEmpty {
+            let mine = keys.filter { hub.computer(of: $0) == nil }
+            body["keys"] = mine
+            for (_, list) in byHost { Task { _ = try? await api.post("/api/viewed", body: ["keys": list]) } }
+            if mine.isEmpty && !history { return }
+        }
         Task { _ = try? await api.post("/api/viewed", body: body) }
     }
 
@@ -676,12 +716,15 @@ final class AppModel {
         #endif
         switch event {
         case "state":
-            if let state = try? decoder.decode(StatePayload.self, from: data) {
+            stateRaw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            stateSeq = stateRaw?["stateSeq"] as? Int
+            primaryRaw = stateRaw
+            if !linkedHosts.isEmpty {
+                applyCombined()   // 和直连的其他电脑的状态合成一份（Model/LinkedHosts.swift）
+            } else if let state = try? decoder.decode(StatePayload.self, from: data) {
                 apply(state)
                 Offline.saveState(data)
             }
-            stateRaw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            stateSeq = stateRaw?["stateSeq"] as? Int
         case "statepatch":
             // 只有变了的部分：接得上（以手里这份为底）就合进去；接不上（中间漏了一份）重连，连上时先收整份
             let patch = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
@@ -750,6 +793,12 @@ final class AppModel {
             break
         }
     }
+
+    /// 直连的其他电脑推来的事件（已换成本机写法）
+    func handleEventFromLinked(_ event: String, _ data: Data) { handle(event, data) }
+
+    /// 合成好的状态（Model/LinkedHosts.swift）
+    func applyState(_ state: StatePayload) { apply(state) }
 
     /// 某台机器现在的 CPU、内存、网速：连着电脑、这台机器在线才给（断线时留下的旧数、离线缓存里的不显示）
     func liveStats(_ sourceId: String) -> MachineStats? {
@@ -878,7 +927,10 @@ final class AppModel {
     func refresh() async {
         do {
             let data = try await api.data("/api/state")
-            apply(try JSONDecoder().decode(StatePayload.self, from: data))
+            let state = try JSONDecoder().decode(StatePayload.self, from: data)
+            primaryRaw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            if !linkedHosts.isEmpty { applyCombined(); return }
+            apply(state)
             Offline.saveState(data)
         } catch {
             show(error)
@@ -1222,7 +1274,8 @@ final class AppModel {
         reconnecting.insert(id)
         defer { reconnecting.remove(id) }
         do {
-            let reply = try await api.post("/api/alerts/reconnect", body: ["id": id])
+            let (target, remoteId) = linkedAlertTarget(id) ?? (api, id)
+            let reply = try await target.post("/api/alerts/reconnect", body: ["id": remoteId])
             flash(reply["message"] as? String ?? L("正在重新连接…"))
         } catch {
             show(error)

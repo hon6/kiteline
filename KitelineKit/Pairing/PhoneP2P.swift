@@ -62,6 +62,10 @@ final class PhoneP2P {
     private var current: RemoteInfo?
     /// 端点是用哪个中继开的（换了中继要重开端点；只换 Mac 的地址不用）
     private var startedRelay: String?
+    /// 另加的 Kiteline 电脑的通道（kiteline_p2p_channel）：那台电脑的点对点公钥 → 本机端口。
+    /// 和主电脑共用同一个端点（到中继一条连接），每台电脑一条连接、一个端口
+    private(set) var channelPorts: [String: Int] = [:]
+    private var channelInfo: [String: RemoteInfo] = [:]
 
     var localURL: URL? {
         if case .ready(let port) = state { return URL(string: "https://127.0.0.1:\(port)") }
@@ -102,7 +106,8 @@ final class PhoneP2P {
         }
         #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
         if localURL == nil { state = .starting }
-        let restart = startedRelay != info.relay || localURL == nil
+        // 端点已经为另加电脑的通道开着、中继也一样：不用重开（重开会让那些通道断一下）
+        let restart = startedRelay != info.relay || localURL == nil && channelPorts.isEmpty
         current = info
         let key = Self.keyPath
         let task = Task { () -> URL? in
@@ -135,6 +140,109 @@ final class PhoneP2P {
         #endif
     }
 
+    /// 另加的一台 Kiteline 电脑：在同一个端点里给它开一条通道，返回 App 该用的地址（https://127.0.0.1:端口），失败 nil。
+    /// 端点还没开（主电脑没开远程访问）就用这台的中继开；同一台再调返回同一个端口
+    func channel(_ info: RemoteInfo) async -> URL? {
+        if channelInfo[info.macId] == info, let port = channelPorts[info.macId] { return URL(string: "https://127.0.0.1:\(port)") }
+        #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
+        if let running = inflight { _ = await running.value }   // 主电脑正在开端点：等它开好，别各开一个
+        guard await openEndpoint(relay: info.relay) else { return nil }
+        let result = await Task.detached { () -> Result<Int, Failure> in
+            let port = kiteline_p2p_channel(info.macId, info.relay, info.addrs.joined(separator: ","))
+            return port > 0 ? .success(Int(port)) : .failure(Failure(Self.lastError() ?? L("远程访问未能启动")))
+        }.value
+        switch result {
+        case .success(let port):
+            channelPorts[info.macId] = port
+            channelInfo[info.macId] = info
+            NetLog.note("channel", ["id": String(info.macId.prefix(8)), "port": port])
+            return URL(string: "https://127.0.0.1:\(port)")
+        case .failure(let failure):
+            NetLog.note("channel_failed", ["id": String(info.macId.prefix(8)), "error": failure.message])
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
+    /// 端点还没开就开一个（几台电脑同时要通道时只开一次）
+    private var opening: Task<Bool, Never>?
+    private func openEndpoint(relay: String) async -> Bool {
+        #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
+        if startedRelay != nil { return true }
+        if let opening { return await opening.value }
+        let key = Self.keyPath
+        let task = Task { () -> Bool in
+            let error = await Task.detached { () -> String? in
+                guard let p = tars_p2p_start(key, relay) else { return nil }
+                defer { tars_p2p_free(p) }
+                return String(cString: p)
+            }.value
+            if let error { NetLog.note("channel_start_failed", ["error": error]) } else { startedRelay = relay }
+            return error == nil
+        }
+        opening = task
+        let ok = await task.value
+        opening = nil
+        return ok
+        #else
+        return false
+        #endif
+    }
+
+    /// 关掉一台电脑的通道（移除了这台电脑）
+    func closeChannel(_ macId: String) {
+        guard channelPorts.removeValue(forKey: macId) != nil else { return }
+        channelInfo[macId] = nil
+        #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
+        kiteline_p2p_channel_close(macId)
+        #endif
+    }
+
+    /// 只留这几台的通道（添加没成功、已移除的关掉）
+    func keepChannels(_ ids: Set<String>) {
+        for id in channelPorts.keys where !ids.contains(id) { closeChannel(id) }
+    }
+
+    /// 一台电脑通道的本机地址（还没开 nil）
+    func channelURL(_ macId: String) -> URL? {
+        channelPorts[macId].map { URL(string: "https://127.0.0.1:\($0)")! }
+    }
+
+    /// 一台电脑通道的状态，任何线程都能调（MacAPI 选路时用）
+    nonisolated static func readChannelLink(_ macId: String) -> Link {
+        #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
+        var link = Link()
+        if let object = json(kiteline_p2p_channel_link(macId)) {
+            link.up = object["up"] as? Bool ?? false
+            link.path = Link.Path(rawValue: object["path"] as? String ?? "") ?? .none
+            link.addr = object["addr"] as? String ?? ""
+            link.fails = object["fails"] as? Int ?? 0
+        }
+        if let status = json(tars_p2p_status()) { link.relayOnline = status["state"] as? String == "online" }
+        return link
+        #else
+        return Link()
+        #endif
+    }
+
+    /// 回到前台：通道的本机端口和主电脑的一样会被 iOS 回收，重开。返回端口变了的那几台（公钥 → 新地址）
+    func resumeChannels() -> [String: URL] {
+        var changed: [String: URL] = [:]
+        #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
+        for (id, port) in channelPorts {
+            let next = Int(kiteline_p2p_channel_resume(id))
+            if next > 0, next != port {
+                NetLog.note("channel_port", ["id": String(id.prefix(8)), "from": port, "to": next])
+                channelPorts[id] = next
+                changed[id] = URL(string: "https://127.0.0.1:\(next)")
+            }
+        }
+        #endif
+        return changed
+    }
+
     /// 回到前台（或在后台被手表叫醒）时调：App 被挂起期间 iOS 会回收监听端口（苹果 TN2277），
     /// 之后连本机端口直接被拒、到 Mac 的连接却还好好的，App 就只剩局域网可走。每次都关掉重开（一般还是同一个端口）
     func resume() {
@@ -151,14 +259,14 @@ final class PhoneP2P {
     /// 断开现在的连接马上重连（端口不变）：切到后台很久回来时，旧连接多半已被系统掐断，不等它超时
     func reconnect() {
         #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
-        if localURL != nil { tars_p2p_reconnect() }
+        if localURL != nil || !channelPorts.isEmpty { tars_p2p_reconnect() }
         #endif
     }
 
     /// 网络变了（Wi-Fi ↔ 5G、从后台回来）：让它重新探路；正连不上的马上重试
     func networkChanged() {
         #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
-        if localURL != nil { tars_p2p_network_changed() }
+        if localURL != nil || !channelPorts.isEmpty { tars_p2p_network_changed() }
         #endif
     }
 
@@ -195,13 +303,15 @@ final class PhoneP2P {
 
     /// 停掉（没订阅时不占中继），密钥留着，订阅了再开
     func stop() {
-        guard state != .off else { return }
+        guard state != .off || !channelPorts.isEmpty else { return }
         #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
         tars_p2p_stop()
         #endif
         state = .off
         current = nil
         startedRelay = nil
+        channelPorts = [:]
+        channelInfo = [:]
         link = Link()
     }
 
@@ -214,6 +324,8 @@ final class PhoneP2P {
         state = .off
         current = nil
         startedRelay = nil
+        channelPorts = [:]
+        channelInfo = [:]
         link = Link()
     }
 

@@ -58,6 +58,11 @@ def create(kl):
         except (OSError, subprocess.SubprocessError):
             return ""
 
+    def alive_since(pid, since):
+        """pid 活着、且不是重启后被别的进程复用的（登记时间 / 登记文件早于进程启动就不算）；旧版中台没有这个能力时退回 pid_alive"""
+        check = getattr(kl, "pid_alive_since", None)
+        return check(pid, since) if check else kl.pid_alive(pid)
+
     # 终端：中台的通用终端层（tmux、Windows 控制台同一套，HOST_CAPS term.any）；老中台没有时只认 tmux
     _term_pane = getattr(kl, "term_pane", None) or kl.find_tmux_pane
     # Windows 控制台上的回复、确认、中断：在 Win11 真机实测过才开放（11-05：没测过的不放出来）
@@ -307,7 +312,7 @@ def create(kl):
                 continue
             pid = LOG_PID.search(head)
             convs = LOG_CONV.findall(tail)
-            if pid and convs and kl.pid_alive(int(pid.group(1))):
+            if pid and convs and alive_since(int(pid.group(1)), path):
                 found[convs[-1]] = int(pid.group(1))
         return found
 

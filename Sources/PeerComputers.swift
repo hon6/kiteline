@@ -26,6 +26,8 @@ struct PeerSourceInfo: Codable, Equatable {
     var name: String
     var kind: String
     var live: Bool?
+    /// 对方给这个来源起的别名（空 = 没起）；nil = 对方是老版本，不报别名、也不认改名
+    var alias: String?
 }
 
 struct PeerComputer: Codable, Equatable, Identifiable {
@@ -158,7 +160,9 @@ final class PeerComputers {
     /// 来源的默认名字：对方本机就叫对方电脑名，对方连的远端叫「对方电脑名 · 远端名」
     func defaultName(_ config: SourceConfig) -> String {
         guard let peer = peer(config.peerId) else { return "Kiteline 电脑" }
-        guard let info = peer.sources.first(where: { $0.id == config.peerSource }), info.kind != "local" else { return peer.name }
+        let info = peer.sources.first(where: { $0.id == config.peerSource })
+        if let alias = info?.alias, !alias.isEmpty { return alias }
+        guard let info, info.kind != "local" else { return peer.name }
         return "\(peer.name) · \(info.name)"
     }
 
@@ -186,13 +190,15 @@ final class PeerComputers {
                 let json = (try? JSONSerialization.jsonObject(with: reply.body)) as? [String: Any] ?? [:]
                 let list = (json["sources"] as? [[String: Any]] ?? []).compactMap { item -> PeerSourceInfo? in
                     guard let sid = item["id"] as? String, !sid.isEmpty else { return nil }
-                    return PeerSourceInfo(id: sid, name: item["name"] as? String ?? sid, kind: item["kind"] as? String ?? "ssh", live: item["live"] as? Bool)
+                    return PeerSourceInfo(id: sid, name: item["name"] as? String ?? sid, kind: item["kind"] as? String ?? "ssh", live: item["live"] as? Bool,
+                                          alias: item["alias"] as? String)
                 }
                 let name = (json["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? peer.name
                 let addresses = (json["addresses"] as? [String] ?? []).filter { $0.hasPrefix("https://") }
                 var sourcesChanged = false
                 self.mutate(id) { p in
-                    sourcesChanged = p.sources.map(\.id) != list.map(\.id) || p.sources.map(\.name) != list.map(\.name) || p.name != name
+                    sourcesChanged = p.sources.map(\.id) != list.map(\.id) || p.sources.map(\.name) != list.map(\.name)
+                        || p.sources.map(\.alias) != list.map(\.alias) || p.name != name
                     p.sources = list
                     p.name = name
                     for address in addresses where !p.addresses.contains(address) { p.addresses.append(address) }
@@ -215,7 +221,32 @@ final class PeerComputers {
     /// 本机的来源列表跟上对方电脑的来源（只增删 kind = .kiteline 的，见 AppState.applyPeerSources）
     func syncSources() {
         let desired = all.flatMap(Self.sourceConfigs)
-        AppState.shared.applyPeerSources(desired)
+        // 别名以设备所在的电脑为准：对方报了别名的来源，本机不另存名字。
+        // 升级前本机起过的名字、对方又没起的：一次性交给对方记下（用户起的名字不丢）；两边都起过的以对方为准
+        var keep = Set<String>()
+        for item in desired {
+            guard let info = peer(item.peerId)?.sources.first(where: { $0.id == item.peerSource }) else { continue }
+            guard let alias = info.alias else { keep.insert(item.id); continue }
+            if alias.isEmpty, let old = AppState.shared.config.sources.first(where: { $0.id == item.id })?.name, !old.isEmpty {
+                _ = renameAtPeer(item, to: old)
+                keep.insert(item.id)   // 对方记下之前本机先留着（失败了下次再交）
+            }
+        }
+        AppState.shared.applyPeerSources(desired, keepNames: keep, namesChanged: true)
+    }
+
+    /// 让设备所在的那台电脑改它的别名（/api/sources/rename），改完重新问一遍，名字从对方报来的为准。
+    /// 对方是老版本（不报别名）时返回 false：调用方照旧记在本机
+    @discardableResult
+    func renameAtPeer(_ config: SourceConfig, to name: String) -> Bool {
+        guard let peer = peer(config.peerId), let remote = config.peerSource,
+              peer.sources.first(where: { $0.id == remote })?.alias != nil else { return false }
+        let body = try? JSONSerialization.data(withJSONObject: ["sourceId": remote, "name": name])
+        call(peer, "POST", "/api/sources/rename", body: body, headers: ["content-type": "application/json"], timeout: 15) { [weak self] result in
+            if case .failure(let error) = result { Log.write("给电脑「\(peer.name)」改设备名失败：\(error.description)") }
+            self?.refresh(peer.id)
+        }
+        return true
     }
 
     // MARK: - 添加（本机是发起的那台）
@@ -433,7 +464,8 @@ final class PeerComputers {
     private func localSources() -> [[String: Any]] {
         AppState.shared.config.sources.filter { $0.kind != .kiteline && $0.enabled }.map { source in
             let live = AppState.shared.source(withId: source.id)?.state.isLive ?? false
-            return ["id": source.id, "name": source.displayName, "kind": source.kind.rawValue, "live": live]
+            // alias：用户起的别名（空 = 没起）。对方据此以本机的名字为准、改名时交给本机（见 renameAtPeer）
+            return ["id": source.id, "name": source.displayName, "kind": source.kind.rawValue, "live": live, "alias": source.name]
         }
     }
 
@@ -652,6 +684,8 @@ final class PeerComputers {
             case .failure(let error):
                 respond(.error("连不上电脑「\(peer.name)」：\(error.description)", status: 502))
             case .success(let reply):
+                // 别名改在那台上了：马上取回新名字（手机再取状态时就是新名字）
+                if request.path == "/api/sources/rename", reply.status == 200 { self.refresh(peer.id) }
                 var response = HTTPResponse(status: reply.status)
                 for name in ["Content-Type", "Content-Disposition", "Cache-Control", "ETag", "Last-Modified"] {
                     if let value = reply.headers[name] { response.headers[name] = value }

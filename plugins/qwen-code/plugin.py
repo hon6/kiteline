@@ -52,6 +52,11 @@ def pane_busy(pane):
 def create(kl):
     QWEN_HOME = os.environ.get("QWEN_HOME") or os.path.join(kl.HOME, ".qwen")
 
+    def alive_since(pid, since):
+        """pid 活着、且不是重启后被别的进程复用的（登记时间 / 登记文件早于进程启动就不算）；旧版中台没有这个能力时退回 pid_alive"""
+        check = getattr(kl, "pid_alive_since", None)
+        return check(pid, since) if check else kl.pid_alive(pid)
+
     def term_pane(pid):
         """能操作的终端：tmux 窗格，或 Kiteline 自己的后台伪终端（hosted:…，中台 term_pane，2.37 起）；
         Windows 控制台没实测，不算。老中台没有 term_pane 就只认 tmux"""
@@ -245,7 +250,7 @@ def create(kl):
                     pid, sid = int(record["pid"]), str(record["sessionId"])
                 except (ValueError, KeyError, TypeError):
                     continue
-                if not kl.pid_alive(pid):
+                if not alive_since(pid, path):
                     continue
                 cwd = record.get("cwd") or ""
                 chat = chat_path(cwd, sid)

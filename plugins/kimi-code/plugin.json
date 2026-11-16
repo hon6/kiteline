@@ -1,7 +1,7 @@
 {
  "id": "kimi-code",
  "name": "Kimi Code",
- "version": "1.1.0",
+ "version": "1.1.1",
  "summary": "月之暗面的编程 agent：查看会话、状态和完整对话；在 tmux 中运行、或由 Kiteline 在后台运行时可回复、确认、回答提问和中断",
  "summaryEn": "Moonshot AI's coding agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux or in the background through Kiteline",
  "needs": [

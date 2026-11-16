@@ -42,6 +42,11 @@ def create(kl):
     # Windows 控制台上的回复、确认、中断：在 Win11 真机实测过才开放（11-05：没测过的不放出来）
     WINDOWS_TESTED = False
 
+    def alive_since(pid, since):
+        """pid 活着、且不是重启后被别的进程复用的（登记时间 / 登记文件早于进程启动就不算）；旧版中台没有这个能力时退回 pid_alive"""
+        check = getattr(kl, "pid_alive_since", None)
+        return check(pid, since) if check else kl.pid_alive(pid)
+
     def term_pane(pid):
         pane = _term_pane(pid)
         if pane and str(pane).startswith("console:") and not WINDOWS_TESTED:
@@ -256,7 +261,7 @@ def create(kl):
                     continue
                 sid = record.get("session_id") if isinstance(record, dict) else None
                 found = re.search(r"pid=(\d+)", str(record.get("process_generation_hint") or "")) if sid else None
-                if found and kl.pid_alive(int(found.group(1))):
+                if found and alive_since(int(found.group(1)), path):
                     out.append((sid, int(found.group(1))))
         return out
 

@@ -626,12 +626,19 @@ with open(os.path.join(bridges, "999999-dead.json"), "w") as handle:
     json.dump({"pid": 999999, "port": 1, "token": "x", "directory": "/w"}, handle)
 with open(registration, "w") as handle:
     json.dump({"pid": os.getpid(), "port": oc.server_address[1], "token": TOKEN, "directory": "/w/oc",
-               "started": int(time.time() * 1000) - 60000}, handle)
+               "started": int(time.time() * 1000)}, handle)   # 真的 OpenCode：插件登记时进程早已启动（登记早于进程启动 = pid 被复用）
 oclink = W.OpenCodeLink()
 snap = wait(lambda: next(iter(oclink.snapshots()), None))
 check("OpenCode：发现登记的桥，列出这个进程里用过的会话（旧会话、子任务不算）", snap and [s["sessionId"] for s in oclink.snapshots()] == ["ses_1"]
       and snap["agent"] == "opencode" and snap["title"] == "加导出" and snap["subagents"] == 1, str(oclink.snapshots()))
 check("OpenCode：进程已经不在的登记文件被清掉", not os.path.exists(os.path.join(bridges, "999999-dead.json")))
+with open(os.path.join(bridges, "%d-reused.json" % os.getpid()), "w") as handle:   # 重启前留下的登记，pid 现在被本进程复用
+    json.dump({"pid": os.getpid(), "port": 1, "token": "x", "directory": "/w/old", "started": 1000}, handle)
+oclink.last_scan = 0
+oclink.snapshots()
+check("OpenCode：重启后 pid 被别的进程复用的残留登记不认、并清掉", not os.path.exists(os.path.join(bridges, "%d-reused.json" % os.getpid())))
+check("中台：登记早于进程启动判为 pid 复用、晚于判活", not W.pid_alive_since(os.getpid(), 1000) and W.pid_alive_since(os.getpid(), int(time.time() * 1000))
+      and not W.pid_alive_since(999999, int(time.time() * 1000)))
 bridge = oclink.owner("ses_1")
 wait(lambda: bridge.connected)
 pumped = wait(lambda: oclink.pump())

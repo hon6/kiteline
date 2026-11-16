@@ -382,13 +382,24 @@ public final class Look {
     /// 选中的字体要是中文字体：确认能用，没装就下载（下好以后整个界面自动换过来）。
     /// 没选中的中文字体：装着的、以前下载过的直接启用（不联网），设置里就不会再显示「首次使用需下载」
     public func prepareFont() {
+        var unknown: [LookFont] = []
         for option in LookFont.all {
             guard let name = option.cjk, !readyFonts.contains(name), downloads[name] == nil else { continue }
             if Look.installed(name) {
                 readyFonts.insert(name)
-            } else if option.id == fontID || Look.downloaded(name) {
+            } else if option.id == fontID {
                 activate(option)
+            } else {
+                unknown.append(option)
             }
+        }
+        guard !unknown.isEmpty else { return }
+        // 问「以前下载过没有」要经 XPC 问系统的资源服务，慢的时候要好几秒：放后台问。
+        // 原来在主线程问，推送在后台唤醒 App 时卡过 10 秒、被系统看门狗杀掉（0x8BADF00D）
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let found = unknown.filter { $0.cjk.map(Look.downloaded) ?? false }
+            guard !found.isEmpty else { return }
+            DispatchQueue.main.async { found.forEach { self?.activate($0) } }
         }
     }
 

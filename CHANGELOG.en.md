@@ -1,5 +1,17 @@
 # Kiteline Release Notes
 
+## 3.49.39 (2026-11-16)
+
+### New Features
+
+- **Connect your phone to several computers at once** (iPhone, iPad): Add other computers running Kiteline in Settings → Kiteline Devices. Your phone connects to each computer directly, and sessions from all of them appear together in one list, ready to view, reply to and approve, without linking the computers to each other first. With a subscription, you can also add and use these computers through Remote Access when you are not on the same network (Remote Access must be turned on on that computer). On the free plan, your phone must be on the same network as the computer to add it. The computer must be updated to the latest version.
+- **Device aliases** (Mac, iPhone, iPad): Tap Device Alias in a device's details to give it a name. The alias is saved on the computer the device belongs to, so it appears the same on your phone, your computers and the mini program. Renaming a device that belongs to another Kiteline computer updates it on that computer too.
+
+### Bug Fixes
+
+- **Fixed Kiteline sometimes failing to open after the computer restarts**: Kiteline keeps a record file to prevent two copies from running at once. After a restart, if the process ID in that record happened to be taken by another system program, Kiteline mistook it for an already running copy and quit right after opening. Kiteline now confirms the process really is Kiteline before giving up.
+- **Fixed ended sessions appearing, and sessions failing to move to the background, after a restart**: Session records left behind by a restart or a forced quit could be mistaken for running sessions when their process IDs were reused by other programs, so ended sessions showed up in the list, or moving a session to the background reported that it was still open in VS Code. Kiteline now checks each process's start time and no longer misjudges these records.
+
 ## 3.49.38 (2026-11-16)
 
 ### Improvements

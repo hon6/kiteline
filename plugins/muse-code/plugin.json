@@ -1,7 +1,7 @@
 {
  "id": "muse-code",
  "name": "Muse Code",
- "version": "1.1.0",
+ "version": "1.1.1",
  "summary": "Meta 的终端编程 agent：查看会话、状态和完整对话；在 tmux 中运行、或由 Kiteline 在后台运行时可回复和中断",
  "summaryEn": "Meta's terminal coding agent: view sessions, status and full conversations; reply and interrupt when it runs in tmux or in the background through Kiteline",
  "needs": [

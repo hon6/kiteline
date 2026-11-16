@@ -37,6 +37,7 @@ import KitelineKit
 ///   GET  /api/todos              我的待办（Claude 说要你做的事）；POST /api/todos/add|update|delete|dismiss|clear-done（见 Todos.swift）
 ///   GET  /api/favorites          我的收藏（收藏的消息）；POST /api/favorites/add|delete，GET /api/favorites/media（见 Favorites.swift）
 ///   GET  /api/tabgroups          标签组（相关会话放一组，各端同一套）；POST /api/tabgroups/set 整份换掉（见 TabGroupStore.swift）
+///   POST /api/sources/rename      给设备起别名 {sourceId, name}（清空 = 默认名；互联电脑的设备转给那台改）
 ///   GET  /api/groups             会话群（跨设备、跨项目的会话互相发消息）；GET /api/groups/messages，POST /api/groups/create|add|remove|rename|send|pause|delete（见 Groups.swift）
 ///   GET  /ca.mobileconfig        本机根证书描述文件（装上后 https 地址受信任，推送才能用）
 ///
@@ -684,6 +685,19 @@ final class MobileServer {
                 DispatchQueue.main.async {
                     Hosted.update(sourceId: body["sourceId"] as? String, on: body["on"] as? Bool, tipOff: body["tipOff"] as? Bool)
                     respond(.json(["ok": true]))
+                }
+            case ("POST", "/api/sources/rename"):
+                // 手机、小程序给设备起别名（清空 = 恢复默认名）。别名记在设备所在的电脑上：
+                // 互联电脑的设备（kl: 开头）在上面已整条转给那台；本机的来源在这里改
+                let body = request.jsonBody ?? [:]
+                let id = body["sourceId"] as? String ?? ""
+                let name = String((body["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+                DispatchQueue.main.async {
+                    guard let source = AppState.shared.config.sources.first(where: { $0.id == id }) else {
+                        respond(.error("设备不存在", status: 404)); return
+                    }
+                    AppState.shared.renameSource(id, to: name)
+                    respond(.json(["ok": true, "sourceId": id, "name": name.isEmpty ? source.displayName : name]))
                 }
             case ("POST", "/api/hosted/move"):
                 if let (record, _) = self.resolve(request) {

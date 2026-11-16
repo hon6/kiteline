@@ -160,6 +160,11 @@ def create(kl):
     else:
         CLI_AUTH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(kl.HOME, ".config"), "cursor", "auth.json")
 
+    def alive_since(pid, since):
+        """pid 活着、且不是重启后被别的进程复用的（登记时间早于进程启动就不算）；旧版中台没有这个能力时退回 pid_alive"""
+        check = getattr(kl, "pid_alive_since", None)
+        return check(pid, since) if check else kl.pid_alive(pid)
+
     def read_state(keys):
         """编辑器 state.vscdb 里的几项（ItemTable，只读打开）→ {键: 值}"""
         out = {}
@@ -724,7 +729,7 @@ def create(kl):
                     continue
                 form = meta.get("form") or "ide"
                 pid = self.agent_pid(meta)
-                alive = kl.pid_alive(pid) if pid else None
+                alive = alive_since(pid, meta.get("updated")) if pid else None   # 重启后 pid 可能被别的进程复用
                 updated = int(meta.get("updated") or 0)
                 restarted = alive is False and form == "ide" and self.editor_running()
                 if restarted:

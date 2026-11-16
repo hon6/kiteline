@@ -25,9 +25,35 @@ final class MacStore {
     static let shared = MacStore()
 
     private(set) var current: PairedMac?
+    /// 另加的 Kiteline 电脑（手机直连，设备维度里的「Kiteline 设备」，见 DeviceHub）：各自的地址、令牌、证书。
+    /// 单独存一项（kiteline.linked）：主电脑那一项格式不变，装回旧版 App 照样连主电脑，只是看不到这些
+    private(set) var linked: [PairedMac] = []
 
     private init() {
         current = Keychain.load()
+        linked = Keychain.loadLinked()
+    }
+
+    /// 加一台（同一台电脑再加一次就换掉旧的）
+    func addLinked(_ mac: PairedMac) {
+        guard let id = mac.computerId else { return }
+        linked = linked.filter { $0.computerId != id } + [mac]
+        Keychain.saveLinked(linked)
+    }
+
+    func removeLinked(_ computerId: String) {
+        linked.removeAll { $0.computerId == computerId }
+        Keychain.saveLinked(linked)
+    }
+
+    /// 改一台的记录（连上的地址排前、补根证书、远程访问信息）
+    func updateLinked(_ computerId: String, _ change: (inout PairedMac) -> Void) {
+        guard let index = linked.firstIndex(where: { $0.computerId == computerId }) else { return }
+        var mac = linked[index]
+        change(&mac)
+        guard mac != linked[index] else { return }
+        linked[index] = mac
+        Keychain.saveLinked(linked)
     }
 
     func save(_ mac: PairedMac) {
@@ -71,6 +97,8 @@ final class MacStore {
         }
         current = nil
         Keychain.delete()
+        linked = []
+        Keychain.saveLinked([])
         Task { @MainActor in
             PushSetup.shared.leave()
             WidgetSync.clear()
@@ -168,5 +196,30 @@ private enum Keychain {
 
     static func delete() {
         SecItemDelete(query as CFDictionary)
+    }
+
+    // 另加的 Kiteline 电脑：单独一项，新标识用 kiteline 命名
+    private static var linkedQuery: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "kiteline.linked",
+         kSecAttrAccount as String: "computers"]
+    }
+
+    static func loadLinked() -> [PairedMac] {
+        var item = linkedQuery
+        item[kSecReturnData as String] = true
+        item[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: AnyObject?
+        guard SecItemCopyMatching(item as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return [] }
+        return (try? JSONDecoder().decode([PairedMac].self, from: data)) ?? []
+    }
+
+    static func saveLinked(_ list: [PairedMac]) {
+        SecItemDelete(linkedQuery as CFDictionary)
+        guard !list.isEmpty, let data = try? JSONEncoder().encode(list) else { return }
+        var item = linkedQuery
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(item as CFDictionary, nil)
     }
 }

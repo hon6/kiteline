@@ -120,7 +120,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.4"
+WATCHER_VERSION = "2.38.5"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -455,6 +455,7 @@ def is_live(payload):
         return False
     recorded = norm_token(payload.get("procStartFt") or payload.get("procStart"))
     if recorded is None:
+        # 不拿 startedAt 兜底：恢复会话等情况下它可能早于进程启动，会把活会话藏掉（11-16 试过，接口测试的合成会话全没了）
         return True
     actual = process_start_token(pid)
     if actual is None:
@@ -464,6 +465,56 @@ def is_live(payload):
         # 解析不了时倾向判活：漏报比误报「pid 复用」安全得多
         return True
     return verdict
+
+
+def process_start_epoch(pid):
+    """进程启动的绝对时间（epoch 秒），取不到返回 None。Linux 的 process_start_token 是开机后的滴答数，这里换成绝对时间"""
+    if not IS_WINDOWS:
+        try:
+            with open("/proc/%d/stat" % pid, "rb") as handle:
+                raw = handle.read().decode("utf-8", "replace")
+            ticks = int(raw[raw.rfind(")") + 2:].split()[19])
+            with open("/proc/stat", "rb") as handle:
+                btime = next(int(line.split()[1]) for line in handle if line.startswith(b"btime "))
+            return btime + ticks / float(os.sysconf("SC_CLK_TCK"))
+        except (OSError, ValueError, IndexError, StopIteration):
+            pass
+        try:
+            # macOS：ps 以 UTC 输出、直接按 UTC 解析（token_seconds 在东时区会再减一次时区差，这里不用它）
+            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 timeout=5, env=dict(os.environ, TZ="UTC", LC_ALL="C"))
+            text = " ".join(out.stdout.decode("utf-8", "replace").split())
+            return float(calendar.timegm(time.strptime(text, _PS_TIME_FORMAT))) if text else None
+        except Exception:
+            return None
+    return token_seconds(_win_start_token(pid))
+
+
+def pid_alive_since(pid, since):
+    """pid 活着，而且不是重启后被别的进程复用的。since 是登记时间（毫秒或秒），或登记文件路径（取修改时间）：
+    登记的那个进程一定在登记之前就启动了，启动时间晚于登记的就是别的进程拿到了同一个 pid。
+    （11-16：Mac 重启后 Kiteline 的 instance.pid 被系统进程复用，App 一直判成「已有实例」打不开）"""
+    if not pid_alive(pid):
+        return False
+    at = None
+    if isinstance(since, str) and not since.strip().isdigit():
+        try:
+            at = os.path.getmtime(since)
+        except OSError:
+            at = None
+    elif since:
+        try:
+            at = float(since)
+        except (TypeError, ValueError):
+            at = None
+        if at and at > 10_000_000_000:   # 毫秒
+            at /= 1000.0
+    if not at:
+        return True
+    start = process_start_epoch(pid)
+    if start is None:
+        return True   # 取不到启动时间时倾向判活（同 is_live）
+    return start <= at + 2.0
 
 
 def display_cwd(cwd):
@@ -12252,6 +12303,9 @@ class OpenCodeBridge:
             others = [s for s in self.touched if s != sid and s in self.sessions and not self.sessions[s].get("parentID")]
         if others:
             raise RuntimeError("这个 OpenCode 窗口中还开着其他 %d 个会话，关闭会退出整个窗口：请在 OpenCode 中关闭" % len(others))
+        if not pid_alive_since(self.pid, self.started or self.file):   # 别把复用了这个 pid 的别的进程关掉
+            self.alive = False
+            return "已关闭会话"
         os.kill(self.pid, signal.SIGTERM)
         for _ in range(40):
             if not pid_alive(self.pid):
@@ -12303,7 +12357,7 @@ class OpenCodeLink:
                 pid = int(info["pid"])
             except (ValueError, KeyError, TypeError):
                 continue
-            if not pid_alive(pid):
+            if not pid_alive_since(pid, info.get("started") or path):   # 重启后残留的登记 pid 可能被别的进程复用
                 try:
                     os.remove(path)   # OpenCode 被强退时留下的
                 except OSError:
@@ -12316,7 +12370,7 @@ class OpenCodeLink:
                 log("OpenCode 登记文件不对（%s）：%r" % (name, exc))
         for path in list(self.bridges.keys()):
             bridge = self.bridges[path]
-            if path not in seen or not bridge.alive or not pid_alive(bridge.pid):
+            if path not in seen or not bridge.alive or not pid_alive_since(bridge.pid, bridge.started or path):
                 bridge.alive = False
                 del self.bridges[path]
 
@@ -15489,7 +15543,7 @@ def vscode_claude_environ():
         entry = read_json_file(path)
         pid = entry.get("pid") if entry else None
         if (not isinstance(pid, int) or pid in hosted or entry.get("entrypoint") != "claude-vscode"
-                or (best and (entry.get("startedAt") or 0) <= best[0]) or not pid_alive(pid)
+                or (best and (entry.get("startedAt") or 0) <= best[0]) or not is_live(entry)
                 or not _editor_extension_host(parent_pid(pid))):
             continue
         env = process_environ(pid)
@@ -15528,7 +15582,7 @@ def registered_session(session_id):
     """这个会话正在运行的 claude（会话登记里 pid 还活着的），没有返回 None"""
     for path in globlib.glob(os.path.join(SESSIONS_DIR, "*.json")):
         entry = read_json_file(path)
-        if entry and entry.get("sessionId") == session_id and isinstance(entry.get("pid"), int) and pid_alive(entry["pid"]):
+        if entry and entry.get("sessionId") == session_id and is_live(entry):   # 重启后残留的登记 pid 可能被别的进程复用
             return entry
     return None
 
@@ -15844,7 +15898,7 @@ class HostedHolder:
             except (OSError, ValueError):
                 continue
             pid = payload.get("pid") if isinstance(payload, dict) else None
-            if not isinstance(pid, int) or payload.get("sessionId") != self.session_id or not pid_alive(pid):
+            if not isinstance(pid, int) or payload.get("sessionId") != self.session_id or not is_live(payload):
                 continue
             # 还得是自己起的这个 claude（或它的子进程）：同一段对话别处若还开着，别认成它
             if pid == self.proc.pid or self.proc.pid in ancestors(pid):
@@ -16333,7 +16387,7 @@ class HostedSessions:
                     entry = json.load(handle)
             except (OSError, ValueError):
                 continue
-            if pid_alive(entry.get("holder")):
+            if pid_alive_since(entry.get("holder"), entry.get("startedAt")):   # 重启后 holder 的 pid 可能被别的进程复用
                 out.append(entry)
                 continue
             for stale in (path, entry.get("sock") or ""):
@@ -16483,9 +16537,9 @@ class HostedSessions:
         if running:
             # 把 VS Code 里正开着的会话转到后台：Kiteline 发完这个请求去关 VS Code 里的标签，等那边的 claude 退出再接着这段对话
             deadline = time.time() + 25
-            while pid_alive(running["pid"]) and time.time() < deadline:
+            while is_live(running) and time.time() < deadline:
                 time.sleep(0.3)
-            if pid_alive(running["pid"]):
+            if is_live(running):
                 raise RuntimeError("VS Code 中的这个会话没有关闭，未转到后台运行")
         session_id = resume or ("" if recipe else str(uuid.uuid4()))   # 别家 agent 的会话编号由它自己定，这里不知道
         hid = uuid.uuid4().hex[:10]
@@ -16623,9 +16677,9 @@ class HostedSessions:
         hosted_call(entry, {"op": "stop"})
         registry = os.path.join(HOSTED_DIR, entry["id"] + ".json")
         deadline = time.time() + 10
-        while time.time() < deadline and os.path.exists(registry) and pid_alive(entry.get("holder")):
+        while time.time() < deadline and os.path.exists(registry) and pid_alive_since(entry.get("holder"), entry.get("startedAt")):
             time.sleep(0.2)
-        return {"stopped": not os.path.exists(registry) or not pid_alive(entry.get("holder"))}
+        return {"stopped": not os.path.exists(registry) or not pid_alive_since(entry.get("holder"), entry.get("startedAt"))}
 
     def send(self, entry, text, keys, submit):
         hosted_call(entry, {"op": "send", "text": text, "keys": keys, "submit": submit}, timeout=20)

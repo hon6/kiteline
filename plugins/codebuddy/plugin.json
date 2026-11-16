@@ -1,7 +1,7 @@
 {
  "id": "codebuddy",
  "name": "CodeBuddy / WorkBuddy",
- "version": "1.1.0",
+ "version": "1.1.1",
  "summary": "腾讯的编程 agent（CodeBuddy Code 命令行、WorkBuddy 桌面版）：查看会话、状态和完整对话；WorkBuddy 桌面版可从手机发消息、新建任务（Mac）；命令行在 tmux 中运行、或由 Kiteline 在后台运行时可回复、确认、回答提问和中断",
  "summaryEn": "Tencent's coding agent (CodeBuddy Code CLI and the WorkBuddy desktop app): view sessions, status and full conversations; send messages to and create WorkBuddy desktop tasks from your phone (Mac); reply, confirm, answer questions and interrupt when the CLI runs in tmux or in the background through Kiteline",
  "needs": [

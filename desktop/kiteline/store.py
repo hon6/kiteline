@@ -223,10 +223,14 @@ class Store:
             self.sources[source.id] = source
 
     def source_changed(self, source):
-        if not source.live:
-            with self.lock:
+        with self.lock:
+            if not source.live:
                 self.records = [r for r in self.records if r.source_id != source.id]
                 self._previous = {k: v for k, v in self._previous.items() if v.source_id != source.id}
+            else:
+                for record in self.records:
+                    if record.source_id == source.id:
+                        record.source_name = source.name   # 改了名（别名）：会话上的设备名马上跟上，不等下一次快照
         self._on_change()
 
     def apply_snapshots(self, source, sessions):

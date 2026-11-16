@@ -239,6 +239,11 @@ enum SelfTest {
                 ["key": "vm#d4", "sessionId": "d4", "sourceId": "vm", "sourceName": "虚拟机", "cwd": "/home/demo/projects/mini-program",
                  "title": "小程序预约推送", "firstPrompt": "小程序预约推送，和服务号推送，我记得有的吧", "lastActive": now - 86_400_000 * 3, "live": false],
             ]
+            // TARS_RENDER_HISTORY=loading 画头一回正在读取、=empty 画一个会话都没有
+            let state = ProcessInfo.processInfo.environment["TARS_RENDER_HISTORY"]
+            if state == "loading" || state == "empty" {
+                HistoryModel.shared.inject([], loaded: state == "empty")
+            } else
             // TARS_RENDER_QUERY：画搜索结果（按项目名搜到的没有片段，下面写着「项目名称：…」）
             if let query = ProcessInfo.processInfo.environment["TARS_RENDER_QUERY"] {
                 var found = samples

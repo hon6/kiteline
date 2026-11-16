@@ -49,6 +49,8 @@ final class HistoryModel: ObservableObject {
     @Published private(set) var sessions: [PastItem] = []
     @Published private(set) var results: [PastItem]?
     @Published private(set) var loading = false
+    /// 列表读回来过一次（没读回来之前列表空着是「正在读取」，不是「没有会话」）
+    @Published private(set) var loaded = false
     @Published var query = ""
     /// 打开过的已结束会话：右侧显示对话时用它的标题和目录
     private(set) var known: [String: PastItem] = [:]
@@ -69,6 +71,7 @@ final class HistoryModel: ObservableObject {
             self.sessions = ((payload["sessions"] as? [[String: Any]]) ?? []).compactMap(PastItem.init)
             self.results = nil
             self.loading = false
+            self.loaded = true
             self.loadProject()
         }
     }
@@ -125,12 +128,14 @@ final class HistoryModel: ObservableObject {
     func past(_ key: String?) -> PastItem? { key.flatMap { known[$0] } }
 
     /// 自测渲染用：results、query 给了就是搜索结果的样子
-    func inject(_ items: [PastItem], results: [PastItem]? = nil, query: String = "") {
+    /// loaded: false 画「头一回正在读取」的样子
+    func inject(_ items: [PastItem], results: [PastItem]? = nil, query: String = "", loaded: Bool = true) {
         frozen = true
         sessions = items
         self.results = results
         self.query = query
-        loading = false
+        loading = !loaded
+        self.loaded = loaded
     }
 
     /// 在 VS Code 里恢复这段对话（不发消息）。点的人要去 VS Code 里看，前台不还回来；
@@ -181,6 +186,18 @@ struct HistoryView: View {
             if !model.sessions.isEmpty || isFiltering { filterRows }
             if let results = model.results {
                 searchList(results)
+            } else if model.sessions.isEmpty, !model.loaded {
+                // 头一回读：各设备的列表要一会儿才回来，空白容易当成出问题了
+                HistoryLoadingView()
+            } else if model.sessions.isEmpty {
+                ContentUnavailableView {
+                    Label("暂无历史会话", systemImage: "clock.arrow.circlepath")
+                } description: {
+                    Text("在电脑上和 Agent 聊过的会话会出现在这里")
+                } actions: {
+                    Button("重新读取") { model.load() }
+                }
+                .frame(maxHeight: .infinity)
             } else if filtered(model.sessions).isEmpty, !model.sessions.isEmpty {
                 ContentUnavailableView {
                     Label("暂无\(filterName)", systemImage: "line.3.horizontal.decrease")
@@ -193,7 +210,8 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("历史会话")
-        .navigationSubtitle(model.results.map { L("找到 %lld 个会话", count: filtered($0).count) } ?? L("%lld 个会话", count: model.sessions.count))
+        .navigationSubtitle(model.results.map { L("找到 %lld 个会话", count: filtered($0).count) }
+                            ?? (model.loaded ? L("%lld 个会话", count: model.sessions.count) : L("正在读取…")))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { model.query = ""; model.load() } label: { Label("刷新", systemImage: "arrow.clockwise") }
@@ -460,5 +478,44 @@ struct PastRow: View {
             Text(Format.short(item.lastActive)).font(.app(size: 10.5)).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 3)
+    }
+}
+
+/// 历史会话头一回读取时的占位：几行骨架一起呼吸，上面一句「正在读取」
+struct HistoryLoadingView: View {
+    @State private var dim = false
+    /// 骨架行标题、摘要的宽度（错开一点，像真的列表）
+    private static let widths: [(CGFloat, CGFloat)] = [(180, 420), (120, 300), (220, 520), (150, 360), (200, 460), (130, 280), (170, 400), (110, 330)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("正在读取各设备上的历史会话…").font(.app(size: 12.5)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10)
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Self.widths.indices, id: \.self) { i in
+                    HStack(spacing: 10) {
+                        Circle().fill(.quaternary).frame(width: 30, height: 30)
+                        VStack(alignment: .leading, spacing: 6) {
+                            RoundedRectangle(cornerRadius: 3).fill(.quaternary).frame(width: Self.widths[i].0, height: 11)
+                            RoundedRectangle(cornerRadius: 3).fill(.quaternary.opacity(0.7)).frame(width: Self.widths[i].1, height: 9)
+                        }
+                        Spacer(minLength: 6)
+                        RoundedRectangle(cornerRadius: 3).fill(.quaternary.opacity(0.7)).frame(width: 30, height: 9)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 28)
+            .opacity(dim ? 0.45 : 1)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("正在读取历史会话"))
+        .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true } }
+        .transition(.opacity)
     }
 }

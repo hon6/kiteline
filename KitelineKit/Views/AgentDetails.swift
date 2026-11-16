@@ -759,6 +759,7 @@ struct MachineInfoSheet: View {
         FitSheet(title: detail?.name ?? (name.isEmpty ? L("设备详情") : name)) {
             if let detail {
                 MachineHeader(detail: detail)
+                SourceAliasRow(sourceId: sourceId, fallback: detail.name)
                 MachineSections(detail: detail, compact: false)
             } else if let error {
                 LoadFailed(error: error) { await load() }.padding(.top, 20)
@@ -775,6 +776,59 @@ struct MachineInfoSheet: View {
             error = nil
         } catch {
             if detail == nil { self.error = error.localizedDescription }
+        }
+    }
+}
+
+/// 设备别名：记在设备所在的那台电脑上（/api/sources/rename），手机、电脑、小程序看到的都一样。
+/// 设备所在的电脑太旧（没有这个接口）时不给改，提示先更新
+private struct SourceAliasRow: View {
+    @Environment(AppModel.self) private var model
+    let sourceId: String
+    let fallback: String
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var saving = false
+
+    private var current: String { model.sources.first { $0.id == sourceId }?.name ?? fallback }
+
+    var body: some View {
+        Button {
+            guard model.canRename(sourceId) else {
+                model.flash(L("这台电脑上的 Kiteline 版本较旧，请先更新后再设置别名"))
+                return
+            }
+            draft = current
+            editing = true
+        } label: {
+            HStack(spacing: 10) {
+                Text("设备别名").foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                if saving { ProgressView().controlSize(.small) }
+                Text(current).foregroundStyle(.secondary).lineLimit(1)
+                Image(systemName: "pencil").font(.ui(.caption).weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .font(.ui(.subheadline))
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(saving)
+        .padding(.bottom, 14)
+        .accessibilityHint(L("为这台设备设置在各端显示的名称"))
+        .alert("设备别名", isPresented: $editing) {
+            TextField("别名", text: $draft)
+            Button("取消", role: .cancel) {}
+            Button("保存") {
+                let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                saving = true
+                Task {
+                    if await model.renameSource(sourceId, to: name) { model.flash(name.isEmpty ? L("已恢复默认名称") : L("已设置别名")) }
+                    saving = false
+                }
+            }
+        } message: {
+            Text("别名保存在这台设备所在的电脑上，手机、电脑和小程序中显示一致。留空则恢复默认名称。")
         }
     }
 }

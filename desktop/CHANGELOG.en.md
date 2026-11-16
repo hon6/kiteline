@@ -1,5 +1,16 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.44 (2026-11-16)
+
+### New Features
+
+- **Connect your phone to several computers at once**: Your phone can add this computer directly, and its sessions appear in the same list as sessions from your other computers, without linking the computers to each other first.
+- **Device aliases**: Set aliases for this computer and the devices it connects to from your phone. Aliases are saved on this computer, so they appear the same on your phone, other computers and the mini program. Renaming a device that belongs to another Kiteline computer in Settings → Sources updates it on that computer too.
+
+### Bug Fixes
+
+- **Fixed ended sessions appearing, and sessions failing to move to the background, after a restart**: Session records left behind by a restart or a forced quit could be mistaken for running sessions when their process IDs were reused by other programs, so ended sessions showed up in the list, or moving a session to the background reported that it was still open in VS Code. Kiteline now checks each process's start time and no longer misjudges these records.
+
 ## 1.0.43 (2026-11-16)
 
 ### Improvements

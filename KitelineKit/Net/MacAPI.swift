@@ -28,6 +28,12 @@ final class MacAPI: @unchecked Sendable {
     /// 让点对点把端口重新开起来（AppModel 设）。11-13 用户出门时就是这样：没走「回到前台」那条路，端口一直是坏的，流量下又没有局域网可退
     var remoteRefused: (@Sendable () async -> Void)?
     private let lock = NSLock()
+    /// 手机直连的其他 Kiteline 电脑（只挂在主电脑的 MacAPI 上）：请求指向它们的会话 / 设备时转过去（见 DeviceHub）
+    var hub: DeviceHub?
+    /// 事件流要不要只推变了的部分（patch=1）。另加的电脑（LinkedHost）要整份：合并时按整份换
+    var wantsPatch = true
+    /// 远程访问那条常驻连接的状态（选路、显示线路用）。主电脑读 tars_p2p_link；另加的电脑读自己那条通道（LinkedHost 设）
+    var linkReader: @Sendable () -> PhoneP2P.Link = { PhoneP2P.readLink() }
     /// 上次通的那个地址；网络变了、请求连不上时清掉，下次先探路
     private var preferred: URL?
     private var probing: Task<URL?, Never>?
@@ -93,7 +99,7 @@ final class MacAPI: @unchecked Sendable {
         case .loopback: return L("本机")
         case .lan: return L("局域网 ") + (url.host() ?? "")
         case .remote:
-            let link = PhoneP2P.readLink()
+            let link = linkReader()
             guard link.up else { return L("远程访问（正在连接）") }
             switch link.path {
             case .direct: return link.onLAN ? L("局域网直连") : L("点对点直连")
@@ -162,7 +168,7 @@ final class MacAPI: @unchecked Sendable {
                 let started = Date()
                 let url = await self.race()
                 NetLog.note("route", ["to": url.map { "\(AddressKind.of($0))" } ?? "none", "ms": Int(Date().timeIntervalSince(started) * 1000),
-                                      "link": "\(PhoneP2P.readLink().path)"])
+                                      "link": "\(self.linkReader().path)"])
                 return url
             }
             probing = task
@@ -189,7 +195,7 @@ final class MacAPI: @unchecked Sendable {
         let hasRemote = pending != nil || list.contains { AddressKind.of($0) == .remote }
         let hasLAN = list.contains { AddressKind.of($0) == .lan || AddressKind.of($0) == .loopback }
         // 局域网先回来时给远程访问的那一小会儿：它正在重连（刚回到前台）就多等等，免得先走局域网、几秒后又换过去断一次
-        let grace = hasRemote && !PhoneP2P.readLink().up ? 2500 : 1000
+        let grace = hasRemote && !linkReader().up ? 2500 : 1000
         return await withTaskGroup(of: URL?.self) { group -> URL? in
             for base in list {
                 group.addTask { await self.ping(base) }
@@ -209,7 +215,7 @@ final class MacAPI: @unchecked Sendable {
                 guard let url else { continue }
                 switch AddressKind.of(url) {
                 case .remote:
-                    if !hasLAN || !NetPath.shared.onLAN || PhoneP2P.readLink().path != .relay {
+                    if !hasLAN || !NetPath.shared.onLAN || linkReader().path != .relay {
                         group.cancelAll()
                         return url
                     }
@@ -303,32 +309,46 @@ final class MacAPI: @unchecked Sendable {
 
     // MARK: 普通请求
 
+    /// 用哪组连接：普通请求 / 要等电脑做完的（actionPaths）/ 图片等原始数据
+    enum Lane { case normal, action, media }
+
+    /// 发一个请求。指向直连的另一台电脑上的会话 / 设备时交给那台（hub），回来的 key 换回本机写法
+    private func exchange(_ method: String, _ path: String, _ query: [String: String], body: [String: Any]?,
+                          idempotent: Bool = true, lane: Lane = .normal) async throws -> (Data, HTTPURLResponse) {
+        if let hub, let routed = hub.route(query: query, body: body) {
+            let (data, http) = try await routed.api.exchange(method, path, routed.query, body: routed.body, idempotent: idempotent, lane: lane)
+            let json = http.value(forHTTPHeaderField: "Content-Type")?.contains("json") == true
+            return (json ? routed.outward(data) : data, http)
+        }
+        let using: MacClient? = switch lane { case .normal: nil; case .action: actionClient; case .media: mediaClient }
+        return try await perform(idempotent: idempotent, using: using) {
+            try MacClient.request(self.url($0, path, query), method: method, token: self.token, body: method == "GET" ? nil : body)
+        }
+    }
+
     @discardableResult
     func get(_ path: String, _ query: [String: String] = [:]) async throws -> [String: Any] {
-        let (data, http) = try await perform { try MacClient.request(self.url($0, path, query), token: self.token) }
+        let (data, http) = try await exchange("GET", path, query, body: nil)
         return try APIError.check(data, http)
     }
 
     @discardableResult
     func post(_ path: String, _ query: [String: String] = [:], body: [String: Any] = [:]) async throws -> [String: Any] {
         // 带 cid 的（发消息）Mac 会去重，重发安全；按键这类不能重发：超时了可能已经按上了，再发一次就按到下一个确认上
-        let (data, http) = try await perform(idempotent: body["cid"] != nil, using: Self.actionPaths.contains(path) ? actionClient : nil) {
-            try MacClient.request(self.url($0, path, query), method: "POST", token: self.token, body: body)
-        }
+        let (data, http) = try await exchange("POST", path, query, body: body, idempotent: body["cid"] != nil,
+                                              lane: Self.actionPaths.contains(path) ? .action : .normal)
         return try APIError.check(data, http)
     }
 
     /// POST 拿回原始数据（朗读的音频）
     func postData(_ path: String, _ query: [String: String] = [:], body: [String: Any] = [:]) async throws -> Data {
-        let (data, http) = try await perform(idempotent: false) {
-            try MacClient.request(self.url($0, path, query), method: "POST", token: self.token, body: body)
-        }
+        let (data, http) = try await exchange("POST", path, query, body: body, idempotent: false)
         if http.statusCode >= 400 { _ = try APIError.check(data, http) }
         return data
     }
 
     func get<T: Decodable>(_ type: T.Type, _ path: String, _ query: [String: String] = [:]) async throws -> T {
-        let (data, http) = try await perform { try MacClient.request(self.url($0, path, query), token: self.token) }
+        let (data, http) = try await exchange("GET", path, query, body: nil)
         _ = try APIError.check(data, http)
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -340,7 +360,7 @@ final class MacAPI: @unchecked Sendable {
         // 截图版测缓存：KITELINE_DEMO_SLOWAPI=<秒> 让这些接口晚这么久才回（看重开时是不是先显示缓存、右上角「更新中」）
         if let delay = Double(ProcessInfo.processInfo.environment["KITELINE_DEMO_SLOWAPI"] ?? "") { try? await Task.sleep(for: .seconds(delay)) }
         #endif
-        let (data, http) = try await perform { try MacClient.request(self.url($0, path, query), token: self.token) }
+        let (data, http) = try await exchange("GET", path, query, body: nil)
         _ = try APIError.check(data, http)
         let value = try JSONDecoder().decode(T.self, from: data)
         Offline.savePage(Self.pageKey(path, query), data)
@@ -371,13 +391,14 @@ final class MacAPI: @unchecked Sendable {
 
     /// 图片等原始数据（走图片那组连接）
     func data(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
-        let (data, http) = try await perform(using: mediaClient) { try MacClient.request(self.url($0, path, query), token: self.token) }
+        let (data, http) = try await exchange("GET", path, query, body: nil, lane: .media)
         if http.statusCode >= 400 { _ = try APIError.check(data, http) }
         return data
     }
 
     /// 原图：边下边报进度（看大图时显示「原图 1.2 MB」和进度条）。走图片那组连接；连不上时换路重试，同 data()
     func data(_ path: String, _ query: [String: String] = [:], progress: @escaping @Sendable (_ received: Int64, _ total: Int64) -> Void) async throws -> Data {
+        if let hub, let routed = hub.route(query: query, body: nil) { return try await routed.api.data(path, routed.query, progress: progress) }
         var lastError: Error = URLError(.cannotConnectToHost)
         for _ in 0..<2 {
             guard let base = await route() else { break }
@@ -497,7 +518,7 @@ final class MacAPI: @unchecked Sendable {
                 base = other
             }
             // patch=1：之后的状态只推变了的部分（新版 Mac 支持；旧版和 Windows/Linux 电脑端不认这个参数，照旧推整份）
-            var request = try MacClient.request(url(base, "/api/events", ["patch": "1"]), token: token)
+            var request = try MacClient.request(url(base, "/api/events", wantsPatch ? ["patch": "1"] : [:]), token: token)
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             do {
                 return try await streamClient.bytes(request)

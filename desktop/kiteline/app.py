@@ -36,7 +36,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.43"
+VERSION = "1.0.44"
 
 
 class App:
@@ -245,17 +245,26 @@ class App:
         self.store.add_source(source)
         source.start()
 
-    def apply_peer_sources(self, desired):
-        """互联电脑的来源（kind = kiteline）跟上对方报的：只增删这一类，名字、停用沿用本机改过的；只起停增删的那几个（同 Mac 版 applyPeerSources）"""
+    def apply_peer_sources(self, desired, keep_names=None):
+        """互联电脑的来源（kind = kiteline）跟上对方报的：只增删这一类，停用沿用本机改过的；只起停增删的那几个（同 Mac 版 applyPeerSources）。
+        名字：keep_names 里的（对方是老版本、没有别名）沿用本机起的；其余以对方的别名为准，本机不另存"""
         current = {s["id"]: s for s in self.cfg.sources if s.get("kind") == "kiteline"}
         merged = []
         for item in desired:
             old = current.get(item["id"])
             if old:
                 item = dict(item, enabled=old.get("enabled", True))
-                if old.get("name"):
+                if old.get("name") and (keep_names is None or item["id"] in keep_names):
                     item["name"] = old["name"]
             merged.append(item)
+        # 对方改了别名：本机配置不变，但已连着的来源显示名要跟上
+        for entry in merged:
+            source = self.store.sources.get(entry["id"])
+            if source is not None:
+                name = entry.get("name") or self.peers.default_name(entry)
+                if source.name != name:
+                    source.name = name
+                    self.store.source_changed(source)
         if [current.get(m["id"]) for m in merged] == merged and len(merged) == len(current):
             return
         self.cfg.update(lambda d: d.update(sources=[s for s in d["sources"] if s.get("kind") != "kiteline"] + merged))
@@ -314,7 +323,13 @@ class App:
         return None
 
     def update_source(self, source_id, name=None, enabled=None):
-        """改名、启用 / 停用"""
+        """改名、启用 / 停用。别名以设备所在的电脑为准：互联电脑的设备交给那台改（对方是老版本时才记在本机）"""
+        if name is not None:
+            entry = next((s for s in self.cfg.sources if s.get("id") == source_id), None)
+            if entry and entry.get("kind") == "kiteline" and self.peers.rename_at_peer(entry, name.strip()):
+                if enabled is None:
+                    return True
+                name = None
         found = {}
 
         def change(data):
@@ -710,7 +725,7 @@ class App:
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
         # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag"]
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource"]
         payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff"))}
         return payload
 

@@ -1,7 +1,7 @@
 {
  "id": "antigravity",
  "name": "Antigravity",
- "version": "1.1.0",
+ "version": "1.1.1",
  "summary": "Google 的 agent 编程工具：查看命令行、桌面版的会话、状态和完整对话；命令行在 tmux 中运行、或由 Kiteline 在后台运行时可回复、确认、回答提问和中断",
  "summaryEn": "Google's agentic coding tool: view sessions, status and full conversations from the CLI and desktop app; reply, confirm, answer questions and interrupt when the CLI runs in tmux or in the background through Kiteline",
  "needs": [

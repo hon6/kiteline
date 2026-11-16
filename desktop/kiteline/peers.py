@@ -304,9 +304,34 @@ class Peers:
         peer = self.get(entry.get("peerId")) or {}
         name = peer.get("name") or "Kiteline 电脑"
         for info in peer.get("sources") or []:
-            if info.get("id") == entry.get("peerSource") and info.get("kind") != "local":
-                return "%s · %s" % (name, info.get("name"))
+            if info.get("id") == entry.get("peerSource"):
+                if info.get("alias"):
+                    return info["alias"]   # 对方给这个设备起的别名
+                if info.get("kind") != "local":
+                    return "%s · %s" % (name, info.get("name"))
         return name
+
+    def source_info(self, entry):
+        peer = self.get(entry.get("peerId")) or {}
+        return next((i for i in peer.get("sources") or [] if i.get("id") == entry.get("peerSource")), None)
+
+    def rename_at_peer(self, entry, name):
+        """让设备所在的那台电脑改它的别名（/api/sources/rename），改完重新问一遍，名字以对方报来的为准（同 Mac 版 renameAtPeer）。
+        对方是老版本（不报 alias）时返回 False：调用方照旧记在本机"""
+        peer = self.get(entry.get("peerId"))
+        info = self.source_info(entry)
+        if not peer or info is None or info.get("alias") is None:
+            return False
+
+        def run():
+            try:
+                self.call(peer, "POST", "/api/sources/rename", body=json.dumps({"sourceId": info["id"], "name": name}).encode("utf-8"),
+                          headers={"content-type": "application/json"}, timeout=15)
+            except Exception as exc:  # noqa: BLE001
+                log.write("给电脑「%s」改设备名失败：%s" % (peer.get("name"), describe(exc)))
+            self.refresh(peer["id"])
+        threading.Thread(target=run, daemon=True).start()
+        return True
 
     @staticmethod
     def source_configs(peer):
@@ -353,13 +378,15 @@ class Peers:
             info = json.loads(body.decode("utf-8"))
         except ValueError:
             info = {}
-        sources = [{"id": s["id"], "name": s.get("name") or s["id"], "kind": s.get("kind") or "ssh", "live": s.get("live")}
+        # alias：对方给设备起的别名（空 = 没起；没有这个字段 = 对方是老版本）
+        sources = [{"id": s["id"], "name": s.get("name") or s["id"], "kind": s.get("kind") or "ssh", "live": s.get("live"),
+                    "alias": s.get("alias") if isinstance(s.get("alias"), str) else None}
                    for s in info.get("sources") or [] if isinstance(s, dict) and s.get("id")]
         changed = []
 
         def update(p):
-            old = [(s["id"], s["name"]) for s in p.get("sources") or []]
-            if old != [(s["id"], s["name"]) for s in sources] or p.get("name") != (info.get("name") or p.get("name")):
+            old = [(s["id"], s["name"], s.get("alias")) for s in p.get("sources") or []]
+            if old != [(s["id"], s["name"], s.get("alias")) for s in sources] or p.get("name") != (info.get("name") or p.get("name")):
                 changed.append(True)
             p["sources"] = sources
             p["name"] = info.get("name") or p.get("name")
@@ -375,7 +402,20 @@ class Peers:
 
     def sync_sources(self):
         desired = [entry for peer in self.all for entry in self.source_configs(peer)]
-        self.app.apply_peer_sources(desired)
+        # 别名以设备所在的电脑为准：对方报了别名的，本机不另存名字；升级前本机起过、对方没起的一次性交给对方（同 Mac 版 syncSources）
+        current = {s["id"]: s for s in self.app.cfg.sources if s.get("kind") == "kiteline"}
+        keep = set()
+        for entry in desired:
+            info = self.source_info(entry)
+            alias = info.get("alias") if info else None
+            if alias is None:
+                keep.add(entry["id"])
+                continue
+            old = (current.get(entry["id"]) or {}).get("name")
+            if not alias and old:
+                self.rename_at_peer(entry, old)
+                keep.add(entry["id"])   # 对方记下之前本机先留着
+        self.app.apply_peer_sources(desired, keep_names=keep)
 
     # MARK: 自己的身份
 
@@ -607,8 +647,9 @@ class Peers:
             if entry.get("kind") == "kiteline" or not entry.get("enabled", True):
                 continue
             source = self.app.store.source(entry["id"])
+            # alias：用户起的别名（空 = 没起），对方据此以本机的名字为准、改名时交给本机
             items.append({"id": entry["id"], "name": entry.get("name") or entry.get("sshHost") or "本机",
-                          "kind": entry.get("kind") or "local", "live": bool(source and source.live)})
+                          "kind": entry.get("kind") or "local", "live": bool(source and source.live), "alias": entry.get("name") or ""})
         return items
 
     def handle(self, request, device):
@@ -812,6 +853,8 @@ class Peers:
                                                     headers, 180)
         except Exception as exc:  # noqa: BLE001
             return Response.error("连不上电脑「%s」：%s" % (peer.get("name"), describe(exc)), 502)
+        if request.path == "/api/sources/rename" and status == 200:
+            self.refresh(peer["id"])   # 别名改在那台上了：马上取回新名字，手机这次刷新就能看到
         prefix = "%s%s:" % (PREFIX, peer["id"][:8])
         remote_ids = {s["id"] for s in peer.get("sources") or []}
         kind = reply_headers.get("content-type", "")

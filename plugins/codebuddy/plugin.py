@@ -66,6 +66,11 @@ def create(kl):
     # Windows 控制台上的回复、确认、中断：在 Win11 真机实测过才开放（11-05：没测过的不放出来）
     WINDOWS_TESTED = False
 
+    def alive_since(pid, since):
+        """pid 活着、且不是重启后被别的进程复用的（登记时间 / 登记文件早于进程启动就不算）；旧版中台没有这个能力时退回 pid_alive"""
+        check = getattr(kl, "pid_alive_since", None)
+        return check(pid, since) if check else kl.pid_alive(pid)
+
     def term_pane(pid):
         pane = _term_pane(pid)
         if pane and str(pane).startswith("console:") and not WINDOWS_TESTED:
@@ -380,7 +385,7 @@ def create(kl):
                     # 那是桌面版的任务，按 workbuddy.db 列（desktop_tasks，带它记的状态；进程跑完就回池子）
                     if record.get("kind") == "prewarm" or sid.startswith("prewarm-") or brand == "WorkBuddy":
                         continue
-                    if not kl.pid_alive(pid):
+                    if not alive_since(pid, path):
                         continue
                     cwd = record.get("cwd") or ""
                     chat = transcript(home, cwd, sid)

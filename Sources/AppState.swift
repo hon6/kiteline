@@ -100,19 +100,29 @@ final class AppState {
         enabled.forEach { sources[$0.id]?.reload() }
     }
 
-    /// 用 pid 文件做单实例判断；上一个实例异常退出时（pid 已不存在）会接管
+    /// 用 pid 文件做单实例判断；上一个实例异常退出时（pid 已不存在）会接管。
+    /// 重启后 pid 会被系统进程复用（11-16 实例：重启后 475 成了 liveactivitiesd，Kiteline 一直「已有实例」退出、打不开），
+    /// 所以除了进程活着，还要它的可执行文件和自己同名才算另一个 Kiteline
     private func claimSingleInstance() -> Bool {
         let lockURL = AppConfig.directoryURL.appendingPathComponent("instance.pid")
         try? FileManager.default.createDirectory(at: AppConfig.directoryURL, withIntermediateDirectories: true)
         if let text = try? String(contentsOf: lockURL, encoding: .utf8),
            let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-           pid > 0, pid != getpid() {
-            if kill(pid, 0) == 0 || errno == EPERM {
-                return false
-            }
+           pid > 0, pid != getpid(), Self.isKitelineProcess(pid) {
+            return false
         }
         try? "\(getpid())".write(to: lockURL, atomically: true, encoding: .utf8)
         return true
+    }
+
+    /// pid 活着、且可执行文件名和本进程一样（TARS）。读不到路径（别的用户的进程等）一律不算
+    private static func isKitelineProcess(_ pid: Int32) -> Bool {
+        guard kill(pid, 0) == 0 || errno == EPERM else { return false }
+        var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return false }
+        let other = URL(fileURLWithPath: String(cString: buf)).lastPathComponent
+        let mine = Bundle.main.executableURL?.lastPathComponent ?? ProcessInfo.processInfo.processName
+        return other == mine
     }
 
     func shutdown() {
@@ -253,11 +263,13 @@ final class AppState {
         apply(newConfig: next)
     }
 
-    /// 改来源的显示名（清空 = 用默认名：本机 / 主机名）。手机上、会话里的来源名都跟着变
+    /// 改来源的显示名（清空 = 用默认名：本机 / 主机名）。手机上、会话里的来源名都跟着变。
+    /// 别名以设备所在的电脑为准：互联电脑的来源交给那台去改（对方是老版本、不认改名时才记在本机）
     func renameSource(_ id: String, to name: String) {
         var next = config
         guard let index = next.sources.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if next.sources[index].kind == .kiteline, PeerComputers.shared.renameAtPeer(next.sources[index], to: trimmed) { return }
         guard next.sources[index].name != trimmed else { return }
         next.sources[index].name = trimmed
         apply(newConfig: next)
@@ -265,16 +277,24 @@ final class AppState {
 
     /// 互联电脑的来源（kind = .kiteline）跟上对方报的：只增删这一类，名字、停用沿用本机改过的；
     /// 只起停增删的那几个连接，别的来源不重连（apply(newConfig:) 会全部重连）
-    func applyPeerSources(_ desired: [SourceConfig]) {
+    /// keepNames：本机记的名字还要沿用的来源（对方是老版本、没有别名；对方有别名的以对方为准，本机不另存）。
+    /// namesChanged：对方改了别名（本机配置不变、显示名变了）也要推给手机和界面
+    func applyPeerSources(_ desired: [SourceConfig], keepNames: Set<String>? = nil, namesChanged: Bool = false) {
         var next = config
         let existing = Dictionary(next.sources.filter { $0.kind == .kiteline }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let merged = desired.map { item -> SourceConfig in
             var item = item
-            if let old = existing[item.id] { item.name = old.name; item.enabled = old.enabled; item.pathPrefixes = old.pathPrefixes }
+            if let old = existing[item.id] {
+                if keepNames?.contains(item.id) ?? true { item.name = old.name }
+                item.enabled = old.enabled; item.pathPrefixes = old.pathPrefixes
+            }
             return item
         }
         next.sources = next.sources.filter { $0.kind != .kiteline } + merged
-        guard next.sources != config.sources else { return }
+        guard next.sources != config.sources else {
+            if namesChanged { onConfigChange?(config); delegateRefresh() }
+            return
+        }
         config = next
         config.save()
         store.config = next
@@ -459,7 +479,8 @@ final class AppState {
             // hostUpdate = 手机上能看这台电脑的新版本、让它下载安装和重启（/api/host-update）
             // hostedSetup = 远端电脑上后台运行 Claude Code：按设备检测出口、开关，把会话转到后台（/api/hosted/*）
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag"]
+            // renameSource = 手机能给设备起别名（/api/sources/rename，记在设备所在的电脑上）
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource"]
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
             "hosted": ["tipOff": config.mobile.hostedTipOff],
         ]

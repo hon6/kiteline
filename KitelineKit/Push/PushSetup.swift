@@ -31,11 +31,13 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate {
 
     @ObservationIgnored private var token: String?
     @ObservationIgnored private weak var model: AppModel?
-    /// 报给了哪台 Mac（Mac 的设备令牌 + 订阅地址）、什么时候报的：一分钟内连上好几次（网络来回切）不重复报
-    @ObservationIgnored private var subscribed: String?
-    @ObservationIgnored private var subscribedAt = Date.distantPast
-    /// 订阅时用的那条连接：断开配对时拿它去退订（那时 AppModel 可能已经没了）
-    @ObservationIgnored private var subscribedVia: (api: MacAPI, endpoint: String)?
+    /// 报给了哪台电脑（电脑的设备令牌 + 订阅地址）、什么时候报的：一分钟内连上好几次（网络来回切）不重复报。
+    /// 主电脑和另加的 Kiteline 设备（LinkedHost）各报各的，按设备令牌分开记
+    @ObservationIgnored private var subscribed: [String: (mark: String, at: Date)] = [:]
+    /// 订阅时用的连接（按设备令牌）：断开配对、移除电脑时拿它去退订（那时 AppModel 可能已经没了）
+    @ObservationIgnored private var subscribedVia: [String: (api: MacAPI, endpoint: String)] = [:]
+    /// 另加的电脑：拿到推送令牌后要补报
+    @ObservationIgnored private var linkedAPIs: [String: MacAPI] = [:]
 
     /// App 一启动就调：接上通知回调，允许过通知的直接要推送令牌（令牌会变，苹果建议每次启动都要）
     func start() {
@@ -60,6 +62,21 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate {
     func received(token data: Data) {
         token = data.map { String(format: "%02x", $0) }.joined()
         if let api = model?.api { Task { await subscribe(api) } }
+        for api in linkedAPIs.values { Task { await subscribe(api) } }
+    }
+
+    /// 另加的 Kiteline 电脑连上了：也订阅（它推来的会话 key 是它自己的写法，点开时按会话 id 找，见 WidgetSnapshot.sameSession）
+    func connectedLinked(_ api: MacAPI) {
+        linkedAPIs[api.token] = api
+        Task { await subscribe(api) }
+    }
+
+    /// 移除了一台另加的电脑：让它退订
+    func leaveLinked(_ api: MacAPI) {
+        linkedAPIs[api.token] = nil
+        subscribed[api.token] = nil
+        guard let via = subscribedVia.removeValue(forKey: api.token) else { return }
+        Task { _ = try? await via.api.post("/api/push/unsubscribe", body: ["endpoint": via.endpoint]) }
     }
 
     /// 连上 Mac 了：对一下订阅；通知被关了就退订（免得 Mac 以为推到了）
@@ -74,23 +91,22 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate {
         let endpoint = "apns:\(Self.environment):\(token)"
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         if !Self.allowed(status) {
-            if subscribed?.hasSuffix(endpoint) == true {
+            if subscribed[api.token]?.mark.hasSuffix(endpoint) == true {
                 _ = try? await api.post("/api/push/unsubscribe", body: ["endpoint": endpoint])
-                subscribed = nil
+                subscribed[api.token] = nil
             }
             return
         }
         // 每次连上都对一下：Mac 那边的订阅可能被删过（推送失败、在 Mac 上清过），同一个订阅 Mac 收到会直接忽略
         let mark = api.token + "|" + endpoint
-        guard subscribed != mark || Date().timeIntervalSince(subscribedAt) > 60 else { return }
+        if let last = subscribed[api.token], last.mark == mark, Date().timeIntervalSince(last.at) <= 60 { return }
         let keys = PushKeys.loadOrCreate()
         do {
             _ = try await api.post("/api/push/subscribe", body: [
                 "endpoint": endpoint, "keys": ["p256dh": keys.p256dh, "auth": keys.authText], "label": Pairing.deviceName,
             ])
-            subscribed = mark
-            subscribedAt = Date()
-            subscribedVia = (api, endpoint)
+            subscribed[api.token] = (mark, Date())
+            subscribedVia[api.token] = (api, endpoint)
         } catch {
             // 下次连上再报
         }
@@ -98,10 +114,11 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate {
 
     /// 在手机上断开配对：先让 Mac 退订，不然断开以后那台 Mac 还会往这台手机推提醒
     func leave() {
-        guard let via = subscribedVia else { return }
-        subscribedVia = nil
-        subscribed = nil
-        Task { _ = try? await via.api.post("/api/push/unsubscribe", body: ["endpoint": via.endpoint]) }
+        let vias = Array(subscribedVia.values)
+        subscribedVia = [:]
+        subscribed = [:]
+        linkedAPIs = [:]
+        for via in vias { Task { _ = try? await via.api.post("/api/push/unsubscribe", body: ["endpoint": via.endpoint]) } }
     }
 
     private static func allowed(_ status: UNAuthorizationStatus) -> Bool {

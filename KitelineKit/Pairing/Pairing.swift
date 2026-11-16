@@ -45,6 +45,14 @@ struct PairingLink {
 }
 
 enum Pairing {
+    /// 正在「添加 Kiteline 设备」（不是配主电脑）：要经中继时给这台另开一条通道（kiteline_p2p_channel），
+    /// 不占主电脑那条远程访问转发
+    @TaskLocal static var addingDevice = false
+
+    /// 经点对点连过去，返回本机转发地址：配主电脑走主转发，添加设备走通道
+    private static func forward(_ info: RemoteInfo) async -> URL? {
+        addingDevice ? await PhoneP2P.shared.channel(info) : await PhoneP2P.shared.connect(info)
+    }
     /// Mac「设置 → 设备」里显示的名字
     static var deviceName: String {
         #if canImport(UIKit)
@@ -86,7 +94,7 @@ enum Pairing {
             }
             let relay = Task {
                 do {
-                    guard let local = await PhoneP2P.shared.connect(remote) else { throw PairingError(L("远程访问未能启动")) }
+                    guard let local = await forward(remote) else { throw PairingError(L("远程访问未能启动")) }
                     _ = try await client.json(local.appending(path: "api/ping"), token: token)
                     continuation.yield(.success(local))
                 } catch { continuation.yield(.failure(error)) }
@@ -130,7 +138,7 @@ enum Pairing {
     private static func pairViaRelay(code: String, status: (@Sendable (String) -> Void)?) async throws -> PairedMac {
         guard await MainActor.run(body: { PhoneP2P.available }) else { throw PairingError("未发现电脑，请手动输入电脑的地址") }
         let (info, fingerprint) = try await findMac(code: code)
-        guard let local = await PhoneP2P.shared.connect(info) else {
+        guard let local = await forward(info) else {
             throw PairingError(L("已找到电脑，但无法经中继连接。请确认电脑上的 Kiteline 正在运行，且已开启远程访问。"))
         }
         status?(L("已找到电脑，请在电脑上点「允许」完成配对"))

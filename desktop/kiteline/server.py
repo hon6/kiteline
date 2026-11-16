@@ -945,6 +945,20 @@ def r_hosted_settings(s, request, *_):
     return Response.json({"ok": True})
 
 
+def r_sources_rename(s, request, *_):
+    """手机、小程序给设备起别名：{sourceId, name}（清空 = 默认名）。别名记在设备所在的电脑上：
+    互联电脑的设备（kl: 开头）在路由开头已整条转给那台；本机的来源在这里改（同 Mac 版 /api/sources/rename）"""
+    body = request.json or {}
+    source_id = str(body.get("sourceId") or "")
+    name = str(body.get("name") or "").strip()[:40]
+    entry = next((e for e in s.app.cfg.sources if e.get("id") == source_id), None)
+    if entry is None:
+        return Response.json({"ok": False, "error": "设备不存在"}, status=404)
+    s.app.update_source(source_id, name=name)
+    shown = name or (s.app.peers.default_name(entry) if entry.get("kind") == "kiteline" else (entry.get("sshHost") or "本机"))
+    return Response.json({"ok": True, "sourceId": source_id, "name": shown})
+
+
 def r_hosted_move(s, request, *_):
     """把 VS Code 里正开着的会话转到后台运行：?key="""
     record, source = s.resolve(request)
@@ -1927,7 +1941,7 @@ ROUTES = {
     ("GET", "/api/state"): r_state, ("GET", "/api/events"): r_events, ("GET", "/api/history"): r_history,
     ("GET", "/api/agents"): r_agents, ("GET", "/api/trace"): r_trace, ("GET", "/api/peers"): r_peers, ("GET", "/api/task-output"): r_task_output, ("GET", "/api/media"): r_media,
     ("GET", "/api/digest/media"): r_digest_media, ("POST", "/api/send"): r_send, ("POST", "/api/key"): r_key, ("POST", "/api/close"): r_close, ("POST", "/api/queue"): r_queue,
-    ("POST", "/api/hosted/probe"): r_hosted_probe, ("POST", "/api/hosted/settings"): r_hosted_settings,
+    ("POST", "/api/hosted/probe"): r_hosted_probe, ("POST", "/api/hosted/settings"): r_hosted_settings, ("POST", "/api/sources/rename"): r_sources_rename,
     ("POST", "/api/hosted/move"): r_hosted_move,
     ("POST", "/api/answer"): r_answer, ("POST", "/api/voice"): r_voice, ("GET", "/api/voices"): r_voices,
     ("GET", "/api/voice-audio"): r_voice_audio, ("GET", "/api/git"): r_git, ("GET", "/api/git/diff"): r_git_diff,
