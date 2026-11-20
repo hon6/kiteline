@@ -10,6 +10,7 @@ Windows 上技能正文里调 watcher 子命令的写法要用 Kiteline 自己�
 import os
 import sys
 import threading
+import time
 
 from . import config, log
 
@@ -18,6 +19,52 @@ ENABLED = True
 TEST_ENABLED = True
 TODO_ENABLED = True
 STAGE_ENABLED = True
+# 节省 token（设置里同名分组，都默认关）：图片先缩小再给 agent 看；上下文到多少 token 自动整理（0 = 不设）。
+# 和技能同一条通道带给 watcher（images、compact:<N>，见 ccpulse-watch.py 的 sync_savers）
+SHRINK_IMAGES = False
+COMPACT_WINDOW = 0
+
+
+def compact_window(value):
+    """设置里的窗口大小：只认 20 万 / 30 万 / 40 万，别的都当不设"""
+    try:
+        value = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value in (200000, 300000, 400000) else 0
+
+
+_SAVERS = {"at": 0.0, "data": None, "thread": None}
+
+
+def savers_summary(sources, wait=True):
+    """设置页显示用：各台在线电脑上图片缩小省了多少（加起来）、哪几台没有能缩图的工具。
+    要问每台的 watcher，结果留 20 秒；过期了在后台再问：有上一次的结果就直接给上一次的，从没问过才等（最多 4 秒）。
+    app 的每分钟循环也会调一次（wait=False），打开设置时一般已经有结果"""
+    if time.time() - _SAVERS["at"] > 20 and not (_SAVERS["thread"] and _SAVERS["thread"].is_alive()):
+        def run():
+            out = {"images": 0, "before": 0, "after": 0, "saved": 0, "unable": []}
+            for source in list(sources):
+                if not getattr(source, "live", False):
+                    continue
+                try:
+                    reply = source.request({"cmd": "savers"}, timeout=8)
+                except Exception:   # 老 watcher 不认这个请求、连接断了：这台不算
+                    continue
+                lean = reply.get("lean") if isinstance(reply, dict) else None
+                if not isinstance(lean, dict):
+                    continue
+                for key in ("images", "before", "after", "saved"):
+                    out[key] += int(lean.get(key) or 0)
+                if reply.get("claude") and not reply.get("canResize"):
+                    out["unable"].append(str(getattr(source, "name", "") or ""))
+            _SAVERS.update(at=time.time(), data=out)
+
+        _SAVERS["thread"] = threading.Thread(target=run, name="savers-summary", daemon=True)
+        _SAVERS["thread"].start()
+        if wait and _SAVERS["data"] is None:
+            _SAVERS["thread"].join(4)
+    return _SAVERS["data"]
 
 
 def _isolated():
@@ -31,7 +78,8 @@ def skill_ids():
     """开着的技能（id 同 watcher 的技能数据）"""
     # 在会话终端里跑命令（term run）、用 Kiteline 的浏览器（browser，也让 Playwright MCP 连它）跟着主技能开关：不另设开关
     return [name for name, on in (("screenshots", ENABLED), ("terminal", ENABLED), ("browser", ENABLED), ("playwright", TEST_ENABLED), ("todos", TODO_ENABLED),
-                                                 ("stages", STAGE_ENABLED)) if on]
+                                                 ("stages", STAGE_ENABLED), ("images", SHRINK_IMAGES),
+                                                 ("compact:%d" % COMPACT_WINDOW, COMPACT_WINDOW > 0)) if on]
 
 
 def _quote(path):

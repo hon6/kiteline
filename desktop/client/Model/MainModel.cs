@@ -75,6 +75,17 @@ public sealed partial class MainModel : ObservableObject
         if (WorldMode && GroupIdOf(newValue) is null) Views.World.Focus(newValue);
     }
 
+    /// 左边栏里点了一行会话（或群）：没开着的照旧开成标签；已经开成标签的不再开，切到那个标签，
+    /// 它的边框闪几下主题色（同 Mac 版 KitelineModel.pick，11-20 用户）
+    public void Pick(string key)
+    {
+        var opened = ChatPanes.Shared.IsOpen(key);
+        Selection = key;
+        if (!opened) return;
+        ChatPanes.Shared.Show(key);   // 再点的就是当前选中的那个时上面不会切，这里补上
+        ChatPanes.Shared.FlashTab(key);
+    }
+
     public void NewTask(SessionInfo? item = null)
     {
         NewTaskPreset = item is null ? null : (item.SourceId, item.Cwd ?? "");

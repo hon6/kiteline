@@ -12,6 +12,10 @@ enum AgentSkill {
     static var testEnabled = true { didSet { if testEnabled != oldValue { syncLive() } } }
     static var todoEnabled = true { didSet { if todoEnabled != oldValue { syncLive() } } }
     static var stageEnabled = true { didSet { if stageEnabled != oldValue { syncLive() } } }
+    /// 节省 token（设置 → 节省 token，都默认关）：图片先缩小再给 agent 看；上下文到多少 token 自动整理（0 = 不设）。
+    /// 和技能同一条通道带给 watcher（images、compact:<N>，见 ccpulse-watch.py 的 sync_savers）
+    static var shrinkImages = false { didSet { if shrinkImages != oldValue { syncLive() } } }
+    static var compactWindow = 0 { didSet { if compactWindow != oldValue { syncLive() } } }
     /// 给 OpenCode 装 Kiteline 插件（watcher 来装，见 ccpulse-watch.py 的 install_opencode_plugin）：同样由 AppState 按配置设置
     static var openCodePlugin = true
     /// 会话浏览器（设置 → Agent 浏览器）：开在哪（client 用户这台电脑 / server agent 所在的电脑）、最多几个、空闲几分钟回收。
@@ -39,6 +43,7 @@ enum AgentSkill {
     static var skillIds: [String] {
         // 在会话终端里跑命令（term run）、用 Kiteline 的浏览器（browser，也让 Playwright MCP 连它）跟着主技能开关：不另设开关
         (enabled ? ["screenshots", "terminal", "browser"] : []) + (testEnabled ? ["playwright"] : []) + (todoEnabled ? ["todos"] : []) + (stageEnabled ? ["stages"] : [])
+            + (shrinkImages ? ["images"] : []) + (compactWindow > 0 ? ["compact:\(compactWindow)"] : [])
     }
 
     /// 启动 watcher 时带的环境变量：哪些技能开着；OpenCode 插件关掉了就让它删掉装过的

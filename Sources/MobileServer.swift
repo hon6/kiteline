@@ -16,6 +16,8 @@ import KitelineKit
 ///   GET  /api/media?key=&ref=    图片（带缓存）
 ///   POST /api/send?key=          {text, images:[{name, data(base64)}], files:[{name, data(base64)}], submit?}
 ///   GET  /api/download?key=&path=[&cwd=&reveal=1]  电脑上的文件原样取回（手机预览、转发到别的 App）
+///   GET  /api/steward                    总管模式（实验性）的设置和总管会话；POST /api/steward {enabled, sourceId, agent, existing, speak} 开启 / 关闭；
+///   POST /api/steward/wake               总管会话不在了，重新开一个（见 Steward.swift）
 ///   POST /api/key?key=           {key: enter|esc|1|2|3}
 ///   POST /api/answer?key=        回答 AskUserQuestion：{answers:[{question, picked:[...], other}]}
 ///   GET  /api/ping[?bytes=N]     网络检测（延迟 / 下行速率）
@@ -790,7 +792,8 @@ final class MobileServer {
                 }
                 switch Scheduler.shared.add(sourceId: sourceId, cwd: body["cwd"] as? String ?? "", prompt: body["prompt"] as? String ?? "",
                                             repeatMode: body["repeat"] as? String ?? "", time: body["time"] as? String ?? "",
-                                            date: body["date"] as? String) {
+                                            date: body["date"] as? String, every: (body["every"] as? NSNumber)?.intValue,
+                                            until: body["until"] as? String) {
                 case .success(let task): respond(.json(["ok": true, "schedule": Scheduler.shared.payload(task)]))
                 case .failure(let error): respond(.error(error.message, status: 400))
                 }
@@ -1046,7 +1049,7 @@ final class MobileServer {
                 IdleClose.shared.touch([request.query["key"] ?? ""])
                 self.capGuard(request, respond: respond) { self.resume(request, respond: respond) }
             case ("GET", "/api/projects"):
-                Projects.collect(detail: request.query["detail"] == "1") { respond(.json($0)) }
+                Projects.collect(detail: request.query["detail"] == "1", fresh: request.query["fresh"] == "1") { respond(.json($0)) }
             case ("GET", "/api/dirs"), ("POST", "/api/dirs"):
                 self.dirs(request, respond: respond)
             case ("GET", "/api/launchable"):
@@ -1191,6 +1194,8 @@ final class MobileServer {
                 respond(TabGroupStore.shared.handle(request))
             case (_, let path) where path == "/api/groups" || path.hasPrefix("/api/groups/"):
                 Groups.shared.handle(request, respond: respond)
+            case (_, let path) where path == "/api/steward" || path.hasPrefix("/api/steward/"):
+                Steward.shared.handle(request, respond: respond)
             default:
                 respond(.error("接口不存在", status: 404))
             }
@@ -2403,13 +2408,15 @@ final class MobileServer {
         }
         let body = request.jsonBody ?? [:]
         let action = body["action"] as? String ?? ""
-        guard ["move", "edit", "delete", "now"].contains(action), let qid = body["id"] as? String else {
+        // hold：开始编辑（on 不是 false）/ 取消编辑，编辑期间这条先不交给 Claude
+        guard ["move", "edit", "delete", "now", "hold"].contains(action), let qid = body["id"] as? String else {
             respond(.error("请求格式无效", status: 400)); return
         }
         let text = (body["text"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         if action == "edit", text == nil { respond(.error("内容为空", status: 400)); return }
         Log.write("手机调整「\(record.snapshot.name)」的排队消息：\(action)")
-        Delivery.queue(action: action, qid: qid, text: text, dir: body["dir"] as? Int, record: record, source: source) { outcome in
+        Delivery.queue(action: action, qid: qid, text: text, dir: body["dir"] as? Int, on: body["on"] as? Bool,
+                       record: record, source: source) { outcome in
             respond(.json(["ok": outcome.ok, "message": outcome.message], status: outcome.ok ? 200 : 409))
         }
     }

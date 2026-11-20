@@ -12,6 +12,8 @@ import UniformTypeIdentifiers
 /// 放掉的只是 Kiteline 里显示用的消息：agent 在 VS Code / 终端里照常跑，状态、推送、确认、群转发都走电脑推来的状态和后台，不受影响（11-10 反馈过）
 @Observable @MainActor
 public final class TabGroups {
+    /// 分屏标签栏顶上画不画会话组那一排（见 KitelineKit.tabGroupsInTitlebar）
+    var showsInTitlebar = true
     struct Group: Codable, Identifiable, Equatable {
         let id: UUID
         var name: String
@@ -988,6 +990,11 @@ extension KitelineKit {
     }
 
     public static var tabGroupCount: Int { tabGroups.groups.count }
+
+    /// Mac 分屏标签栏顶上还画不画会话组（倒挂在窗口顶边的一排组标签、放不下时标签栏最前面的色块组名、标签栏底边的组色线）。
+    /// 11-20 反馈：顶上那排不好用——新版界面不画（会话组还在：左边栏「会话组」页签、「窗口」菜单和快捷键、会话右键里切换和管理），经典版照旧
+    static var tabGroupsInTitlebar: Bool { tabGroups.showsInTitlebar }
+    public static func showTabGroupsInTitlebar(_ on: Bool) { if tabGroups.showsInTitlebar != on { tabGroups.showsInTitlebar = on } }
 
     /// ⇧⌘U：跳到最该看的会话——先待确认，再出错，再有新消息；先找当前组，再按侧栏顺序找别的组（同 cmux「跳到最新未读」）
     @discardableResult

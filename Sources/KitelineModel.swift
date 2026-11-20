@@ -163,6 +163,163 @@ final class KitelineModel: ObservableObject {
     static let todosID = "@todos"
     static let favoritesID = "@favorites"
 
+    /// 新版界面（11-20）：最左一条图标栏（会话、项目、待办、收藏……）+ 一栏内容，窗口底部一条状态栏，项目点进去看文件、Git、会话。
+    /// 经典版（顶上几格入口 + 会话列表）原样留着，默认还是它，窗口右上角的按钮在两套之间换（用户：给个适应的过渡期）
+    @Published var newLayout = AppConfig.defaults.bool(forKey: "newLayout") {
+        didSet {
+            guard newLayout != oldValue else { return }
+            AppConfig.defaults.set(newLayout, forKey: "newLayout")
+            // 经典版里没有左边栏的待办 / 项目 / 收藏：换回去时收起点开的项目；新版里这三样不占右边：从这三页换过来时右边回到会话
+            projectShowsCode = false
+            if !newLayout { projectPane = nil }
+            if newLayout, [Self.todosID, Self.projectsID, Self.favoritesID].contains(selection ?? "") {
+                let page = String((selection ?? "").dropFirst())
+                selection = nil
+                sideTab = page
+            }
+            applyLayoutToPanes()
+        }
+    }
+
+    /// 新版界面不在分屏标签栏顶上画会话组那一排（用户：上面的会话组不好用，去掉）；经典版照旧
+    func applyLayoutToPanes() {
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.applyLayoutToPanes() }; return }
+        let fresh = newLayout
+        MainActor.assumeIsolated {
+            KitelineKit.showTabGroupsInTitlebar(!fresh)
+            // 新版界面每个项目一套标签：切进来时经典那套存起来，切回去放回
+            KitelineKit.projectSpaces.setEnabled(fresh, project: projectPane ?? "", seed: [])
+        }
+        if fresh {
+            if !ProjectsModel.shared.loaded { ProjectsModel.shared.load() }   // 认会话属于哪个项目要用到项目列表
+            // 重开 App：中间显示的是上次那个项目的标签，项目栏也接上它
+            let active = MainActor.assumeIsolated { KitelineKit.projectSpaces.active }
+            if projectPane == nil, !active.isEmpty {
+                inSpaceSwitch = true
+                projectPane = active
+                inSpaceSwitch = false
+            }
+        }
+    }
+
+    /// 新版界面左边栏那一栏现在列的是什么：sessions 会话 / todos 待办 / projects 项目 / favorites 收藏（图标栏上点的）。
+    /// 记在偏好里，下次打开还是这一页
+    static let sideTabs = ["sessions", "todos", "projects", "favorites"]
+    @Published var sideTab: String = {
+        let saved = AppConfig.defaults.string(forKey: "sideTab") ?? ""
+        return KitelineModel.sideTabs.contains(saved) ? saved : "sessions"
+    }() {
+        didSet { if sideTab != oldValue { AppConfig.defaults.set(sideTab, forKey: "sideTab") } }
+    }
+
+    /// 新版界面：切到左边栏的某一栏（图标栏上点的，对话里点「待办」「收藏」、菜单、通知跳过来的）：世界模式里先回到平时的界面，侧栏收着就展开
+    func showSideTab(_ tab: String) {
+        guard Self.sideTabs.contains(tab) else { return }
+        if worldMode { setWorld(false) }
+        SidebarState.shared.show()
+        if !query.isEmpty { query = "" }   // 搜索时列的是会话，页签看不见
+        if sideTab != tab { sideTab = tab }
+    }
+
+    /// 新版界面的当前项目（项目合成一项后的 id）：项目栏显示它的会话、文件；中间的标签是它那一套（ProjectSpaces，切项目整套换，
+    /// 11-20 反馈：A 项目下不要出现 B 项目的会话）。nil = 没选项目（「全部」那一套）
+    @Published var projectPane: String? {
+        didSet { if projectPane != oldValue, newLayout { switchSpace() } }
+    }
+    /// 「项目」一栏现在列的是项目列表（点了「‹」回列表时；当前项目不变，中间的标签不动）
+    @Published var projectListShown = false
+    /// 切项目时要显示的会话（从「选了别的项目的会话」来的）
+    private var spaceFocus: String?
+    private var inSpaceSwitch = false
+
+    /// 中间的标签整套换成当前项目那一套；那个项目第一次打开：放它最近有动静的会话
+    private func switchSpace() {
+        let id = projectPane ?? ""
+        let projects = ProjectsModel.shared
+        let live = id.isEmpty ? [] : projects.live(group: projects.members(id)).sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }.map(\.id)
+        let seed = spaceFocus.map { [$0] } ?? Array(live.prefix(1))
+        inSpaceSwitch = true
+        MainActor.assumeIsolated {
+            KitelineKit.projectSpaces.activate(id, seed: seed)
+            if let focus = spaceFocus { KitelineKit.panes.show(focus) }
+        }
+        let focused = MainActor.assumeIsolated { KitelineKit.panes.focused }
+        if selection != focused { selection = focused }
+        spaceFocus = nil
+        inSpaceSwitch = false
+        if !id.isEmpty { MainActor.assumeIsolated { ProjectStripState.shared.reopen(id) } }
+    }
+
+    /// 一个标签 / 会话属于哪个项目（项目合成一项后的 id）；群、认不出的回 nil
+    func projectID(of key: String) -> String? {
+        if key.hasPrefix("@group:") { return nil }
+        let projects = ProjectsModel.shared
+        if key.hasPrefix(NewDraftKey.prefix) {
+            return NewDraftKey.parse(key).map { projects.groupID(ProjectsModel.id(sourceId: $0.sourceId, cwd: $0.cwd)) }
+        }
+        let sessionKey = MainActor.assumeIsolated { KitelineKit.codeTabSession(key) } ?? key
+        if let item = session(sessionKey) { return projects.groupID(ProjectsModel.id(sourceId: item.sourceId, cwd: item.cwd)) }
+        if let past = HistoryModel.shared.past(sessionKey) { return projects.groupID(ProjectsModel.id(sourceId: past.sourceId, cwd: past.cwd)) }
+        return nil
+    }
+    /// 二级侧边栏开着时右边显示的是代码（点了文件、改动、提交历史）还是会话
+    @Published var projectShowsCode = false
+
+    /// 点项目：没开就打开它的二级侧边栏，开着的正是它就收起
+    func toggleProject(_ id: String) {
+        projectShowsCode = false
+        if newLayout { openProject(id); return }   // 新版：点项目就是切到它（中间的标签跟着换），回列表用「‹」
+        projectPane = projectPane == id ? nil : id
+    }
+
+    /// 「打开项目」面板（左边栏「项目」页签里的「打开」：选电脑和文件夹、选 Agent，直接打开）
+    @Published var showOpenProject = false
+
+    /// 新版界面的布局（11-20 反馈：所有板块都能拖，左右、上下随便组合）：从左到右几栏，每栏从上到下几块。
+    /// 块：nav 导航栏（图标栏 + 列表）、sessions 项目的会话列表、files 文件侧栏、tabs 标签页区域（会话、文件开成的标签）。
+    /// 状态栏单独：放窗口顶部还是底部。存在 AppConfig.defaults 的 layoutColumns（「nav,sessions|tabs|files」这样一串）
+    static let layoutBlocks = ["nav", "sessions", "files", "tabs"]
+    static let defaultColumns: [[String]] = [["nav", "sessions"], ["tabs"], ["files"]]
+    @Published var layoutColumns: [[String]] = KitelineModel.parseColumns(AppConfig.defaults.string(forKey: "layoutColumns")) {
+        didSet { AppConfig.defaults.set(layoutColumns.map { $0.joined(separator: ",") }.joined(separator: "|"), forKey: "layoutColumns") }
+    }
+    @Published var statusOnTop = AppConfig.defaults.bool(forKey: "layoutStatusTop") {
+        didSet { AppConfig.defaults.set(statusOnTop, forKey: "layoutStatusTop") }
+    }
+
+    /// 读回存的布局：认不得的块丢掉、缺的块补到合适的地方（导航栏放最左、标签页区域单独一栏、会话列表和文件侧栏跟在导航栏下面），空栏去掉
+    static func parseColumns(_ raw: String?) -> [[String]] {
+        guard let raw, !raw.isEmpty else { return defaultColumns }
+        var seen = Set<String>()
+        var columns = raw.split(separator: "|").map { col in
+            col.split(separator: ",").map(String.init).filter { layoutBlocks.contains($0) && seen.insert($0).inserted }
+        }.filter { !$0.isEmpty }
+        for block in layoutBlocks where !seen.contains(block) {
+            switch block {
+            case "nav": columns.insert(["nav"], at: 0)
+            case "tabs": columns.append(["tabs"])
+            default: if columns.isEmpty { columns.append([block]) } else { columns[0].append(block) }
+            }
+        }
+        return columns
+    }
+
+    /// 切到新版界面时弹不弹布局设置（弹窗里勾「下次不再询问」就不弹了；图标栏上的「布局」随时能再打开）
+    var askLayoutOnSwitch: Bool {
+        get { AppConfig.defaults.object(forKey: "layoutAskOnSwitch") as? Bool ?? true }
+        set { AppConfig.defaults.set(newValue, forKey: "layoutAskOnSwitch") }
+    }
+    /// 布局设置弹窗
+    @Published var showLayoutSetup = false
+
+    /// 打开某个项目的二级侧边栏（「打开项目」开好之后）：左边栏切到「项目」
+    func openProject(_ id: String, showList: Bool = true) {
+        if showList { showSideTab("projects") }
+        projectShowsCode = false
+        projectListShown = false
+        projectPane = ProjectsModel.shared.groupID(id)   // 几台设备上的同一个项目合成一项，按那一项的 id 记
+    }
+
     @Published private(set) var sessions: [SessionItem] = []
     @Published private(set) var sources: [SourceItem] = []
     @Published private(set) var phoneClients = 0
@@ -172,8 +329,18 @@ final class KitelineModel: ObservableObject {
         didSet {
             // 世界模式里点了左边栏顶上的入口（今日动态、待办……）：离开世界去那一页；点会话 = 世界里镜头飞过去（见 WorldView）
             if worldMode, let key = selection, key.hasPrefix("@") { worldMode = false }
+            // 二级侧边栏开着、右边正看着代码时选了会话（哪怕就是原来那个）：右边回到会话
+            if projectShowsCode, selection != nil { projectShowsCode = false }
             // 选中了会话（或群：同会话一样开成一个标签）：右边分屏里已经开着就切到那块，没开着就放进当前块（画右边之前先换好，不闪一下旧的）
-            guard let key = selection, !key.hasPrefix("@") || key.hasPrefix("@group:"), key != oldValue else { return }
+            // 代码标签（@code:…，文件、对比、历史）也一样开在分屏里
+            guard let key = selection, !key.hasPrefix("@") || key.hasPrefix("@group:") || key.hasPrefix("@code:") || key.hasPrefix("@new:"),
+                  key != oldValue else { return }
+            // 新版界面选中了别的项目的会话（左边全部会话里点的、通知跳过来的……）：先切到那个项目（中间的标签整套换），再显示它
+            if newLayout, !inSpaceSwitch, projectPane != nil, let project = projectID(of: key), project != projectPane {
+                spaceFocus = key
+                projectPane = project
+                return
+            }
             if Thread.isMainThread {
                 MainActor.assumeIsolated { KitelineKit.panes.show(key) }
             } else {
@@ -181,6 +348,20 @@ final class KitelineModel: ObservableObject {
             }
         }
     }
+    /// 左边栏里点了一行会话（或群、历史会话）：没开着的照旧开成标签；已经开成标签的不再开，切到那个标签，
+    /// 它的边框闪几下主题色（11-20 反馈：已打开的再点一次不要再开标签，对应的标签边框闪主题色）
+    func pick(_ key: String) {
+        // AR 模式里（小球展开的侧栏）点了会话：镜头运过去、打开那个窗口
+        if arMode, !key.hasPrefix("@") { MainActor.assumeIsolated { ARMode.shared.focus(key) } }
+        let opened = MainActor.assumeIsolated { KitelineKit.panes.openKeys.contains(key) }
+        selection = key
+        guard opened else { return }
+        MainActor.assumeIsolated {
+            KitelineKit.panes.show(key)   // 选中的没变（再点的就是当前这个）时上面不会切，这里补上
+            KitelineKit.panes.flashTab(key)
+        }
+    }
+
     @Published var query = ""
     /// 「新任务」面板；preset = 预先选中的项目（从某个会话的菜单里点进来）
     @Published var showNewTask = false
@@ -203,6 +384,13 @@ final class KitelineModel: ObservableObject {
     /// 世界那块放哪一页：像素园区（world）还是数据流大屏（flow）；两页共用一个网页宿主（WorldHost）。记在偏好里
     @Published private(set) var worldPage = AppConfig.defaults.string(forKey: "worldPage") == "flow" ? "flow" : "world" {
         didSet { AppConfig.defaults.set(worldPage, forKey: "worldPage") }
+    }
+
+    /// AR 模式：主窗口收起，所有会话漂在透明的屏幕空间里（Sources/ARMode.swift）。不记偏好：下次打开 App 还是平时的窗口
+    @Published var arMode = false
+
+    func toggleAR() {
+        MainActor.assumeIsolated { ARMode.shared.toggle() }   // 只在界面上点、菜单里按的时候调（主线程）
     }
 
     /// 地球 / 数据流两个入口：没开就打开这一页；开着别的那页就切过来；开着的正是这页就离开

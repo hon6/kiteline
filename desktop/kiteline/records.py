@@ -519,6 +519,24 @@ class Favorites:
                 self._items = [i for i in self._items if not gone(i)]
             self._changed()
             return 200, self.payload()
+        if method == "POST" and path == "/api/favorites/update":
+            # 改一条收藏的文字（收藏下来的内容有错、想补一句；图不动。没有图的不能改成空的）
+            fav_id, raw = body.get("id"), body.get("text")
+            if not fav_id or not isinstance(raw, str):
+                return 400, {"ok": False, "error": "缺少 id、text"}
+            text = raw.strip()
+            with self._lock:
+                found = next((i for i in self._items if i["id"] == fav_id), None)
+                if found is None:
+                    return 404, {"ok": False, "error": "这条收藏已不存在"}
+                if not text and not found.get("images"):
+                    return 400, {"ok": False, "error": "内容不能为空"}
+                if text:
+                    found["text"] = text[:self.TEXT_LIMIT]
+                else:
+                    found.pop("text", None)
+            self._changed()
+            return 200, self.payload()
         if method == "GET" and path == "/api/favorites/media":
             ref = query.get("ref", "")
             if not re.match(r"^[a-f0-9]{16}\.(jpg|png)$", ref):

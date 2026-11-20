@@ -321,6 +321,16 @@ enum AppAppearance {
         // 主题色、字体、字号（Look）也存在这份偏好里：测试实例用自己那份
         Look.shared.use(AppConfig.defaults)
         KitelineKit.useTranslatorDefaults(AppConfig.defaults)   // 消息翻译的设置（同上：测试实例不写正式版的偏好）
+        Look.shared.schemeChanged = { applyWindow() }
+        applyWindow()
+    }
+
+    /// 窗口深浅：选了 VS Code 配色方案就跟方案（深色方案用深色外观，系统控件、菜单才对得上），否则照「跟随系统 / 浅色 / 深色」
+    static func applyWindow() {
+        if let scheme = Look.shared.scheme {
+            NSApp.appearance = NSAppearance(named: scheme.dark ? .darkAqua : .aqua)
+            return
+        }
         switch current {
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)

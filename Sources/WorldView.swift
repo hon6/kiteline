@@ -159,6 +159,10 @@ final class WorldContainer: NSView {
 @MainActor
 final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
     static let shared = WorldHost()
+    /// AR 模式那一份（ar.html，铺满屏幕的透明窗口里，见 ARMode.swift）：和主窗口里的世界 / 数据流各用各的网页，数据照样从这里转
+    static let ar = WorldHost(page: "ar")
+    /// AR 那一份建过没有（转实时事件时用，没建过不去建它）
+    private static var arMade = false
     static let scheme = "kiteline-world"
     static let canvasColor = NSColor(srgbRed: 0x2A / 255, green: 0x2B / 255, blue: 0x2F / 255, alpha: 1)
     static let flowColor = NSColor(srgbRed: 0x06 / 255, green: 0x07 / 255, blue: 0x0B / 255, alpha: 1)
@@ -166,8 +170,15 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
     private var web: WKWebView?
     private var ready = false
     private var shown = false
-    /// 放哪一页：world（index.html，像素园区）/ flow（flow.html，数据流大屏）
-    private var page = KitelineModel.shared.worldPage
+    /// 放哪一页：world（index.html，像素园区）/ flow（flow.html，数据流大屏）/ ar（ar.html，AR 模式）
+    private var page: String
+    private var isAR: Bool { page == "ar" }
+
+    private init(page: String? = nil) {
+        self.page = page ?? KitelineModel.shared.worldPage
+        super.init()
+        if page == "ar" { Self.arMade = true }
+    }
     private var insetTop: CGFloat = 0
     private var insetLeft: CGFloat = 0
     private var lastState = ""
@@ -183,8 +194,8 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             guard window !== oldValue else { return }
             windowObserver.map(NotificationCenter.default.removeObserver)
             windowObserver = window.map { window in
-                NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { _ in
-                    MainActor.assumeIsolated { WorldHost.shared.sendActive() }
+                NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.sendActive() }
                 }
             }
         }
@@ -205,7 +216,7 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         config.mediaTypesRequiringUserActionForPlayback = []   // 朗读交谈不用先点一下
         let web = WKWebView(frame: .zero, configuration: config)
         web.setValue(false, forKey: "drawsBackground")
-        web.underPageBackgroundColor = page == "flow" ? Self.flowColor : Self.canvasColor
+        web.underPageBackgroundColor = isAR ? .clear : page == "flow" ? Self.flowColor : Self.canvasColor
         // 网页铺到标题栏底下：别让系统按标题栏高度缩掉页面（否则窗口底下空出一条）；网页自己按 insets 让开统计条
         if web.responds(to: NSSelectorFromString("_setAutomaticallyAdjustsContentInsets:")) {
             web.setValue(false, forKey: "automaticallyAdjustsContentInsets")
@@ -219,26 +230,26 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         // 会话列表、状态有变化（KitelineModel 跟着 AppState 刷新）：攒 0.3 秒推一次整份
         KitelineModel.shared.objectWillChange
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
-            .sink { _ in MainActor.assumeIsolated { WorldHost.shared.pushState(force: false) } }
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.pushState(force: false) } }
             .store(in: &bag)
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
             NotificationCenter.default.publisher(for: name)
-                .sink { _ in MainActor.assumeIsolated { WorldHost.shared.sendActive() } }
+                .sink { [weak self] _ in MainActor.assumeIsolated { self?.sendActive() } }
                 .store(in: &bag)
         }
         NotificationCenter.default.publisher(for: Lang.didChange)
-            .sink { _ in MainActor.assumeIsolated { WorldHost.shared.sendInit(); WorldHost.shared.pushState(force: true) } }
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.sendInit(); self?.pushState(force: true) } }
             .store(in: &bag)
         return web
     }
 
     private static func url(_ page: String) -> URL {
-        URL(string: "\(scheme)://app/\(page == "flow" ? "flow" : "index").html")!
+        URL(string: "\(scheme)://app/\(page == "flow" ? "flow" : page == "ar" ? "ar" : "index").html")!
     }
 
-    /// 换页（地球 ↔ 数据流）：同一个网页宿主重新加载另一页，数据照旧从这里转
+    /// 换页（地球 ↔ 数据流）：同一个网页宿主重新加载另一页，数据照旧从这里转（AR 那一份不换页）
     func setPage(_ value: String) {
-        guard value != page else { return }
+        guard value != page, !isAR, value != "ar" else { return }
         page = value
         guard let web else { return }
         ready = false
@@ -256,11 +267,12 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         if value {
             pushState(force: true)
             pushUsage()
-            usageTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in MainActor.assumeIsolated { WorldHost.shared.pushUsage() } }
+            usageTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.pushUsage() } }
         } else {
-            let work = DispatchWorkItem { MainActor.assumeIsolated { WorldHost.shared.release() } }
+            let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.release() } }
             teardown = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 180, execute: work)
+            // AR 那一份：离开 30 秒就放掉（回来重新载入只要一下）
+            DispatchQueue.main.asyncAfter(deadline: .now() + (isAR ? 30 : 180), execute: work)
         }
         sendActive()
     }
@@ -292,6 +304,11 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         if ready { send(["type": "focus", "key": key]) }
     }
 
+    /// 给网页发一条（AR 的 cmd / prefs 这类）：网页还没好就不发（好了以后 init 里会带上当前设置）
+    func post(_ object: [String: Any]) {
+        if ready { send(object) }
+    }
+
     func sendActive() {
         guard ready else { return }
         let visible = shown && (window?.occlusionState.contains(.visible) ?? true)
@@ -313,6 +330,7 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             "type": "init", "lang": Lang.shared.isEnglish ? "en" : "zh", "strings": Self.strings, "brand": lastBrand,
             "quality": "high", "insets": ["top": insetTop, "left": insetLeft], "door": false, "mediaBase": "\(Self.scheme)://app/", "marks": marks,
             "voices": Array(TTS.voices().map(\.id).prefix(6)),
+            "prefs": isAR ? ARMode.shared.dock.prefs : [String: Any](),
         ])
     }
 
@@ -340,17 +358,22 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
     /// 今日用量：各台机器汇总（UsageReport 自己缓存一分钟）
     func pushUsage() {
         guard ready, shown else { return }
-        UsageReport.collect(days: 1) { payload in
+        UsageReport.collect(days: 1) { [weak self] payload in
             MainActor.assumeIsolated {
-                WorldHost.shared.send(["type": "usage", "totals": payload["totals"] ?? [:], "projects": payload["projects"] ?? []])
+                self?.send(["type": "usage", "totals": payload["totals"] ?? [:], "projects": payload["projects"] ?? []])
             }
         }
     }
 
     /// 实时事件（MobileServer.publish 每条都过一遍）：对话增量、会话之间的消息、机器负载、待办转给网页
     nonisolated static func forward(event: String, payload: [String: Any]) {
-        guard ["entries", "peers", "sys", "todos"].contains(event) else { return }
-        let work = { MainActor.assumeIsolated { WorldHost.shared.relay(event, payload) } }
+        guard ["entries", "peers", "sys", "todos", "browser_frame"].contains(event) else { return }
+        let work = {
+            MainActor.assumeIsolated {
+                if event != "browser_frame" { WorldHost.shared.relay(event, payload) }
+                if WorldHost.arMade { WorldHost.ar.relay(event, payload) }
+            }
+        }
         if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
@@ -359,6 +382,18 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         var body = payload
         body["type"] = event
         switch event {
+        case "entries" where isAR:
+            // AR 窗口里显示完整的回复：文字留长一些，不要工具的输入
+            let fields: Set<String> = ["t", "id", "ts", "text", "name", "images", "queued", "brief", "isError"]
+            body["items"] = (payload["items"] as? [[String: Any]] ?? []).suffix(30).map { item in
+                item.filter { fields.contains($0.key) }.mapValues { value -> Any in
+                    if let text = value as? String { return String(text.prefix(6000)) }
+                    return value
+                }
+            }
+        case "browser_frame":
+            // 会话浏览器的画面：只有 AR 窗口要（它自己订了才有）
+            guard isAR else { return }
         case "entries":
             // 只留网页用得到的字段、最后十几条，长文字截短（工具的输入输出可能很大）。
             // 数据流页还要工具的输入（读写了哪些文件、跑了什么命令）、报错、结果多长，多留几条
@@ -409,6 +444,9 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             send(todos)
             pushUsage()
             sendActive()
+        case "open" where isAR:
+            // AR 窗口里点了「在主窗口中打开」：离开 AR，主窗口切到这个会话
+            if let key = body["key"] as? String { ARMode.shared.openInMain(key) }
         case "open":
             // 悬浮窗自己一份单块分屏：不切主窗口的分屏、不往里加标签
             if let key = body["key"] as? String { model.worldDetail = key }
@@ -425,8 +463,27 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             send(["type": "sent", "ok": ok, "id": body["id"] as? String ?? ""])
         case "dictate":
             dictate(body["action"] as? String ?? "")
+        case "exit" where isAR:
+            ARMode.shared.exit()
         case "exit":
             model.setWorld(false)
+        case "press":
+            // AR 窗口里点了确认框的选项（允许 / 总是允许 / 拒绝……），同会话页的按键
+            guard let key = body["key"] as? String, let button = body["button"] as? String else { break }
+            TarsWorldChat.press(key: key, button: button, label: body["label"] as? String ?? "")
+        case "browser":
+            // AR 窗口要看哪个会话的浏览器画面：thumb 小图 / full 大图 / off 不看了
+            guard let key = body["key"] as? String else { break }
+            TarsWorldChat.watchBrowser(key: key, level: body["level"] as? String ?? "off")
+        case "viewed":
+            // AR 窗口里看过了（指着停了一会儿、打开过）：同对话页打开，各端的新消息提示一起消
+            guard let key = body["key"] as? String else { break }
+            IdleClose.shared.touch([key])
+            PeerComputers.shared.noteViewed([key])
+        case "rects":
+            ARMode.shared.setRects(body["rects"] as? [[Double]] ?? [])
+        case "prefs":
+            ARMode.shared.dock.apply(body)
         default: break
         }
     }
@@ -449,9 +506,9 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
                 }
                 self.send(["type": "dictation", "state": "recording"])
                 self.levelTimer?.invalidate()
-                self.levelTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                self.levelTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated {
-                        let host = WorldHost.shared
+                        guard let host = self else { return }
                         guard TarsWorldChat.recording else { host.levelTimer?.invalidate(); return }
                         host.send(["type": "dictation", "state": "level", "level": TarsWorldChat.level, "elapsed": TarsWorldChat.elapsed])
                         if TarsWorldChat.elapsed >= 60 { host.dictate("stop") }   // 最长一分钟
@@ -522,8 +579,8 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             let http = response as? HTTPURLResponse
             let status = http?.statusCode ?? 502
             let type = http?.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream"
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { WorldHost.shared.finish(task, status: status, type: type, data: data ?? Data()) }
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.finish(task, status: status, type: type, data: data ?? Data()) }
             }
         }.resume()
     }
@@ -535,8 +592,8 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         let voice = query.first { $0.name == "voice" }?.value
         guard !text.isEmpty else { finish(task, status: 400, type: "text/plain", data: Data()); return }
         TTS.shared.synthesize(text: text, voice: voice?.isEmpty == false ? voice : nil, rate: 1) { data, type in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { WorldHost.shared.finish(task, status: data == nil ? 500 : 200, type: type, data: data ?? Data()) }
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.finish(task, status: data == nil ? 500 : 200, type: type, data: data ?? Data()) }
             }
         }
     }

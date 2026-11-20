@@ -30,6 +30,8 @@ final class AppState {
         AgentSkill.todoEnabled = config.mobile.installTodoSkill
         AgentSkill.stageEnabled = config.mobile.installStageSkill
         AgentSkill.openCodePlugin = config.mobile.installOpenCodePlugin
+        AgentSkill.shrinkImages = config.mobile.shrinkAgentImages
+        AgentSkill.compactWindow = config.mobile.compactWindow
         AgentSkill.browser = (config.mobile.browserOn, config.mobile.browserMax, config.mobile.browserIdle, config.mobile.browserRecord)
         store.delegate = self
         mobile.onClientsChange = { [weak self] in
@@ -140,6 +142,8 @@ final class AppState {
         AgentSkill.todoEnabled = newConfig.mobile.installTodoSkill
         AgentSkill.stageEnabled = newConfig.mobile.installStageSkill
         AgentSkill.openCodePlugin = newConfig.mobile.installOpenCodePlugin
+        AgentSkill.shrinkImages = newConfig.mobile.shrinkAgentImages
+        AgentSkill.compactWindow = newConfig.mobile.compactWindow
         AgentSkill.browser = (newConfig.mobile.browserOn, newConfig.mobile.browserMax, newConfig.mobile.browserIdle, newConfig.mobile.browserRecord)
         mobile.update(config: newConfig.mobile)
         // 端口、令牌可能变了：主窗口的原生对话页跟着重连（没变时什么也不做）
@@ -216,6 +220,8 @@ final class AppState {
         AgentSkill.todoEnabled = next.mobile.installTodoSkill
         AgentSkill.stageEnabled = next.mobile.installStageSkill
         AgentSkill.openCodePlugin = next.mobile.installOpenCodePlugin
+        AgentSkill.shrinkImages = next.mobile.shrinkAgentImages
+        AgentSkill.compactWindow = next.mobile.compactWindow
         AgentSkill.browser = (next.mobile.browserOn, next.mobile.browserMax, next.mobile.browserIdle, next.mobile.browserRecord)
         mobile.update(config: next.mobile)
         mobile.publishState()   // 快捷短语等设置要同步到已连着的手机
@@ -488,7 +494,7 @@ final class AppState {
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
             // renameSource = 手机能给设备起别名（/api/sources/rename，记在设备所在的电脑上）
             // editorWindows = 能列出、关掉没有会话在运行的 VS Code 窗口（/api/editor/windows，hosted.closeEditor 是自动关的开关）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows"]
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit"] + (Steward.available ? ["steward"] : [])
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
             "hosted": ["tipOff": config.mobile.hostedTipOff, "closeEditor": config.mobile.hostedCloseEditor],
         ]
@@ -592,6 +598,8 @@ extension AppState: SourceConnectionDelegate {
             Todos.shared.pushToAgents(only: source)
             // 会话群的名单也给一份（group say / info 核对成员）
             Groups.shared.pushToAgents(only: source)
+            // 总管模式：总管那台电脑刚连上，推一份目录
+            DispatchQueue.main.async { Steward.shared.sourceConnected(source) }
         }
     }
 
@@ -664,6 +672,8 @@ extension AppState: SourceConnectionDelegate {
                     Todos.shared.fillSessionMeta()
                     // 会话群：成员开了 / 关了，排着的群消息接着投或改成恢复时补上
                     Groups.shared.sessionsChanged()
+                    // 总管模式：认总管会话、把目录推给总管那台电脑
+                    Steward.shared.sessionsChanged()
                 }
             }
         }
@@ -709,6 +719,9 @@ extension AppState: SourceConnectionDelegate {
             case "group_say":
                 // 发到会话群的（watcher 的 group say）：转给群里其他会话
                 Groups.shared.agentSaid(key: key, item: item)
+            case "steward_op":
+                // 总管模式（watcher 的 steward 子命令）：派活、新开会话、拉群、汇报
+                Steward.shared.agentOp(key: key, item: item)
             default:
                 continue
             }

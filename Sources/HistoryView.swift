@@ -122,7 +122,7 @@ final class HistoryModel: ObservableObject {
     func open(_ item: PastItem, hit: String? = nil) {
         known[item.key] = item
         if let hit = hit { KitelineKit.jump(key: item.key, itemId: hit) }
-        KitelineModel.shared.selection = item.key
+        KitelineModel.shared.pick(item.key)   // 已经开成标签的不再开：切过去，标签边框闪一下
     }
 
     func past(_ key: String?) -> PastItem? { key.flatMap { known[$0] } }
@@ -463,23 +463,29 @@ struct HistoryView: View {
 
 struct PastRow: View {
     let item: PastItem
+    /// 新版界面项目栏里的「最近的会话」不画头像（同会话列表），第二行也不写项目名（都是这个项目的，只写设备）
+    var avatar = true
 
     var body: some View {
-        HStack(spacing: 10) {
-            SessionAvatar(key: item.key, title: item.displayTitle, activity: item.live ? .busy : .unknown, size: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.displayTitle).font(.app(size: 13, weight: .semibold)).lineLimit(1)
-                Text([item.sourceName, item.folder, item.title != nil ? (item.firstPrompt ?? "") : ""].filter { !$0.isEmpty }.joined(separator: " · "))
-                    .font(.app(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+        // 新版界面（不画头像）照侧栏规范：字号同上面的会话行（标题 12、第二行 11），时间和标题顶对齐，上下边距同会话行
+        HStack(alignment: avatar ? .center : .top, spacing: avatar ? 10 : SideMetric.gap) {
+            if avatar { SessionAvatar(key: item.key, title: item.displayTitle, activity: item.live ? .busy : .unknown, size: 30) }
+            VStack(alignment: .leading, spacing: avatar ? 1 : 2) {
+                // 新版界面的「最近的会话」：标题不加粗、最多两行（11-20 截图：加粗又截成一行看不全）
+                Text(item.displayTitle).font(.app(size: avatar ? 13 : SideMetric.Text.row, weight: avatar ? .semibold : .regular))
+                    .lineLimit(avatar ? 1 : 2).fixedSize(horizontal: false, vertical: !avatar)
+                Text([item.sourceName, avatar ? item.folder : "", item.title != nil ? (item.firstPrompt ?? "") : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.app(size: avatar ? 11 : SideMetric.Text.caption)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 6)
+            TarsOpenedTabMark(key: item.key)
             if item.live {
                 Text("进行中").font(.app(size: 10.5, weight: .medium)).foregroundStyle(Color.tarsBrand)
                     .padding(.horizontal, 6).padding(.vertical, 2).background(Color.tarsTile, in: Capsule())
             }
-            Text(Format.short(item.lastActive)).font(.app(size: 10.5)).foregroundStyle(.tertiary)
+            Text(Format.short(item.lastActive)).font(.app(size: avatar ? 10.5 : SideMetric.Text.meta)).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, avatar ? 3 : SideMetric.rowPad)
     }
 }
 

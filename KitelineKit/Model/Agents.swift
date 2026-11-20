@@ -196,13 +196,40 @@ extension AppModel {
         return used
     }
 
-    /// 换模型：在这个会话里发一条 /model（和在 VS Code 输入框里打一样，只改这个会话）
+    /// 换模型：让这个会话执行 /model（和在 VS Code 输入框里打一样，只改这个会话）。不在对话里挂一条消息，界面上马上按新的显示
     func setModel(_ key: String, _ id: String, _ name: String) {
         guard let session = session(key), session.canReply else { flash(L("此会话不支持远程操作")); return }
-        chat(key).pending.removeAll { $0.isFailed && $0.text.hasPrefix("/model") }   // 之前没发出去的 /model 被这次取代了
-        guard let sent = send(key, text: "/model \(id)", images: []) else { return }
-        chat(key).modelOverride = (id, session.usage?.model, sent)
-        flash(L("已发送 /model：切换为 %@", "\(name)"))
+        let chat = chat(key)
+        chat.pending.removeAll { $0.isFailed && $0.text.hasPrefix("/model") }   // 老版本留下的没发出去的 /model 被这次取代了
+        let sent = sendSetting(key, "/model \(id)", done: session.isBusy ? L("已切换为 %@，下一步起生效", "\(name)") : L("已切换为 %@", "\(name)")) { [weak chat] in
+            if chat?.modelOverride?.model == id { chat?.modelOverride = nil }
+        }
+        chat.modelOverride = (id, session.usage?.model, sent)
+    }
+
+    /// 设置类的命令（/model、/effort）交给电脑上的会话执行，不走发消息那一套（11-20 反馈：以前点了之后排成一条消息挂在输入框上方，
+    /// 不好用，要和 VS Code 里切换一样）。Claude 正忙时电脑端的送达插件让这一轮接下来的请求直接按新设置发，这一轮做完再执行命令本身；
+    /// 会话还是旧版插件时照旧排到这一轮做完（回 later，队列里看得到）。回这次的编号（记在界面的临时显示上）；没成时调 failed 把显示改回去
+    private func sendSetting(_ key: String, _ text: String, done: String, failed: @escaping () -> Void) -> String {
+        let cid = "set-" + String(Int(Date().timeIntervalSince1970 * 1000), radix: 36) + String(Int.random(in: 0..<1_000_000), radix: 36)
+        Task {
+            do {
+                let reply = try await api.post("/api/send", ["key": key], body: ["text": text, "images": [], "files": [], "override": false, "cid": cid])
+                let submitted = reply["submitted"] as? Bool ?? false
+                if !submitted {
+                    failed()
+                    flash(reply["message"] as? String ?? L("未能切换，请稍后重试"))
+                } else if reply["later"] as? Bool == true {
+                    flash(L("Claude 正在工作，本轮结束后生效"))
+                } else {
+                    flash(done)
+                }
+            } catch {
+                failed()
+                show(error)
+            }
+        }
+        return cid
     }
 
     /// 会话现在的思考等级：刚发过 /effort、记录里还没认出来时（Claude 在忙要等这一轮做完才执行），先按发过去的算
@@ -232,12 +259,17 @@ extension AppModel {
             guard ultracode != currentUltracode(key) else { return }
             arg = ultracode ? "ultracode on" : "ultracode off"
         } else { return }
-        // 之前没发出去的 /effort 被这次取代了：拿掉，别挂在对话底下
+        // 老版本留下的没发出去的 /effort 被这次取代了：拿掉，别挂在对话底下
         chat.pending.removeAll { $0.isFailed && $0.text.hasPrefix("/effort") }
-        guard let id = send(key, text: "/effort \(arg)", images: []) else { return }
+        // 思考等级是跟着你说的话走的：Claude 正忙时这一轮接下来只有工具结果，新等级这一轮做完（下一句话起）才用上。
+        // 换模型不一样，下一次请求就换（11-20 用真的 Claude Code 2.1.329 加假模型实测）
+        let done = session.isBusy ? L("已切换为 %@，本轮结束后生效", "\(name)") : L("已切换为 %@", "\(name)")
+        let id = sendSetting(key, "/effort \(arg)", done: done) { [weak chat] in
+            if level != nil, chat?.effortOverride?.effort == level { chat?.effortOverride = nil }
+            if ultracode != nil, chat?.ultracodeOverride?.on == ultracode { chat?.ultracodeOverride = nil }
+        }
         if let level { chat.effortOverride = (level, session.effort, id) }
         if let ultracode { chat.ultracodeOverride = (ultracode, session.ultracode == true, id) }
-        flash(session.isBusy ? L("已发送 /effort %@（%@），Claude 本轮结束后生效", "\(arg)", "\(name)") : L("已发送 /effort %@：%@", "\(arg)", "\(name)"))
     }
 
     /// 切权限模式：替你在 Claude Code 里按 ⇧Tab，按到目标那一档

@@ -104,7 +104,11 @@ public sealed class FavoritesPage : Panel
         var line = string.Join(" · ", new[] { speaker, item.Title, item.Ts is double ts ? Format.ListTime(ts) : "" }.Where(s => s.Length > 0));
         var jump = new Tap(Ui.H(3, Ui.Text(L("原消息"), 12, color: "Text2"), Ui.Sym("chevron.right", 10, "Text2")).Pad(4, 2),
             () => TodoState.OpenSource(item.Key, item.ItemId), 4).Keys("Transparent", "Fill05").Tip(L("跳转到原消息"));
-        stack.Children.Add(Ui.H(6, Ui.Sym("star.fill", 11, "Accent"), Ui.Text(line, 12, color: "Text2").Trim().Shrink(), new Spacer(8), jump));
+        // 编辑：收藏下来的内容有错、想补一句时改（11-20 用户；原来只能取消收藏重来）
+        var edit = FavoriteState.CanEdit
+            ? new Tap(Ui.Sym("pencil", 11.5, "Text2"), () => FavoriteEditor.Open(item), 4) { Width = 24, Height = 22 }.Keys("Transparent", "Fill05").Tip(L("编辑"))
+            : null;
+        stack.Children.Add(Ui.H(6, Ui.Sym("star.fill", 11, "Accent"), Ui.Text(line, 12, color: "Text2").Trim().Shrink(), new Spacer(8), edit, jump));
         var card = Card.Make(stack, 14, 12);
         card.Menu(() => Menu(item));
         return card;
@@ -113,6 +117,7 @@ public sealed class FavoritesPage : Panel
     static IEnumerable<Control> Menu(FavoriteItem item)
     {
         yield return Ui.Item(L("跳转到原消息"), () => TodoState.OpenSource(item.Key, item.ItemId));
+        if (FavoriteState.CanEdit) yield return Ui.Item(L("编辑"), () => FavoriteEditor.Open(item));
         if (item.Text is { Length: > 0 } text)
             yield return Ui.Item(L("复制"), () => { _ = MainWindow.Current?.Clipboard?.SetTextAsync(text); AppModel.Shared.Flash(L("已复制")); });
         yield return Ui.Divider();
@@ -145,5 +150,85 @@ public sealed class FavoritesPage : Panel
             e.Handled = true;
         };
         return box;
+    }
+}
+
+/// 改一条收藏的文字（同 Mac 版 FavoriteEditor，11-20）：只改收藏里存的这一份，原对话不动，图不动。
+/// 一个大文字框，回车换行，Ctrl+Enter 保存，Esc 取消（改过了先问一句）
+public sealed class FavoriteEditor
+{
+    readonly FavoriteItem item;
+    readonly Window window;
+    readonly TextBox input;
+    readonly Tap confirm;
+
+    public static void Open(FavoriteItem item) => new FavoriteEditor(item);
+
+    string Trimmed => (input.Text ?? "").Trim();
+    bool Dirty => Trimmed != (item.Text ?? "").Trim();
+    /// 没有图的收藏不能改成空的（那就是取消收藏了）
+    bool CanSave => Dirty && (Trimmed.Length > 0 || item.Images.Count > 0);
+
+    FavoriteEditor(FavoriteItem item)
+    {
+        this.item = item;
+        var source = L("出自「%@」", item.Title) + (item.Ts is double ts ? " · " + Format.ListTime(ts) : "");
+        var header = new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 0, 14) };
+        header.Children.Add(Ui.Text(L("编辑收藏"), 16, FontWeight.SemiBold));
+        header.Children.Add(Ui.H(5, Ui.Sym("text.bubble", 11, "Text2"), Ui.Text(source, 12, color: "Text2").Trim().Shrink()));
+
+        input = new TextBox
+        {
+            Text = item.Text ?? "", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 200, MaxHeight = 460, FontSize = Look.Pt(14),
+            Watermark = L("收藏的内容"), Padding = new Thickness(10, 8), Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+        };
+        input.Classes.Add("plain");
+        input.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { e.Handled = true; Save(); }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        var field = new Border { CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(0.5), Child = input }
+            .Res(Border.BackgroundProperty, "Surface").Res(Border.BorderBrushProperty, "Separator");
+        var note = Ui.Text(L("只修改收藏中保存的这一份，原对话不受影响；图片保持不变。"), 11.5, color: "Text3").Wrap().Margin(0, 8, 0, 0);
+        var top = new StackPanel { Children = { header, field, note } }.Pad(20, 18, 20, 16);
+
+        confirm = new Tap(Ui.Text(L("保存"), 13, FontWeight.SemiBold, "White").HAlign(HorizontalAlignment.Center).Pad(18, 0), Save, 7) { Height = 30, MinWidth = 72 }
+            .Keys("Accent", "Accent");
+        var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), Cancel, 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
+            .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
+        var footer = Ui.H(10, Ui.Text(L("Ctrl+Enter %@", L("保存")), 11.5, color: "Text3"), new Spacer(), cancel, confirm).Pad(20, 14);
+        var root = new DockPanel();
+        DockPanel.SetDock(footer, Dock.Bottom);
+        var rule = Ui.Rule("Separator", 0.5);
+        DockPanel.SetDock(rule, Dock.Bottom);
+        root.Children.Add(footer);
+        root.Children.Add(rule);
+        root.Children.Add(top);
+
+        window = Dialog.Make(root, 600, L("编辑收藏"));
+        window.KeyDown += (_, e) => { if (e.Key == Key.Escape) Cancel(); };
+        window.Opened += (_, _) => { input.Focus(); input.CaretIndex = input.Text?.Length ?? 0; };
+        input.TextChanged += (_, _) => UpdateConfirm();
+        UpdateConfirm();
+        Dialog.Show(window);
+    }
+
+    void UpdateConfirm()
+    {
+        confirm.Opacity = CanSave ? 1 : 0.45;
+        confirm.IsHitTestVisible = CanSave;
+    }
+
+    async void Cancel()
+    {
+        if (Dirty && !await Dialogs.Confirm(L("放弃所做的修改？"), L("放弃修改"), destructive: true)) return;
+        window.Close();
+    }
+
+    void Save()
+    {
+        if (!CanSave) return;
+        FavoriteState.Shared.Update(item.Id, Trimmed);
+        window.Close();
     }
 }

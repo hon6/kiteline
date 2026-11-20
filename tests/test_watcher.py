@@ -1073,6 +1073,73 @@ try:
           and "e.agentId !== undefined" in register and "delivered" in register)
     W.sync_stage_mod(mod_root, enabled=False)
     check("关掉任务阶段技能：提醒 mod 一起删掉", not os.path.exists(os.path.join(mod_root, "skills", "kiteline-stages")))
+
+    # 省 token：图片先缩小（mod kiteline-lean）、上下文自动整理（Claude Code 的 autoCompactWindow）
+    lean_root = os.path.join(root, "claude-lean")
+    os.makedirs(lean_root)
+    lean_register = os.path.join(lean_root, "skills", "kiteline-lean", "hooks", "register.ts")
+    real_resize = W.lean_resize_command
+    W.lean_resize_command = lambda folder=None: ["/usr/bin/sips", "-s", "format", "{fmt}", "-Z", "{max}", "{src}", "--out", "{dst}"]
+    installed = W.sync_lean_mod(lean_root, enabled=True)
+    register = open(lean_register, encoding="utf-8").read() if os.path.exists(lean_register) else ""
+    check("图片先缩小开着：装上 mod（只管 Read 读到的图、缩图命令按这台电脑填好、长边 1280、再读一次给原图）",
+          installed and "on('tool.call', { tool: 'Read' }" in register and '["/usr/bin/sips", "-s", "format", "{fmt}", "-Z", "{max}", "{src}", "--out", "{dst}"]' in register
+          and "const MAX = 1280" in register and "Read the same path again" in register and "@@" not in register, register[:200])
+    check("Mac 的 sips 写不了 webp：webp 图缩小后存成 png", '"image/webp": ["png", "image/png", "png"]' in register and '"image/jpeg": ["jpg", "image/jpeg", "jpeg"]' in register)
+    W.lean_resize_command = lambda folder=None: None
+    check("这台电脑没有能缩图的工具：不装，装过的删掉", not W.sync_lean_mod(lean_root, enabled=True) and not os.path.exists(os.path.dirname(os.path.dirname(lean_register))))
+    W.lean_resize_command = lambda folder=None: ["python3", "-c", W._LEAN_PIL, "{src}", "{dst}", "{max}"]
+    W.sync_lean_mod(lean_root, enabled=True)
+    register = open(lean_register, encoding="utf-8").read()
+    check("Linux 用 Pillow 的那条命令写进去后还是合法的一行（换行转成 \\n）", "from PIL import Image\\nim = Image.open" in register and register.count("const RESIZE") == 1)
+    check("Linux：webp 还存成 webp", '"image/webp": ["webp", "image/webp", "webp"]' in register)
+    W.lean_resize_command = lambda folder=None: ["C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe", "-NoProfile", "-File", (folder or "").replace("\\", "/") + "/hooks/resize.ps1", "{src}", "{dst}", "{max}"]
+    W.sync_lean_mod(lean_root, enabled=True)
+    register = open(lean_register, encoding="utf-8").read()
+    ps1 = os.path.join(os.path.dirname(lean_register), "resize.ps1")
+    check("Windows：缩图脚本 resize.ps1 跟着装进 mod（只有 ASCII），命令指到它，webp 不缩",
+          os.path.exists(ps1) and open(ps1, "rb").read().isascii() and "System.Drawing" in open(ps1).read()
+          and "/hooks/resize.ps1" in register and '"image/webp"' not in register and '"image/png": ["png", "image/png", "png"]' in register)
+    W.sync_lean_mod(lean_root, enabled=False)
+    check("关掉图片先缩小：mod 删掉", not os.path.exists(os.path.dirname(os.path.dirname(lean_register))))
+    other_lean = os.path.join(root, "claude-lean-other")
+    os.makedirs(os.path.join(other_lean, "skills", "kiteline-lean", "hooks"))
+    open(os.path.join(other_lean, "skills", "kiteline-lean", "hooks", "register.ts"), "w").write("// 用户自己的\n")
+    W.sync_lean_mod(other_lean, enabled=False)
+    check("别人放的同名文件夹（没有我们的标记）不删", os.path.exists(os.path.join(other_lean, "skills", "kiteline-lean", "hooks", "register.ts")))
+    W.lean_resize_command = real_resize
+    os.makedirs(os.path.join(lean_root, "kiteline", "lean", "stats"))
+    json.dump({"v": 1, "hours": {"489888": [2, 5000, 2000], "489900": [1, 3555, 1456]}}, open(os.path.join(lean_root, "kiteline", "lean", "stats", "s1.json"), "w"))
+    json.dump({"v": 1, "hours": {"489900": [3, 9000, 4000]}}, open(os.path.join(lean_root, "kiteline", "lean", "stats", "s2.json"), "w"))
+    open(os.path.join(lean_root, "kiteline", "lean", "stats", "bad.json"), "w").write("{oops")
+    check("图片缩小省了多少：各会话记的加起来（坏文件跳过）", W.lean_stats(root=lean_root) == {"images": 6, "before": 17555, "after": 7456, "saved": 10099}, str(W.lean_stats(root=lean_root)))
+    check("只算某个时间之后的", W.lean_stats(489900 * 3600000, root=lean_root)["images"] == 4)
+    thumbs = os.path.join(lean_root, "kiteline", "lean", "thumbs", "s1")
+    os.makedirs(thumbs)
+    for name, age in (("old.png", 2 * 86400), ("new.png", 60)):
+        open(os.path.join(thumbs, name), "w").write("x")
+        os.utime(os.path.join(thumbs, name), (time.time() - age, time.time() - age))
+    check("缩小后的临时图：放了一天以上的删掉，新的留着", W.lean_cleanup(lean_root) == 1 and os.listdir(thumbs) == ["new.png"])
+    check("开关里的 compact:<N>：取出窗口大小（不到 10 万按 10 万，没带是 0）",
+          W.compact_target({"todos", "compact:300000"}) == 300000 and W.compact_target({"compact:5"}) == 100000 and W.compact_target({"todos"}) == 0)
+    settings_file = os.path.join(lean_root, "settings.json")
+    read_settings = lambda: json.load(open(settings_file, encoding="utf-8"))
+    json.dump({"model": "claude-x", "permissions": {"allow": ["Bash(ls:*)"]}}, open(settings_file, "w"))
+    check("自动整理上下文：写进 settings.json 的 autoCompactWindow，别的键原样", W.sync_compact_window(lean_root, 300000) == 300000
+          and read_settings() == {"model": "claude-x", "permissions": {"allow": ["Bash(ls:*)"]}, "autoCompactWindow": 300000}, str(read_settings()))
+    check("换一档：跟着改", W.sync_compact_window(lean_root, 200000) == 200000 and read_settings()["autoCompactWindow"] == 200000)
+    check("关掉：把这个键拿掉（原来就没有），别的键还在", W.sync_compact_window(lean_root, 0) is None and read_settings() == {"model": "claude-x", "permissions": {"allow": ["Bash(ls:*)"]}}
+          and not os.path.exists(os.path.join(lean_root, "kiteline", "compact.json")))
+    json.dump({"autoCompactWindow": 500000}, open(settings_file, "w"))
+    W.sync_compact_window(lean_root, 300000)
+    check("用户原来自己设过：关掉时还回他的值", read_settings()["autoCompactWindow"] == 300000 and W.sync_compact_window(lean_root, 0) == 500000 and read_settings() == {"autoCompactWindow": 500000})
+    W.sync_compact_window(lean_root, 300000)
+    json.dump({"autoCompactWindow": 150000}, open(settings_file, "w"))
+    check("开着的时候用户自己改成了别的值：以他的为准，不再改回去", W.sync_compact_window(lean_root, 300000) == 150000 and read_settings()["autoCompactWindow"] == 150000)
+    check("这时关掉：他的值不动", W.sync_compact_window(lean_root, 0) == 150000 and read_settings()["autoCompactWindow"] == 150000)
+    open(settings_file, "w").write("{ // 注释\n}")
+    check("settings.json 不是合法 JSON：不碰", W.sync_compact_window(lean_root, 300000) is None and open(settings_file).read() == "{ // 注释\n}")
+    check("没装 Claude Code 的电脑：什么都不写", W.sync_compact_window(os.path.join(root, "no-claude"), 300000) is None and not os.path.exists(os.path.join(root, "no-claude")))
     W.STAGE_DIR, W.STAGE_FLOWS_FILE = os.path.join(DATA, "stage"), os.path.join(DATA, "stage-flows.json")
 
     out = subprocess.run([sys.executable, WATCHER, "stage", "测试", "--note", "跑集成测试", "--session", SID],
@@ -1381,7 +1448,7 @@ try:
     tc = mod_ts.split("on('turn.complete'")[1].split("on('tool.call'")[0]
     check("mod：Claude 忙时发来的话和斜杠命令都排进队，这一轮做完（turn.complete）再照顺序提交 / 执行",
           "later.push(q)" in mod_ts
-          and "for (const q of later.splice(0)) await deliver($, q)" in tc
+          and "await flushIdle($)" in tc and "for (const q of ready) await deliver($, q)" in mod_ts
           and "void $.command.run({ command: slash[0], args: slash[1] })" in mod_ts and "result = 'later'" in mod_ts)
     check("读记录时去掉垫的零宽空格：手机上显示、核对送达都照原话", W.user_string_item("\u200b/Users/x 看看", {"id": "1"})["text"] == "/Users/x 看看")
     check("手机经 mod 发来、排队进来的话算你说的；别的插件的不算",
@@ -1392,7 +1459,7 @@ try:
     check("mod v3：不再往一轮中间插（session.append 的行 2.1.327 起被标成「不是用户说的」）",
           "$.session.append(" not in mod_ts and "classic.PostToolBatch" not in mod_ts)
     check("mod v4：Claude Code 不收的提交（你在电脑上按了停止，回 drop）放回队列；直发、强插被丢回 dropped，alive 标 v4；会话重开接着排",
-          "v: 4" in mod_ts and ".drop !== undefined" in mod_ts and "requeue($, q)" in mod_ts and mod_ts.count("result = 'dropped'") == 2
+          "v: 6" in mod_ts and ".drop !== undefined" in mod_ts and "requeue($, q)" in mod_ts and mod_ts.count("result = 'dropped'") == 2
           and "startedAt - q.at < 1800 * 1000" in mod_ts and hasattr(W.Watcher, "bridge_dropped"))
     note = {"type": "attachment", "timestamp": ts(1), "attachment": {"type": "plugin_note", "plugin": "kiteline",
             "content": ["\u200b现在部署"], "sentAs": "system"}}
@@ -1406,7 +1473,19 @@ try:
           and not any(W.bridge_typeable(x) for x in ("/compact", "!ls", "# 记住", "@file", "看看 @src/ma", "", "  ")))
     check("mod：排队的话写进 <会话>.queue.json，认 queue 指令（move / edit / delete / now），alive 标 v2",
           "queue.json" in mod_ts and "item.op === 'queue'" in mod_ts and all("item.action === '%s'" % a in mod_ts for a in ("move", "edit", "delete", "now"))
-          and "v: 4" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now"} and "queue" in W.BRIDGE_OPS)
+          and "v: 6" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now", "hold"} and "queue" in W.BRIDGE_OPS)
+    # 忙时切模型 / 思考等级不排队（11-20）：记进 over，turn.step 里这一轮接下来的请求按新的发；这一轮做完先执行命令本身再交排着的话
+    check("mod：忙时的 /model、/effort 不进排队列表，下一次模型请求起生效，这一轮做完再执行命令本身",
+          "if (turn && slash && instant(slash))" in mod_ts and "on('turn.step', async function* ($, e, next)" in mod_ts
+          and "e.agentId !== undefined || e.turnId !== turn" in mod_ts and "settle.splice(0)" in mod_ts
+          and mod_ts.index("settle.splice(0)") < mod_ts.index("for (const q of jumps.splice(0))"))
+    check("mod v5：正在编辑的那条（hold）和它后面的这一轮做完先不交，保存 / 取消 / 删除后空闲就交；编辑保留 n、at；到点放开",
+          "item.action === 'hold'" in mod_ts and "later[at].held = now" in mod_ts and "delete later[at].held" in mod_ts
+          and "const stop = later.findIndex(q => held(q, now))" in mod_ts and "if (release) await flushIdle($)" in mod_ts
+          and "const { held: _held, cmd: _cmd, ...rest } = later[at]" in mod_ts and "const HOLD_MS = 10 * 60 * 1000" in mod_ts
+          and "later.push({ ...q, held: undefined, n: ++seq })" in mod_ts)
+    check("简版项目列表不和统计排一队（HEAVY_CMDS 里没有 projects，仍在 SLOW_CMDS）",
+          "projects" not in W.HEAVY_CMDS and "projects" in W.SLOW_CMDS and "project_overview" in W.HEAVY_CMDS)
     q_dir = W.bridge_dir()
     os.makedirs(q_dir, exist_ok=True)
     q_started = int(time.time() * 1000) - 5000

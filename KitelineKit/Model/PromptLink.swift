@@ -76,15 +76,18 @@ public final class PromptLinks {
 }
 
 #if os(iOS)
-/// 主界面上挂着：收到提示词链接就弹「新任务」（提示词填好，链接里的项目对得上就选中）
+/// 主界面上挂着：收到提示词链接就推进「新会话」页（提示词填好，链接里的项目对得上就定下）
 struct PromptLinkHost: ViewModifier {
-    /// 挂在主界面 .environment(model) 外面：面板里要自己带上
-    let model: AppModel
+    /// 推进「新会话」页（MainView 的 openFromOutside：切到会话页签推进去）
+    let open: (NewTaskSeed) -> Void
     @State private var links = PromptLinks.shared
 
     func body(content: Content) -> some View {
-        content.sheet(item: $links.pending) { link in
-            NewTaskView(initialText: link.prompt, hint: link.project).environment(model)
+        // initial：App 收到链接时主界面还没搭好的，出来时接着打开
+        content.onChange(of: links.pending?.id, initial: true) { _, _ in
+            guard let link = links.pending else { return }
+            links.pending = nil
+            open(NewTaskSeed(initialText: link.prompt, hint: link.project))
         }
     }
 }

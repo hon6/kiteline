@@ -65,6 +65,7 @@ public sealed class SidebarView : Panel
         main.PropertyChanged += Changed;
         tiles.Changed += Schedule;
         Look.Changed += Schedule;
+        ChatPanes.Shared.OpenKeysChanged += Schedule;   // 会话行、群行的「已在标签页中打开」标识
         FavoriteState.Shared.PropertyChanged += (_, _) => Dispatcher.UIThread.Post(Schedule);   // 「收藏」格子的条数
         GroupState.Shared.PropertyChanged += (_, _) => Dispatcher.UIThread.Post(Schedule);      // 「群」页签
         TabGroupState.Shared.PropertyChanged += (_, _) => Dispatcher.UIThread.Post(Schedule);   // 「会话组」页签
@@ -509,7 +510,7 @@ public sealed class SessionRowView : Tap
         this.model = model;
         this.main = main;
         Padding = new Thickness(7, 5);
-        Click = () => { if (key is not null) main.Selection = key; };
+        Click = () => { if (key is not null) main.Pick(key); };
         this.Menu(() => key is null ? [] : SessionMenu.Items(model, main, key));
         DragDrop.SetAllowDrop(this, false);
         // 把另一个会话拖到这一行上松开：拉这两个会话建群
@@ -556,7 +557,10 @@ public sealed class SessionRowView : Tap
         var pinned = model.IsPinned(s.Key);
         var marked = model.IsMarked(s.Key);
         var muted = model.IsMuted(s.Key);
-        if (s == shown && isSelected == selected && Child is not null && pinned == lastPinned && marked == lastMarked && muted == lastMuted && Look.Size == lastSize) return;
+        // 已经开成标签的会话：标题后一个小窗口图标（再点这一行不会再开，切过去并让那个标签闪）
+        var opened = ChatPanes.Shared.IsOpen(s.Key);
+        if (s == shown && isSelected == selected && Child is not null && pinned == lastPinned && marked == lastMarked && muted == lastMuted && opened == lastOpened && Look.Size == lastSize) return;
+        lastOpened = opened;
         shown = s;
         key = s.Key;
         selected = isSelected;
@@ -573,6 +577,7 @@ public sealed class SessionRowView : Tap
             marked ? new Tap(Ui.Sym("star.fill", 10, "Accent"), () => model.SetMarked(s.Key, false), 4).Keys("Transparent", "Fill08").Tip(L("已标记，点按取消标记")) : null,
             pinned ? Ui.Sym("pin.fill", 9, "Text3").Tip(L("已置顶")) : null,
             muted ? Ui.Sym("bell.slash", 10, "Text3").Tip(L("已静音：仅在需要确认时提醒")) : null,
+            opened ? Ui.Sym("macwindow", 9.5, "Text2").Tip(L("已在标签页中打开")) : null,
             new Spacer(4),
             Corner(s, marked));
         var meta = Ui.H(4,
@@ -627,7 +632,7 @@ public sealed class SessionRowView : Tap
     /// 头像（会话之间的消息：纸鸢从这飞、风筝线接在这，见 PeerOverlay）
     public Control? Avatar { get; private set; }
 
-    bool lastPinned, lastMarked, lastMuted;
+    bool lastPinned, lastMarked, lastMuted, lastOpened;
     LookSize? lastSize;
 }
 

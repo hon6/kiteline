@@ -82,7 +82,49 @@ def search(store, query):
     return {"ok": True, "query": query, "results": items, "errors": errors, "truncated": truncated}
 
 
-def projects(store, detail=False):
+# 各台机器上次回的项目（键：(来源 id, 简版 / 详细版)）。项目不常变，新任务、项目页每次打开都去问每台机器、等最慢的那台太慢（11-20）：
+# 有缓存先用缓存马上回，超过 PROJECTS_FRESH 秒的顺手在后台再问一次换掉；没缓存或超过一天的才当场等（同 Mac 版 Projects.collect）
+PROJECTS_FRESH = 60
+PROJECTS_MAX_AGE = 24 * 3600
+_PROJECTS_CACHE = {}
+_PROJECTS_REFRESHING = set()
+_PROJECTS_LOCK = threading.Lock()
+
+
+def cached_request(cache_key, source, payload, field, timeout, fresh=False):
+    """问某台机器、记下结果里的 field；有新鲜的缓存直接用，旧一点的先用着、后台再问一次。当场问失败照常抛错"""
+    now = time.time()
+    with _PROJECTS_LOCK:
+        hit = None if fresh else _PROJECTS_CACHE.get(cache_key)
+        if hit and now - hit[0] < PROJECTS_MAX_AGE:
+            stale = now - hit[0] > PROJECTS_FRESH and cache_key not in _PROJECTS_REFRESHING
+            if stale:
+                _PROJECTS_REFRESHING.add(cache_key)
+        else:
+            hit = None
+    if hit:
+        if stale:
+            def refresh():
+                try:
+                    reply = source.request(payload, timeout=timeout)
+                    with _PROJECTS_LOCK:
+                        _PROJECTS_CACHE[cache_key] = (time.time(), reply.get(field) or [])
+                except Exception:  # noqa: BLE001
+                    pass
+                finally:
+                    with _PROJECTS_LOCK:
+                        _PROJECTS_REFRESHING.discard(cache_key)
+            threading.Thread(target=refresh, daemon=True, name="projects-refresh").start()
+        return hit[1]
+    reply = source.request(payload, timeout=timeout)
+    value = reply.get(field) or []
+    with _PROJECTS_LOCK:
+        _PROJECTS_CACHE[cache_key] = (time.time(), value)
+    return value
+
+
+def projects(store, detail=False, fresh=False):
+    """fresh：不用缓存，每台机器都当场问（日报要最新的 git 状态）"""
     items, order, errors = {}, [], []
 
     def upsert(source, cwd):
@@ -108,7 +150,9 @@ def projects(store, detail=False):
 
     def one(source):
         try:
-            return source, source.request(requests[source.id], timeout=30), None
+            listing = cached_request((source.id, "detail" if detail else "brief"), source, requests[source.id],
+                                        "projects", 30, fresh)
+            return source, {"projects": listing}, None
         except Exception as exc:  # noqa: BLE001
             return source, None, "%s：%s" % (source.name, exc)
     results = []

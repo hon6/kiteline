@@ -27,6 +27,7 @@ public sealed record LimitWindow(string Kind, double Percent, double? ResetsAt, 
         "seven_day" => L("本周"),
         "month" => L("本月"),
         "spend_limit" => L("额度"),
+        _ when WeeklyModel(Kind) is string model => L("本周 · %@", model),
         _ => (Minutes ?? 0) switch
         {
             >= 1440 => L("%@ 天", Minutes!.Value / 1440),
@@ -35,8 +36,22 @@ public sealed record LimitWindow(string Kind, double Percent, double? ResetsAt, 
         },
     };
 
+    /// 按模型单算的周额度是哪个模型的：「seven_day_opus」→「Opus」；Claude Code 把 Fable 这一档的叫 seven_day_overage_included。
+    /// 不是这类窗口返回 null（同 iOS LimitWindow.weeklyModel）
+    public static string? WeeklyModel(string kind)
+    {
+        const string prefix = "seven_day_";
+        if (!kind.StartsWith(prefix, StringComparison.Ordinal) || kind.Length == prefix.Length) return null;
+        var name = kind[prefix.Length..];
+        if (name == "overage_included") return "Fable";
+        return string.Join(" ", name.Split('_', StringSplitOptions.RemoveEmptyEntries).Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
+    }
+
+    /// 说明里不写重置时间（和旁边「本周」那格同时重置的按模型周额度，见 LimitAgent.Slots）
+    public bool QuietReset { get; init; }
+
     /// 「5 小时 · 22:10 重置」
-    public string Caption => ResetText.Length == 0 ? Label : $"{Label} · {ResetText}";
+    public string Caption => ResetText.Length == 0 || (QuietReset && !Reset) ? Label : $"{Label} · {ResetText}";
 
     /// 「22:10 重置」「明天 03:00 重置」「11月7日 重置」；不知道什么时候重置时为空
     public string ResetText
@@ -83,16 +98,20 @@ public sealed record LimitAgent(string Agent, double At, string? Plan, List<Limi
 
     static readonly string[] Order = ["five_hour", "day", "seven_day", "month"];
 
-    /// 格子，两格一行，按周期从短到长：5 小时、今日、本周、本月——有哪几种排哪几种；一种都没有的按顺序取两格（同 Mac 版）
-    public LimitWindow?[] Slots
+    /// 格子，两格一行，按周期从短到长：5 小时、今日、本周、本月，后面跟按模型单算的周额度（Fable、Opus、Sonnet）和别的窗口——
+    /// 电脑报了哪几种排哪几种，一种不丢（同 Mac 版；11-20 前只认前四种）。落单的那条画的时候占一整行
+    public LimitWindow[] Slots
     {
         get
         {
             var picked = Order.Select(kind => Windows.FirstOrDefault(w => w.Kind == kind)).OfType<LimitWindow>().ToList();
-            if (picked.Count == 0) picked = Windows.Take(2).ToList();
-            var slots = picked.Cast<LimitWindow?>().ToList();
-            if (slots.Count % 2 == 1) slots.Add(null);
-            return [.. slots];
+            var seen = picked.Select(w => w.Kind).ToHashSet();
+            var week = Windows.FirstOrDefault(w => w.Kind == "seven_day")?.ResetsAt;
+            // 按模型的周额度和「本周」同一个时刻重置：不再写一遍重置时间（并排两格写不下，旁边那格就有）
+            picked.AddRange(Windows.Where(w => seen.Add(w.Kind)).Select(w =>
+                LimitWindow.WeeklyModel(w.Kind) is not null && w.ResetsAt is double at && week is double same && Math.Abs(at - same) < 120_000
+                    ? w with { QuietReset = true } : w));
+            return [.. picked];
         }
     }
 }
@@ -183,7 +202,7 @@ public static class LimitsBoard
         var body = Ui.VFill(compact ? 8 : 10);
         var slots = agent.Slots;
         for (var i = 0; i < slots.Length; i += 2)
-            body.Children.Add(new EqualRow(compact ? 10 : 14, slots.Skip(i).Take(2).Select(w => w is null ? (Control)new Border() : new LimitBar(w, compact)).ToArray()));
+            body.Children.Add(new EqualRow(compact ? 10 : 14, slots.Skip(i).Take(2).Select(w => (Control)new LimitBar(w, compact)).ToArray()));
         if (agent.Balances.Count > 0) body.Children.Add(BalanceLine(agent.Balances, compact));
         return Ui.VFill(8, head, body);
     }

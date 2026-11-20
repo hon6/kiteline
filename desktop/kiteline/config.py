@@ -47,6 +47,8 @@ DEFAULT_MOBILE = {
     "installTodoSkill": True,     # 待办与关键信息技能
     "installStageSkill": True,    # 任务阶段技能（会话列表的「2/4 开发中」）
     "installOpenCodePlugin": True,
+    "shrinkAgentImages": False,   # 节省 token：agent 读到的大图先缩小到长边 1280 再给模型看（默认关）
+    "compactWindow": 0,           # 节省 token：上下文到多少 token 自动整理（Claude Code 的 autoCompactWindow）；0 = 不设
     "browserOn": "client",         # agent 浏览器开在哪：client 用户这台电脑（远端会话经 ssh 反向转发用它）/ server agent 所在的电脑
     "browserMax": 4,               # 最多同时开几个浏览器（再按可用内存往下压）
     "browserIdle": 10,             # 空闲多少分钟回收

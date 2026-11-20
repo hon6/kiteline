@@ -222,6 +222,8 @@ enum SelfTest {
             let images = (env["TARS_RENDER_IMAGES"] ?? "").split(separator: ",").compactMap { FileManager.default.contents(atPath: String($0)) }
             // TARS_RENDER_LINK：当作点了这条提示词链接（同 AppDelegate 收到 kiteline://new#…）
             if let raw = env["TARS_RENDER_LINK"], let url = URL(string: raw), let link = PromptLink.parse(url) { KitelineModel.shared.newTaskLink = link }
+            // TARS_RENDER_TIMING：打开时选中的时机（daily / weekdays / hourly / once），截定时任务那一行用
+            if let timing = env["TARS_RENDER_TIMING"] { NewTaskSheet.initialTiming = timing }
             root = AnyView(NewTaskSheet(attach: images.compactMap { TarsTaskImage.make($0) }).background(Color(nsColor: .windowBackgroundColor)))
         case "usage":
             Limits.inject(fakeLimits())
@@ -677,6 +679,49 @@ extension SelfTest {
                 delay = 3.6
             }
         case "select": KitelineModel.shared.selection = arg
+        case "layout":
+            // 两套界面：layout:new 新版 / layout:classic 经典版；layout:setup 弹布局设置；layout:cols=<几栏几块> 直接摆；layout:top|bottom 状态栏位置
+            switch arg {
+            case "setup": KitelineModel.shared.showLayoutSetup = true
+            case "top": KitelineModel.shared.statusOnTop = true
+            case "bottom": KitelineModel.shared.statusOnTop = false
+            case let raw where raw.hasPrefix("cols="): KitelineModel.shared.layoutColumns = KitelineModel.parseColumns(String(raw.dropFirst(5)))   // layout:cols=nav,sessions|tabs|files
+            default: KitelineModel.shared.newLayout = arg == "new"
+            }   // 两套界面：layout:new 新版（图标栏 + 状态栏）/ layout:classic 经典版
+        case "draftadopt":
+            // 新会话草稿发出去后接上会话（同 NewSessionDraftView.adopt）：draftadopt:<会话标题> 把开着的草稿标签换成那个会话
+            if let draft = KitelineKit.panes.keys.first(where: { $0.hasPrefix("@new:") }), let item = KitelineModel.shared.sessions.first(where: { $0.title == arg }) {
+                KitelineKit.panes.replace(draft, with: item.id)
+                KitelineModel.shared.selection = item.id
+                Log.write("[capture] 草稿 \(draft.prefix(14)) → \(item.title)")
+            } else { Log.write("[capture] 没有草稿标签或没找到会话「\(arg)」") }
+        case "favedit": Log.write("[capture] 编辑收藏：\(KitelineKit.editFavorite(Int(arg) ?? 0))"); delay = 2   // 收藏页开着时打开第几条的编辑面板
+        case "sidetab": KitelineModel.shared.showSideTab(arg)   // 新版界面左边栏列哪一栏：sidetab:sessions / todos / projects / favorites
+        case "project":
+            // 二级侧边栏：project:<项目名> 打开那个项目的（同在「项目」页签里点它）；project:off 收起；
+            // project:tab:<explorer|scm|sessions|branches> 切到哪一栏；project:file:<相对路径> 打开文件（右边换成编辑区）；project:open 「打开项目」面板；
+            // project:split / project:inline 项目的内容拆成单独一列 / 收回左边栏里（默认）
+            let projects = ProjectsModel.shared
+            if arg == "off" { KitelineModel.shared.projectPane = nil }
+            else if arg == "open" { KitelineModel.shared.showOpenProject = true }
+            else if arg.hasPrefix("right:"), let id = KitelineModel.shared.projectPane, let key = projects.codeKey(id) {
+                // 文件开在右边新分出的一块（同把文件标签拖到右边缘）：project:right:<相对路径>
+                _ = KitelineKit.panes.splitFocused(key: KitelineKit.codeTab(file: String(arg.dropFirst(6)), session: key), down: false)
+            }
+            else if arg.hasPrefix("down:"), let id = KitelineModel.shared.projectPane, let key = projects.codeKey(id) {
+                _ = KitelineKit.panes.splitFocused(key: KitelineKit.codeTab(file: String(arg.dropFirst(5)), session: key), down: true)
+            }
+            else if arg == "split" || arg == "inline" { AppConfig.defaults.set(arg == "split", forKey: "projectPaneSplit") }   // 拆成单独一列 / 收回左边栏里
+            else if arg.hasPrefix("tab:") || arg.hasPrefix("file:") {
+                guard let id = KitelineModel.shared.projectPane, let key = projects.codeKey(id) else { Log.write("[capture] 二级侧边栏没开，或这个项目还没有会话"); break }
+                if arg.hasPrefix("tab:") { KitelineKit.projectActivity(key: key, String(arg.dropFirst(4))) }
+                // 新版界面：文件开成中间分屏里的标签（同在项目栏里点它）；经典版的单独一栏放法照旧在 IDE 编辑区开
+                else if KitelineModel.shared.newLayout { KitelineModel.shared.selection = KitelineKit.codeTab(file: String(arg.dropFirst(5)), session: key) }
+                else { KitelineKit.projectOpenFile(key: key, path: String(arg.dropFirst(5))) }
+            }
+            else if let found = projects.projects.first(where: { $0.name == arg }) { KitelineModel.shared.openProject(found.id) }
+            else { Log.write("[capture] 没找到项目「\(arg)」（先 sidetab:projects 等列表读回来）：\(projects.projects.map(\.name))") }
+            delay = 2
         case "group":
             // 会话群：group = 第一个群开进当前块的标签；group:split = 开在右侧分屏；group:drawer = 点标签栏上的成员按钮；group:list = 全部群；group:pick = 拉群面板（先勾上列表里前两个会话）；group:new = 点「建群」（什么都没勾）
             if arg == "list" { KitelineModel.shared.selection = KitelineModel.groupsID }
@@ -692,7 +737,12 @@ extension SelfTest {
             if let item = KitelineModel.shared.sessions.first(where: { $0.title == arg }) { KitelineModel.shared.selection = item.id }
             else if let past = HistoryModel.shared.sessions.first(where: { $0.displayTitle == arg }) { HistoryModel.shared.open(past) }   // 已结束的（先 select 历史页把列表载进来）
             else { Log.write("[capture] 没找到会话「\(arg)」") }
+        case "pick":
+            // 同在左边栏点了这一行（pick:<会话标题>）：没开着的开成标签；已经开成标签的切过去，标签边框闪主题色
+            if let item = KitelineModel.shared.sessions.first(where: { $0.title == arg }) { KitelineModel.shared.pick(item.id) }
+            else { Log.write("[capture] 没找到会话「\(arg)」") }
         case "wait": delay = Double(arg) ?? 1
+        case "scheme": Look.shared.schemeID = arg   // VS Code 配色方案：scheme:dark-modern / light-plus / … ；scheme: 空 = 跟随系统
         case "theme": Look.shared.themeID = arg   // 换主题色：theme:ocean（测试实例用自己那份偏好）
         case "font": Look.shared.fontID = arg   // 换字体：font:rounded / system（同设置 → 外观）
         case "lang": Lang.shared.choice = Lang.Choice(rawValue: arg) ?? .system   // 换界面语言：lang:en / zh / system（同设置里点）
@@ -888,6 +938,26 @@ extension SelfTest {
                 Log.write("[capture] 世界截图 \(arg) \(Int(image.size.width))x\(Int(image.size.height))")
             }
             delay = 2
+        // AR 模式：ar:on / off；arjs:<脚本>（在 AR 网页里跑，比如 World.ar.focus(World.ar.panels.get("key"))）；
+        // ardock:open / close / pin（左上角小球展开的侧栏）；arpass:on / off（穿透）；
+        // arshot:<png>[|<当桌面用的图>]：网页截图 + 小球 / 侧栏叠在一张图上（没给桌面图就垫一层深灰渐变，看得出透明的地方）
+        case "ar": if arg == "off" { ARMode.shared.exit() } else { ARMode.shared.enter() }; delay = 4
+        case "arjs":
+            WorldHost.ar.webView.evaluateJavaScript(arg) { result, error in
+                Log.write("[capture] AR 脚本：\(result.map { "\($0)" } ?? "-")\(error.map { " 出错 \($0)" } ?? "")")
+            }
+        case "ardock":
+            let dock = ARMode.shared.dock
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                dock.pinned = arg == "pin"
+                dock.expanded = arg != "close"
+            }
+            delay = 1
+        case "arpass": ARMode.shared.dock.passthrough = arg != "off"; delay = 1
+        case "arshot":
+            let parts = arg.split(separator: "|").map(String.init)
+            ARMode.shared.snapshot(to: parts[0], backdrop: parts.count > 1 ? parts[1] : nil)
+            delay = 2
         case "image":
             // 在当前块打开看大图：image:<本机图片路径>[*张数]（同一张当几张，看翻页按钮）；之后 zoom:in / out / fit / actual / 2（倍数）
             let bits = arg.split(separator: "*").map(String.init)
@@ -1018,6 +1088,22 @@ extension SelfTest {
             if let url = URL(string: arg), let link = PromptLink.parse(url) { KitelineModel.shared.newTask(link: link) } else { Log.write("[capture] 不是提示词链接：\(arg)") }
             delay = 3
         case "type": KitelineKit.setDraft(key: KitelineModel.shared.selection ?? "", arg)
+        case "typekeys":
+            // 往这个窗口里有焦点的输入框真的敲字（键盘事件直接发给这个窗口，不走系统全局、不抢前台）：typekeys:文字，「\n」= 回车。
+            // 测新会话标签「写第一句话、回车发出」用（11-21）
+            let first = window.firstResponder.map { String(describing: type(of: $0)) } ?? "-"
+            for ch in arg.replacingOccurrences(of: "\\n", with: "\n") {
+                let enter = ch == "\n"
+                let chars = enter ? "\r" : String(ch)
+                for kind in [NSEvent.EventType.keyDown, .keyUp] {
+                    if let event = NSEvent.keyEvent(with: kind, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                    windowNumber: window.windowNumber, context: nil, characters: chars,
+                                                    charactersIgnoringModifiers: chars, isARepeat: false, keyCode: enter ? 36 : 0) {
+                        window.sendEvent(event)
+                    }
+                }
+            }
+            Log.write("[capture] 敲字 \(arg.count) 个字，焦点在 \(first)")
         case "shot": capture(window, to: arg)
         case "glassshot":
             // 同 kiteshot，再补上液态玻璃（macOS 26 的侧栏）里的内容：整窗截图时系统不画玻璃里面，列表的字又是窗口服务器合成的，
@@ -1326,7 +1412,9 @@ extension SelfTest {
         }
         let top = backdrop(glass) ?? 98
         let dark = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let hosting = NSHostingView(rootView: SidebarView(model: KitelineModel.shared).padding(.top, top)
+        // 新版界面的左边栏是图标栏 + 一栏内容
+        let sidebar = KitelineModel.shared.newLayout ? AnyView(RailSidebar(model: KitelineModel.shared)) : AnyView(SidebarView(model: KitelineModel.shared))
+        let hosting = NSHostingView(rootView: sidebar.padding(.top, top)
             .frame(width: size.width, height: size.height).tarsLook())
         hosting.appearance = window.effectiveAppearance
         let helper = NSWindow(contentRect: NSRect(x: 60, y: 60, width: size.width, height: size.height), styleMask: [.borderless], backing: .buffered, defer: false)

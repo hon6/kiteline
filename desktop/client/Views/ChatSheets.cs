@@ -897,13 +897,15 @@ public static class ChatSheets
                 {
                     if (choice.Name != current)
                     {
-                        var sent = model.Send(key, "/model " + choice.Id, []);
+                        // 不在对话里挂一条消息：直接交给会话执行，Claude 正忙时下一次请求就换（见 AppModel.SendSetting）
+                        var busy = session?.IsBusy == true;
+                        var sent = model.SendSetting(key, "/model " + choice.Id, busy ? L("已切换为 %@，下一步起生效", choice.Name) : L("已切换为 %@", choice.Name),
+                            () => { if (chat.ModelOverride?.Model == choice.Id) chat.ModelOverride = null; });
                         chat.ModelOverride = (choice.Id, session?.Usage?.Model, sent);
-                        model.Flash(L("已发送 /model：切换为 %@", choice.Name));
                     }
                     s.Close();
                 } : null)), 12));
-            stack.Children.Add(Note(current == L("模型") ? L("Claude 尚未回复，暂无法确定当前使用的模型。") : L("切换模型将在此会话中发送 /model 命令，自下一条消息起生效。")));
+            stack.Children.Add(Note(current == L("模型") ? L("Claude 尚未回复，暂无法确定当前使用的模型。") : L("切换模型仅作用于此会话；Claude 正在工作时自下一次请求起生效。")));
             stack.Children.Add(Header(L("思考等级")));
             var effort = chat.EffortOverride is { } e && e.Baseline == session?.Effort ? e.Effort : session?.Effort ?? "auto";
             var dots = new Grid();
@@ -918,9 +920,11 @@ public static class ChatSheets
                 var level = id;
                 var tap = new Tap(cell.Pad(0, 4), enabled && !on ? () =>
                 {
-                    var sent = model.Send(key, "/effort " + level, []);
+                    // 思考等级跟着你说的话走：Claude 正忙时这一轮做完（下一句话起）才用上
+                    var sent = model.SendSetting(key, "/effort " + level,
+                        session?.IsBusy == true ? L("已切换为 %@，本轮结束后生效", L(name)) : L("已切换为 %@", L(name)),
+                        () => { if (chat.EffortOverride?.Effort == level) chat.EffortOverride = null; });
                     chat.EffortOverride = (level, session?.Effort, sent);
-                    model.Flash(L("已发送 /effort：%@", L(name)));
                     s.Reload();
                 } : null, 6).Keys("Transparent", "Transparent");
                 Grid.SetColumn(tap, i);
@@ -929,15 +933,15 @@ public static class ChatSheets
             var ultra = chat.UltracodeOverride is { } u && u.Baseline == (session?.Ultracode ?? false) ? u.On : session?.Ultracode ?? false;
             var ultracode = new MacSwitch(ultra, on =>
             {
-                var sent = model.Send(key, "/effort ultracode " + (on ? "on" : "off"), []);
+                var sent = model.SendSetting(key, "/effort ultracode " + (on ? "on" : "off"), on ? L("Ultracode 已开") : L("Ultracode 已关"),
+                    () => { if (chat.UltracodeOverride?.On == on) chat.UltracodeOverride = null; });
                 chat.UltracodeOverride = (on, session?.Ultracode ?? false, sent);
-                model.Flash(on ? L("Ultracode 已开") : L("Ultracode 已关"));
             }) { IsEnabled = enabled };
             stack.Children.Add(Group([
                 Ui.VFill(10, Ui.H(6, Ui.Sym("gauge.with.dots.needle.50percent", 13, "Text"), Ui.Text(L("思考等级"), 13), new Spacer(), Ui.Text(Effort.Name(effort), 13, color: "Text2")), dots).Pad(12, 10),
                 Ui.H(10, Ui.VFill(2, Ui.H(6, Ui.Sym("bolt.horizontal", 13, "Text"), Ui.Text("Ultracode", 13)), Ui.Text(L("大型任务多代理并行"), 11.5, color: "Text2")).Shrink(), new Spacer(), ultracode).Pad(12, 10),
             ], 12));
-            stack.Children.Add(Note(L("思考等级和 Ultracode 仅作用于此会话（发送 /effort 命令）。")));
+            stack.Children.Add(Note(L("思考等级和 Ultracode 仅作用于此会话；Claude 正在工作时本轮结束后生效。")));
             return NavSheet.Scroll(stack);
         }, 520, 560);
     }

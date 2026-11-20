@@ -212,7 +212,7 @@ def send_morning(app, manual, now=None):
             stuck.append((display_title(record.snap), minutes))
     stopped = [r for r in records if r.activity == "idle" and r.snap.get("error")]
     held = [e for e in app.inbox.recent(300, since) if e.get("delivery") == "quiet"]
-    projects = aggregate.projects(app.store, detail=True)
+    projects = aggregate.projects(app.store, detail=True, fresh=True)
 
     def compose(english):
         """按语言各拼一份：中文设备收中文、英文设备收英文"""

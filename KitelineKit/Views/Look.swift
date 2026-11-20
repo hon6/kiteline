@@ -197,6 +197,105 @@ public struct LookSize: Identifiable, Hashable, Sendable {
 }
 
 /// 当前主题算好的颜色（换主题时算一次，同一个主题下每次拿到的是同一个 Color，比较相等也成立）
+/// VS Code 风格的配色方案（11-20 反馈：仿照 VS Code 的配色，所有界面都能选不同的配色主题）。颜色取自 VS Code 自带的几套主题
+/// （主题文件里 activityBar / sideBar / editor / tab / statusBar / list 这些键的值；没有逐个对照最新版核对，个别是按同系列推的）。
+/// 选了它：窗口跟着它是深色还是浅色，图标栏、侧栏、对话区、标签栏、状态栏、选中行、强调色按它画；
+/// 「跟随系统」= 原来的样子（不选方案，颜色跟系统和主题色走）。目前只有 Mac 用（iPhone、Windows/Linux 还没接）
+public struct LookScheme: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let dark: Bool
+    /// 图标栏：底、选中图标、没选中的图标、选中项左边那道竖线、角标底
+    let activityBar: UInt32, activityFg: UInt32, activityInactive: UInt32, activityBorder: UInt32, badge: UInt32
+    /// 侧栏：底、小节标题的底、侧栏边线
+    let sideBar: UInt32, sectionHeader: UInt32, border: UInt32
+    /// 对话区（编辑区）的底、标签栏的底、没选中的标签
+    let editor: UInt32, tabs: UInt32, tabInactive: UInt32
+    /// 状态栏：底、字
+    let statusBar: UInt32, statusFg: UInt32
+    /// 列表选中行、悬停
+    let listActive: UInt32, listHover: UInt32
+    /// 强调色（焦点、链接、主按钮）
+    let accent: UInt32
+    /// 普通文字（侧栏里）
+    let fg: UInt32
+
+    public var activityBarColor: Color { Color(hex: activityBar) }
+    public var activityFgColor: Color { Color(hex: activityFg) }
+    public var activityInactiveColor: Color { Color(hex: activityInactive) }
+    public var activityBorderColor: Color { Color(hex: activityBorder) }
+    public var badgeColor: Color { Color(hex: badge) }
+    public var sideBarColor: Color { Color(hex: sideBar) }
+    public var sectionHeaderColor: Color { Color(hex: sectionHeader) }
+    public var borderColor: Color { Color(hex: border) }
+    public var editorColor: Color { Color(hex: editor) }
+    public var tabsColor: Color { Color(hex: tabs) }
+    public var tabInactiveColor: Color { Color(hex: tabInactive) }
+    public var statusBarColor: Color { Color(hex: statusBar) }
+    public var statusFgColor: Color { Color(hex: statusFg) }
+    public var listActiveColor: Color { Color(hex: listActive) }
+    public var listHoverColor: Color { Color(hex: listHover) }
+    public var accentColor: Color { Color(hex: accent) }
+    public var fgColor: Color { Color(hex: fg) }
+
+    public static let all: [LookScheme] = [
+        LookScheme(id: "dark-modern", name: "Dark Modern", dark: true,
+                   activityBar: 0x181818, activityFg: 0xD7D7D7, activityInactive: 0x868686, activityBorder: 0x0078D4, badge: 0x0078D4,
+                   sideBar: 0x181818, sectionHeader: 0x181818, border: 0x2B2B2B, editor: 0x1F1F1F, tabs: 0x181818, tabInactive: 0x181818,
+                   statusBar: 0x181818, statusFg: 0x868686, listActive: 0x2A2D2E, listHover: 0x2A2D2E, accent: 0x0078D4, fg: 0xCCCCCC),
+        LookScheme(id: "light-modern", name: "Light Modern", dark: false,
+                   activityBar: 0xF8F8F8, activityFg: 0x1F1F1F, activityInactive: 0x616161, activityBorder: 0x005FB8, badge: 0x005FB8,
+                   sideBar: 0xF8F8F8, sectionHeader: 0xF8F8F8, border: 0xE5E5E5, editor: 0xFFFFFF, tabs: 0xF8F8F8, tabInactive: 0xF8F8F8,
+                   statusBar: 0xF8F8F8, statusFg: 0x3B3B3B, listActive: 0xE4E6F1, listHover: 0xF2F2F2, accent: 0x005FB8, fg: 0x3B3B3B),
+        LookScheme(id: "dark-plus", name: "Dark+", dark: true,
+                   activityBar: 0x333333, activityFg: 0xFFFFFF, activityInactive: 0x8B8B8B, activityBorder: 0xFFFFFF, badge: 0x007ACC,
+                   sideBar: 0x252526, sectionHeader: 0x252526, border: 0x3C3C3C, editor: 0x1E1E1E, tabs: 0x252526, tabInactive: 0x2D2D2D,
+                   statusBar: 0x007ACC, statusFg: 0xFFFFFF, listActive: 0x37373D, listHover: 0x2A2D2E, accent: 0x007ACC, fg: 0xCCCCCC),
+        LookScheme(id: "light-plus", name: "Light+", dark: false,
+                   activityBar: 0x2C2C2C, activityFg: 0xFFFFFF, activityInactive: 0x8B8B8B, activityBorder: 0xFFFFFF, badge: 0x007ACC,
+                   sideBar: 0xF3F3F3, sectionHeader: 0xF3F3F3, border: 0xE0E0E0, editor: 0xFFFFFF, tabs: 0xF3F3F3, tabInactive: 0xECECEC,
+                   statusBar: 0x007ACC, statusFg: 0xFFFFFF, listActive: 0xE4E6F1, listHover: 0xE8E8E8, accent: 0x007ACC, fg: 0x616161),
+        LookScheme(id: "monokai", name: "Monokai", dark: true,
+                   activityBar: 0x272822, activityFg: 0xF8F8F2, activityInactive: 0x75715E, activityBorder: 0xF92672, badge: 0x75715E,
+                   sideBar: 0x1E1F1C, sectionHeader: 0x272822, border: 0x414339, editor: 0x272822, tabs: 0x1E1F1C, tabInactive: 0x34352F,
+                   statusBar: 0x414339, statusFg: 0xF8F8F2, listActive: 0x75715E, listHover: 0x3E3D32, accent: 0xF92672, fg: 0xF8F8F2),
+        LookScheme(id: "solarized-dark", name: "Solarized Dark", dark: true,
+                   activityBar: 0x003847, activityFg: 0x93A1A1, activityInactive: 0x586E75, activityBorder: 0x2AA198, badge: 0x047AA6,
+                   sideBar: 0x00212B, sectionHeader: 0x00212B, border: 0x003847, editor: 0x002B36, tabs: 0x004052, tabInactive: 0x004052,
+                   statusBar: 0x00212B, statusFg: 0x93A1A1, listActive: 0x005A6F, listHover: 0x004454, accent: 0x2AA198, fg: 0x93A1A1),
+        LookScheme(id: "solarized-light", name: "Solarized Light", dark: false,
+                   activityBar: 0xDDD6C1, activityFg: 0x584C27, activityInactive: 0x9A8F6E, activityBorder: 0xB58900, badge: 0xB58900,
+                   sideBar: 0xEEE8D5, sectionHeader: 0xEEE8D5, border: 0xDDD6C1, editor: 0xFDF6E3, tabs: 0xD9D2C2, tabInactive: 0xD3CBB7,
+                   statusBar: 0xEEE8D5, statusFg: 0x586E75, listActive: 0xDFCA88, listHover: 0xE4DCC6, accent: 0xB58900, fg: 0x586E75),
+        LookScheme(id: "abyss", name: "Abyss", dark: true,
+                   activityBar: 0x051336, activityFg: 0xDDBB88, activityInactive: 0x6688CC, activityBorder: 0xDDBB88, badge: 0x0063A5,
+                   sideBar: 0x060621, sectionHeader: 0x10192C, border: 0x2B2B4A, editor: 0x000C18, tabs: 0x1C1C2A, tabInactive: 0x10192C,
+                   statusBar: 0x10192C, statusFg: 0x8899BB, listActive: 0x08286B, listHover: 0x061940, accent: 0x6688CC, fg: 0x6688CC),
+        LookScheme(id: "tomorrow-night-blue", name: "Tomorrow Night Blue", dark: true,
+                   activityBar: 0x001733, activityFg: 0xFFFFFF, activityInactive: 0x7285B7, activityBorder: 0xBBDAFF, badge: 0xBBDAFF,
+                   sideBar: 0x001C40, sectionHeader: 0x001C40, border: 0x003F8E, editor: 0x002451, tabs: 0x001733, tabInactive: 0x001C40,
+                   statusBar: 0x001126, statusFg: 0xFFFFFF, listActive: 0x003F8E, listHover: 0x00346E, accent: 0xBBDAFF, fg: 0xDDDDDD),
+        LookScheme(id: "quiet-light", name: "Quiet Light", dark: false,
+                   activityBar: 0xEDEDF5, activityFg: 0x705697, activityInactive: 0xA19BB0, activityBorder: 0x705697, badge: 0x705697,
+                   sideBar: 0xF2F2F2, sectionHeader: 0xEDEDED, border: 0xE0E0E0, editor: 0xF5F5F5, tabs: 0xEDEDED, tabInactive: 0xEDEDED,
+                   statusBar: 0x705697, statusFg: 0xFFFFFF, listActive: 0xC4D9B1, listHover: 0xE0E0E0, accent: 0x705697, fg: 0x333333),
+        LookScheme(id: "kimbie-dark", name: "Kimbie Dark", dark: true,
+                   activityBar: 0x221A0F, activityFg: 0xD3AF86, activityInactive: 0x7E6A55, activityBorder: 0xF79A32, badge: 0x7C5021,
+                   sideBar: 0x362712, sectionHeader: 0x362712, border: 0x51412C, editor: 0x221A0F, tabs: 0x131510, tabInactive: 0x131510,
+                   statusBar: 0x423523, statusFg: 0xD3AF86, listActive: 0x7C5021, listHover: 0x5E452B, accent: 0xF79A32, fg: 0xD3AF86),
+        LookScheme(id: "red", name: "Red", dark: true,
+                   activityBar: 0x580000, activityFg: 0xFFFFFF, activityInactive: 0xC08080, activityBorder: 0xFF6666, badge: 0xCC3333,
+                   sideBar: 0x330000, sectionHeader: 0x330000, border: 0x580000, editor: 0x390000, tabs: 0x330000, tabInactive: 0x300A0A,
+                   statusBar: 0x700000, statusFg: 0xFFFFFF, listActive: 0x880000, listHover: 0x800000, accent: 0xFF6666, fg: 0xF8F8F8),
+        LookScheme(id: "hc-black", name: "Dark High Contrast", dark: true,
+                   activityBar: 0x000000, activityFg: 0xFFFFFF, activityInactive: 0xFFFFFF, activityBorder: 0xF38518, badge: 0x000000,
+                   sideBar: 0x000000, sectionHeader: 0x000000, border: 0x6FC3DF, editor: 0x000000, tabs: 0x000000, tabInactive: 0x000000,
+                   statusBar: 0x000000, statusFg: 0xFFFFFF, listActive: 0x000000, listHover: 0x0F2A35, accent: 0xF38518, fg: 0xFFFFFF),
+    ]
+
+    public static func named(_ id: String) -> LookScheme? { all.first { $0.id == id } }
+}
+
 public struct LookPalette {
     public let accent: Color
     public let action: Color
@@ -207,7 +306,17 @@ public struct LookPalette {
     /// 我的气泡的浅色版（深色蒙层上「按住说话」的气泡用）
     let bubbleLight: Color
 
-    init(_ theme: LookTheme) {
+    init(_ theme: LookTheme, scheme: LookScheme? = nil) {
+        // 选了 VS Code 配色方案：强调色、主按钮用方案的（VS Code 的蓝之类），气泡照主题
+        if let scheme {
+            accent = Color(hex: scheme.accent)
+            action = Color(hex: scheme.accent)
+            bubble = Theme.dynamic(light: theme.bubble, dark: theme.bubbleDark)
+            bubbleText = Theme.dynamic(light: theme.bubbleText, dark: theme.bubbleTextDark)
+            tile = Color(hex: scheme.accent, alpha: 0.16)
+            bubbleLight = Color(hex: theme.bubble)
+            return
+        }
         accent = Theme.dynamic(light: theme.accent, dark: theme.accentDark)
         action = Theme.dynamic(light: theme.action, dark: theme.actionDark)
         bubble = Theme.dynamic(light: theme.bubble, dark: theme.bubbleDark)
@@ -227,9 +336,14 @@ public final class Look {
     @ObservationIgnored private var loading = false
 
     /// LookTheme 的 id，或 "custom"（自定义颜色，见 customColor）
-    public var themeID: String { didSet { if themeID != oldValue { palette = LookPalette(theme); save() } } }
+    public var themeID: String { didSet { if themeID != oldValue { palette = LookPalette(theme, scheme: scheme); save() } } }
     /// 自定义的颜色（0xRRGGBB），themeID 是 custom 时用
-    public var customColor: UInt32 = 0xD97757 { didSet { if customColor != oldValue { palette = LookPalette(theme); save() } } }
+    public var customColor: UInt32 = 0xD97757 { didSet { if customColor != oldValue { palette = LookPalette(theme, scheme: scheme); save() } } }
+    /// VS Code 配色方案（LookScheme 的 id）；空 = 跟随系统（原来的样子）
+    public var schemeID: String = "" { didSet { if schemeID != oldValue { palette = LookPalette(theme, scheme: scheme); save(); schemeChanged?() } } }
+    /// 配色方案选了 / 换了：Mac 主程序据此把窗口改成深色或浅色
+    @ObservationIgnored public var schemeChanged: (() -> Void)?
+    public var scheme: LookScheme? { LookScheme.named(schemeID) }
     public var fontID: String { didSet { if fontID != oldValue, !loading { save(); prepareFont() } } }
     /// LookSize 的 id，或 LookSize.system（跟随系统，只有 iPhone）
     public var sizeID: String { didSet { if sizeID != oldValue { save() } } }
@@ -283,9 +397,10 @@ public final class Look {
         #endif
         if LookSize.named(size) == nil { size = LookSize.system }
         themeID = theme == "custom" || LookTheme.all.contains { $0.id == theme } ? theme : "classic"
+        schemeID = LookScheme.named(defaults.string(forKey: "lookScheme") ?? "") == nil ? "" : defaults.string(forKey: "lookScheme") ?? ""
         fontID = LookFont.all.contains { $0.id == font } ? font : "system"
         sizeID = size
-        palette = LookPalette(self.theme)
+        palette = LookPalette(self.theme, scheme: scheme)
     }
 
     private func save() {
@@ -294,6 +409,7 @@ public final class Look {
         defaults.set(String(format: "%06X", customColor), forKey: "lookCustom")
         defaults.set(fontID, forKey: "lookFont")
         defaults.set(sizeID, forKey: "lookSize")
+        defaults.set(schemeID, forKey: "lookScheme")
         #if os(iOS)
         Look.styleSystemControls()
         #endif

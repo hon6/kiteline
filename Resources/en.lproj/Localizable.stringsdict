@@ -663,6 +663,17 @@
 <key>other</key><string>%lld today</string>
 </dict>
 </dict>
+<key>会话群 · %lld 个成员</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Group · %lld member</string>
+<key>other</key><string>Group · %lld members</string>
+</dict>
+</dict>
 <key>修改 %lld 个文件</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -1057,6 +1068,17 @@
 <key>NSStringFormatValueTypeKey</key><string>lld</string>
 <key>one</key><string>%lld session is running in this folder</string>
 <key>other</key><string>%lld sessions are running in this folder</string>
+</dict>
+</dict>
+<key>每 %lld 小时</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Every %lld hour</string>
+<key>other</key><string>Every %lld hours</string>
 </dict>
 </dict>
 <key>测试 %lld 次</key>

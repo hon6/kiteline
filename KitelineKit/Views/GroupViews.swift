@@ -74,6 +74,10 @@ struct GroupRow: View {
                     Text(group.name).font(.app(size: compact ? 13 : 17)).lineLimit(1)
                     Text("(\(group.members.count))").font(.app(size: compact ? 11.5 : 14)).foregroundStyle(.secondary).fixedSize()
                     if group.marked { MarkStar() }
+                    #if KITELINE_MAC
+                    // Mac 左边栏：已经开成标签的群，名字后一个小标签页图标（同会话行）
+                    if compact { TarsOpenedTabMark(key: GroupKey.make(group.id)) }
+                    #endif
                     Spacer(minLength: 4)
                     Text(Format.listTime(group.updatedAt)).font(.app(size: compact ? 10.5 : 12)).foregroundStyle(.tertiary).fixedSize()
                 }

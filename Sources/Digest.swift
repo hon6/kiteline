@@ -226,7 +226,7 @@ final class DailyReport {
                 let title = waiting.isEmpty ? p("早安 · 昨晚的动态") : p("早安 · %lld 个会话待确认", waiting.count)
                 return (title, body, lines)
             }
-            Projects.collect(detail: true) { projects in
+            Projects.collect(detail: true, fresh: true) { projects in
                 let (title, body, lines) = compose(false, projects)
                 let english = compose(true, projects)
                 AppState.shared.mobile.notifyRoute(kind: "digest", title: title, body: body, route: "today", english: (english.title, english.body))

@@ -7,6 +7,7 @@ import Foundation
 ///   GET  /api/favorites                 全部收藏（新的在前）
 ///   POST /api/favorites/add             {key, itemId, title?, who: me|bot, speaker?, agent?, ts?, text?, images?:[{data}]}：同一条消息收藏过就不重复加
 ///   POST /api/favorites/delete          {ids:[…]} 或 {key, itemId}（取消收藏）
+///   POST /api/favorites/update          {id, text}：改一条收藏的文字（收藏下来的内容有错、想补一句；图不动。没有图的不能改成空的）
 ///   GET  /api/favorites/media?ref=      收藏里的图
 final class Favorites {
     struct Image: Codable {
@@ -93,6 +94,19 @@ final class Favorites {
                 let gone = store.items.filter { ids.contains($0.id) || ($0.key == key && $0.itemId == itemId) }
                 Self.dropImages(gone, in: self.mediaDir)
                 store.items.removeAll { ids.contains($0.id) || ($0.key == key && $0.itemId == itemId) }
+            }
+            return .json(payload())
+        case ("POST", "/api/favorites/update"):
+            guard let id = body["id"] as? String, !id.isEmpty, let raw = body["text"] as? String else { return .error("缺少 id、text", status: 400) }
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            lock.lock()
+            let found = store.items.first { $0.id == id }
+            lock.unlock()
+            guard let found else { return .error("这条收藏已不存在", status: 404) }
+            guard !text.isEmpty || !(found.images ?? []).isEmpty else { return .error("内容不能为空", status: 400) }
+            mutate { store in
+                guard let index = store.items.firstIndex(where: { $0.id == id }) else { return }
+                store.items[index].text = text.isEmpty ? nil : String(text.prefix(Self.textLimit))
             }
             return .json(payload())
         case ("GET", "/api/favorites/media"):

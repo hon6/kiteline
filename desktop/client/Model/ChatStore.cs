@@ -57,7 +57,7 @@ public sealed partial class ChatStore : ObservableObject
         {
             any = true;
             if (item.T == "result" && item.ToolId is string toolId) results[toolId] = item;
-            if (item.T == "user") users.Add(item);
+            if (item.T == "user" && seenUsers.Add($"{item.Id}|{item.Ts ?? 0}")) users.Add(item);
             if (item.T == "event" && item.Goal is not null) goalNoted = true;
             items[item.Id] = item;
         }
@@ -77,7 +77,12 @@ public sealed partial class ChatStore : ObservableObject
         Revision++;
     }
 
-    /// 发出去的消息在对话记录里回显了，撤掉本地的「发送中」
+    /// 收到过的用户消息（id + 时间；Reset 后也留着）：重新加载历史时再来一遍的旧消息不拿去认回显
+    readonly HashSet<string> seenUsers = new();
+
+    /// 发出去的消息在对话记录里回显了，撤掉本地的「发送中」。
+    /// 只认这条发出之后才有的用户消息（两边的钟可能差一点，放宽两分钟）：以前只比文字，重连、重新加载历史时早先发过的同样的话
+    /// （「继续」「好的」）被当成回显，还没送到的这条就被悄悄撤掉、也不再重发（11-20 反馈，同 iOS）
     void Settle(List<ChatItem> users)
     {
         var before = pending.Count;
@@ -86,7 +91,8 @@ public sealed partial class ChatStore : ObservableObject
             if (p.IsFailed) return true;
             if (p.Voice is not null && p.Text.Length == 0) return true;   // 语音还没转写完，认不出是哪条
             var head = p.Text.Length > 24 ? p.Text[..24] : p.Text;
-            return !users.Any(u => head.Length == 0 ? (u.Images?.Count ?? 0) > 0 : (u.Text ?? "").Contains(head));
+            return !users.Any(u => (u.Ts ?? double.MaxValue) >= p.At - 120_000
+                && (head.Length == 0 ? (u.Images?.Count ?? 0) > 0 : (u.Text ?? "").Contains(head)));
         }).ToList();
         if (pending.Count != before) Revision++;
     }
@@ -130,17 +136,18 @@ public sealed partial class ChatStore : ObservableObject
     public bool QueueCollapsed { get; set; }
 
     /// 输入框上方排队列表的一行：电脑队列里的（Editable，能上移、下移、编辑、删除）或这台设备刚发、还没在队列里出现的（只能强插）
-    public sealed record QueueRow(string Id, string Text, bool Editable);
+    /// Sending：还在发往电脑的路上（发的时候 Claude 正忙，先列在这里），还不能强插
+    public sealed record QueueRow(string Id, string Text, bool Editable, bool Sending = false);
 
     /// 排队列表：电脑给了队列就按它（加上刚发、还没出现在里面的）；老版本（没有队列）列这台设备记下的排队消息（同 iOS）
     public List<QueueRow> QueueRows(SessionInfo? session)
     {
-        var mine = pending.Where(p => p.State == SendState.Later).ToList();
-        if (session?.Queue is not { } queue) return mine.Select(p => new QueueRow(p.Qid ?? p.Id, p.Text, false)).ToList();
+        var mine = pending.Where(p => p.InQueueStrip).ToList();
+        if (session?.Queue is not { } queue) return mine.Select(p => new QueueRow(p.Qid ?? p.Id, p.Text, false, p.State == SendState.Sending)).ToList();
         if (QueueDraft is { } draft && DateTime.Now - draft.At < TimeSpan.FromSeconds(4)) queue = draft.Items;
         var known = queue.Select(q => q.Id).ToHashSet();
         return queue.Select(q => new QueueRow(q.Id, q.Text, true))
-            .Concat(mine.Where(p => !p.Seen && !known.Contains(p.Qid ?? "")).Select(p => new QueueRow(p.Qid ?? p.Id, p.Text, false))).ToList();
+            .Concat(mine.Where(p => !p.Seen && !known.Contains(p.Qid ?? "")).Select(p => new QueueRow(p.Qid ?? p.Id, p.Text, false, p.State == SendState.Sending))).ToList();
     }
 
     /// 往前翻页的位置

@@ -15,7 +15,7 @@ import threading
 import time
 import webbrowser
 
-from . import config, i18n, kite, log, setup_tools, tls, vscreen
+from . import agent_skill, config, i18n, kite, log, setup_tools, tls, vscreen
 from .httpd import Response
 
 QR_CACHE = {}
@@ -206,6 +206,7 @@ class Console:
         "voiceLocale": ("zh-CN", "zh-HK", "zh-TW", "en-US"),
         "relayURL": "url", "installOpenCodePlugin": bool, "usageStats": bool, "installAgentSkill": bool,
         "installTestSkill": bool, "installTodoSkill": bool, "installStageSkill": bool,
+        "shrinkAgentImages": bool, "compactWindow": (0, 200000, 300000, 400000),
         "browserOn": ("client", "server"), "browserMax": (1, 2, 3, 4, 5, 6, 8, 10, 12, 16), "browserIdle": (5, 10, 30, 60), "browserRecord": bool,
     }
     TOP_LEVEL = ("notifyOnNeedsAttention", "notifyOnConclusion")
@@ -240,13 +241,15 @@ class Console:
                 app.cfg.update(apply)
                 if changes.get("usageStats"):
                     app.stats.kick()
-                if {"installAgentSkill", "installTestSkill", "installTodoSkill", "installStageSkill"} & set(changes):
-                    # 技能开关：在线的 watcher（本机、远端）马上照着装上 / 删掉
+                if {"installAgentSkill", "installTestSkill", "installTodoSkill", "installStageSkill", "shrinkAgentImages", "compactWindow"} & set(changes):
+                    # 技能开关、节省 token 的两项：在线的 watcher（本机、远端）马上照着装上 / 删掉
                     from . import agent_skill
                     agent_skill.ENABLED = bool(changes.get("installAgentSkill", agent_skill.ENABLED))
                     agent_skill.TEST_ENABLED = bool(changes.get("installTestSkill", agent_skill.TEST_ENABLED))
                     agent_skill.TODO_ENABLED = bool(changes.get("installTodoSkill", agent_skill.TODO_ENABLED))
                     agent_skill.STAGE_ENABLED = bool(changes.get("installStageSkill", agent_skill.STAGE_ENABLED))
+                    agent_skill.SHRINK_IMAGES = bool(changes.get("shrinkAgentImages", agent_skill.SHRINK_IMAGES))
+                    agent_skill.COMPACT_WINDOW = agent_skill.compact_window(changes.get("compactWindow", agent_skill.COMPACT_WINDOW))
                     agent_skill.sync_live(app.store.sources.values())
                 if {"browserOn", "browserMax", "browserIdle", "browserRecord"} & set(changes):
                     # 会话浏览器：开在哪变了要换远端的 watcher 进程（ssh 的反向转发、远端环境变量在启动时定）；上限、回收时间当场生效
@@ -335,7 +338,8 @@ class Console:
                 "devices": [app.server.device_payload(d, None) for d in app.devices.all],
                 "delivery": {"ready": ready, "reason": why}, "autostart": autostart_enabled(),
                 "fingerprint": tls.ca_fingerprint(), "dataDir": config.config_dir(),
-                "readiness": app.readiness(), "uiLanguage": i18n.ui_choice(), "virtualScreen": vscreen.state()}
+                "readiness": app.readiness(), "uiLanguage": i18n.ui_choice(), "virtualScreen": vscreen.state(),
+                "savers": agent_skill.savers_summary(app.store.sources.values())}
 
     def sources(self, action, method, body):
         """来源管理（客户端「来源」页）：GET 列表和建议；POST /add {host, name, port}、/update {id, name, enabled}、/remove {id}、/reconnect {id}"""

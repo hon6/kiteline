@@ -78,9 +78,14 @@ struct NewTaskSheet: View {
     private var agentChoices: [LaunchAgent] { selected.flatMap { launchable[$0.sourceId] } ?? [] }
     /// 选了别家 agent（定时任务只做 Claude Code）
     private var otherAgent: LaunchAgent? { timing == "now" ? agentChoices.first { $0.id == agent } : nil }
-    /// now / daily / weekdays / once
-    @State private var timing = "now"
+    /// now / daily / weekdays / hourly / once
+    @State private var timing = NewTaskSheet.initialTiming
+    /// 打开时选中的时机：平时是「现在开始」；离屏自检（--render newtask，TARS_RENDER_TIMING）截别的时机用
+    static var initialTiming = "now"
     @State private var when = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date().addingTimeInterval(86400)) ?? Date()
+    /// 「每隔几小时」：隔几小时、当天最后一次不晚于几点（开始时间用上面的 when）
+    @State private var every = 2
+    @State private var until = Calendar.current.date(bySettingHour: 23, minute: 0, second: 0, of: Date()) ?? Date()
     /// 「打开其他文件夹」：在远端电脑上一层层点（本机用系统的选文件夹框）
     @State private var browsing: Browse?
 
@@ -184,13 +189,9 @@ struct NewTaskSheet: View {
                           } ?? L("请先在上方选择项目"),
                           enabled: !sending, submitTitle: timing == "now" ? L("开始") : L("创建"), onSubmit: start)
             HStack(spacing: 10) {
-                LookSegmented(selection: $timing, options: [("now", L("现在开始")), ("daily", L("每天")), ("weekdays", L("工作日")), ("once", L("仅一次"))])
+                LookSegmented(selection: $timing, options: [("now", L("现在开始")), ("daily", L("每天")), ("weekdays", L("工作日")), ("hourly", L("按小时")), ("once", L("仅一次"))])
                 .labelsHidden()
-                .frame(width: Lang.shared.isEnglish ? 340 : 280)   // 英文「Start Now」「Weekdays」放不进 280
-                if timing != "now" {
-                    DatePicker("", selection: $when, displayedComponents: timing == "once" ? [.date, .hourAndMinute] : [.hourAndMinute])
-                        .labelsHidden()
-                }
+                .frame(width: Lang.shared.isEnglish ? 400 : 380)   // 五段（「按小时」= 每隔几小时）
                 Spacer()
                 if timing == "now", !agentChoices.isEmpty {
                     Picker("Agent", selection: $agent) {
@@ -201,6 +202,24 @@ struct NewTaskSheet: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .help("除 Claude Code 外，也可选择这台电脑上已安装的其他命令行 Agent，由 Kiteline 在后台运行")
+                }
+            }
+            // 定时任务的时间单独一行（和五段的时机选择挤在一行时 600 宽放不下）
+            if timing != "now" {
+                HStack(spacing: 8) {
+                    DatePicker(timing == "hourly" ? "从" : "时间", selection: $when, displayedComponents: timing == "once" ? [.date, .hourAndMinute] : [.hourAndMinute])
+                        .fixedSize()
+                    if timing == "hourly" {
+                        // 每隔几小时：从这个时间起，每隔这么久一次，到结束时间为止，天天如此（每次都开一个新会话）
+                        DatePicker("至", selection: $until, displayedComponents: [.hourAndMinute])
+                            .fixedSize()
+                        Picker("", selection: $every) {
+                            ForEach([1, 2, 3, 4, 6, 8, 12], id: \.self) { hours in Text(L("每 %lld 小时", count: hours)).tag(hours) }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    Spacer()
                 }
             }
             // 单独一行：和定时、Agent 挤在一行时 600 宽放不下，会被压成竖排
@@ -393,9 +412,9 @@ struct NewTaskSheet: View {
                 projectFilter = listProject
             }
             if let preset = model.newTaskPreset, let project = projects.first(where: { $0.sourceId == preset.sourceId && $0.cwd == preset.cwd }) {
-                // 指定了项目（从某个会话、项目页来的）：筛选和它对不上的那一项放开，免得选中的看不见
-                if !sourceFilter.isEmpty, sourceFilter != project.sourceId { sourceFilter = "" }
-                if !projectFilter.isEmpty, projectFilter != project.name { projectFilter = "" }
+                // 指定了项目（从某个会话、项目页、项目栏来的）：设备、项目两排直接筛成它（11-20 反馈：选了项目后新建，上面的选项应该默认选中）
+                sourceFilter = project.sourceId
+                projectFilter = project.name
                 selection = project.id
                 reveal = project.id
             }
@@ -455,7 +474,10 @@ struct NewTaskSheet: View {
             let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: when)
             let time = String(format: "%02d:%02d", parts.hour ?? 9, parts.minute ?? 0)
             let date = String(format: "%04d-%02d-%02d", parts.year ?? 2026, parts.month ?? 1, parts.day ?? 1)
-            switch Scheduler.shared.add(sourceId: project.sourceId, cwd: project.cwd, prompt: prompt, repeatMode: timing, time: time, date: date) {
+            let last = Calendar.current.dateComponents([.hour, .minute], from: until)
+            let untilText = String(format: "%02d:%02d", last.hour ?? 23, last.minute ?? 0)
+            switch Scheduler.shared.add(sourceId: project.sourceId, cwd: project.cwd, prompt: prompt, repeatMode: timing, time: time, date: date,
+                                        every: timing == "hourly" ? every : nil, until: timing == "hourly" ? untilText : nil) {
             case .success: close()
             case .failure(let error):
                 sending = false

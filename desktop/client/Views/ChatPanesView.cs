@@ -757,6 +757,58 @@ public sealed class PaneTab : Control
         return final;
     }
 
+    // 边框闪主题色（左边栏里再点一个已经开成标签的会话时，ChatPanes.FlashTab）：三下、一秒左右，同 Mac 版 TabFlashRing
+    static readonly double[] FlashLevels = [0, 1, 0.15, 1, 0.15, 1, 0];
+    /// 每一段多少秒；自测里 KITELINE_TEST_FLASH_STEP 放慢，才截得到闪到一半的样子
+    static readonly double FlashStep = double.TryParse(Environment.GetEnvironmentVariable("KITELINE_TEST_FLASH_STEP"),
+        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var slow) && slow > 0 ? slow : 0.16;
+    DispatcherTimer? flashTimer;
+
+    /// 这会儿边框该多亮（0 = 不画）：按开始时间算，标签重建了也接得上
+    double FlashLevel()
+    {
+        if (key is null || ChatPanes.Shared.Flash is not (string flashKey, DateTime at) || flashKey != key) return 0;
+        var t = (DateTime.UtcNow - at).TotalSeconds / FlashStep;
+        if (t < 0 || t >= FlashLevels.Length - 1) return 0;
+        var i = (int)t;
+        return FlashLevels[i] + (FlashLevels[i + 1] - FlashLevels[i]) * (t - i);
+    }
+
+    void StartFlash()
+    {
+        if (flashTimer is not null || key is null || ChatPanes.Shared.Flash is not (string flashKey, DateTime at) || flashKey != key) return;
+        if ((DateTime.UtcNow - at).TotalSeconds >= FlashStep * (FlashLevels.Length - 1)) return;
+        flashTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Render, (_, _) =>
+        {
+            InvalidateVisual();
+            if (ChatPanes.Shared.Flash is not (string k, DateTime started) || k != key
+                || (DateTime.UtcNow - started).TotalSeconds >= FlashStep * (FlashLevels.Length - 1)) StopFlash();
+        });
+        flashTimer.Start();
+    }
+
+    void StopFlash()
+    {
+        flashTimer?.Stop();
+        flashTimer = null;
+        InvalidateVisual();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        ChatPanes.Shared.Flashed += StartFlash;
+        StartFlash();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        ChatPanes.Shared.Flashed -= StartFlash;
+        flashTimer?.Stop();
+        flashTimer = null;
+    }
+
     protected override void OnPointerEntered(PointerEventArgs e) { hover = true; if (close is not null && !active) close.Opacity = 1; InvalidateVisual(); }
     protected override void OnPointerExited(PointerEventArgs e) { hover = false; if (close is not null && !active) close.Opacity = 0; InvalidateVisual(); }
 
@@ -803,6 +855,10 @@ public sealed class PaneTab : Control
             context.DrawRectangle(Palette.Get("Fill06"), null, new Rect(Foot, 2, rect.Width - Foot * 2, rect.Height - 6), 7, 7);
         if (divider && !hover)
             context.FillRectangle(Palette.Get("Separator"), new Rect(-0.5, (rect.Height - 15) / 2 - 1, 1, 15));
+        // 放在最后画：整圈（上边和两侧）主题色，线宽 2，往里收 1 免得顶边画到标签栏外面
+        if (FlashLevel() is > 0 and var level)
+            using (context.PushOpacity(level))
+                context.DrawGeometry(null, new Pen(Palette.Get("Accent"), 2), Shape(new Rect(0, 1, rect.Width, rect.Height - 1), open: true));
     }
 
     /// 浏览器式的标签：上面两个圆角，下面两只「脚」往外弯、和标签栏底边接上（同 Mac 版 PaneTabShape）

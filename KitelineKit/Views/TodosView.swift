@@ -9,6 +9,9 @@ import AppKit
 struct TodosView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openRoute) private var open
+    /// 嵌在 Mac 左边栏的「待办」页签里（11-20）：列表的第一行是左边栏顶上那几格（跟着一起滚），没有窗口工具栏和标题，
+    /// 「新建待办」放在格子下面一行，空着的说明也排在列表里（不盖住那几格）
+    var sidebarHeader: AnyView? = nil
     @AppStorage("todosShowDone") private var showDone = false
     @State private var adding: AddTodosRequest?
     /// 这次打开从电脑读过一回（之前空着是「正在读取」，不是「暂无待办」）
@@ -33,7 +36,15 @@ struct TodosView: View {
         let agentAll = state.items.filter { !$0.done && $0.agentTask }
         let agentTasks = sortedAgentTasks(agentAll.filter { activeSource == nil || model.todoPlace($0).sourceId == activeSource?.id })
         let done = state.items.filter(\.done).sorted { ($0.doneAt ?? 0) > ($1.doneAt ?? 0) }
+        let isEmpty = state.items.isEmpty && state.suggestions.isEmpty
         List {
+            if let sidebarHeader {
+                sidebarHeader
+                sidebarBar(open: pending.count + agentAll.count)
+                if isEmpty {
+                    if fetched { sidebarEmpty } else { SkeletonShape(style: .list(4)) }
+                }
+            }
             if !state.suggestions.isEmpty {
                 Section {
                     ForEach(state.suggestions.sorted { $0.at > $1.at }) { suggestionRow($0) }
@@ -112,31 +123,75 @@ struct TodosView: View {
             }
         }
         .tabBarScrollWatch()
-        .overlay { if state.items.isEmpty, state.suggestions.isEmpty { if fetched { emptyState } else { SkeletonPage(style: .todos(6)) } } }
+        .overlay { if isEmpty, sidebarHeader == nil { if fetched { emptyState } else { SkeletonPage(style: .todos(6)) } } }
         .animation(.skeletonFade, value: fetched)   // 读回来时骨架淡出、内容淡入
         // 别处（电脑、网页）勾掉 / 加了一条，推过来时行平滑挪动，不是一下跳过去
         .animation(.snappy, value: state.items.map { "\($0.id)\($0.done)" } + state.suggestions.map(\.id) + agentTasks.map(\.id))
-        .navigationTitle("待办")
+        .navigationTitle(sidebarHeader == nil ? L("待办") : "")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { editor = .new } label: { Image(systemName: "plus") }
-                    .help("新建待办")
+            if sidebarHeader == nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { editor = .new } label: { Image(systemName: "plus") }
+                        .help("新建待办")
+                }
             }
         }
         .task { await model.refreshTodos(); fetched = true }
         .refreshable { await model.refreshTodos() }
         .sheetPanel(item: $adding) { AddTodosSheet(request: $0) }
         .sheetPanel(item: $editor) { TodoEditor(target: $0) }
+        #if os(iOS)
+        // iPhone / iPad：推进「新会话」页，待办内容填好、原项目能找到就直接定下
+        .onChange(of: creating?.id) { _, _ in
+            guard let item = creating else { return }
+            creating = nil
+            open(.newTask(NewTaskSeed(initialText: item.task, match: model.todoOrigin(item))))
+        }
+        #else
         .sheetPanel(item: $creating) { item in NewTaskView(initialText: item.task, match: model.todoOrigin(item)) }
+        #endif
         .confirmPanel(L("删除所有已完成的待办？"), isPresented: $confirmClear, confirm: L("清空已完成"), destructive: true) { model.clearDoneTodos() }
         // 一键收起久未更新的 agent 待办（11-13：很多早做完、早过期了，agent 没勾）：只在你确认后改
         .confirmPanel(L("把 %lld 条 3 天以上没更新的 agent 待办标为已完成？", count: staleAgentTasks.count), isPresented: $confirmStale,
                       confirm: L("全部标为已完成")) {
             for item in staleAgentTasks { model.setTodoDone(item, true) }
         }
+    }
+
+    // MARK: 嵌在 Mac 左边栏里
+
+    /// 格子下面一行：左边「待办 5」，右边「新建」（左边栏里没有窗口工具栏）
+    private func sidebarBar(open count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text("待办").font(.app(size: 13, weight: .semibold))
+            if count > 0 { Text("\(count)").font(.app(size: 12).monospacedDigit()).foregroundStyle(.tertiary) }
+            Spacer(minLength: 6)
+            Button { editor = .new } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus").font(.app(size: 11, weight: .semibold))
+                    Text("新建").lineLimit(1)
+                }
+                .font(.app(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .frame(height: 26)
+                .background(Color.primary.opacity(0.06), in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.steady(.plain))
+            .help("新建待办")
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+    }
+
+    private var sidebarEmpty: some View {
+        Text("暂无待办。编程 agent 遇到只有你能做的事（如注册账号、申请密钥）时会提醒你，可以现在处理或加入待办；它自己以后要做的事会记在「agent 的待办」中。")
+            .font(.app(size: 11.5)).foregroundStyle(.secondary)
+            .lineLimit(nil).fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: 一条待办
@@ -182,6 +237,9 @@ struct TodosView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { tap(item) }
+            #if os(macOS)
+            editButton(item)
+            #endif
         }
         .contextMenu { menu(item) }
         .swipeActions(edge: .trailing) {
@@ -226,6 +284,21 @@ struct TodosView: View {
     private func edit(_ item: TodoItem) {
         editor = .edit(item)
     }
+
+    #if os(macOS)
+    /// Mac：每行右边常驻一个淡色的铅笔，点了改这条（11-20 反馈待办不能编辑——原来只有右键菜单里的「修改」，
+    /// 点有出处的待办又是跳回原消息，找不到入口）。一直在、不随悬停增删：列表行悬停改布局会让滚动卡住
+    private func editButton(_ item: TodoItem) -> some View {
+        Button { edit(item) } label: {
+            Image(systemName: "pencil").font(.app(size: 11.5, weight: .medium)).foregroundStyle(.tertiary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L("编辑"))
+        .accessibilityLabel(L("编辑"))
+    }
+    #endif
 
     private func jump(_ source: TodoSource) {
         model.openSource(key: source.key, itemId: source.itemId, open: open)
@@ -511,6 +584,11 @@ struct TodosView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.steady(.plain))
+        #if os(macOS)
+        // 整行是一个按钮（点了打开处理它的会话）：铅笔不放在它里面（按钮里再放按钮点不准），右边留出位置盖上去
+        .padding(.trailing, 24)
+        .overlay(alignment: .topTrailing) { editButton(item) }
+        #endif
         .contextMenu { menu(item) }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) { model.deleteTodos([item.id]) } label: { Label("删除", systemImage: "trash") }

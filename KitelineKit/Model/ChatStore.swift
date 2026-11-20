@@ -10,6 +10,8 @@ final class ChatStore {
     /// 工具结果按工具调用 id 存，画工具那一步时一起显示
     private(set) var results: [String: ChatItem] = [:]
     var pending: [PendingSend] = []
+    /// 收到过的用户消息（id + 时间；reset 后也留着）：重新加载历史时再来一遍的旧消息不拿去认回显
+    @ObservationIgnored private var seenUsers: Set<String> = []
     var hasMore = true
     var loading = false
     var loaded = false
@@ -55,18 +57,21 @@ final class ChatStore {
         var text: String
         /// 能上移、下移、编辑、删除（电脑队列里的）；否则只能强插
         var editable: Bool
+        /// 还在发往电脑的路上（发的时候 Claude 正忙，先列在这里）：还不能强插
+        var sending = false
     }
 
     /// 排队列表：电脑给了队列就按它（加上刚发、还没出现在里面的）；老版本（没有队列）列这台设备记下的排队消息
     func queueRows(_ session: SessionInfo?) -> [QueueRow] {
-        let mine = pending.filter { $0.state == .later }
+        let mine = pending.filter(\.inQueueStrip)
         guard let session, var queue = session.queue else {
-            return mine.map { QueueRow(id: $0.qid ?? $0.id, text: $0.text, editable: false) }
+            return mine.map { QueueRow(id: $0.qid ?? $0.id, text: $0.text, editable: false, sending: $0.state == .sending) }
         }
         if let draft = queueDraft, Date().timeIntervalSince(draft.at) < 4 { queue = draft.items }
         let known = Set(queue.map(\.id))
         return queue.map { QueueRow(id: $0.id, text: $0.text, editable: true) }
-            + mine.filter { !$0.seen && !known.contains($0.qid ?? "") }.map { QueueRow(id: $0.qid ?? $0.id, text: $0.text, editable: false) }
+            + mine.filter { !$0.seen && !known.contains($0.qid ?? "") }
+                .map { QueueRow(id: $0.qid ?? $0.id, text: $0.text, editable: false, sending: $0.state == .sending) }
     }
 
     init(key: String) { self.key = key }
@@ -77,7 +82,7 @@ final class ChatStore {
         var goalNoted = false
         for item in new {
             if item.t == "result", let toolId = item.toolId { results[toolId] = item }
-            if item.t == "user" { users.append(item) }
+            if item.t == "user", seenUsers.insert("\(item.id)|\(item.ts ?? 0)").inserted { users.append(item) }
             if item.t == "event", item.goal != nil { goalNoted = true }
             items[item.id] = item
         }
@@ -95,13 +100,18 @@ final class ChatStore {
         revision += 1
     }
 
-    /// 发出去的消息在对话记录里回显了，撤掉本地的「发送中」
+    /// 发出去的消息在对话记录里回显了，撤掉本地的「发送中」。
+    /// 只认这条发出之后才有的用户消息（电脑和手机的钟可能差一点，放宽两分钟）：以前只比文字，网络不好重连、重新加载历史时，
+    /// 早先发过的同样的话（「继续」「好的」）被当成回显，还没送到的这条就被悄悄撤掉、也不再重发（11-20 反馈「消息没了」）
     private func settle(_ users: [ChatItem]) {
         pending.removeAll { p in
             if case .failed = p.state { return false }
             if p.voice != nil, p.text.isEmpty { return false }   // 语音还没转写完，认不出是哪条
             let head = String(p.text.prefix(24))
-            return users.contains { u in head.isEmpty ? !(u.images ?? []).isEmpty : (u.text ?? "").contains(head) }
+            return users.contains { u in
+                guard (u.ts ?? .infinity) >= p.at - 120_000 else { return false }
+                return head.isEmpty ? !(u.images ?? []).isEmpty : (u.text ?? "").contains(head)
+            }
         }
     }
 

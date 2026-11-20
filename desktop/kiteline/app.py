@@ -26,6 +26,7 @@ from .push import WebPush
 from .live import LiveActivities
 from .guest import GuestLinks
 from .groups import Groups
+from .steward import Steward, steward_available
 from .idleclose import IdleClose
 from .records import Audit, Favorites, Inbox, MediaCache, TabGroupStore, Todos, VoiceStore
 from .schedules import Schedules
@@ -37,7 +38,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.47"
+VERSION = "1.0.48"
 
 
 class App:
@@ -83,6 +84,7 @@ class App:
         self.favorites = Favorites(self.store, self.server.publish)
         self.tab_groups = TabGroupStore(self.server.publish)
         self.groups = Groups(self)   # 会话群：跨设备、跨项目的会话互相发消息
+        self.steward = Steward(self)   # 总管模式（实验性）：对总管说需求，总管找设备、项目、会话派活
         self.schedules = Schedules(self)
         self.stuck = reminders.StuckWatch(self)
         self.idle_close = IdleClose(self)
@@ -117,6 +119,8 @@ class App:
         agent_skill.TEST_ENABLED = bool(self.cfg.mobile.get("installTestSkill", True))
         agent_skill.TODO_ENABLED = bool(self.cfg.mobile.get("installTodoSkill", True))
         agent_skill.STAGE_ENABLED = bool(self.cfg.mobile.get("installStageSkill", True))
+        agent_skill.SHRINK_IMAGES = bool(self.cfg.mobile.get("shrinkAgentImages", False))
+        agent_skill.COMPACT_WINDOW = agent_skill.compact_window(self.cfg.mobile.get("compactWindow"))
         watcher_module.BROWSER.update(on=self.cfg.mobile.get("browserOn") or "client", max=int(self.cfg.mobile.get("browserMax") or 4),
                                       idle=int(self.cfg.mobile.get("browserIdle") or 10),
                                       record=bool(self.cfg.mobile.get("browserRecord", True)))
@@ -412,6 +416,8 @@ class App:
             self.todos.push_to_agents(only=source)
             # 会话群的名单也给一份（group say / info 核对成员）
             self.groups.push_to_agents(only=source)
+            # 总管模式：总管那台电脑刚连上，推一份目录
+            self.steward.source_connected(source)
 
     def _push_agent_todos(self, items, only=None):
         """agent 的待办推给 watcher（同 Mac 版 Todos.pushToAgents）：agent 用 todo list / done 看得到、关得掉别的会话或别的电脑上记的。
@@ -485,6 +491,8 @@ class App:
             self.todos.fill_session_meta()
             # 会话群：成员开了 / 关了，排着的群消息接着投或改成恢复时补上
             self.groups.sessions_changed()
+            # 总管模式：认总管会话、把目录推给总管那台电脑
+            self.steward.sessions_changed()
         elif kind == "sys":
             self._machine_stats(source.id, {k: v for k, v in event.items() if k != "event"})
         elif kind == "peers":
@@ -576,6 +584,9 @@ class App:
             elif kind == "group_say":
                 # 发到会话群的（watcher 的 group say）：转给群里其他会话
                 self.groups.agent_said(key, item)
+            elif kind == "steward_op":
+                # 总管模式（watcher 的 steward 子命令）：派活、新开会话、拉群、汇报
+                self.steward.agent_op(key, item)
 
     def set_marked(self, key, on):
         """标记 / 取消标记会话（新标记的排在标记里的最前，同 Mac 版 AppState.setMarked）"""
@@ -759,7 +770,7 @@ class App:
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
         # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows"]
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit"] + (["steward"] if steward_available(self.cfg) else [])
         # editorWindows = 能列出、关掉没有会话在运行的 VS Code 窗口（/api/editor/windows）；closeEditor 是自动关的开关
         payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff")), "closeEditor": editor_windows.enabled(self)}
         return payload
@@ -1057,6 +1068,7 @@ class App:
                     pass
             try:
                 self.schedules.tick(now)
+                agent_skill.savers_summary(self.store.sources.values(), wait=False)   # 设置页的「已缩小 N 张图片」先在后台问好
                 if not delivery.DRY_RUN:
                     self.stuck.tick(time.time())
                     self.idle_close.tick()

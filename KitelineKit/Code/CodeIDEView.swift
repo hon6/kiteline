@@ -117,7 +117,9 @@ struct CodeTab: Identifiable, Hashable {
 /// 宽屏 IDE 的状态：开着的标签、哪个在前面、侧栏显示什么
 @MainActor @Observable
 final class CodeWorkspace {
-    enum Activity: String { case explorer, scm, branches }
+    /// sessions：Mac 主窗口的二级侧边栏才有（这个项目的会话，内容由主程序画）
+    /// history：Mac 新版界面的文件侧栏才有（提交历史列在侧栏里，点了某次提交在中间开标签）
+    enum Activity: String { case explorer, scm, branches, sessions, history }
 
     let key: String
     @ObservationIgnored weak var model: AppModel?
@@ -138,6 +140,18 @@ final class CodeWorkspace {
     @ObservationIgnored var options = EditorOptions(dark: true, fontSize: 13, wrap: false, minimap: true)
     /// 已经在网页里打开过的文件标签（切回来时只要 show）
     @ObservationIgnored private var loaded: Set<String> = []
+    /// Mac 主窗口的二级侧边栏：侧栏和编辑区分开放（编辑区在右边，和会话换着显示）。开了标签报 true（右边换成编辑区），
+    /// 标签全关了报 false（右边回到会话）
+    @ObservationIgnored var onShowCode: ((Bool) -> Void)?
+    /// 二级侧边栏用的那份只初始化一次（侧栏、编辑区两块都会来叫）
+    @ObservationIgnored private var started = false
+
+    /// 二级侧边栏：第一次显示时读仓库概况和根目录（之后切走再回来不重读，标签、展开的目录都留着）
+    func start() async {
+        guard !started else { return }
+        started = true
+        await begin(.explorer(""))
+    }
 
     init(key: String, model: AppModel) {
         self.key = key
@@ -186,6 +200,7 @@ final class CodeWorkspace {
             tabs.insert(tab, at: index)
         }
         activate(tab.id)
+        onShowCode?(true)
     }
 
     func openFile(_ path: String, line: Int? = nil) {
@@ -271,6 +286,7 @@ final class CodeWorkspace {
             active = nil
             if !tabs.isEmpty { activate(tabs[min(index, tabs.count - 1)].id) }
         }
+        if tabs.isEmpty { onShowCode?(false) }
     }
 
     func closeOthers(_ keep: CodeTab) {
@@ -300,15 +316,55 @@ final class CodeWorkspace {
 }
 
 /// 宽屏 IDE 的整体布局
-private struct IDELayout: View {
+struct IDELayout: View {
+    /// 画哪一部分：all 整个 IDE（Mac 面板、iPad）；side 只画活动栏和侧栏、editor 只画编辑区——
+    /// Mac 主窗口的二级侧边栏把这两块分开放（侧栏在左边栏右边那一列，编辑区在最右边和会话换着显示）
+    enum Part { case all, side, editor }
+
     @Environment(AppModel.self) private var model
     @PanelDismiss private var closePanel
     @Bindable var ws: CodeWorkspace
     let options: EditorOptions
+    var part: Part = .all
+    /// 二级侧边栏：活动栏多一项「会话」（这个项目的会话，主程序画好送进来）和它右下角的数
+    var sessions: AnyView? = nil
+    var sessionCount = 0
+    /// 嵌在 Mac 左边栏里（项目点进去就在左边栏这一列里看）：活动栏横着排在上面，不另占一条竖栏的宽度
+    var barOnTop = false
+    /// Mac 新版界面：点了文件、改动、历史不在 IDE 自己的编辑区开，交给主窗口在中间的分屏里开成标签（CodeTabs.swift）
+    var openTab: ((CodeTab) -> Void)? = nil
     @State private var sidebarWidth: CGFloat = 280
     @State private var dragStart: CGFloat?
 
     var body: some View {
+        switch part {
+        case .all: whole
+        case .side:
+            Group {
+                if barOnTop {
+                    VStack(spacing: 0) {
+                        topBar
+                        Divider().opacity(0.6)
+                        sidebar.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    HStack(spacing: 0) {
+                        activityBar
+                        Divider()
+                        sidebar.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+            }
+            .gitFailureAlert(ws.repo)
+        case .editor:
+            editorArea.modifier(closingDialog)
+        }
+    }
+
+    /// 关标签时有没保存的：问一声
+    private var closingDialog: ClosingDialog { ClosingDialog(ws: ws) }
+
+    private var whole: some View {
         HStack(spacing: 0) {
             activityBar
             Divider()
@@ -331,23 +387,76 @@ private struct IDELayout: View {
                 }
         }
         .gitFailureAlert(ws.repo)
-        .confirmationDialog(L("「%@」有未保存的修改", ws.closing?.title ?? ""), isPresented: Binding(get: { ws.closing != nil }, set: { if !$0 { ws.closing = nil } }), titleVisibility: .visible) {
-            Button("保存") {
-                guard let tab = ws.closing, case .file(let path) = tab.kind else { return }
-                ws.closing = nil
-                Task { if await ws.files[path]?.save(from: ws.editor, id: tab.id) == true { ws.close(tab) } }
+        .modifier(closingDialog)
+    }
+
+    struct ClosingDialog: ViewModifier {
+        @Bindable var ws: CodeWorkspace
+
+        func body(content: Content) -> some View {
+            content.confirmationDialog(L("「%@」有未保存的修改", ws.closing?.title ?? ""), isPresented: Binding(get: { ws.closing != nil }, set: { if !$0 { ws.closing = nil } }), titleVisibility: .visible) {
+                Button("保存") {
+                    guard let tab = ws.closing, case .file(let path) = tab.kind else { return }
+                    ws.closing = nil
+                    Task { if await ws.files[path]?.save(from: ws.editor, id: tab.id) == true { ws.close(tab) } }
+                }
+                Button("不保存", role: .destructive) { if let tab = ws.closing { ws.closing = nil; ws.close(tab) } }
+                Button("取消", role: .cancel) { ws.closing = nil }
             }
-            Button("不保存", role: .destructive) { if let tab = ws.closing { ws.closing = nil; ws.close(tab) } }
-            Button("取消", role: .cancel) { ws.closing = nil }
         }
     }
 
+    /// 侧栏里点了要打开的东西：给了 openTab 就交出去（中间分屏的标签），否则在 IDE 自己的编辑区开
+    private func show(_ tab: CodeTab) {
+        if let openTab { openTab(tab) } else { ws.openTab(tab) }
+    }
+
     // MARK: 活动栏
+
+    /// 横着排的页签（嵌在 Mac 左边栏里，11-20 反馈：文件、Git、分支、提交历史都放在文件侧栏里，顶部页签切换、用图标）：
+    /// 每个是图标加右上角的数（Git 是没提交的改动数），选中的品牌色、下面一道短线；鼠标指上去看名字。有「会话」一项时（拆成单独一栏的放法）排在最后
+    private var topBar: some View {
+        HStack(spacing: 2) {
+            topTab(.explorer, "doc.on.doc", L("文件"))
+            topTab(.scm, "arrow.triangle.branch", "Git", badge: ws.repo.overview?.changeCount ?? 0)
+            topTab(.branches, "point.3.connected.trianglepath.dotted", L("分支与会话"), badge: ws.repo.overview?.sessions.count ?? 0, muted: true)
+            topTab(.history, "clock.arrow.circlepath", L("提交历史"))
+            if sessions != nil { topTab(.sessions, "bubble.left.and.bubble.right", L("会话"), badge: sessionCount, muted: true) }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 34)
+    }
+
+    private func topTab(_ value: CodeWorkspace.Activity, _ symbol: String, _ title: String, badge: Int = 0, muted: Bool = false) -> some View {
+        let on = ws.activity == value
+        return Button { ws.activity = value } label: {
+            Image(systemName: symbol).font(.system(size: 14, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? AnyShapeStyle(Theme.claude) : AnyShapeStyle(.secondary))
+                .frame(width: 34, height: 28)
+                .overlay(alignment: .topTrailing) {
+                    if badge > 0 {
+                        Text("\(min(badge, 99))").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 3).frame(minWidth: 13, minHeight: 13)
+                            .background(muted ? Color.secondary : Theme.claude, in: Capsule()).offset(x: -1, y: 1)
+                    }
+                }
+                .overlay(alignment: .bottom) { Capsule().fill(on ? Theme.claude : .clear).frame(width: 16, height: 2) }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
 
     private var activityBar: some View {
         VStack(spacing: 4) {
             activityButton(.explorer, symbol: "doc.on.doc", help: L("资源管理器"))
             activityButton(.scm, symbol: "arrow.triangle.branch", help: L("源代码管理"), badge: ws.repo.overview?.changeCount ?? 0)
+            if sessions != nil {
+                activityButton(.sessions, symbol: "bubble.left.and.bubble.right", help: L("会话"), badge: sessionCount, badgeMuted: true)
+            }
             activityButton(.branches, symbol: "point.3.connected.trianglepath.dotted", help: L("分支与会话"),
                            badge: ws.repo.overview?.sessions.count ?? 0, badgeMuted: true)
             Button { ws.openTab(CodeTab(kind: .history(nil))) } label: {
@@ -390,13 +499,24 @@ private struct IDELayout: View {
         switch ws.activity {
         case .explorer:
             ExplorerTree(explorer: ws.explorer, activePath: { if case .file(let p) = ws.activeTab?.kind { return p } else { return nil } }(),
-                         openFile: { ws.openFile($0) }, openHistory: { ws.openTab(CodeTab(kind: .history($0))) })
+                         openFile: { path in if openTab != nil { show(CodeTab(kind: .file(path))) } else { ws.openFile(path) } },
+                         openHistory: { show(CodeTab(kind: .history($0))) })
         case .scm:
-            SourceControlPanel(store: ws.repo, openDiff: { change, mode in ws.openDiff(change, mode: mode) },
-                               openFile: { ws.openFile($0) }, openBranches: { ws.activity = .branches },
-                               openHistory: { ws.openTab(CodeTab(kind: .history(nil))) })
+            SourceControlPanel(store: ws.repo,
+                               openDiff: { change, mode in
+                                   if openTab != nil { show(CodeTab(kind: .diff(path: change.path, mode: mode, commit: nil, oldPath: change.oldPath))) }
+                                   else { ws.openDiff(change, mode: mode) }
+                               },
+                               openFile: { path in if openTab != nil { show(CodeTab(kind: .file(path))) } else { ws.openFile(path) } },
+                               openBranches: { ws.activity = .branches },
+                               openHistory: { show(CodeTab(kind: .history(nil))) })
         case .branches:
-            GitBranchesView(store: ws.repo, openCommit: { ws.openTab(CodeTab(kind: .commit($0))) })
+            GitBranchesView(store: ws.repo, openCommit: { show(CodeTab(kind: .commit($0))) })
+        case .sessions:
+            if let sessions { sessions } else { EmptyView() }
+        case .history:
+            // 提交历史列在侧栏里（窄排法）：点某次提交在编辑区 / 中间的分屏开
+            GitHistoryView(store: ws.repo, openCommit: { show(CodeTab(kind: .commit($0))) })
         }
     }
 
@@ -654,5 +774,38 @@ extension RepoChange {
     static func simple(_ path: String) -> RepoChange {
         let json = (try? JSONSerialization.data(withJSONObject: ["path": path, "status": "M"])) ?? Data()
         return (try? JSONDecoder().decode(RepoChange.self, from: json))!
+    }
+}
+
+/// Mac 主窗口的二级侧边栏（11-20）：项目的代码页拆成两块用——side 是活动栏加文件 / Git / 会话那一栏，editor 是标签页编辑区。
+/// 两块共用同一份 CodeWorkspace（CodeStores.workspace，按会话 key 记着：切到别的项目再回来，开着的标签、展开的目录都在）
+struct CodePart: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var scheme
+    let key: String
+    let part: IDELayout.Part
+    var sessions: AnyView? = nil
+    var sessionCount = 0
+    var barOnTop = false
+    var openTab: ((CodeTab) -> Void)? = nil
+    var onShowCode: ((Bool) -> Void)? = nil
+    @AppStorage(EditorPrefs.fontSizeKey) private var fontSize = EditorPrefs.defaultFontSize
+    @AppStorage(EditorPrefs.wrapKey) private var wrap = false
+    @AppStorage(EditorPrefs.minimapKey) private var minimap = true
+
+    private var options: EditorOptions { EditorOptions(dark: scheme == .dark, fontSize: fontSize, wrap: wrap, minimap: minimap) }
+
+    var body: some View {
+        let ws = CodeStores.workspace(key, model)
+        IDELayout(ws: ws, options: options, part: part, sessions: sessions, sessionCount: sessionCount, barOnTop: barOnTop, openTab: openTab)
+            .task(id: key) {
+                ws.options = options
+                if let onShowCode { ws.onShowCode = onShowCode }
+                await ws.start()
+            }
+            .onChange(of: options) { _, value in
+                ws.options = value
+                ws.editor.setOptions(value)
+            }
     }
 }

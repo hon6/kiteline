@@ -316,17 +316,18 @@ enum DebugRemote {
             } else if parts.first == "tap", parts.count >= 2 {
                 withAccessibility { tap(String(line.dropFirst("tap ".count))) }
             } else if parts.first == "type", parts.count >= 2 {
-                // 往第一个输入框里打字（筛选框、搜索框）：type 关键词
+                // 往第一个输入框里打字（筛选框、搜索框、多行的任务内容框）：type 关键词
                 withAccessibility {
-                    func field(_ view: UIView) -> UITextField? {
+                    func field(_ view: UIView) -> UIView? {
                         if let text = view as? UITextField, !text.isHidden { return text }
+                        if let text = view as? UITextView, text.isEditable, !text.isHidden { return text }
                         return view.subviews.lazy.compactMap(field).first
                     }
                     guard let target = roots().lazy.compactMap(field).first else { note("type：没有输入框"); return }
                     target.becomeFirstResponder()
-                    target.text = ""
-                    target.insertText(String(line.dropFirst("type ".count)))
-                    note("type 打进了 \(type(of: target))：\(target.text ?? "")")
+                    let words = String(line.dropFirst("type ".count))
+                    if let text = target as? UITextField { text.text = ""; text.insertText(words); note("type 打进了 UITextField：\(text.text ?? "")") }
+                    if let text = target as? UITextView { text.text = ""; text.insertText(words); note("type 打进了 UITextView：\(text.text ?? "")") }
                 }
             } else if parts.first == "labels" {
                 withAccessibility {

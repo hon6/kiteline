@@ -165,6 +165,10 @@ final class ExplorerStore {
 /// 文件树
 struct ExplorerTree: View {
     @Environment(AppModel.self) private var model
+    #if os(macOS)
+    /// 在 Mac 新版界面的侧栏里（边距照 SideMetric）
+    @Environment(\.sideColumn) private var sideColumn
+    #endif
     @Bindable var explorer: ExplorerStore
     /// 当前打开的文件（高亮）
     var activePath: String?
@@ -226,6 +230,10 @@ struct ExplorerTree: View {
                         .font(.ui(.footnote).weight(.semibold))
                     }
                     .textCase(nil)
+                    #if os(macOS)
+                    // Mac 新版界面的文件侧栏：系统侧栏列表的节标题右边几乎贴边，四个按钮被栏边裁掉（11-21 量过），让到离栏边 16
+                    .padding(.leading, sideColumn ? 2 : 0).padding(.trailing, sideColumn ? 12 : 0)
+                    #endif
                     .contextMenu { folderMenu("") }
                 }
             }

@@ -51,13 +51,22 @@ struct LimitAgent: Decodable, Identifiable, Hashable {
         pending = c.truthy("pending")
     }
 
-    /// 卡片上的格子，两格一行，按周期从短到长：5 小时、今日、本周、本月——这家有哪几种就排哪几种（Claude、Codex 是
-    /// 「5 小时 · 本周」一行，只有本月的占一格）。一种都没有的（Codex 免费版 30 天一个窗口、网关的花费上限）按顺序取两格
+    /// 卡片上的格子，两格一行，按周期从短到长：5 小时、今日、本周、本月，后面跟按模型单算的周额度（Fable、Opus、Sonnet）
+    /// 和别的窗口（Codex 免费版 30 天一个窗口、网关的花费上限）——电脑报了哪几种就排哪几种，一种不丢
+    /// （11-20：原来只认前四种，别的在有「本周」时被丢掉）。落单的那条后面补一个空位，画的时候它占一整行
     var slots: [LimitWindow?] {
         let order = ["five_hour", "day", "seven_day", "month"]
-        var picked = order.compactMap { kind in windows.first { $0.kind == kind } }
-        if picked.isEmpty { picked = Array(windows.prefix(2)) }
-        var out: [LimitWindow?] = picked
+        let known = order.compactMap { kind in windows.first { $0.kind == kind } }
+        var seen = Set(known.map(\.kind))
+        let week = windows.first { $0.kind == "seven_day" }?.resetsAt
+        let rest = windows.filter { seen.insert($0.kind).inserted }.map { window -> LimitWindow in
+            // 按模型的周额度和「本周」同一个时刻重置：不再写一遍重置时间（并排两格写不下，旁边那格就有）
+            guard LimitWindow.weeklyModel(window.kind) != nil, let at = window.resetsAt, let week, abs(at - week) < 120_000 else { return window }
+            var quiet = window
+            quiet.quietReset = true
+            return quiet
+        }
+        var out: [LimitWindow?] = known + rest
         if out.count % 2 == 1 { out.append(nil) }
         return out
     }
@@ -92,6 +101,8 @@ struct LimitWindow: Decodable, Identifiable, Hashable {
     var minutes: Int?
     /// 过了重置时间、还没有新读数：额度已经回来了
     var reset: Bool
+    /// 说明里不写重置时间（和旁边「本周」那格同时重置的按模型周额度，见 LimitAgent.slots）
+    var quietReset = false
     var id: String { kind }
 
     init(from decoder: Decoder) throws {
@@ -117,15 +128,25 @@ struct LimitWindow: Decodable, Identifiable, Hashable {
         case "month": return L("本月")
         case "spend_limit": return L("额度")
         default:
+            if let model = Self.weeklyModel(kind) { return L("本周 · %@", model) }
             let minutes = minutes ?? Int(kind.split(separator: "_").last ?? "") ?? 0
             if minutes >= 1440 { return L("%@ 天", "\(minutes / 1440)") }
             return minutes > 0 ? L("%@ 小时", "\(max(1, minutes / 60))") : L("额度")
         }
     }
 
+    /// 按模型单算的周额度是哪个模型的：「seven_day_opus」→「Opus」；Claude Code 把 Fable 这一档的叫 seven_day_overage_included。
+    /// 不是这类窗口返回 nil
+    static func weeklyModel(_ kind: String) -> String? {
+        guard kind.hasPrefix("seven_day_") else { return nil }
+        let name = kind.dropFirst("seven_day_".count)
+        if name == "overage_included" { return "Fable" }
+        return name.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
     /// 「5 小时 · 22:10 重置」
     var caption: String {
-        let reset = resetText
+        let reset = quietReset && !self.reset ? "" : resetText
         return reset.isEmpty ? label : "\(label) · \(reset)"
     }
 
@@ -257,11 +278,9 @@ struct LimitsBoard: View {
                 VStack(alignment: .leading, spacing: compact ? 8 : 10) {
                     ForEach(Array(stride(from: 0, to: slots.count, by: 2)), id: \.self) { row in
                         HStack(alignment: .top, spacing: compact ? 10 : 14) {
+                            // 落单的一条（只有「本周」、或一共三条时的最后一条）占一整行，不留半边空着
                             ForEach(row..<row + 2, id: \.self) { index in
-                                Group {
-                                    if let window = slots[index] { LimitBar(window: window, compact: compact) } else { Color.clear.frame(height: 1) }
-                                }
-                                .frame(maxWidth: .infinity)
+                                if let window = slots[index] { LimitBar(window: window, compact: compact).frame(maxWidth: .infinity) }
                             }
                         }
                     }

@@ -311,11 +311,16 @@ public sealed class TodosPage : Panel
         }
         var body = new Tap(content, () => Tap(item), 6).Keys("Transparent", "Transparent");
         body.Cursor = Cursor.Default;
-        var row = Ui.HTop(10, check, body.Grow()).Pad(12, 9);
+        var row = Ui.HTop(10, check, body.Grow(), EditButton(item)).Pad(12, 9);
         row.Background = Brushes.Transparent;
         row.Menu(() => Menu(item));
         return row;
     }
+
+    /// 每行右边常驻一个淡色的铅笔，点了改这条（11-20 反馈待办不能编辑：原来只有右键菜单里的「修改」，点有出处的待办又是跳回原消息）
+    static Control EditButton(TodoItem item) =>
+        new Tap(Ui.Sym("pencil", 12, "Text3"), () => TodoEditor.Open(TodoEditor.Target.Edit(item)), 6) { Width = 24, Height = 24 }
+            .Keys("Transparent", "Fill08").Tip(L("编辑"));
 
     static void Tap(TodoItem item)
     {

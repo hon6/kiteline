@@ -688,6 +688,27 @@ _, audit, _ = request("/api/audit")
 acts = {e["action"] for e in audit["entries"]}
 check("定时任务的新建 / 运行都进操作记录", {"新建定时任务", "定时任务", "删除定时任务"} <= acts, str(acts))
 request("/api/schedules/delete", "POST", {"id": once["id"]})
+status, body, _ = request("/api/schedules", "POST", dict(base, prompt="每两小时巡检一次评论", repeat="hourly", time="09:00", every=2, until="23:00"))
+hourly = body.get("schedule", {}) if status == 200 else {}
+check("每隔几小时：创建成功，说明写成「每 2 小时（09:00–23:00）」，带间隔、结束时间和下次运行时间",
+      status == 200 and hourly.get("label") == "每 2 小时（09:00–23:00）" and hourly.get("every") == 2 and hourly.get("until") == "23:00"
+      and bool(hourly.get("nextRun")), str(body))
+bad = [request("/api/schedules", "POST", dict(base, prompt="x", repeat="hourly", time="09:00", every=0))[0],
+       request("/api/schedules", "POST", dict(base, prompt="x", repeat="hourly", time="09:00", every=13))[0],
+       request("/api/schedules", "POST", dict(base, prompt="x", repeat="hourly", time="09:00", every=2, until="08:00"))[0]]
+check("每隔几小时：间隔不在 1～12 小时、结束时间早于开始时间都会被拒绝", bad == [400, 400, 400], str(bad))
+day5 = datetime.date.today() + datetime.timedelta(days=5)
+at = lambda hour, minute=0, second=0: ms(datetime.datetime.combine(day5, datetime.time(hour, minute, second)))
+request("/api/schedules/tick", "POST", {"now": at(11, 0, 30)})
+ran = wait_until(lambda all: all.get(hourly.get("id")) if all.get(hourly.get("id"), {}).get("lastRun") == at(11) and all[hourly.get("id")].get("lastOk") is not None else None)
+check("每隔几小时：到了其中一次（11:00）自动开新会话", ran is not None and ran.get("lastOk") is True and "每两小时巡检一次评论" in log_tail(), str(ran))
+request("/api/schedules/tick", "POST", {"now": at(11, 40)})
+time.sleep(1.5)
+check("每隔几小时：两次之间不重复跑", schedules().get(hourly.get("id"), {}).get("lastRun") == at(11))
+request("/api/schedules/tick", "POST", {"now": at(13, 0, 20)})
+ran = wait_until(lambda all: all.get(hourly.get("id")) if all.get(hourly.get("id"), {}).get("lastRun") == at(13) and all[hourly.get("id")].get("lastOk") is not None else None)
+check("每隔几小时：到下一次（13:00）再跑", ran is not None and ran.get("lastOk") is True, str(ran))
+request("/api/schedules/delete", "POST", {"id": hourly.get("id")})
 
 print("== Bark 备用推送（本地假 Bark 服务器）")
 import http.server, threading, subprocess
@@ -1506,6 +1527,23 @@ status, _, _ = request("/api/favorites/add", "POST", {"key": busy["key"], "itemI
 check("收藏的图超过 9 张不收", status == 400)
 status, _, _ = request("/api/favorites/media?ref=%s" % q("../favorites.json"), raw=True)
 check("收藏取图不能越界", status == 404)
+# 改一条收藏的文字（11-20：收藏下来的内容有错、想补一句）：图不动；不存在的 404；没有图的不能改成空的，有图的可以
+status, body, _ = request("/api/favorites/update", "POST", {"id": fav.get("id", ""), "text": "  统计后台已上线（已修订）  "})
+fav_edited = next((i for i in body.get("items", []) if i.get("id") == fav.get("id")), {})
+check("改收藏的文字：存下去掉首尾空白的新文字，图和收藏时间不动", status == 200 and fav_edited.get("text") == "统计后台已上线（已修订）"
+      and [im["ref"] for im in fav_edited.get("images", [])] == fav_refs and fav_edited.get("at") == fav.get("at"), str(fav_edited)[:300])
+status, _, _ = request("/api/favorites/update", "POST", {"id": "nope", "text": "x"})
+check("改不存在的收藏：404", status == 404, str(status))
+status, _, _ = request("/api/favorites/update", "POST", {"id": fav.get("id", "")})
+check("改收藏不带文字：400", status == 400, str(status))
+status, body, _ = request("/api/favorites/update", "POST", {"id": fav.get("id", ""), "text": "   "})
+check("有图的收藏可以把文字改成空的", status == 200 and not next((i for i in body.get("items", []) if i.get("id") == fav.get("id")), {}).get("text"), str(status))
+request("/api/favorites/add", "POST", {"key": busy["key"], "itemId": "fav-text-only", "who": "bot", "text": "只有文字"})
+_, body, _ = request("/api/favorites")
+fav_plain = next((i for i in body.get("items", []) if i.get("itemId") == "fav-text-only"), {})
+status, _, _ = request("/api/favorites/update", "POST", {"id": fav_plain.get("id", ""), "text": "  "})
+check("没有图的收藏不能改成空的：400", status == 400, str(status))
+request("/api/favorites/delete", "POST", {"ids": [fav_plain.get("id", "")]})
 fav_dir = os.path.join(CONFIG_DIR, "favorite-media")
 status, body, _ = request("/api/favorites/delete", "POST", {"key": busy["key"], "itemId": "fav-item-1"})
 check("取消收藏（按消息），图文件一起删", status == 200 and not any(i.get("itemId") == "fav-item-1" for i in body.get("items", []))

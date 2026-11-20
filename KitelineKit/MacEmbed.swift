@@ -1,4 +1,5 @@
 #if KITELINE_MAC
+import AppKit
 import SwiftUI
 
 /// Mac App 主窗口里的原生对话页：和手机 App 同一套代码（这个文件只在给 Mac 编的时候编进来）。
@@ -202,6 +203,15 @@ public enum KitelineKit {
     /// 左边栏「收藏」那一格：收藏了几条
     public static var favoriteCount: Int { model?.favorites.items.count ?? 0 }
 
+    /// 自测用：打开第几条收藏（新的在前，从 0 数）的编辑面板——要收藏页正显示着
+    public static func editFavorite(_ index: Int) -> String {
+        guard let model else { return "-" }
+        let items = model.favorites.items.sorted { $0.at > $1.at }
+        guard items.indices.contains(index) else { return L("没有第 %@ 条收藏", "\(index)") }
+        FavoriteEditRequest.shared.item = items[index]
+        return items[index].text.map { String($0.prefix(20)) } ?? ""
+    }
+
     /// 左边栏「待办」那一行：几件没做完、几件 Claude 刚说要你做还没加的
     public static var todoCounts: (open: Int, suggested: Int) {
         guard let model else { return (0, 0) }
@@ -233,6 +243,38 @@ public struct TarsLimitsBoard: View {
     }
 }
 
+/// 状态栏里一行紧凑的额度（Mac 新版界面窗口底部）：每台电脑每家 agent 一段「虚拟机 本周 67% · 本周 · Fable 41%」，
+/// 用到八成的那一项红色；还没有读数的不占地方
+public struct TarsLimitsStrip: View {
+    private let devices: [LimitDevice]
+
+    public init(json: Data?) {
+        devices = json.flatMap { try? JSONDecoder().decode(LimitsPayload.self, from: $0) }?.devices ?? []
+    }
+
+    public var body: some View {
+        let blocks = devices.flatMap { device in device.agents.filter { !$0.pending }.map { (device, $0) } }
+        HStack(spacing: 12) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, item in
+                HStack(spacing: 5) {
+                    AgentGlyph(item.1.agent, size: 11)
+                    Text(item.0.name).foregroundStyle(.tertiary)
+                    ForEach(item.1.slots.compactMap { $0 }) { window in
+                        Text(verbatim: "\(window.label) \(Int(window.percent.rounded()))%")
+                            .monospacedDigit()
+                            .foregroundStyle(window.percent >= 80 ? AnyShapeStyle(window.tint) : AnyShapeStyle(.secondary))
+                    }
+                    if !item.1.balances.isEmpty {
+                        Text(verbatim: L("余额") + " " + item.1.balances.filter { $0.kind != "bonus" || item.1.balances.count == 1 }.map(\.text).joined(separator: " · "))
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+        .lineLimit(1)
+    }
+}
+
 /// 左边栏「待办」页：和手机同一个页面；点来源 = 左边栏选中那个会话、滚到那条消息
 public struct TarsTodosView: View {
     public init() {}
@@ -251,6 +293,45 @@ public struct TarsTodosView: View {
             .panelAnchor(key: "todos")   // 加待办、改待办、看截图的面板对着待办页居中
         } else {
             SkeletonPage(style: .todos(6))
+        }
+    }
+}
+
+/// 左边栏「待办」页签（11-20 起待办在左边栏里看，不占右边）：和手机同一个页面，列表的第一行是 header（左边栏顶上那几格）；
+/// 点来源 = 右边打开那个会话、滚到那条消息
+public struct TarsTodosSidebar: View {
+    let header: AnyView
+    public init(header: AnyView) { self.header = header }
+
+    public var body: some View {
+        if let model = KitelineKit.model {
+            TodosView(sidebarHeader: header)
+                .tint(Theme.claude)
+                .environment(model)
+                .environment(\.openRoute, OpenRoute { route in
+                    if case .chat(let key) = route { KitelineKit.openSession(key) }
+                })
+        } else {
+            List { header }
+        }
+    }
+}
+
+/// 左边栏「收藏」页签：和手机同一个页面，列表的第一行是 header；点「原消息」= 右边打开那个会话、滚到那条消息
+public struct TarsFavoritesSidebar: View {
+    let header: AnyView
+    public init(header: AnyView) { self.header = header }
+
+    public var body: some View {
+        if let model = KitelineKit.model {
+            FavoritesView(sidebarHeader: header)
+                .tint(Theme.claude)
+                .environment(model)
+                .environment(\.openRoute, OpenRoute { route in
+                    if case .chat(let key) = route { KitelineKit.openSession(key) }
+                })
+        } else {
+            List { header }
         }
     }
 }
@@ -294,6 +375,122 @@ public struct TarsFavoritesView: View {
     }
 }
 
+// MARK: - 二级侧边栏（Mac 主窗口：左边栏「项目」里点开的项目，Code/CodeIDEView.swift 的 CodePart）
+
+/// 二级侧边栏里的那一栏（同 VS Code 的侧边栏）：左边一条活动栏（文件、Git、会话、分支、提交历史），右边是选中那一项的内容。
+/// key = 这个项目的任意一个会话（文件、Git 接口按会话找到电脑和目录）；sessions = 「会话」那一项的内容（主程序画，sessionCount 是活动栏上的数）；
+/// showCode：开了文件 / 改动 / 历史的标签报 true（右边换成编辑区），标签全关了报 false（右边回到会话）；
+/// barOnTop：嵌在左边栏那一列里时活动栏横着排在上面（文件 | Git | 会话），不另占一条竖栏
+public struct TarsProjectSide: View {
+    let key: String
+    let sessions: AnyView?
+    let sessionCount: Int
+    let barOnTop: Bool
+    /// 点了文件、改动、历史：给了就把要开的标签 key（CodeTabKey）交出去，在中间的分屏里开（新版界面）；不给就在 IDE 自己的编辑区开
+    let open: ((String) -> Void)?
+    let showCode: (Bool) -> Void
+
+    public init(key: String, sessions: AnyView?, sessionCount: Int, barOnTop: Bool = false, open: ((String) -> Void)? = nil,
+                showCode: @escaping (Bool) -> Void) {
+        self.key = key
+        self.sessions = sessions
+        self.sessionCount = sessionCount
+        self.barOnTop = barOnTop
+        self.open = open
+        self.showCode = showCode
+    }
+
+    public var body: some View {
+        if let model = KitelineKit.model {
+            let session = key
+            CodePart(key: key, part: .side, sessions: sessions, sessionCount: sessionCount, barOnTop: barOnTop,
+                     openTab: open.map { open in { tab in open(CodeTabKey.from(tab, session: session)) } }, onShowCode: showCode)
+                .font(.ui(.body))
+                .tint(Theme.claude)
+                .environment(model)
+        }
+    }
+}
+
+/// 二级侧边栏开着时右边的编辑区：文件、改动对比、提交历史的标签页（和 TarsProjectSide 共用一份状态）
+public struct TarsProjectEditor: View {
+    let key: String
+    public init(key: String) { self.key = key }
+
+    public var body: some View {
+        if let model = KitelineKit.model {
+            CodePart(key: key, part: .editor)
+                .font(.ui(.body))
+                .tint(Theme.claude)
+                .environment(model)
+        }
+    }
+}
+
+extension KitelineKit {
+    /// 代码标签（文件、对比、历史、提交，见 Code/CodeTabs.swift）：是的话给标签上写的和下面那行小字
+    public static func codeTabTitle(_ key: String) -> (title: String, subtitle: String)? {
+        guard let model, let parts = CodeTabKey.parse(key) else { return nil }
+        return (CodeTabKey.title(parts), CodeTabKey.help(parts, model: model))
+    }
+
+    public static func isCodeTab(_ key: String?) -> Bool { CodeTabKey.isCode(key) }
+
+    /// 新会话草稿标签（「@new:…」，同 VS Code 新开的对话标签）：标签里的界面、建一个草稿的 key、草稿写着开在哪，都由 Mac 主程序给
+    public static let draftPrefix = "@new:"
+    public static var newSessionDraftView: ((String) -> AnyView)?
+    /// 参数：这块标签开「+」之前显示的那个（按它带项目、设备、agent）；回草稿的 key，没法建（一台电脑都没连上）回 nil
+    public static var newSessionDraft: ((String?) -> String?)?
+    public static var newSessionDraftLabel: ((String) -> String)?
+
+    /// 代码标签是哪个会话（项目）的：切项目时判断这个标签属于哪个项目
+    public static func codeTabSession(_ key: String) -> String? { CodeTabKey.parse(key)?.session }
+
+    /// 自测用：某个会话所在项目里一个文件的标签 key
+    public static func codeTab(file path: String, session: String) -> String { CodeTabKey.make(.file, session: session, path) }
+
+    /// 关代码标签前：有没保存的修改就问「保存 / 不保存 / 取消」（保存成功后再关）。启动时装一次
+    public static func installCodeTabGuard() {
+        ChatPanes.confirmClose = { key in
+            guard CodeTabKey.isCode(key), CodeTabStore.isDirty(key), let parts = CodeTabKey.parse(key) else { return true }
+            let alert = NSAlert()
+            alert.messageText = L("「%@」有未保存的修改", CodeTabKey.title(parts))
+            alert.informativeText = L("不保存的话，所做的修改会丢失。")
+            alert.addButton(withTitle: L("保存"))
+            alert.addButton(withTitle: L("不保存"))
+            alert.addButton(withTitle: L("取消"))
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                Task { @MainActor in if await CodeTabStore.save(key) { panes.close(key: key) } }
+                return false
+            case .alertSecondButtonReturn:
+                CodeTabStore.discard(key)
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    /// 二级侧边栏：这个项目开着几个代码标签（0 = 右边没有编辑区可看）
+    public static func projectCodeTabs(key: String) -> Int { CodeStores.existingWorkspace(key)?.tabs.count ?? 0 }
+
+    /// 窗口工具栏最右边有主程序放的按钮（两套界面的切换）时，贴着窗口右上角那一块的标签栏右边让出这么宽，按钮不盖住它的「更多」
+    public static func reserveTitlebarTrailing(_ width: CGFloat) { if panes.trailingReserve != width { panes.trailingReserve = width } }
+
+    /// 二级侧边栏切到哪一栏：explorer 文件 / scm Git / sessions 会话 / branches 分支（刚打开项目时主程序定、自测用）
+    public static func projectActivity(key: String, _ name: String) {
+        guard let model, let activity = CodeWorkspace.Activity(rawValue: name) else { return }
+        CodeStores.workspace(key, model).activity = activity
+    }
+
+    /// 自测用：二级侧边栏里打开一个文件（同在文件树里点它）
+    public static func projectOpenFile(key: String, path: String) {
+        guard let model else { return }
+        CodeStores.workspace(key, model).openFile(path)
+    }
+}
+
 // MARK: - 会话群（Views/GroupViews.swift）
 
 extension KitelineKit {
@@ -321,6 +518,34 @@ extension KitelineKit {
             case .groups: KitelineKit.openPage("groups")
             default: break
             }
+        }
+    }
+}
+
+/// Mac 设置 → 通用里的「实验性功能 · 总管模式」：同手机设置里那组（打开先弹配置，见 StewardViews.swift）
+public struct TarsStewardSection: View {
+    public init() {}
+
+    public var body: some View {
+        if let model = KitelineKit.model, model.hostFeatures.contains("steward") {
+            StewardSettingsSection().environment(model)
+        }
+    }
+}
+
+/// 会话（或群、历史会话）已经开成右边分屏里的标签：标题后一个小标签页图标（左边栏的会话行、群行、历史行共用，11-20 用户）。
+/// 再点这一行不会再开一个标签：切过去，那个标签的边框闪几下主题色（ChatPanes.flashTab）。
+/// 单独一层只读 openKeys：标签增删时只有这些小图标重画，行本身不动
+public struct TarsOpenedTabMark: View {
+    let key: String
+
+    public init(key: String) { self.key = key }
+
+    public var body: some View {
+        if KitelineKit.panes.openKeys.contains(key) {
+            Image(systemName: "macwindow").font(.app(size: 9.5)).foregroundStyle(.secondary)
+                .help(L("已在标签页中打开"))
+                .accessibilityLabel(L("已在标签页中打开"))
         }
     }
 }
@@ -439,7 +664,12 @@ private struct GroupSidebarRows: View {
         let key = GroupKey.make(group.id)
         let card = SessionCard(group: group, model: model)
         return GroupRow(group: group, compact: true)
-            .modifier(GroupRowHighlight(selected: selection == key) { selection = key })
+            .modifier(GroupRowHighlight(selected: selection == key) {
+                // 已经开成标签的群再点一次：不再开，切过去，标签边框闪一下（同会话行）
+                let opened = KitelineKit.panes.openKeys.contains(key)
+                selection = key
+                if opened { KitelineKit.panes.show(key); KitelineKit.panes.flashTab(key) }
+            })
             // 同会话行：拖到右边哪一块的哪一边就放到哪
             .onDrag { PaneDrag.provider(key: key, card: card) } preview: { card.opacity(0.92) }
             .groupDrop(key: "", enabled: true, label: L("松开加入群")) { dragged in
@@ -628,6 +858,28 @@ public enum TarsWorldChat {
         let current = recorder ?? VoiceRecorder()
         recorder = current
         return await current.start()
+    }
+
+    /// 确认框上的按键（AR 窗口底栏的「允许 / 总是允许 / 拒绝」）：同会话页，button 是选项的 key（1 / 2 / esc / enter）
+    public static func press(key: String, button: String, label: String) {
+        guard let model = KitelineKit.model else { return }
+        Task { _ = await model.press(key, button, label: label) }
+    }
+
+    /// AR 窗口里的浏览器画面：level = thumb（小图）/ full（大图）/ off（不看了）。每个会话一个看的人，档位变了换一下
+    private static var browserTokens: [String: UUID] = [:]
+    public static func watchBrowser(key: String, level: String) {
+        guard let store = KitelineKit.model?.browsers else { return }
+        if let token = browserTokens.removeValue(forKey: key) { store.unwatch(key, token: token) }
+        guard level == "thumb" || level == "full" else { return }
+        let token = UUID()
+        browserTokens[key] = token
+        store.watch(key, token: token, level: level)
+    }
+
+    /// 离开 AR：它订的画面全部退掉
+    public static func stopBrowsers() {
+        for key in Array(browserTokens.keys) { watchBrowser(key: key, level: "off") }
     }
 
     public static var recording: Bool { recorder?.recording ?? false }

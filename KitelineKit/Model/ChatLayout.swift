@@ -30,6 +30,13 @@ struct PendingSend: Identifiable, Hashable {
     /// 排队（later）时电脑给的编号，对上会话的 queue；seen = 已经在 queue 里出现过（之后不在了 = 已交给 Claude 或在别处删了）
     var qid: String?
     var seen = false
+    /// 发的时候 Claude 正忙：多半要排队。还在发送中就先放进排队列表，不在对话里画——
+    /// 以前先在对话里出现、电脑回了「排队」又跳回队列，像是消息退回来了（11-20）
+    var busyAtSend = false
+    /// 发的时刻（毫秒）：对话里比它早的用户消息不是它的回显（见 ChatStore.settle）
+    var at = Date().timeIntervalSince1970 * 1000
+    /// 在排队列表里（不在对话里画）
+    var inQueueStrip: Bool { state == .later || (busyAtSend && state == .sending) }
 }
 
 struct PendingFile: Hashable {
@@ -152,7 +159,7 @@ enum ChatLayout {
         // 最后一组步骤：Claude 还在忙就别折叠
         flushSteps(live: activity.map { $0 != "idle" } ?? false)
         // 排队的（later）不在对话里画，在输入框上方的排队列表里（QueueStrip）
-        for (index, p) in pending.filter({ $0.state != .later }).enumerated() {
+        for (index, p) in pending.filter({ !$0.inQueueStrip }).enumerated() {
             rows.append(.pending(p, first: index == 0 && prevSide != "me"))
         }
         return rows

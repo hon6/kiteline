@@ -79,6 +79,11 @@ static class SelfTest
                     if (model.Sessions.FirstOrDefault(s => s.Title == arg) is SessionInfo s) main.Selection = s.Key;
                     else Console.WriteLine($"[capture] 没找到会话「{arg}」");
                     break;
+                // 同在左边栏点了这一行（pick:<会话标题>）：没开着的开成标签；已经开成标签的切过去，标签边框闪主题色
+                case "pick":
+                    if (model.Sessions.FirstOrDefault(x => x.Title == arg) is SessionInfo toPick) main.Pick(toPick.Key);
+                    else Console.WriteLine($"[capture] 没找到会话「{arg}」");
+                    break;
                 case "split" or "splitdown":
                     if (model.Sessions.FirstOrDefault(x => x.Title == arg) is SessionInfo t) SessionMenu.OpenSplit(t.Key, name == "splitdown");
                     break;

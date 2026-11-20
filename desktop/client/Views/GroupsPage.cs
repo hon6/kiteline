@@ -80,6 +80,8 @@ public static class GroupRow
             Ui.Text(group.Name, compact ? 13 : 14, FontWeight.SemiBold).Trim().Shrink(),
             Ui.Text($"({group.Members.Count})", compact ? 11.5 : 12.5, color: "Text2"),
             group.Marked ? Ui.Sym("star.fill", compact ? 10.5 : 11.5, "Accent") : null,
+            // 左边栏：已经开成标签的群，名字后一个小窗口图标（同会话行）
+            compact && ChatPanes.Shared.IsOpen(MainModel.GroupPrefix + group.Id) ? Ui.Sym("macwindow", 9.5, "Text2").Tip(L("已在标签页中打开")) : null,
             new Spacer(4),
             Ui.Text(Format.ListTime(group.UpdatedAt), 10.5, color: "Text3"));
         var line = Ui.H(6,
@@ -173,7 +175,7 @@ public sealed class GroupRowView : Tap
     {
         key = MainModel.GroupPrefix + group.Id;
         Padding = new Thickness(7, 5);
-        Click = () => main.Selection = key;
+        Click = () => main.Pick(key);   // 已经开成标签的群：不再开，切过去，标签边框闪一下（同会话行）
         if (main.Selection == key) { Keys("AccentFill14", "AccentFill14"); BorderThickness = new Thickness(1); this.Res(BorderBrushProperty, "AccentEdge32"); }
         else Keys("Transparent", "Fill05", "Fill08");
         var gid = group.Id;

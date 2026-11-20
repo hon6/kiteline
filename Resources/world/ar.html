@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Kiteline AR</title>
+<link rel="stylesheet" href="ar.css">
+<script>/* 出错记一笔（自测时 arjs:JSON.stringify(window.__errs) 取出来看） */ window.__errs = []; addEventListener('error', (e) => __errs.push(String(e.message) + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno));</script>
+</head>
+<body>
+<div id="ar-stage"></div>
+<div class="ar-hud">
+  <div class="ar-compass"><div class="ar-compass-in" id="ar-compass-in"></div><i class="ar-compass-tip"></i><b id="ar-heading">0°</b></div>
+  <div class="ar-stats"><span class="ar-clock" id="ar-clock"></span><span class="ar-stats-n" id="ar-stats-n"></span></div>
+  <div class="ar-tools" id="ar-tools"></div>
+  <i class="ar-reticle"></i>
+  <div class="ar-edges" id="ar-edges"></div>
+  <canvas class="ar-radar" id="ar-radar" width="150" height="150"></canvas>
+  <div class="ar-hint" id="ar-hint"></div>
+  <div class="ar-toast" id="ar-toast" hidden></div>
+  <button class="ar-door" id="ar-door" hidden>离开</button>
+</div>
+<script type="module" src="js/ar.js"></script>
+</body>
+</html>

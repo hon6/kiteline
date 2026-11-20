@@ -97,6 +97,26 @@ public sealed partial class FavoriteState : ObservableObject
         AppModel.Shared.Flash(L("已取消收藏"));
     }
 
+    /// 后台能改收藏的文字（11-20 起；连着旧版后台时不给「编辑」）
+    public static bool CanEdit => AppModel.Shared.Features.Contains("favoriteEdit");
+
+    /// 改一条收藏的文字（收藏下来的内容有错、想补一句）：先在这边换掉，后台存好后整份换成它回的
+    public async void Update(string id, string text)
+    {
+        text = text.Trim();
+        Set(Items.Select(i => i.Id == id ? i with { Text = text.Length == 0 ? null : text } : i).ToList());
+        try
+        {
+            Apply(await AppModel.Shared.Api.Post("/api/favorites/update", new JsonObject { ["id"] = id, ["text"] = text }));
+            AppModel.Shared.Flash(L("已保存"));
+        }
+        catch (Exception e)
+        {
+            AppModel.Shared.Flash(e.Message);
+            await Refresh();
+        }
+    }
+
     /// 收藏页里删一条
     public void Delete(string id)
     {

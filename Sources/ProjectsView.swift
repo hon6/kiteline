@@ -62,6 +62,8 @@ final class ProjectsModel: ObservableObject {
     /// 读回来过一次（之前列表空着是「正在读取」）
     @Published private(set) var loaded = false
     @Published private(set) var cost7: [String: Double] = [:]
+    /// 每个项目今天用了多少（各家 agent 合计）：token 总数（输入 + 输出 + 读写缓存）和花费。项目栏顶上那行用量用
+    @Published private(set) var today: [String: (tokens: Double, cost: Double)] = [:]
     @Published private(set) var past: [String: [PastItem]] = [:]
     @Published var filter = "all"
     @Published var expanded: String?
@@ -73,8 +75,11 @@ final class ProjectsModel: ObservableObject {
         loading = true
         Projects.collect(detail: true) { [weak self] payload in
             guard let self = self, current == self.seq else { return }
-            self.projects = ((payload["projects"] as? [[String: Any]]) ?? []).compactMap(ProjectItem.init)
+            let found = ((payload["projects"] as? [[String: Any]]) ?? []).compactMap(ProjectItem.init)
                 .filter { $0.exists || self.live($0).count > 0 }
+            // 「打开项目」刚选的：各台电脑报上来的里面有了就不用再记，还没有的接着排在最前面
+            self.adopted.removeAll { item in found.contains { $0.id == item.id } }
+            self.projects = self.adopted + found
             self.errors = payload["errors"] as? [String] ?? []
             self.loading = false
             self.loaded = true
@@ -86,6 +91,14 @@ final class ProjectsModel: ObservableObject {
             }
             self?.cost7 = map
         }
+        UsageReport.collect(days: 1) { [weak self] payload in
+            var map: [String: (tokens: Double, cost: Double)] = [:]
+            for item in payload["projects"] as? [[String: Any]] ?? [] {
+                let tokens = ["input", "output", "cacheRead", "cacheWrite"].reduce(0.0) { $0 + Digest.number(item[$1]) }
+                map["\(item["sourceId"] as? String ?? "")\n\(item["cwd"] as? String ?? "")"] = (tokens, Digest.number(item["cost"]))
+            }
+            self?.today = map
+        }
     }
 
     func toggle(_ project: ProjectItem) {
@@ -96,26 +109,144 @@ final class ProjectsModel: ObservableObject {
         }
     }
 
+    // MARK: 左边栏「项目」页签、二级侧边栏（ProjectPane.swift）
+
+    /// 「打开项目」刚选的文件夹：还没有会话记录、各台电脑报上来的项目里还没有它，先自己记着排在最前面
+    private var adopted: [ProjectItem] = []
+
+    /// 「打开项目」刚开的项目：二级侧边栏先看「会话」一栏（平时先看文件）；它的会话一出现右边就打开
+    var startOnSessions: Set<String> = []
+    var selectWhenReady: Set<String> = []
+
+    /// 项目的 id 拆回哪台电脑、哪个目录
+    static func place(_ id: String) -> (sourceId: String, cwd: String)? {
+        let parts = id.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        return parts.count == 2 ? (parts[0], parts[1]) : nil
+    }
+
+    static func id(sourceId: String, cwd: String) -> String { "\(sourceId)\n\(cwd)" }
+
+    func project(_ id: String) -> ProjectItem? { projects.first { $0.id == id } }
+
+    /// 「打开项目」选了一个列表里没有的文件夹：先放进列表（它的会话开出来、下次刷新时就是正经的一项了）
+    func adopt(sourceId: String, sourceName: String, cwd: String) {
+        let id = Self.id(sourceId: sourceId, cwd: cwd)
+        guard project(id) == nil, let item = ProjectItem(["sourceId": sourceId, "sourceName": sourceName, "cwd": cwd, "exists": true,
+                                                          "lastActive": Date().timeIntervalSince1970 * 1000]) else { return }
+        adopted.insert(item, at: 0)
+        projects.insert(item, at: 0)
+    }
+
+    /// 二级侧边栏的文件、Git 按会话找电脑和目录：用这个项目里正在跑的会话，没有就用它最近的一次会话。
+    /// 定下来就不换（换了右边开着的代码标签要重开）；一个会话都还没有（刚打开的新项目，会话还在启动）返回 nil
+    private var codeKeys: [String: String] = [:]
+
+    func codeKey(_ id: String) -> String? {
+        if let key = codeKeys[id] { return key }
+        guard let place = Self.place(id) else { return nil }
+        let key = KitelineModel.shared.sessions.first { $0.sourceId == place.sourceId && $0.cwd == place.cwd }?.id
+            ?? project(id)?.sessionId.map { "\(place.sourceId)#\($0)" }
+        if let key { codeKeys[id] = key }
+        return key
+    }
+
+    /// 项目栏「最近的会话」：合成一项的几台设备上的都拉来，按时间合在一起（键是这一项的 id）
+    func loadPast(_ id: String) {
+        let places = members(id).map { ($0.sourceId, $0.cwd) }
+        let list = places.isEmpty ? [Self.place(id)].compactMap { $0 } : places
+        var got: [[PastItem]] = []
+        for place in list {
+            PastSessions.list(sourceId: place.0, cwd: place.1) { [weak self] payload in
+                got.append(((payload["sessions"] as? [[String: Any]]) ?? []).compactMap(PastItem.init).filter { !$0.live })
+                guard let self, got.count == list.count else { return }
+                self.past[id] = got.flatMap { $0 }.sorted { $0.lastActive > $1.lastActive }
+            }
+        }
+    }
+
+    // MARK: 同一个项目挂在几台设备上（新版界面合成一项，11-20 用户）
+
+    /// 是不是同一个项目：不同设备、文件夹名一样，路径末尾至少三级对得上（同一个文件夹经 sshfs / 网络盘挂到虚拟机上：
+    /// /Users/u/Documents/x/app 和 /home/u/mnt/Users/u/Documents/x/app）。只比末尾，两台机器上碰巧都叫 ~/projects/app 的不会被合起来
+    /// （「projects/app」只有两级，用户名那一级也得一样）
+    static func same(_ a: ProjectItem, _ b: ProjectItem) -> Bool {
+        guard a.sourceId != b.sourceId, a.name == b.name else { return false }
+        func parts(_ path: String) -> [Substring] { path.split(whereSeparator: { $0 == "/" || $0 == "\\" }) }
+        let x = parts(a.cwd), y = parts(b.cwd)
+        let n = min(x.count, y.count)
+        guard n >= 3 else { return false }
+        var matched = 0
+        while matched < n, x[x.count - 1 - matched] == y[y.count - 1 - matched] { matched += 1 }
+        return matched >= 3
+    }
+
+    /// 合成一项的几个（第一个是这一项的 id：几个里 id 最小的，排序变了也不换）
+    private var groupCache: (source: [ProjectItem], groups: [[ProjectItem]])?
+
+    var groups: [[ProjectItem]] {
+        if let cache = groupCache, cache.source == projects { return cache.groups }
+        var groups: [[ProjectItem]] = []
+        for item in projects {
+            if let at = groups.firstIndex(where: { group in group.contains { Self.same($0, item) } }) { groups[at].append(item) }
+            else { groups.append([item]) }
+        }
+        groups = groups.map { $0.sorted { $0.id < $1.id } }
+        groupCache = (projects, groups)
+        return groups
+    }
+
+    /// 这一项（或其中任一个）合在一起的几个；还没读回来的（刚「打开项目」）就它自己
+    func members(_ id: String) -> [ProjectItem] {
+        groups.first { $0.contains { $0.id == id } } ?? project(id).map { [$0] } ?? []
+    }
+
+    /// 某个项目所在那一项的 id
+    func groupID(_ id: String) -> String { members(id).first?.id ?? id }
+
+    /// 新版界面的项目列表：合成后的每项（第一个当代表），按「有待确认 > 有在忙 > 有会话 > 最近用过」排
+    var groupedShown: [[ProjectItem]] {
+        groups.filter { group in group.contains { matches($0, filter) } }
+            .sorted { a, b in
+                let ra = a.map(rank).max() ?? 0, rb = b.map(rank).max() ?? 0
+                return ra != rb ? ra > rb : (a.map(\.lastActive).max() ?? 0) > (b.map(\.lastActive).max() ?? 0)
+            }
+    }
+
+    /// 这一项在几台设备上正在跑的会话
+    func live(group: [ProjectItem]) -> [SessionItem] { group.flatMap(live) }
+
+    /// 文件、Git 看哪台设备上的那份：用户选过就用选的，否则有会话在跑的那台，再否则第一个
+    @Published var fileSource: [String: String] = [:]
+
+    func fileMember(_ id: String) -> ProjectItem? {
+        let group = members(id)
+        if let chosen = fileSource[groupID(id)], let item = group.first(where: { $0.id == chosen }) { return item }
+        return group.first { !live($0).isEmpty } ?? group.first
+    }
+
     /// 这个项目里正在跑的会话（实时的，跟着侧栏变）
     func live(_ project: ProjectItem) -> [SessionItem] {
         KitelineModel.shared.sessions.filter { $0.sourceId == project.sourceId && $0.cwd == project.cwd }
     }
 
-    private func rank(_ project: ProjectItem) -> Int {
+    func rank(_ project: ProjectItem) -> Int {
         let sessions = live(project)
         if sessions.contains(where: { $0.activity == .waiting }) { return 3 }
         if sessions.contains(where: { $0.activity == .busy }) { return 2 }
         return sessions.isEmpty ? 0 : 1
     }
 
-    var shown: [ProjectItem] {
-        projects.filter { project in
-            switch filter {
-            case "active": return !live(project).isEmpty || project.today > 0
-            case "dirty": return project.git.map { $0.dirty || $0.ahead > 0 } ?? false
-            default: return true
-            }
+    /// 筛选：active 有活动（有会话在跑、今天开过会话）/ dirty 有改动（没提交的、没推送的）/ 别的 = 全部
+    func matches(_ project: ProjectItem, _ filter: String) -> Bool {
+        switch filter {
+        case "active": return !live(project).isEmpty || project.today > 0
+        case "dirty": return project.git.map { $0.dirty || $0.ahead > 0 } ?? false
+        default: return true
         }
+    }
+
+    var shown: [ProjectItem] {
+        projects.filter { matches($0, filter) }
         .sorted { a, b in rank(a) != rank(b) ? rank(a) > rank(b) : a.lastActive > b.lastActive }
     }
 

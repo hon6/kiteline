@@ -424,10 +424,10 @@ UNTITLED_CLOSE = ("「%s」还没有标题（尚未发送消息，或标题正�
                   "为避免关错，会话未关闭。刚发过消息的请稍后再试；未使用的空白标签页可在 VS Code 中直接关闭")
 
 
-QUEUE_ACTIONS = ("move", "edit", "delete", "now")
+QUEUE_ACTIONS = ("move", "edit", "delete", "now", "hold")
 
 
-def queue(action, qid, text, direction, record, source, siblings=0):
+def queue(action, qid, text, direction, record, source, siblings=0, on=None):
     """排队的消息（Claude 忙时发的、还在 mod 里等着）：move（dir -1 / 1）、edit（text）、delete、now（强插：中断当前这一步，
     排队的马上进会话）。会话的 mod 是老版本（只在会话启动时加载，快照里没有 queue）时只有强插能做（等同按 Esc）。同 Mac 版 Delivery.queue"""
     if record.kind == "kiteline":
@@ -436,6 +436,8 @@ def queue(action, qid, text, direction, record, source, siblings=0):
             body["text"] = text
         if direction is not None:
             body["dir"] = direction
+        if on is not None:
+            body["on"] = on
         return Outcome(*PEERS[0].deliver("/api/queue", record, body))
     if not via_bridge(record):
         return Outcome(False, False, "这个会话不支持排队消息")
@@ -450,12 +452,14 @@ def queue(action, qid, text, direction, record, source, siblings=0):
         fields["text"] = text
     if direction is not None:
         fields["dir"] = direction
+    if on is not None:
+        fields["on"] = on
     reply = _bridge_reply(fields, record, source)
     result = None if reply is None else (reply.get("result") or "ok")
     if result is None:
         return Outcome(False, False, "未能连接会话，请稍后再试")
     if result == "none":
-        return Outcome(False, False, "这条消息已发给 Claude")
+        return Outcome(False, False, "这条消息在保存前已发给 Claude，修改未发送" if action == "edit" else "这条消息已发给 Claude")
     if result == "dropped":
         # 电脑上刚按了停止，Claude Code 不收插件提交的（watcher 的 bridge_dropped）：从前台发出去（算你亲自输入），发出去了再从队列里删掉
         if not reply.get("text"):

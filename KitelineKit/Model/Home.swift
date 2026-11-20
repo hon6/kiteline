@@ -34,6 +34,8 @@ enum Route: Hashable {
     case tabGroup(String)
     case schedules
     case project(ProjectInfo)
+    /// 新会话（iPhone / iPad 推进 NewSessionPage，不弹面板）：带着从哪进来、定了哪个项目
+    case newTask(NewTaskSeed)
     /// 改动报告 / 测试报告 / 项目文件：key 是哪个会话（取它的工作目录）
     case changes(String)
     case diff(key: String, path: String?, commit: String?, title: String)
@@ -55,6 +57,17 @@ enum Route: Hashable {
         default: false
         }
     }
+}
+
+/// 新会话从哪进来、带了什么：项目定了（项目页、对话页）、待办 / 链接带来的内容、只建定时任务
+struct NewTaskSeed: Hashable {
+    /// 每次打开都是新的一页（同样的入口点两次也推两页）
+    var id = UUID()
+    var preset: ProjectInfo? = nil
+    var scheduleOnly = false
+    var initialText: String? = nil
+    var match: TaskOrigin? = nil
+    var hint: String? = nil
 }
 
 // MARK: 今日动态（/api/digest）

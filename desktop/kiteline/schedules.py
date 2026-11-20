@@ -1,5 +1,5 @@
 """定时任务（对应 Mac 版 Schedules.swift）：到点在项目的 VS Code 窗口里新开一个会话，把要求发给 Claude。
-重复方式：once 一次 / daily 每天 / weekdays 工作日；错过 1 小时以内的补跑，更久的记为错过。"""
+重复方式：once 一次 / daily 每天 / weekdays 工作日 / hourly 每隔几小时（从 time 起每 every 小时一次，到 until 为止）；错过 1 小时以内的补跑，更久的记为错过。"""
 
 import json
 import os
@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from . import config, log
 
-MODES = {"once": "一次", "daily": "每天", "weekdays": "工作日"}
+MODES = {"once": "一次", "daily": "每天", "weekdays": "工作日", "hourly": "每隔几小时"}
 GRACE = timedelta(hours=1)
 
 
@@ -39,10 +39,28 @@ class Schedules:
         except (ValueError, TypeError):
             return None
 
+    def _occurrences(self, task, day):
+        """hourly 的任务在某一天的各次时间：从 time 起每 every 小时一次，不晚于 until（没填是 23:59）"""
+        hm, end = config.parse_hm(task["time"]), config.parse_hm(task.get("until") or "23:59")
+        every = int(task.get("every") or 0)
+        if not hm or not end or every <= 0:
+            return []
+        when, last, out = self._at(day, hm), self._at(day, end), []
+        while when <= last and len(out) < 24:
+            out.append(when)
+            when += timedelta(hours=every)
+        return out
+
     def next_run(self, task, now=None):
         now = now or datetime.now()
         hm = config.parse_hm(task["time"])
         if not hm or not task.get("enabled", True):
+            return None
+        if task["repeat"] == "hourly":
+            for ahead in range(2):
+                later = [w for w in self._occurrences(task, now + timedelta(days=ahead)) if w > now]
+                if later:
+                    return later[0]
             return None
         if task["repeat"] == "once":
             when = self._once(task)
@@ -64,6 +82,12 @@ class Schedules:
         if task["repeat"] == "once":
             when = self._once(task)
             return when if when and when <= now and not task.get("lastRun") else None
+        if task["repeat"] == "hourly":
+            for back in range(2):
+                earlier = [w for w in self._occurrences(task, now - timedelta(days=back)) if w <= now]
+                if earlier:
+                    return earlier[-1] if earlier[-1] > last else None
+            return None
         when = self._at(now, hm)
         if when > now:
             when -= timedelta(days=1)
@@ -76,6 +100,8 @@ class Schedules:
             return "每天 %s" % task["time"]
         if task["repeat"] == "weekdays":
             return "工作日 %s" % task["time"]
+        if task["repeat"] == "hourly":
+            return "每 %d 小时（%s–%s）" % (int(task.get("every") or 1), task["time"], task.get("until") or "23:59")
         parts = (task.get("date") or "").split("-")
         day = "%d月%d日" % (int(parts[1]), int(parts[2])) if len(parts) == 3 else task.get("date", "")
         return "%s %s 一次" % (day, task["time"])
@@ -86,7 +112,7 @@ class Schedules:
                 "cwd": task["cwd"], "name": os.path.basename(task["cwd"].rstrip("/\\")), "prompt": task["prompt"],
                 "repeat": task["repeat"], "time": task["time"], "enabled": task.get("enabled", True),
                 "createdAt": task["createdAt"], "label": self.label(task)}
-        for key in ("date", "lastRun", "lastOk", "lastResult"):
+        for key in ("date", "every", "until", "lastRun", "lastOk", "lastResult"):
             if task.get(key) is not None:
                 item[key] = task[key]
         nxt = self.next_run(task)
@@ -98,7 +124,7 @@ class Schedules:
         with self._lock:
             return [self.payload(t) for t in self.tasks]
 
-    def add(self, source_id, cwd, prompt, repeat, time_text, date):
+    def add(self, source_id, cwd, prompt, repeat, time_text, date, every=None, until=None):
         if repeat not in MODES:
             return False, "重复方式无效"
         if not config.parse_hm(time_text):
@@ -119,6 +145,19 @@ class Schedules:
                 return False, "一次性任务需选择日期"
             if when <= datetime.now():
                 return False, "该时间已过"
+        if repeat == "hourly":
+            try:
+                every = int(every)
+            except (TypeError, ValueError):
+                every = 0
+            if not 1 <= every <= 12:
+                return False, "间隔应为 1～12 小时"
+            task["every"] = every
+            if until:
+                end = config.parse_hm(until)
+                if not end or end < config.parse_hm(time_text):
+                    return False, "结束时间应不早于开始时间"
+                task["until"] = until
         with self._lock:
             self.tasks.append(task)
         self._save()

@@ -126,8 +126,8 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.10"
-FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
+WATCHER_VERSION = "2.38.15"
+FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run", "steward"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 MESSAGE_MAX_CHARS = 600
@@ -2357,6 +2357,18 @@ def outbox_item(offset, entry):
             lines.append(entry["note"])
         return {"id": "o%d" % offset, "ts": entry.get("ts"), "t": "agent_key", "title": entry.get("title") or "",
                 "fields": fields, "note": entry.get("note") or "", "text": "\n".join(lines)}
+    if kind == "steward":
+        # 总管模式（steward 子命令）：电脑端照 op 去做（派活、新开会话、拉群、把汇报送给总管）；对话里显示一行说明
+        op = str(entry.get("op") or "")
+        item = {"id": "o%d" % offset, "ts": entry.get("ts"), "t": "steward_op", "op": op, "text": entry.get("text") or ""}
+        for field in ("device", "cwd", "agent"):
+            if entry.get(field):
+                item[field] = str(entry[field])[:1024]
+        if isinstance(entry.get("to"), list):
+            item["to"] = [str(x) for x in entry["to"]][:20]
+        if isinstance(entry.get("images"), list):
+            item["images"] = [str(x) for x in entry["images"]][:6]
+        return item
     if kind == "group":
         # 发到会话群的消息（group say）：电脑端投递给群里其他会话；对话里画成一封发往群的信，不认识的客户端显示 text
         item = {"id": "o%d" % offset, "ts": entry.get("ts"), "t": "group_say", "group": entry.get("group") or "",
@@ -4325,6 +4337,10 @@ def sync_skills(enabled=None, data=None):
         sync_browser_env("browser" in enabled)   # Playwright MCP 连 Kiteline 的浏览器（跟着浏览器技能开关）
     except Exception as exc:
         log("同步浏览器环境变量出错：%r" % exc)
+    try:
+        result["savers"] = sync_savers()   # 省 token 的两项和技能同一条通道带来（见 sync_lean_mod、sync_compact_window）
+    except Exception as exc:
+        log("同步省 token 的设置出错：%r" % exc)
     for path in result["installed"]:
         log("已安装技能：%s" % path)
     for path in result["removed"]:
@@ -4434,6 +4450,337 @@ def sync_stage_mod(root=None, enabled=None):
     return False
 
 
+# ---------------------------------------------------------------------------
+# 省 token（设置 → 省 token，两项都默认关）。依据是拿真实会话记录算的：花费的大头是每次请求重读整段上下文，
+# 图片按像素算 token、进了上下文之后每次请求都跟着重读；压缩命令输出实测省不到，没做（见 docs/features/token-saving.md）。
+#   images          给模型看的图片先缩小：装 mod kiteline-lean，Read 读到大图时用这台电脑自带的工具缩到长边 1280 再交给模型，
+#                   同一张图再读一次给原图。全程在本机，不联网
+#   compact:<N>     上下文到 N token 就自动整理：写 Claude Code 自带的设置 autoCompactWindow（至少 100000）
+# 开没开由电脑端放在 CCPULSE_SKILLS 里带来（和技能同一条通道，老 watcher 不认识就忽略）
+# ---------------------------------------------------------------------------
+LEAN_MOD_NAME = "kiteline-lean"
+LEAN_MOD_MARKER = "kiteline-lean v1"
+LEAN_IMAGE_MAX = 1280
+# 用 Pillow 缩图的一行脚本（Linux；参数：原图、小图、长边）
+_LEAN_PIL = "import sys\nfrom PIL import Image\nim = Image.open(sys.argv[1])\nim.thumbnail((int(sys.argv[3]), int(sys.argv[3])))\nim.save(sys.argv[2])"
+_LEAN_REGISTER = r'''// @@MARKER@@：Kiteline 装的，别改（会被覆盖）。
+import type { Register } from 'claude-code'
+
+// 给模型看的图片先缩小（设置 → 省 token → 图片先缩小再给 Agent 看）：图片按像素算 token，进了上下文之后每次请求都要重读。
+// Read 读到大图时，用这台电脑自带的工具缩到长边 MAX 再交给模型，并告诉它「同一张图再读一次就是原图」。
+// 全程在本机处理，不联网；缩不了（没有工具、出错）就原样给。
+const MAX = @@MAX@@
+// 缩图命令，Kiteline 按这台电脑上有的工具填好：{src} 原图、{dst} 小图、{max} 长边、{fmt} 小图的格式名
+const RESIZE: readonly string[] = @@RESIZE@@
+// 能缩的图片类型 → [小图的扩展名, 小图的类型, 给缩图命令的格式名]。这台电脑的工具写不了的格式换一种存（Mac 的 sips 写不了 webp，存成 png）
+const OUT: Record<string, readonly string[]> = @@OUT@@
+
+const shrunk = new Set<string>()   // 缩过一次的图（路径 + 文件大小）：再读就给原图
+let stats: Record<string, number[]> | undefined
+let seq = 0
+
+export const register: Register = on => {
+  on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    const ran = await next(e)
+    try {
+      if (ran.deny !== undefined || ran.isError === true) return ran
+      const result = ran.result
+      if (result.type !== 'image') return ran
+      const out = OUT[result.file.type]
+      const size = result.file.dimensions
+      const width = size?.displayWidth ?? size?.originalWidth ?? 0
+      const height = size?.displayHeight ?? size?.originalHeight ?? 0
+      if (out === undefined || Math.max(width, height) <= MAX) return ran
+      const key = `${e.file_path}\n${result.file.originalSize}`
+      if (shrunk.has(key)) return ran
+      const dir = `${(await $.env.get('CLAUDE_CONFIG_DIR'))
+        ?? `${(await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))}/.claude`}/kiteline/lean`
+      const session = await $.session.id()
+      const now = await $.clock.now()
+      const small = `${dir}/thumbs/${session}/${now}-${seq++}.${out[0]}`
+      await $.fs.write(`${dir}/thumbs/${session}/.keep`, '')
+      const done = await $.process.run(
+        RESIZE.map(part => part === '{src}' ? e.file_path : part === '{dst}' ? small : part === '{max}' ? String(MAX)
+          : part === '{fmt}' ? (out[2] ?? '') : part),
+        { timeoutMs: 20000 })
+      if (done.exitCode !== 0) return ran
+      const bytes = await $.fs.read(small, { as: 'bytes' })
+      if (typeof bytes === 'string' || bytes.base64 === '') return ran
+      shrunk.add(key)
+      const scale = MAX / Math.max(width, height)
+      const w = Math.max(1, Math.round(width * scale))
+      const h = Math.max(1, Math.round(height * scale))
+      const file = `${dir}/stats/${session}.json`
+      if (stats === undefined) {
+        const saved = JSON.parse(await $.fs.read(file).then(text => typeof text === 'string' ? text : '{}').catch(() => '{}'))
+        stats = saved !== null && typeof saved.hours === 'object' && saved.hours !== null ? saved.hours as Record<string, number[]> : {}
+      }
+      const hour = String(Math.floor(now / 3600000))
+      const row = stats[hour] ?? [0, 0, 0]
+      stats[hour] = [(row[0] ?? 0) + 1, (row[1] ?? 0) + Math.round(width * height / 750), (row[2] ?? 0) + Math.round(w * h / 750)]
+      await $.fs.write(file, JSON.stringify({ v: 1, hours: stats }))
+      const note = `Kiteline shrank this image to ${w}x${h} (shown before as ${width}x${height}) to save tokens. If you need finer detail, Read the same path again: a second read is not shrunk.`
+      return {
+        result: { ...result, file: { ...result.file, base64: bytes.base64, type: (out[1] ?? result.file.type) as typeof result.file.type,
+          dimensions: { ...size, displayWidth: w, displayHeight: h } } },
+        context: [...(ran.context ?? []), note],
+      }
+    } catch {
+      return ran
+    }
+  }).catch(($, e, next) => next(e))
+}
+'''
+
+
+# Windows 用系统自带的 PowerShell + System.Drawing 缩图（参数：原图、小图、长边）。只写 ASCII：PowerShell 5.1 把没有 BOM 的脚本按本地编码读
+_LEAN_PS1 = r"""param([string]$src, [string]$dst, [int]$max)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+$img = [System.Drawing.Image]::FromFile($src)
+try {
+    $scale = [Math]::Min($max / $img.Width, $max / $img.Height)
+    if ($scale -ge 1) { $scale = 1 }
+    $w = [Math]::Max(1, [int][Math]::Round($img.Width * $scale))
+    $h = [Math]::Max(1, [int][Math]::Round($img.Height * $scale))
+    $bmp = New-Object System.Drawing.Bitmap($w, $h)
+    try {
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.DrawImage($img, 0, 0, $w, $h)
+        $g.Dispose()
+        if ($dst -match '\.jpe?g$') { $bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Jpeg) }
+        else { $bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Png) }
+    } finally { $bmp.Dispose() }
+} finally { $img.Dispose() }
+"""
+_LEAN_FORMATS = {"image/png": ["png", "image/png", "png"], "image/jpeg": ["jpg", "image/jpeg", "jpeg"], "image/webp": ["webp", "image/webp", "webp"]}
+
+
+def lean_resize_command(folder=None):
+    """这台电脑上能用来缩图的命令（argv，里面的 {src} {dst} {max} {fmt} 由 mod 换成原图、小图、长边、格式名）；没有可用的工具返回 None。
+    Mac 用系统自带的 sips；Windows 用系统自带的 PowerShell + System.Drawing（脚本是 mod 里的 hooks/resize.ps1，folder = mod 的文件夹）；
+    Linux 用 Pillow（跑 watcher 的这个 Python 里有的话），没有再找 ImageMagick"""
+    if sys.platform == "darwin":
+        return ["/usr/bin/sips", "-s", "format", "{fmt}", "-Z", "{max}", "{src}", "--out", "{dst}"] if os.path.exists("/usr/bin/sips") else None
+    if IS_WINDOWS:
+        shell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if not shell or not folder:
+            return None
+        return [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+                os.path.join(folder, "hooks", "resize.ps1").replace("\\", "/"), "{src}", "{dst}", "{max}"]
+    try:
+        if importlib.util.find_spec("PIL") is not None:
+            return [sys.executable or "python3", "-c", _LEAN_PIL, "{src}", "{dst}", "{max}"]
+    except (ImportError, ValueError):
+        pass
+    for tool in ("magick", "convert"):
+        found = shutil.which(tool)
+        if found:
+            return [found, "{src}", "-resize", "{max}x{max}>", "{dst}"]
+    return None
+
+
+def lean_output_formats(command):
+    """各种图片缩小后存成什么：Mac 的 sips 写不了 webp，存成 png；Windows 的 System.Drawing 读不了 webp，那种图不缩"""
+    formats = dict(_LEAN_FORMATS)
+    if command and os.path.basename(command[0]) == "sips":
+        formats["image/webp"] = formats["image/png"]
+    elif command and "powershell" in os.path.basename(command[0]).lower():
+        formats.pop("image/webp")
+    return formats
+
+
+def lean_mod_files(command):
+    register = _LEAN_REGISTER.replace("@@MARKER@@", LEAN_MOD_MARKER).replace("@@MAX@@", str(LEAN_IMAGE_MAX)) \
+        .replace("@@RESIZE@@", json.dumps(command, ensure_ascii=False)).replace("@@OUT@@", json.dumps(lean_output_formats(command)))
+    files = {
+        ".claude-plugin/plugin.json": json.dumps({
+            "name": LEAN_MOD_NAME, "version": "1.0.1",
+            "description": "Kiteline: shrinks large images before the model reads them, to save tokens. Runs locally; no network.",
+        }, ensure_ascii=False, indent=2) + "\n",
+        "hooks/hooks.json": '{ "modules": ["./register.ts"] }\n',
+        "hooks/register.ts": register,
+    }
+    if any(str(part).endswith("resize.ps1") for part in command):
+        files["hooks/resize.ps1"] = _LEAN_PS1
+    return files
+
+
+def lean_dir(root=None):
+    return os.path.join(root or claude_config_dir(), "kiteline", "lean")
+
+
+def sync_lean_mod(root=None, enabled=None):
+    """「图片先缩小」开着就装 mod，关了（或这台电脑没有能缩图的工具）按标记删掉；规矩同 sync_limits_mod。返回 True = 装着"""
+    if enabled is None:
+        skills = skills_enabled()
+        if root is None and skills is None:
+            return False
+        enabled = skills is not None and "images" in skills
+    root = root or claude_config_dir()
+    command = lean_resize_command(os.path.join(root, "skills", LEAN_MOD_NAME)) if enabled else None
+    if enabled and command:
+        return _sync_mod(root, LEAN_MOD_NAME, LEAN_MOD_MARKER, lean_mod_files(command), "图片缩小插件")
+    if enabled:
+        log("这台电脑上没有能缩图的工具（Mac 要 sips，Windows 要 PowerShell，Linux 要 Pillow 或 ImageMagick），图片不缩小")
+    folder = os.path.join(root, "skills", LEAN_MOD_NAME)
+    if LEAN_MOD_MARKER.split(" v")[0] in (read_text(os.path.join(folder, "hooks", "register.ts")) or ""):
+        shutil.rmtree(folder, ignore_errors=True)
+        log("已移除图片缩小插件：%s" % folder)
+    return False
+
+
+def lean_cleanup(root=None, keep_seconds=86400):
+    """缩小后的图只是给模型看一眼的临时文件：放了一天以上的删掉"""
+    base = os.path.join(lean_dir(root), "thumbs")
+    removed = 0
+    try:
+        sessions = os.listdir(base)
+    except OSError:
+        return 0
+    for session in sessions:
+        folder = os.path.join(base, session)
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(folder, name)
+            try:
+                if time.time() - os.path.getmtime(path) > keep_seconds:
+                    os.remove(path)
+                    removed += 1
+            except OSError:
+                pass
+        try:
+            if not os.listdir(folder):
+                os.rmdir(folder)
+        except OSError:
+            pass
+    return removed
+
+
+def lean_stats(since_ms=0, root=None):
+    """图片缩小省了多少（mod 按小时记在 <Claude 配置目录>/kiteline/lean/stats/<会话>.json）：
+    {images 张数, before / after 按像素估的 token, saved}"""
+    out = {"images": 0, "before": 0, "after": 0}
+    for path in globlib.glob(os.path.join(lean_dir(root), "stats", "*.json")):
+        try:
+            hours = (json.loads(read_text(path) or "{}") or {}).get("hours") or {}
+        except ValueError:
+            continue
+        for hour, row in hours.items() if isinstance(hours, dict) else []:
+            try:
+                if (int(hour) + 1) * 3600000 <= since_ms:
+                    continue
+                out["images"] += int(row[0]); out["before"] += int(row[1]); out["after"] += int(row[2])
+            except (TypeError, ValueError, IndexError):
+                continue
+    out["saved"] = out["before"] - out["after"]
+    return out
+
+
+COMPACT_MIN = 100000   # Claude Code 的 autoCompactWindow 最小值
+
+
+def compact_target(skills):
+    """CCPULSE_SKILLS 里的 compact:<N> → N（不到最小值按最小值）；没带返回 0（不设）"""
+    for item in skills or ():
+        if str(item).startswith("compact:"):
+            try:
+                return max(int(str(item).split(":", 1)[1]), COMPACT_MIN)
+            except ValueError:
+                return 0
+    return 0
+
+
+def sync_compact_window(root=None, target=None):
+    """上下文到多大就自动整理：把 Claude Code 自带的设置 autoCompactWindow 写进用户的 settings.json（target = 0 是不设）。
+    只动这一个键；原来的值记在 <Claude 配置目录>/kiteline/compact.json，关掉时还回去。
+    用户自己在 settings.json 里把它改成了别的值就不再动（以他的为准）。文件不是合法 JSON 时不碰。
+    规矩同 sync_limits_mod：不传 root 时只在电脑端带了技能配置（正式运行）时写。返回现在生效的值（没设是 None）"""
+    if target is None:
+        skills = skills_enabled()
+        if root is None and skills is None:
+            return None
+        target = compact_target(skills)
+    root = root or claude_config_dir()
+    if not os.path.isdir(root):
+        return None
+    path = os.path.realpath(os.path.join(root, "settings.json"))
+    note_path = os.path.join(root, "kiteline", "compact.json")
+    try:
+        note = json.loads(read_text(note_path) or "null")
+    except ValueError:
+        note = None
+    note = note if isinstance(note, dict) and "set" in note else None
+    raw = read_text(path)
+    try:
+        settings = json.loads(raw) if raw and raw.strip() else {}
+    except ValueError:
+        log("settings.json 不是合法的 JSON，没有改自动整理上下文的设置：%s" % path)
+        return None
+    if not isinstance(settings, dict):
+        return None
+    current = settings.get("autoCompactWindow")
+    if target:
+        if current == target:
+            return current
+        if note is not None and current != note.get("set"):
+            return current      # 用户自己改过：以他的为准
+        if note is None:
+            note = {"previous": current}
+        settings["autoCompactWindow"] = target
+        note["set"] = target
+    else:
+        if note is None:
+            return current
+        if current == note.get("set"):
+            if note.get("previous") is None:
+                settings.pop("autoCompactWindow", None)
+            else:
+                settings["autoCompactWindow"] = note["previous"]
+    try:
+        if settings.get("autoCompactWindow") != current:
+            with open(path + ".kiteline-tmp", "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
+            if os.path.exists(path):
+                shutil.copymode(path, path + ".kiteline-tmp")
+            os.replace(path + ".kiteline-tmp", path)
+            log("自动整理上下文：autoCompactWindow %s → %s（%s）" % (current, settings.get("autoCompactWindow"), path))
+        if target:
+            os.makedirs(os.path.dirname(note_path), exist_ok=True)
+            with open(note_path + ".tmp", "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(note, ensure_ascii=False))
+            os.replace(note_path + ".tmp", note_path)
+        elif os.path.exists(note_path):
+            os.remove(note_path)
+    except OSError as exc:
+        log("写自动整理上下文的设置失败：%s" % exc)
+        return current
+    return settings.get("autoCompactWindow")
+
+
+def savers_status():
+    """设置页显示用：这台电脑上图片缩小省了多少、能不能缩、mod 装没装、自动整理窗口现在是多少"""
+    root = claude_config_dir()
+    try:
+        window = (json.loads(read_text(os.path.join(root, "settings.json")) or "{}") or {}).get("autoCompactWindow")
+    except (ValueError, AttributeError):
+        window = None
+    folder = os.path.join(root, "skills", LEAN_MOD_NAME)
+    return {"lean": lean_stats(), "canResize": lean_resize_command(folder) is not None, "installed": os.path.isdir(folder),
+            "claude": os.path.isdir(root), "compactWindow": window if isinstance(window, int) else None}
+
+
+def sync_savers():
+    """省 token 的两项（图片先缩小、上下文自动整理）照电脑端带来的开关装 / 写；顺带清掉放久了的小图"""
+    result = {"images": sync_lean_mod(), "compactWindow": sync_compact_window()}
+    lean_cleanup()
+    return result
+
+
 def _sync_mod(root, name, marker, files, label):
     if not os.path.isdir(root):
         return False
@@ -4488,10 +4835,12 @@ import type { Register } from 'claude-code'
 // Kiteline 把指令写进 <Claude 配置目录>/kiteline/inbox/<会话>.json（{items: [{id, op, …, expires}]}），这里每 0.4 秒看一眼，
 // 照做后写 <会话>.ack-<id>.json；<会话>.alive 记下这个进程什么时候装上的，Kiteline 据此知道这个会话能走这条路
 type Item = { id: string; op: string; text?: string; decision?: string; answers?: Record<string, string>; tool?: string; expires?: number;
-  action?: string; qid?: string; dir?: number }
+  action?: string; qid?: string; dir?: number; on?: boolean }
 // cmd：斜杠命令（/effort、/model……）：Claude Code 只在一轮结束后执行，和话一样排到这一轮做完
 // n：排进来的先后（被 Claude Code 退回来时按它插回原位）；at：排进来的时刻（会话重开时只接着排半小时内的）
-type Queued = { id: string; text: string; cmd?: boolean; n?: number; at?: number }
+// held：手机 / 电脑上正在编辑这一条（开始编辑的时刻）：这一轮做完时它和排在它后面的先不交，保存或取消后再交。
+// 以前编辑到一半这一轮做完、原文先交了，保存时又成了一条（11-20）。超过 HOLD_MS 没保存也没取消（手机断了）当作放开
+type Queued = { id: string; text: string; cmd?: boolean; n?: number; at?: number; held?: number }
 type Waiter = { agent: string; tool: string; key: string; wake: (item: Item | null) => void; input: unknown; id: string; at: number }
 
 let dir = ''
@@ -4508,8 +4857,35 @@ const switches: { model: string; at: number }[] = []
 // Claude 正忙时发来、还没交给它的话（排队）：每条带 Kiteline 那边的编号，手机、电脑上能调顺序、改、删、强插；
 // 有变化就写进 <会话>.queue.json，Kiteline 据此在输入框上方列出来
 const later: Queued[] = []
+const HOLD_MS = 10 * 60 * 1000
+const held = (q: Queued, now: number) => q.held !== undefined && now - q.held < HOLD_MS
 // 强插的那一条：中断这一轮后在 turn.complete 里单独提交，别的照旧排着（手机上空着输入框按回车 = 发最前面一条，再按再发下一条）
 const jumps: Queued[] = []
+// 手机 / 电脑上切的模型和思考等级（/model、/effort）。以前 Claude 正忙时和话一样排队、这一轮做完才执行，输入框上方挂着一条排队的消息
+// （11-20 反馈：不好用，要和 VS Code 里切换一样）。现在忙时不排队：记在 over 里，这一轮接下来的每次模型请求（turn.step）
+// 直接按新的发：模型下一次请求就换；思考等级是跟着用户的话走的，只带工具结果的请求 Claude Code 不改它，实际从下一轮起用上
+// （11-20 用 2.1.329 加假模型实测）。真正的 /model、/effort 记在 settle 里，这一轮做完先悄悄执行（会话自己的设置、状态栏跟着换），再交排着的话
+const over: { model?: string; effort?: string } = {}
+const settle: { command: string; args: string }[] = []
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+// 是不是忙时也能马上生效的设置命令：是就记下来、回 true
+const instant = (slash: [string, string]): boolean => {
+  const args = slash[1].trim()
+  if ((slash[0] !== 'model' && slash[0] !== 'effort') || !args) return false
+  const ultra = args.toLowerCase().startsWith('ultracode')
+  if (slash[0] === 'model') {
+    // 别名（opus）或完整的模型名才能直接写进请求；带方括号这类写法、default 留到这一轮做完由 /model 自己解析
+    over.model = /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(args) && args.toLowerCase() !== 'default' ? args : undefined
+  } else if (!ultra) {
+    // auto 这类不是等级的不改请求，这一轮做完执行命令时生效
+    over.effort = EFFORTS.includes(args.toLowerCase()) ? args.toLowerCase() : undefined
+  }
+  // 同一样设置这一轮里点了几次：只留最后一次
+  const at = settle.findIndex(c => c.command === slash[0] && c.args.toLowerCase().startsWith('ultracode') === ultra)
+  if (at >= 0) settle.splice(at, 1)
+  settle.push({ command: slash[0], args })
+  return true
+}
 // 一次写完再写下一次：两次写同时在跑时后发的可能先落盘，被退回队列的话又让早一步的空队列盖掉（11-20 实测遇到）
 let publishing: Promise<unknown> = Promise.resolve()
 const publishQueue = ($: any) => {
@@ -4537,6 +4913,16 @@ const submit = async ($: any, q: Queued, wait = 0): Promise<boolean> => {
   if (ok !== null) return ok
   void sent.then(taken => { if (!taken) requeue($, q) })
   return true
+}
+// 空闲时把排着的交出去：到第一条正在编辑的为止（保持先后）
+const flushIdle = async ($: any) => {
+  if (turn || !later.length) return
+  const now = await $.clock.now()
+  const stop = later.findIndex(q => held(q, now))
+  const ready = later.splice(0, stop < 0 ? later.length : stop)
+  if (!ready.length) return
+  publishQueue($)
+  for (const q of ready) await deliver($, q)
 }
 // 是不是这个会话里有的斜杠命令：是就回 [命令名, 参数]
 const slashOf = async ($: any, text: string): Promise<[string, string] | undefined> => {
@@ -4574,13 +4960,23 @@ export const register: Register = on => {
     const result = await next(e)
     if (e.turnId === turn) {
       turn = undefined
+      // 这一轮里切过模型 / 思考等级（见 over）：先把真正的命令执行掉，下一轮起会话自己就是新的设置；每条最多等 4 秒，别卡住后面排着的话
+      if (settle.length) {
+        const cmds = settle.splice(0)
+        over.model = undefined
+        over.effort = undefined
+        for (const c of cmds) {
+          if (c.command === 'model') switches.push({ model: c.args.toLowerCase(), at: await $.clock.now() })
+          await Promise.race([Promise.resolve($.command.run({ command: c.command, args: c.args })).catch(() => undefined), $.clock.sleep(4000)])
+        }
+      }
       if (jumps.length) {
         // 强插中断的：只交强插的那条，其余等它这一轮做完再交
         for (const q of jumps.splice(0)) await deliver($, q)
       } else if (later.length) {
-        // 这一轮做完了：排着的话照顺序作为你说的话提交（$.prompt.submit asUser），排着的命令这时执行
-        for (const q of later.splice(0)) await deliver($, q)
-        publishQueue($)
+        // 这一轮做完了：排着的话照顺序作为你说的话提交（$.prompt.submit asUser），排着的命令这时执行；
+        // 正在编辑的那条和它后面的留着，编辑完（flushIdle）再交
+        await flushIdle($)
       }
     }
     return result
@@ -4592,6 +4988,14 @@ export const register: Register = on => {
   // 照顺序提交；急的在手机上点「强插」（中断这一轮马上发）。
   // 后台运行的会话不走这里：Kiteline 把话直接键入它的终端（见 watcher 的 bridge_type），Claude Code 自己排队、
   // 下一批工具跑完就读到，记录里就是你打的字
+
+  // 忙时切的模型 / 思考等级：这一轮主对话接下来的每次模型请求直接按新的发（子 agent 的不动）。没切过就原样放过去
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId !== undefined || e.turnId !== turn || (over.model === undefined && over.effort === undefined)) return yield* next(e)
+    return yield* next({ ...e, ...(over.model !== undefined ? { model: over.model } : {}),
+      // 模型本来就不带思考等级的不硬加
+      ...(over.effort !== undefined && e.effort !== undefined ? { effort: over.effort as typeof e.effort } : {}) })
+  })
 
   // 确认框电脑上已经答了（工具跑完或被拒）：别再等手机
   on('tool.call', async ($, e, next) => {
@@ -4667,14 +5071,16 @@ export const register: Register = on => {
         const old: Queued[] = JSON.parse(await $.fs.read(path)).items ?? []
         for (const q of old) {
           if (q && typeof q.id === 'string' && typeof q.text === 'string' && typeof q.at === 'number' && startedAt - q.at < 1800 * 1000) {
-            later.push({ ...q, n: ++seq })
+            later.push({ ...q, held: undefined, n: ++seq })
           }
         }
       }
     } catch {
       // 读不出来就当没有
     }
-    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: startedAt, v: 4 }))
+    // v5：认 queue 的 hold（正在编辑的先不交）
+    // v6：忙时切模型 / 思考等级不排队，下一次模型请求起生效（turn.step）
+    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: startedAt, v: 6 }))
     publishQueue($)
     if (ticking) return started
     ticking = true
@@ -4683,9 +5089,14 @@ export const register: Register = on => {
       if (busy || !sid) return
       busy = true
       try {
+        const now = await $.clock.now()
+        // 编辑了很久没保存也没取消（手机断了、页面关了）：放开，空闲时交出去
+        if (later.some(q => q.held !== undefined && !held(q, now))) {
+          for (const q of later) if (q.held !== undefined && !held(q, now)) delete q.held
+          await flushIdle($)
+        }
         const path = `${dir}/${sid}.json`
         if (!(await $.fs.exists(path))) return
-        const now = await $.clock.now()
         const items: Item[] = JSON.parse(await $.fs.read(path)).items ?? []
         for (const item of items) {
           if (!item || typeof item.id !== 'string' || done.has(item.id)) continue
@@ -4695,9 +5106,13 @@ export const register: Register = on => {
           if (item.op === 'send' && typeof item.text === 'string') {
             // 斜杠命令（手机上的压缩上下文、切换模型、思考强度……）照在输入框里打的那样执行；别的作为你说的话提交，Claude 正忙就排着、这一轮做完再交。
             // 忙时的命令也排进队（Claude Code 本来就要等这一轮做完才执行；直接交给它的话手机上看不到、改不了，一直显示「发送中」）
-            const cmd = (await slashOf($, item.text)) !== undefined
+            const slash = await slashOf($, item.text)
+            const cmd = slash !== undefined
             const q: Queued = { id: item.id, text: item.text, ...(cmd ? { cmd } : {}), n: ++seq, at: now }
-            if (turn) {
+            if (turn && slash && instant(slash)) {
+              // 切模型 / 思考等级：不排队，这一轮接下来的请求就按新的发，这一轮做完再执行命令本身（见 over）
+              result = 'ok'
+            } else if (turn) {
               later.push(q)
               publishQueue($)
               result = 'later'
@@ -4710,16 +5125,29 @@ export const register: Register = on => {
             // 排队的话：move（dir -1 上移 / 1 下移）、edit（text）、delete；now = 强插：只把这一条拿出来，中断这一轮，
             // turn.complete 里单独提交（正在跑的工具不跑完插不进去），别的照旧排队；这时已经空闲就直接提交
             const at = later.findIndex(q => q.id === item.qid)
+            let release = false
             if (at < 0) {
               result = 'none'
             } else if (item.action === 'move') {
               const to = at + ((item.dir ?? 1) < 0 ? -1 : 1)
               if (to >= 0 && to < later.length) [later[at], later[to]] = [later[to], later[at]]
             } else if (item.action === 'edit' && typeof item.text === 'string' && item.text.trim()) {
+              // 保留 n、at（以前只留 id，被退回时插不回原位、会话重开后也接不上）；编辑完了放开
               const cmd = (await slashOf($, item.text)) !== undefined
-              later[at] = { id: later[at].id, text: item.text, ...(cmd ? { cmd } : {}) }
+              const { held: _held, cmd: _cmd, ...rest } = later[at]
+              later[at] = { ...rest, text: item.text, ...(cmd ? { cmd } : {}) }
+              release = true
+            } else if (item.action === 'hold') {
+              // 开始编辑（on 不是 false）/ 取消编辑
+              if (item.on === false) {
+                delete later[at].held
+                release = true
+              } else {
+                later[at].held = now
+              }
             } else if (item.action === 'delete') {
               later.splice(at, 1)
+              release = true
             } else if (item.action === 'now') {
               const [q] = later.splice(at, 1)
               if (turn) {
@@ -4734,6 +5162,8 @@ export const register: Register = on => {
               result = 'unknown'
             }
             publishQueue($)
+            // 编辑完、取消编辑、删掉了正在编辑的：这一轮已经做完了的话，留着的现在交
+            if (release) await flushIdle($)
           } else if (item.op === 'abort') {
             if (turn) await $.turn.abort({ turnId: turn })
             else result = 'idle'
@@ -4763,7 +5193,7 @@ export const register: Register = on => {
 """ % BRIDGE_MOD_MARKER,
 }
 BRIDGE_OPS = ("send", "abort", "perm", "answer", "queue")
-BRIDGE_QUEUE_ACTIONS = ("move", "edit", "delete", "now")
+BRIDGE_QUEUE_ACTIONS = ("move", "edit", "delete", "now", "hold")
 BRIDGE_WAIT = 2.5     # 等 mod 回执的秒数（它 0.4 秒看一次收件箱）；过了就撤下，电脑端改走前台
 BRIDGE_GRACE = 0.8    # 撤下后再等一会儿：正好在撤之前被 mod 拿走的也认回执，免得电脑端再从前台发一遍
 BRIDGE_TIDY_SECONDS = 3600
@@ -5806,6 +6236,303 @@ def command_group(argv):
     if group.get("paused"):
         print("注意：这个群的转发已暂停（往来太多条，等用户在 Kiteline 里点继续），消息先记在群里，暂时不会投递。")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# 总管模式（实验性，11-20 用户提）：用户在 Kiteline 设置里选一台电脑、一个 agent 当「总管」，以后不用自己找设备、项目、会话，
+#   直接对总管说需求；总管知道有哪些设备、项目、会话（电脑端推来的目录），决定派给已有会话还是新开一个，派出去的会话做完向总管汇报，
+#   总管再向用户汇报。总管就是一个普通会话，工作目录是 ~/.ccpulse/steward（里面的 CLAUDE.md / AGENTS.md 是它的说明书）。
+#   电脑端推来的目录存在 ~/.ccpulse/steward.json（{"cmd":"steward"}），steward 子命令读它；要电脑端做的事写进发图通道（kind=steward）。
+# ---------------------------------------------------------------------------
+
+HOST_STEWARD_FILE = os.path.join(DATA_DIR, "steward.json")
+STEWARD_DIR = os.path.join(DATA_DIR, "steward")
+STEWARD_TEXT_MAX = 8000
+
+
+def save_host_steward(directory):
+    """电脑端推来的总管目录（整份换掉）：{steward:{key,sessionId,deviceId}, devices:[…], sessions:[…], projects:[…]}"""
+    data = dict(directory if isinstance(directory, dict) else {}, at=_now_ms())
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(HOST_STEWARD_FILE + ".tmp", "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(data, ensure_ascii=False))
+    os.replace(HOST_STEWARD_FILE + ".tmp", HOST_STEWARD_FILE)
+    return len(data.get("sessions") or [])
+
+
+def _host_steward():
+    try:
+        with open(HOST_STEWARD_FILE, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+# 总管的说明书：开启时写进总管工作目录的 CLAUDE.md / AGENTS.md（Mac、Windows / Linux 电脑端共用这一份）。{{CMD}} 换成这台电脑上调本脚本的写法
+STEWARD_BRIEF = """# 你是 Kiteline 总管
+
+用户在 Kiteline 里开启了「总管模式」（实验性功能）。用户不再自己挑设备、项目和会话，而是直接对你说需求——多半是在手机上用语音说的，转出来的文字可能有错字、同音字，按意思理解。
+
+你的工作：弄清需求 → 找到对应的设备、项目、会话 → 派活 → 盯进度 → 验收 → 向用户汇报。你自己不改项目代码，也不去别的项目目录里动文件。
+
+## 回复的写法（手机上会朗读出来）
+
+- 先说结论，一两句口语化的话；不用表格、列表、代码块、链接和特殊符号，少念路径和长数字。
+- 收到需求先用一句话回执（如「收到，我让仪表盘那个会话加上」），再去做。
+- 拿不准是哪个项目、会不会动到用户的数据时，先问一句再派。
+- 用用户说话的语言回复。
+
+## 命令（在终端里运行）
+
+- `{{CMD}} steward state`：设备、项目、运行中的会话（做到哪一步、最近说了什么）。每次派活前先看一遍。
+- `{{CMD}} steward assign --to 会话 "任务"`：派给已有的会话。同一项目、同一模块的优先复用。--to 写会话标题、项目名或会话 id 开头。
+- `{{CMD}} steward new --device 设备 --dir 项目路径 [--agent agent] "任务"`：没有合适的会话时新开一个（项目路径从 steward state 的项目列表里找）。
+- `{{CMD}} steward group --to 会话 --to 会话 "说明"`：一个需求要几个模块配合时拉群，让它们先约定接口、数据表、字段，再各自开工；群里用 `{{CMD}} group say "内容"` 说话。
+- 派出去的会话做完、卡住或要用户决定时，会用 steward report 回报，你会收到以「【汇报」开头的消息；Kiteline 自己的通知以「【Kiteline】」开头。
+- 汇报里带的截图会作为附件路径出现在消息里；要给用户看就 `{{CMD}} send-image 图片路径 --caption "说明"`。
+
+## 任务写法
+
+派活时把用户的原话、你理解的目标、验收标准写清楚；被派的会话看不到你和用户的对话。要求它做完先自测、截图，再回报。
+
+## 模块档案（modules/ 目录）
+
+- 每个项目按功能模块（如人事、财务、预约、仪表盘）对应固定的会话，记在 `modules/<项目名>.md`：模块 → 负责的目录、数据表、接口约定、当前对应的会话、最近做过什么。
+- 派活前先看档案；对应的会话关了或上下文太满，就新开一个，把档案里这个模块的要点写进任务。
+- 每次派活、收到汇报后更新档案。第一次接触一个项目时，可以先派一个会话把项目结构和模块梳理出来，写进档案。
+
+## 进度与验收
+
+- 用户问进度、或长任务每过一阵，用 steward state 看各会话做到哪一步，简短汇报：派给了谁、到哪一步、还要多久。
+- 所有子任务都回报完成后，对照用户的原话检查：让对应会话跑测试、截图；不满足就打回去改。都通过了再做最终汇报：做了什么、在哪能看到、还有什么要用户决定。
+
+## 不要做的
+
+- 不替用户批准危险操作（确认框由用户自己处理）；不碰账号、密码、密钥。
+- 不往外部服务、生产环境发布或部署，除非用户明确说了。
+"""
+
+
+def steward_setup(brief=None):
+    """开启总管时电脑端让总管所在的电脑准备工作目录：写说明书（Claude Code 读 CLAUDE.md，Codex 等读 AGENTS.md），
+    模块档案目录 modules/ 留着不动（总管自己记的）。→ {cwd}"""
+    os.makedirs(os.path.join(STEWARD_DIR, "modules"), exist_ok=True)
+    command = self_command()
+    text = str(brief or STEWARD_BRIEF).replace("{{CMD}}", command)
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        path = os.path.join(STEWARD_DIR, name)
+        with open(path + ".tmp", "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(path + ".tmp", path)
+    steward_permissions(command)
+    return {"cwd": STEWARD_DIR}
+
+
+# 总管整天在跑 Kiteline 的几条命令，每条都要用户在手机上点允许就没法用：在总管自己的工作目录里写 Claude Code 的项目设置，
+# 只放行这几条（Claude Code 自己按前缀匹配，组合命令会拆开逐段核对），模块档案（modules/）可以直接改。别的照常问
+STEWARD_COMMANDS = ("steward", "group", "send-image", "send-page", "stage", "todo", "keyinfo")
+
+
+def steward_permissions(command):
+    folder = os.path.join(STEWARD_DIR, ".claude")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "settings.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    perms = data.setdefault("permissions", {})
+    allow = [rule for rule in perms.get("allow") or [] if isinstance(rule, str)]
+    wanted = ["Bash(%s %s:*)" % (command, name) for name in STEWARD_COMMANDS] + ["Edit(modules/**)", "Write(modules/**)"]
+    for rule in wanted:
+        if rule not in allow:
+            allow.append(rule)
+    perms["allow"] = allow
+    with open(path + ".tmp", "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    os.replace(path + ".tmp", path)
+
+
+def _steward_where(row):
+    return " · ".join(x for x in (row.get("device"), row.get("project")) if x)
+
+
+def _steward_match(sessions, ref):
+    """会话写法：会话 key、会话 id 开头、标题（含一部分）、项目名都认；对得上不止一个、一个都没有返回 (None, 候选)"""
+    low = (ref or "").strip().lower()
+    if not low:
+        return None, []
+    exact = [s for s in sessions if low in ((s.get("key") or "").lower(), (s.get("sessionId") or "").lower())]
+    if len(exact) == 1:
+        return exact[0], exact
+    hits = [s for s in sessions if (s.get("sessionId") or "").lower().startswith(low) or low == (s.get("title") or "").lower()]
+    if len(hits) != 1:
+        hits = [s for s in sessions if low in (s.get("title") or "").lower() or low == (s.get("project") or "").lower()]
+    return (hits[0], hits) if len(hits) == 1 else (None, hits)
+
+
+def _steward_print_state(data, me):
+    devices = [d for d in data.get("devices") or [] if isinstance(d, dict)]
+    sessions = [s for s in data.get("sessions") or [] if isinstance(s, dict) and s.get("sessionId") != me]
+    projects = [p for p in data.get("projects") or [] if isinstance(p, dict)]
+    when = time.strftime("%m-%d %H:%M:%S", time.localtime((data.get("at") or 0) / 1000.0))
+    print("Kiteline 目录（电脑端 %s 推来）" % when)
+    print("设备：")
+    for d in devices:
+        print("  · %s（%s）%s" % (d.get("name") or d.get("id"), d.get("id"), "在线" if d.get("online") else "离线"))
+    print("运行中的会话（%d 个）：" % len(sessions))
+    for s in sessions:
+        state = {"busy": "正在工作", "waiting": "等用户确认", "idle": "空闲"}.get(s.get("activity") or "", s.get("activity") or "")
+        stage = (" · " + s["stage"]) if s.get("stage") else ""
+        print("  · 「%s」　%s　%s%s　会话 %s%s" % (s.get("title") or "会话", _steward_where(s), state, stage, (s.get("sessionId") or "")[:8],
+                                          ("　agent " + s["agent"]) if s.get("agent") and s.get("agent") != "claude-code" else ""))
+        if s.get("last"):
+            print("      最近：%s" % re.sub(r"\s+", " ", str(s["last"]))[:160])
+    if projects:
+        print("项目（含最近用过、现在没有会话的）：")
+        for p in projects:
+            print("  · %s　%s:%s%s" % (p.get("name") or "", p.get("device") or p.get("deviceId") or "", p.get("path") or "",
+                                       ("　运行中 %d 个会话" % p["live"]) if p.get("live") else ""))
+
+
+def command_steward(argv):
+    """总管模式（只有用户在 Kiteline 里指定的总管会话用）：
+    steward state                                         有哪些设备、项目、运行中的会话（标题、状态、做到哪一步、最近说了什么）
+    steward assign --to 会话 "任务"                       把任务派给一个已有的会话（--to 写会话标题、项目名或会话 id 开头）
+    steward new --device 设备 --dir 项目路径 [--agent agent] "任务"
+                                                          在某台电脑的某个项目里新开一个会话做这件事（默认 Claude Code）
+    steward group --to 会话 --to 会话 "说明"               把几个会话和你拉进一个会话群，让它们直接约定接口、数据格式
+    steward report "内容" [--image 截图路径]               （被派活的会话用）向总管汇报进展、结果或问题；截图可以带几张，会一起送到总管那里
+    内容写 - 从标准输入读。派出去的会话做完会用 steward report 回报，回报作为一条消息送进总管的会话"""
+    action = argv[0] if argv else "state"
+    rest = argv[1:] if argv else []
+    if action in ("-h", "--help", "help"):
+        print(command_steward.__doc__)
+        return 0
+    text, to, device, folder, agent, session, images = None, [], None, None, None, None, []
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        value = rest[index + 1] if index + 1 < len(rest) else None
+        if arg == "--to" and value is not None:
+            to.append(value); index += 2; continue
+        if arg == "--device" and value is not None:
+            device = value; index += 2; continue
+        if arg in ("--dir", "--cwd") and value is not None:
+            folder = value; index += 2; continue
+        if arg == "--agent" and value is not None:
+            agent = value; index += 2; continue
+        if arg == "--image" and value is not None:
+            images.append(value); index += 2; continue
+        if arg == "--session" and value is not None:
+            session = value; index += 2; continue
+        text = arg if text is None else text + " " + arg
+        index += 1
+    if text == "-":
+        text = sys.stdin.read()
+    text = (text or "").strip()
+    session_id, _ = target_session(session)
+    if not session_id:
+        return 3
+    data = _host_steward()
+    steward = data.get("steward") or {}
+    if not data or not steward.get("sessionId"):
+        print("总管模式没有开启（或这台电脑还没收到 Kiteline 推来的目录）：用户在 Kiteline 设置里开启后才能用", file=sys.stderr)
+        return 4
+    me_steward = steward.get("sessionId") == session_id
+    sessions = [s for s in data.get("sessions") or [] if isinstance(s, dict)]
+    if len(text) > STEWARD_TEXT_MAX:
+        print("内容太长（%d 字，上限 %d）：写成文件放在对方读得到的地方，只发路径和要点" % (len(text), STEWARD_TEXT_MAX), file=sys.stderr)
+        return 2
+
+    if action == "report":
+        if me_steward:
+            print("你就是总管：直接回复用户即可，不用 report", file=sys.stderr)
+            return 2
+        if not text:
+            print("没有内容。用法：%s steward report \"做完了什么 / 卡在哪\"" % self_command(), file=sys.stderr)
+            return 2
+        entry = {"kind": "steward", "op": "report", "text": text}
+        paths = []
+        for raw in images[:6]:
+            path = os.path.abspath(os.path.expanduser(raw))
+            if os.path.splitext(path)[1].lower() not in IMAGE_EXTS or not os.path.isfile(path):
+                print("不是图片或不存在：%s" % raw, file=sys.stderr)
+                return 4
+            paths.append(path)
+        if paths:
+            entry["images"] = paths
+        append_outbox(session_id, entry)
+        print("已发给总管%s" % ("（附 %d 张图）" % len(paths) if paths else ""))
+        return 0
+
+    if not me_steward:
+        print("只有总管会话能用这个命令（被派活的会话用 %s steward report \"内容\" 回报）" % self_command(), file=sys.stderr)
+        return 4
+
+    if action in ("state", "status", "list"):
+        _steward_print_state(data, session_id)
+        return 0
+
+    others = [s for s in sessions if s.get("sessionId") != session_id]
+    if action in ("assign", "group"):
+        if not to:
+            print("缺少 --to（派给哪个会话）。运行中的会话见 %s steward state" % self_command(), file=sys.stderr)
+            return 2
+        if not text:
+            print("没有内容", file=sys.stderr)
+            return 2
+        keys, picked = [], []
+        for ref in to:
+            hit, candidates = _steward_match(others, ref)
+            if hit is None:
+                if candidates:
+                    print("「%s」对得上不止一个会话，换个更具体的写法（或写会话 id 开头）：" % ref, file=sys.stderr)
+                    for c in candidates[:8]:
+                        print("  · 「%s」%s　%s" % (c.get("title"), _steward_where(c), (c.get("sessionId") or "")[:8]), file=sys.stderr)
+                else:
+                    print("找不到会话「%s」：运行中的会话见 %s steward state；已经关了的要用 steward new 新开" % (ref, self_command()), file=sys.stderr)
+                return 4
+            keys.append(hit.get("key")); picked.append(hit)
+        if action == "group" and len(keys) < 1:
+            return 2
+        append_outbox(session_id, {"kind": "steward", "op": action, "to": keys, "text": text})
+        names = "、".join("「%s」（%s）" % (p.get("title") or "会话", _steward_where(p)) for p in picked)
+        if action == "assign":
+            print("已派给 %s；它做完或遇到问题会用 steward report 回报，回报会作为消息送到你这里" % names)
+        else:
+            print("已请 Kiteline 把你和 %s 拉进一个会话群；群里用 %s group say 说话" % (names, self_command()))
+        return 0
+
+    if action == "new":
+        devices = [d for d in data.get("devices") or [] if isinstance(d, dict)]
+        if not device or not folder or not text:
+            print("用法：%s steward new --device 设备 --dir 项目路径 [--agent agent] \"任务\"" % self_command(), file=sys.stderr)
+            return 2
+        low = device.strip().lower()
+        hits = [d for d in devices if low in ((d.get("id") or "").lower(), (d.get("name") or "").lower())] or \
+               [d for d in devices if low in (d.get("name") or "").lower()]
+        if len(hits) != 1:
+            print("设备「%s」对不上（%s）。设备：%s" % (device, "不止一个" if hits else "没有",
+                                                  "、".join("%s（%s）" % (d.get("name"), d.get("id")) for d in devices)), file=sys.stderr)
+            return 4
+        if not hits[0].get("online"):
+            print("设备「%s」现在离线，开不了会话" % hits[0].get("name"), file=sys.stderr)
+            return 4
+        entry = {"kind": "steward", "op": "new", "device": hits[0].get("id"), "cwd": folder, "text": text}
+        if agent:
+            entry["agent"] = agent
+        append_outbox(session_id, entry)
+        print("已请 Kiteline 在 %s 的 %s 新开会话（%s）；开好后它会出现在 steward state 里，做完用 steward report 回报"
+              % (hits[0].get("name"), folder, agent or "Claude Code"))
+        return 0
+
+    print("不认识的操作：%s。用法：\n%s" % (action, command_steward.__doc__), file=sys.stderr)
+    return 2
 
 
 # ---------------------------------------------------------------------------
@@ -7642,6 +8369,7 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
         "unpriced": sorted(unpriced),
         "sessions": sessions,
         "daySplit": day_split,
+        "lean": lean_stats(since_ms),   # 图片先缩小省下的（见 sync_lean_mod）：{images, before, after, saved}
     }
 
 
@@ -8297,20 +9025,53 @@ def read_file(root, rel, reveal=False, edit=False):
 DOWNLOAD_MAX = 50 * 1024 * 1024
 
 
+def find_by_name(root, rel, seconds=1.5, cap=40000):
+    """回复里只写了文件名或半截路径（「改了 `ChatPanes.swift`」）、会话目录下直接拼不出来时：在会话目录里按结尾找。
+    跳过 node_modules 这类目录和点开头的目录；最多找 1.5 秒、4 万个条目。几个同名的取最近改过的（多半就是刚提到的那个）"""
+    tail = rel.replace("\\", "/").strip("/")
+    if not tail or tail.startswith("../"):
+        return None
+    name = tail.rsplit("/", 1)[-1]
+    best, started, scanned = None, time.time(), 0
+    for folder, dirs, names in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        scanned += len(names) + len(dirs)
+        if name in names:
+            full = os.path.join(folder, name)
+            if (full.replace("\\", "/")).endswith("/" + tail) and os.path.isfile(full):
+                try:
+                    mtime = os.path.getmtime(full)
+                except OSError:
+                    mtime = 0
+                if best is None or mtime > best[0]:
+                    best = (mtime, full)
+        if scanned > cap or time.time() - started > seconds:
+            break
+    return best[1] if best else None
+
+
 def get_file(path, cwd=None, reveal=False):
     raw = str(path or "").strip()
     if not raw or len(raw) > 4096 or "\0" in raw:
         raise RuntimeError("文件路径无效")
     full = os.path.expanduser(raw)
-    if not is_abs_path(full):
+    relative = not is_abs_path(full)
+    if relative:
         if not is_abs_path(cwd):
             raise RuntimeError("无法确定相对路径所在的目录：%s" % raw)
         full = os.path.join(cwd, full)
     full = os.path.realpath(full)
     if os.path.isdir(full):
         raise RuntimeError("这是一个文件夹，不是文件：%s" % raw)
+    if not os.path.isfile(full) and relative:
+        full = find_by_name(cwd, raw) or full
     if not os.path.isfile(full):
-        raise RuntimeError("文件不存在：%s" % raw)
+        # 说清在哪找过：只写了名字的文件常在别的目录、别的电脑上（11-20 用户点了回复里的「s3.wav」只看到「文件不存在」）
+        # 开头一定是「文件不存在：」：Mac / 电脑端按这个前缀决定要不要再去本机找（MobileServer 的 download、server.py 的 r_download）
+        if relative:
+            raise RuntimeError("文件不存在：%s（在电脑 %s 的会话目录 %s 及其子目录中都没有找到，可能在别的目录或别的电脑上）"
+                               % (raw, socket.gethostname(), cwd.replace(HOME, "~", 1) if cwd.startswith(HOME) else cwd))
+        raise RuntimeError("文件不存在：%s（电脑 %s 上没有这个文件）" % (raw, socket.gethostname()))
     name = os.path.basename(full)
     size = os.path.getsize(full)
     out = {"path": full, "name": name, "size": size, "mtime": int(os.path.getmtime(full) * 1000),
@@ -17907,6 +18668,9 @@ HOSTED_ENV_DROP = {"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_AGENT_SD
                    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_EMIT_STARTUP_TIMING",
                    "CLAUDE_CODE_STARTUP_FAILURE_RESULTS", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT",
                    "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TMUX", "TMUX_PANE", "GIT_ASKPASS"}
+# Kiteline 的内部变量不往后台的 claude 里带，但这几个要带：会话里跑的 Kiteline 命令（todo、group、steward……）要和 watcher 用同一个
+# 数据目录、同一份会话登记，命令写法也要一样。正式使用时不设，测试实例、隔离环境里设了，不带就会去读写正式的 ~/.ccpulse
+HOSTED_ENV_KEEP = {"CCPULSE_DATA_DIR", "CCPULSE_SESSIONS_DIR", "CCPULSE_SELF_COMMAND"}
 if not IS_WINDOWS:
     FEATURES.append("hosted")
     FEATURES.append("hosted_agents")   # hosted_start 认 agent：别家命令行 agent 也能在后台伪终端里起（配方见 AgentPlugin.launch）
@@ -18387,7 +19151,8 @@ def net_prelude(network):
 def hosted_env(network):
     """托管 claude（和出口检测）的环境：watcher 的环境去掉 Claude Code / VS Code / Kiteline 自己的标记
     （watcher 若是从 Claude Code / VS Code 里起的，留着的话新 claude 当自己是子会话，不写对话记录、不登记），网络设置另外带上"""
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("CCPULSE_", "VSCODE_", "_KLN_")) and k not in HOSTED_ENV_DROP}
+    env = {k: v for k, v in os.environ.items()
+           if (k in HOSTED_ENV_KEEP or not k.startswith(("CCPULSE_", "VSCODE_", "_KLN_"))) and k not in HOSTED_ENV_DROP}
     env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor"})
     if "UTF-8" not in (env.get("LC_ALL") or env.get("LC_CTYPE") or env.get("LANG") or "").upper().replace("UTF8", "UTF-8"):
         env["LANG"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
@@ -19794,12 +20559,20 @@ class Watcher:
             # 设置里开关变了：电脑端把现在开着的技能告诉我们，马上照着装 / 删（之后定时再对也按这份）
             os.environ["CCPULSE_SKILLS"] = ",".join(str(x) for x in request.get("enabled") or [])
             return sync_skills()
+        if cmd == "savers":
+            # 设置 → 节省 token：图片缩小省了多少、这台电脑能不能缩、自动整理窗口现在的值
+            return savers_status()
         if cmd == "todos":
             # 电脑端的「agent 的待办」变了（或刚连上）：存一份给 todo 子命令——列出、接手、关掉别的会话 / 别的电脑上记的，发图时提醒没关的
             return {"ok": True, "count": save_host_todos(request.get("items"))}
         if cmd == "groups":
             # 会话群变了（或刚连上）：存一份给 group 子命令核对成员、看最近的群消息
             return {"ok": True, "count": save_host_groups(request.get("items"))}
+        if cmd == "steward":
+            # 总管模式：电脑端推来的目录（设备、项目、会话），给 steward 子命令看；setup = 准备总管的工作目录和说明书
+            if request.get("op") == "setup":
+                return dict(steward_setup(request.get("brief")), ok=True)
+            return {"ok": True, "count": save_host_steward(request.get("directory"))}
         agent = self.agents.get(request.get("sessionId"), "claude-code")
         if cmd == "agent_close":
             # 在后台伪终端里跑的别家 agent：关闭会话 = 结束后台这一份（各家自己的退出命令不一定有，进程收掉最干净）
@@ -20136,7 +20909,7 @@ class Watcher:
             return {"bridged": False}
         if op == "queue" and (request.get("action") not in BRIDGE_QUEUE_ACTIONS or (bridge_alive(sid, snap.get("startedAt")) or 0) < 2):
             return {"bridged": False}
-        fields = {key: request[key] for key in ("text", "decision", "answers", "tool", "action", "qid", "dir") if request.get(key) is not None}
+        fields = {key: request[key] for key in ("text", "decision", "answers", "tool", "action", "qid", "dir", "on") if request.get(key) is not None}
         rid = request.get("id")
         # 电脑端给每条指令一个编号（bid）：回应没等到（链路卡了一下）时它拿同一个编号再问一遍，这里不重复送，等上一次的结果给它。
         # 没有这个，电脑端只能超时后改走前台再发一遍，而这边那条其实可能已经送到了（FEATURES 的 bridge_bid）
@@ -20786,9 +21559,11 @@ def fast_lane(line):
 # 统计类（HEAVY_CMDS）要把很多份对话记录整份读一遍，一次只算一个：电脑端刚启动时会一口气要好几样，
 #   几个一起算内存叠加（11-13 实测三个并行，虚拟机上 watcher 峰值 1.8 GB、之后一直占着 680 MB）、还互相抢解释器更慢；
 # 文件、Git 这些（看文件、列目录、传附件）另一档，最多同时两个，不排在统计后面
-HEAVY_CMDS = frozenset(("usage_report", "brag", "digest", "sessions_list", "search", "projects", "project_overview"))
+# 简版项目列表（projects）只列目录、看修改时间、读几份记录的开头（实测 0.03～0.15 秒），不和统计排一队：
+# 原来排在用量报表后面，新任务面板要等十几秒（11-20）
+HEAVY_CMDS = frozenset(("usage_report", "brag", "digest", "sessions_list", "search", "project_overview"))
 SLOW_CMDS = HEAVY_CMDS | frozenset((
-    "session_info", "tests", "ls", "dirs", "read_file", "find_files", "get_file", "repo_info", "worktree_add",
+    "projects", "session_info", "tests", "ls", "dirs", "read_file", "find_files", "get_file", "repo_info", "worktree_add",
     "git_status", "git_diff", "machine_info", "put_file",
     # 执行过程、子 agent 列表、后台任务输出：大会话头一次要一两秒（11-13 实测 570 MB 的记录：trace 1.5 秒、agents 1.4 秒），只读文件
     "trace", "agents", "task_output",
@@ -21623,6 +22398,13 @@ if __name__ == "__main__":
         sys.exit(command_browser(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "group":
         sys.exit(command_group(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "steward":
+        sys.exit(command_steward(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "lean":
+        # 排查用：省 token 两项现在的状态（能不能缩图、用什么命令、省了多少、自动整理窗口设成了多少）
+        print(json.dumps(dict(savers_status(), resize=lean_resize_command(os.path.join(claude_config_dir(), "skills", LEAN_MOD_NAME))),
+                         ensure_ascii=False, indent=2))
+        sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "limits":
         # 排查用：装上额度插件，打印这台电脑上读到的额度
         sync_limits_mod(claude_config_dir())

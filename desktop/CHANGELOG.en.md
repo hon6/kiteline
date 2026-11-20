@@ -1,5 +1,30 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.48 (2026-11-21)
+
+### New Features
+
+- **Favorites can be edited**: If the text of a favorite is wrong or needs an addition, click the edit button below it (or right-click and choose “Edit”) to change it. Only the copy saved in Favorites changes; the original conversation and images are not affected.
+- **Save Tokens**: Settings now has a “Save Tokens” group. Both options are off by default and currently apply to Claude Code only. “Shrink Images Before the Agent Reads Them”: large images the agent reads are shrunk to 1280 pixels on the long side before they reach the model, and reading the same image again returns the original; for a 2000×1333 screenshot, this cuts the tokens it takes by about 60%. It takes effect in new sessions, and Settings shows how many images were shrunk and how many tokens were saved. “Auto-Compact Context”: choose to compact the context automatically when it reaches 200K, 300K, or 400K tokens, so less is re-read on every request. Both run on your computer without any network access.
+- **Scheduled tasks can repeat by the hour**: When you create a scheduled task, you can now choose “Hourly”, for example every 2 hours from 9:00 to 23:00, with an interval of 1 to 12 hours. Each run starts a new session, so sessions don't keep growing and fewer tokens are used. You can create them on Mac, Windows, Linux, and iPhone.
+
+### Improvements
+
+- **Switching the model or thinking level happens right away**: Previously, switching while Claude was working queued a message that ran only when the turn ended. Switching no longer uses the message queue: a new model takes effect from Claude's next request, and a new thinking level takes effect after the current turn. This applies to sessions started after the computer is updated.
+- **To-dos can be edited directly**: Each to-do now has an edit button on the right. Previously “Modify” was available only from the right-click menu.
+- **More complete plan limits**: When an account has only a weekly limit, its bar no longer takes up half a row. When a computer reports a separate weekly limit for a specific model, it is shown as well.
+- **The project list appears right away when you start a new task**: Projects and devices rarely change, so the computer now remembers each device's project list and refreshes it in the background. When you open New Task on your phone or computer, the last list is shown first and then replaced with the latest one, so you no longer wait for it to load every time.
+- **Open sessions are marked**: When a session is already open in a tab, a small icon appears after its title in the list on the left. Clicking it again no longer opens it a second time; Kiteline switches to that tab and flashes its border in the accent color so you can find it.
+- **File names in messages are easier to open**: When a reply mentions only a file name without a full path, tapping it now searches the session’s project for that file and opens it. If it can’t be found, the message says which computer and folder were searched.
+
+### Bug Fixes
+
+- **Fixed messages occasionally not sending on the local network**: When a message hit a brief network problem while sending, it used to stay at “Offline. Will send when connected.” until you deleted it and sent it again. Kiteline now retries automatically until the message is sent.
+- **Fixed messages disappearing after sending on an unstable network**: When the network recovered and the conversation reloaded, a message that had not been delivered yet could be mistaken for a delivered one, removed from the conversation and never sent. It is now kept and sent.
+- **Queued messages are no longer sent while you are editing them**: While you edit a message in the queue, that message and the ones after it are held back, and are sent after you save or cancel. Previously the original text could be sent to Claude while you were still editing.
+- **Messages sent while Claude is busy go straight to the queue**: Previously such a message appeared in the conversation first and then jumped back to the queue.
+- **Fixed Ctrl+Enter not saving while editing a queued message**: When you edit a message in the queue, pressing Ctrl+Enter now saves your changes. Previously it only added a line break.
+
 ## 1.0.47 (2026-11-20)
 
 ### Bug Fixes

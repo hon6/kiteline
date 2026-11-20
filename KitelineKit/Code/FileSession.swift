@@ -28,6 +28,18 @@ enum CodeStores {
         explorers[key] = store
         return store
     }
+
+    /// Mac 主窗口的二级侧边栏：侧栏和编辑区两块共用的那份 IDE 状态（开着的标签、正看的是哪一栏）
+    private static var workspaces: [String: CodeWorkspace] = [:]
+
+    static func workspace(_ key: String, _ model: AppModel) -> CodeWorkspace {
+        if let ws = workspaces[key] { ws.model = model; return ws }
+        let ws = CodeWorkspace(key: key, model: model)
+        workspaces[key] = ws
+        return ws
+    }
+
+    static func existingWorkspace(_ key: String) -> CodeWorkspace? { workspaces[key] }
 }
 
 /// 打开的一个文件：读进来的内容、磁盘上那份的指纹（保存时核对有没有被别人改过）、能不能改

@@ -25,6 +25,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.setFrameAutosaveName("TARSMainWindow")
         super.init(window: window)
         window.delegate = self
+        // 新版界面各栏让出标题栏用的高度（TitlebarInset 不能自己来问 shared，见那里）
+        let band = window.frame.height - window.contentLayoutRect.maxY
+        if band > 20 { TitlebarInset.band = band }
         // 窗口顶上飞的纸鸢（透明子窗口，窗口出现时自动挂上）
         KiteOverlay.shared.attach(to: window)
     }
@@ -59,13 +62,85 @@ struct MainView: View {
     @ObservedObject private var sidebar = SidebarState.shared
 
     var body: some View {
+        // 两套界面并存（11-20 反馈：现在的界面保留，右上角可以切到新版，给个适应的过渡期）：
+        // 经典版 = SidebarView（顶上几格入口 + 会话列表）；新版 = RailSidebar（最左一条图标栏 + 一栏内容）加窗口底部的状态栏（NewLayout.swift）
+        root(model.newLayout)
+    }
+
+    /// 新版界面不用系统的分栏（它的侧栏只能在最左边）：几栏几块由用户摆（NewLayoutRoot）；经典版照旧
+    @ViewBuilder private func root(_ fresh: Bool) -> some View {
+        if fresh {
+            NewLayoutRoot(model: model).modifier(MainChrome(model: model))
+        } else {
+            split(false).modifier(MainChrome(model: model))
+        }
+    }
+
+    private func split(_ fresh: Bool) -> some View {
         NavigationSplitView(columnVisibility: sidebar.binding) {
-            SidebarView(model: model)
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 400)
+            Group {
+                if fresh { RailSidebar(model: model) } else { SidebarView(model: model) }
+            }
+            .modifier(SidebarChrome(model: model))
+            .navigationSplitViewColumnWidth(min: fresh ? 290 : 260, ideal: fresh ? 330 : 300, max: fresh ? 450 : 400)
         } detail: {
-            DetailView(model: model)
+            ProjectSplit(model: model)
+                // 窗口右上角的界面切换按钮：不放工具栏，挂在右边这一栏上（挂在外层会被系统的分栏视图盖住），见 LayoutSwitchCorner
+                .overlay(alignment: .topTrailing) { LayoutSwitchCorner(model: model) }
         }
         .searchable(text: $model.query, placement: .sidebar, prompt: "搜索会话")
+    }
+}
+
+/// 窗口右上角的「新版界面 / 经典界面」切换：浮在内容最上面工具栏那一带，样子同工具栏按钮（玻璃胶囊，高 36，在那一带里上下居中）。
+/// 不放进窗口工具栏：放进去要在前面垫一个弹性空位才推得到最右边，而这个空位在工具栏里是一整块横跨右侧的视图，
+/// 分屏标签栏铺进工具栏那一带时，标签上的 ×、「+」按下去被它接走、没有反应（11-20 反馈：经典界面关不掉标签、新增列点了没反应；
+/// 有会话组时标签行被顶上那排组标签压低，整行落在它上面，最明显）。标签栏右边按这个按钮实际多宽让位。
+/// 用法：`.overlay(alignment: .topTrailing) { LayoutSwitchCorner(model:) }` 挂在贴着窗口右上角的那一栏自己身上——
+/// 两套界面的分栏都是系统的分栏视图（NSSplitView），挂在窗口最外层的浮层会被它盖住，看不见也点不着
+struct LayoutSwitchCorner: View {
+    @ObservedObject var model: KitelineModel
+    /// 按钮底下是标签栏（要让位）。新版界面最右一栏是文件侧栏这类时按钮落在那一栏上方，标签栏不用让（keyuanchuangmei-56 发现多让了 112）
+    var overTabs = true
+    @State private var hovering = false
+    @State private var width: CGFloat = 0
+
+    var body: some View {
+        LayoutSwitch(model: model)
+            .buttonStyle(CornerButtonStyle(hovering: hovering))
+            .onHover { hovering = $0 }
+            // 右上角那一块标签栏让出：按钮宽 + 右边 6 + 和标签栏按钮之间留 8（中英文字数不同，按实际宽度）
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; reserve() }
+            .onChange(of: overTabs) { reserve() }
+            .frame(height: TitlebarInset.band)   // 在标题栏 + 工具栏那一带里上下居中，同工具栏上的按钮
+            .padding(.trailing, 6)
+            .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private func reserve() { KitelineKit.reserveTitlebarTrailing(overTabs ? ceil(width) + 14 : 0) }
+
+    private struct CornerButtonStyle: ButtonStyle {
+        var hovering: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .font(.system(size: 13))
+                .imageScale(.large)
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(Capsule().fill(Color.primary.opacity(configuration.isPressed ? 0.12 : hovering ? 0.06 : 0)))
+                .contentShape(Capsule())
+                .tarsGlass(cornerRadius: 18)
+        }
+    }
+}
+
+/// 主窗口两套界面共用的：纸鸢、浏览器、翻译宿主、各种面板
+struct MainChrome: ViewModifier {
+    @ObservedObject var model: KitelineModel
+
+    func body(content: Content) -> some View {
+        content
         // 会话之间互发消息：纸鸢从发信会话飞到收信会话（开在分屏里时在标签之间飞），侧栏左边的风筝线连起最近有往来的会话
         .overlay { KitelineKit.PeerStageView(order: model.filtered.map(\.id)) }
         // 会话浏览器放到「整个应用 / 全屏」：盖满整个窗口
@@ -75,6 +150,8 @@ struct MainView: View {
         .frame(minWidth: 820, minHeight: 520)
         .sheetPanel(isPresented: $model.showNewTask) { NewTaskSheet() }
         .sheetPanel(isPresented: $model.showBatchRestart) { KitelineKit.BatchRestartView() }   // 能拖动、改大小的面板，在窗口正中
+        .sheetPanel(isPresented: $model.showOpenProject) { OpenProjectSheet() }
+        .sheetPanel(isPresented: $model.showLayoutSetup) { LayoutSetupSheet() }
         .sheetPanel(isPresented: Binding(get: { model.agentDetail != nil }, set: { if !$0 { model.agentDetail = nil } })) {
             if let key = model.agentDetail { TarsAgentInfoView(key: key) }
         }
@@ -95,6 +172,8 @@ struct MainView: View {
 
 struct SidebarView: View {
     @ObservedObject var model: KitelineModel
+    /// 新版界面里当「会话」那一栏用：不带顶上几格入口和底栏（入口在图标栏上，来源、手机数在窗口底部的状态栏里）
+    var embedded = false
     /// 分组、排序、筛选（同手机，存的键也一样）：分组 none / source / project；排序 started / recent / status / name；
     /// 状态 all / busy / waiting / error；设备 = 来源 id（空 = 全部设备）；项目 = 项目名（目录最后一级；空 = 全部项目）
     @AppStorage("listGrouping") private var grouping = "none"
@@ -124,7 +203,7 @@ struct SidebarView: View {
         let shown = base.filter { matches($0, status) }
         // 不用列表自带的选中（见 SidebarRowHighlight），选中靠 model.selection
         List {
-            if model.query.isEmpty {
+            if model.query.isEmpty, !embedded {
                 SidebarTiles(model: model).selectionDisabled()
             }
             // 「会话」「群」「标签组」三个页签（11-10 起分开）：状态 / 设备 / 项目筛选和「显示方式」只在「会话」里，
@@ -171,7 +250,7 @@ struct SidebarView: View {
                             HStack(spacing: 6) {
                                 if group.marked { Image(systemName: "star.fill").foregroundStyle(Color.tarsBrand) }
                                 if let agent = group.agent { AgentGlyph(agent, size: 12) }
-                                Text(name).lineLimit(1)
+                                Text(name).lineLimit(1).layoutPriority(embedded ? 1 : 0)   // 窄时先缩 CPU、内存，别把设备名挤没
                                 if let sub = group.sub { Text(sub).foregroundStyle(.tertiary).lineLimit(1).fixedSize() }
                                 if let source = group.source {
                                     // 点 CPU、内存看这台机器的设备详情（同手机）
@@ -184,6 +263,8 @@ struct SidebarView: View {
                                 Spacer(minLength: 4)
                                 Text("\(group.items.count)").monospacedDigit().foregroundStyle(.tertiary)
                             }
+                            // 新版界面：节标题左边系统给了 14、右边几乎贴边（11-21 量过），对到侧栏的 16 点对齐线
+                            .padding(.leading, embedded ? 2 : 0).padding(.trailing, embedded ? 12 : 0)
                         }
                     } else {
                         rows(group.items)
@@ -199,46 +280,17 @@ struct SidebarView: View {
                 ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass")
             }
         }
-        .safeAreaInset(edge: .bottom) { SidebarFooter(model: model) }
-        // 把侧栏宽度报给顶上的纸鸢（它飞在侧栏这一段上方；侧栏收起时不飞）。只报出去、不参与排版，不会互相撑
-        .background {
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear { KiteOverlay.shared.sidebarWidth = geometry.size.width }
-                    .onChange(of: geometry.size.width) { _, width in KiteOverlay.shared.sidebarWidth = width }
-            }
-        }
-        .onDisappear { KiteOverlay.shared.sidebarWidth = 0 }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.newTask() } label: { Label("新任务", systemImage: "square.and.pencil") }
-                    .help("在指定项目中新建 Claude Code 会话")
-            }
-            // 世界模式的入口：像素地球（鼠标移上去会转）；再点一下回到会话
-            ToolbarItem(placement: .primaryAction) {
-                let on = model.worldMode && model.worldPage == "world"
-                Button { model.toggleWorld(page: "world") } label: {
-                    Label { Text("世界") } icon: { WorldGlobeIcon(active: on) }
-                }
-                .help(on ? L("离开世界模式，回到会话（⇧⌘E）") : L("世界模式：机房、卫星和像素小人，一眼看全所有会话（⇧⌘E）"))
-            }
-            // 数据流大屏：所有会话读了什么、做了什么、产出去了哪，一块屏连成线（和世界共用一个网页宿主）
-            ToolbarItem(placement: .primaryAction) {
-                let on = model.worldMode && model.worldPage == "flow"
-                Button { model.toggleWorld(page: "flow") } label: {
-                    Label { Text("数据流") } icon: { Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(on ? Color.tarsBrand : .secondary) }
-                }
-                .help(on ? L("离开数据流大屏，回到会话（⇧⌘D）") : L("数据流大屏：所有会话读了什么、做了什么、产出去了哪，连成一块屏（⇧⌘D）"))
-            }
-        }
+        .safeAreaInset(edge: .bottom) { if !embedded { SidebarFooter(model: model) } }
     }
 
     private func rows(_ items: [SessionItem]) -> some View {
         ForEach(items) { item in
             SessionRow(item: item, pinned: model.isPinned(item.id), marked: model.isMarked(item.id),
                        onMark: { withAnimation(.snappy) { model.toggleMark(item.id) } },
-                       onClose: item.canReply && item.can("close") ? { model.close(item.id) } : nil)
-                .modifier(SidebarRowHighlight(selected: model.selection == item.id) { model.selection = item.id })
+                       onClose: item.canReply && item.can("close") ? { model.close(item.id) } : nil, avatar: !embedded)
+                .modifier(SidebarRowHighlight(selected: model.selection == item.id) { model.pick(item.id) })
+                // 新版界面：系统侧栏列表每边自带 16 点，行的框要离栏边 8（侧栏规范 SideMetric），减回去
+                .listRowInsets(embedded ? EdgeInsets(top: 1, leading: SideMetric.edge - 16, bottom: 1, trailing: SideMetric.edge - 16) : nil)
                 .sessionDraggable(item)
                 // 把另一个会话拖到这一行上松开：拉这两个会话建群
                 .tarsGroupDrop(key: item.id) { dragged in model.groupSeed = [dragged, item.id] }
@@ -555,6 +607,53 @@ struct SidebarView: View {
     }
 }
 
+/// 左边栏这一列共用的外壳（经典版、新版都挂）：窗口工具栏上的新任务 / 世界 / 数据流三个按钮，把这一列的宽度报给顶上的纸鸢
+struct SidebarChrome: ViewModifier {
+    @ObservedObject var model: KitelineModel
+
+    func body(content: Content) -> some View {
+        content
+            // 把侧栏宽度报给顶上的纸鸢（它飞在侧栏这一段上方；侧栏收起时不飞）。只报出去、不参与排版，不会互相撑
+            .background {
+                GeometryReader { geometry in
+                    Color.clear
+                        .onAppear { KiteOverlay.shared.sidebarWidth = geometry.size.width }
+                        .onChange(of: geometry.size.width) { _, width in KiteOverlay.shared.sidebarWidth = width }
+                }
+            }
+            .onDisappear { KiteOverlay.shared.sidebarWidth = 0 }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { model.newTask() } label: { Label("新任务", systemImage: "square.and.pencil") }
+                        .help("在指定项目中新建 Claude Code 会话")
+                }
+                // 世界模式的入口：像素地球（鼠标移上去会转）；再点一下回到会话
+                ToolbarItem(placement: .primaryAction) {
+                    let on = model.worldMode && model.worldPage == "world"
+                    Button { model.toggleWorld(page: "world") } label: {
+                        Label { Text("世界") } icon: { WorldGlobeIcon(active: on) }
+                    }
+                    .help(on ? L("离开世界模式，回到会话（⇧⌘E）") : L("世界模式：机房、卫星和像素小人，一眼看全所有会话（⇧⌘E）"))
+                }
+                // 数据流大屏：所有会话读了什么、做了什么、产出去了哪，一块屏连成线（和世界共用一个网页宿主）
+                ToolbarItem(placement: .primaryAction) {
+                    let on = model.worldMode && model.worldPage == "flow"
+                    Button { model.toggleWorld(page: "flow") } label: {
+                        Label { Text("数据流") } icon: { Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(on ? Color.tarsBrand : .secondary) }
+                    }
+                    .help(on ? L("离开数据流大屏，回到会话（⇧⌘D）") : L("数据流大屏：所有会话读了什么、做了什么、产出去了哪，连成一块屏（⇧⌘D）"))
+                }
+                // AR 模式：界面变透明，所有会话漂在桌面前的 3D 空间里（WASD 走动、拖动转向、指着放大、点开回复）
+                ToolbarItem(placement: .primaryAction) {
+                    Button { model.toggleAR() } label: {
+                        Label { Text("AR") } icon: { Image(systemName: "cube.transparent").foregroundStyle(model.arMode ? Color.tarsBrand : .secondary) }
+                    }
+                    .help(L("AR 模式：界面变为透明，所有会话悬浮在桌面前方的空间中；WASD 移动、拖动转向（⇧⌘A）"))
+                }
+            }
+    }
+}
+
 /// 左边栏顶上「会话 9 | 群 1 | 标签组 2」三个页签：选中的那个字重、下面一条品牌色短线，没选中的淡字；同一行右边放这个页签的按钮
 private struct SidebarTabs: View {
     struct Tab {
@@ -596,7 +695,7 @@ private struct SidebarTabs: View {
 }
 
 /// 页签那一行右边的小按钮（建群、新建标签组）：图标 + 两个字，样子同「显示方式」默认态但更紧凑，三个页签放下了也不挤
-private struct SidebarTabButton: View {
+struct SidebarTabButton: View {
     let symbol: String
     let title: String
 
@@ -617,17 +716,23 @@ private struct SidebarTabButton: View {
 
 /// 左边栏会话行的选中、悬停：同上面的入口格子，淡品牌色底 + 细边。不用列表自带的选中——键盘焦点在列表上时它是一整块饱和的强调色，
 /// 行里的橙色状态字也被吃掉（10-23 反馈太突兀）；另外会话现在开成标签页，按方向键一路选下去会给经过的每个会话都开一个标签
-private struct SidebarRowHighlight: ViewModifier {
+struct SidebarRowHighlight: ViewModifier {
     let selected: Bool
     let select: () -> Void
     @State private var hovering = false
+    /// 新版界面的侧栏里：框里的边距、圆角照侧栏规范（SideMetric）；经典版不变
+    @Environment(\.sideColumn) private var side
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        let scheme = Look.shared.scheme
+        let shape = RoundedRectangle(cornerRadius: side ? SideMetric.radius : scheme == nil ? 10 : 4, style: .continuous)
+        let fill: Color = if let scheme { selected ? scheme.listActiveColor : (hovering ? scheme.listHoverColor : .clear) }
+            else { selected ? Color.tarsBrand.opacity(0.14) : Color.primary.opacity(hovering ? 0.05 : 0) }
         content
-            .padding(.horizontal, 7)
-            .background(selected ? Color.tarsBrand.opacity(0.14) : Color.primary.opacity(hovering ? 0.05 : 0), in: shape)
-            .overlay { if selected { shape.strokeBorder(Color.tarsBrand.opacity(0.32), lineWidth: 1) } }
+            .padding(.horizontal, side ? SideMetric.pad : 7)
+            .background(fill, in: shape)
+            // VS Code 配色方案下选中行没有描边（同 VS Code 的列表）
+            .overlay { if selected, scheme == nil { shape.strokeBorder(Color.tarsBrand.opacity(0.32), lineWidth: 1) } }
             .contentShape(shape)
             .onHover { hovering = $0 }
             .onTapGesture(perform: select)
@@ -929,22 +1034,30 @@ struct SessionRow: View {
     var onMark: (() -> Void)? = nil
     /// 右上角的关闭：鼠标移到卡片上时，时间的位置换成「×」（不占宽度、列表不跳），点了先确认再关；不能关的会话不给
     var onClose: (() -> Void)? = nil
+    /// 左边画不画头像：新版界面的会话列表不要（11-20 反馈：会话侧栏里去掉会话头像），状态看第二行的字
+    var avatar = true
+    /// 第三行写不写项目名：项目里的会话列表不写（选了项目进来的，都是这个项目的，11-20 用户），只写设备
+    var folder = true
     @State private var hovering = false
     /// 自测截图：标题是这个的卡片画成鼠标停在上面（截不到真的悬停）
     static var captureHover: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            SessionAvatar(key: item.id, title: item.title, activity: item.activity, size: 34)
-                .tarsPeerAnchor(item.id)
-                .padding(.top, 1)
+            if avatar {
+                SessionAvatar(key: item.id, title: item.title, activity: item.activity, size: 34)
+                    .tarsPeerAnchor(item.id)
+                    .padding(.top, 1)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
                     // 标题前是这个会话所属 agent 的小标志（同手机），几个 agent 混着用时一眼分得清
-                    AgentGlyph(item.agent, size: 12).foregroundStyle(.secondary)
+                    // 正在工作的会话：agent 标志亮成主题色（11-20 反馈：亮起来，绿色或主题色——界面少用颜色，取主题色），一眼看出哪几个在跑
+                    AgentGlyph(item.agent, size: 12).foregroundStyle(item.activity == .busy ? AnyShapeStyle(Color.tarsBrand) : AnyShapeStyle(.secondary))
                         .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1.5 }
                         .help(Agents.info(item.agent).name)
-                    Text(item.title).font(.app(size: 13, weight: .semibold)).lineLimit(1)
+                    // 新版界面：标题不加粗、小一号，一行放得下更多字（11-20）
+                    Text(item.title).font(.app(size: avatar ? 13 : SideMetric.Text.row, weight: avatar ? .semibold : .regular)).lineLimit(1)
                     if marked, let onMark {
                         Button(action: onMark) {
                             Image(systemName: "star.fill").font(.app(size: 10)).foregroundStyle(Color.tarsBrand)
@@ -959,6 +1072,8 @@ struct SessionRow: View {
                     if AppState.shared.config.mobile.mutedSessions.contains(item.id) {
                         Image(systemName: "bell.slash").font(.app(size: 10)).foregroundStyle(.tertiary).help("已静音：仅在需要确认时提醒")
                     }
+                    // 已经开成标签的会话（11-20）：标题后一个小标签页图标；再点这一行不会再开，切过去并让那个标签闪
+                    TarsOpenedTabMark(key: item.id)
                     Spacer(minLength: 4)
                     // 鼠标移上来时，时间的位置换成「☆」「×」。按钮一直在、只切换显隐，而且盖在上面不参与排版（宽度事先按按钮留好）：
                     // 悬停既不改卡片高度、也不增删控件。原来悬停时插进两个比时间高的按钮，卡片变高几点，
@@ -999,6 +1114,8 @@ struct SessionRow: View {
                             .allowsHitTesting(showsClose || showsMark)
                         }
                 }
+                // 新版界面：空闲的不写「空闲」（11-20 反馈：没必要），有目标、阶段的照样显示
+                if avatar || !idleOnly {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     // 设了目标的：目标到哪了（鼠标停上去看目标原文）
                     if let goal = item.goal {
@@ -1010,15 +1127,18 @@ struct SessionRow: View {
                             .hoverTip(stage.tip)
                     }
                     // 只说状态（回复内容点开会话看；截短的两行看了也看不全，11-10 用户）
-                    Text(item.status)
-                        .font(.app(size: 11.5))
-                        .foregroundStyle(lineColor)
-                        .lineLimit(1)
-                        .help(item.line)
+                    if avatar || !isIdleStatus {
+                        Text(item.status)
+                            .font(.app(size: avatar ? 11.5 : SideMetric.Text.caption))   // 新版界面（不画头像）照侧栏规范
+                            .foregroundStyle(lineColor)
+                            .lineLimit(1)
+                            .help(item.line)
+                    }
+                }
                 }
                 HStack(spacing: 4) {
                     Image(systemName: item.kind == .ssh ? "server.rack" : (item.kind == .kiteline ? "desktopcomputer" : "laptopcomputer"))
-                    Text("\(item.sourceName) · \(item.folder)").lineLimit(1)
+                    Text(folder ? "\(item.sourceName) · \(item.folder)" : item.sourceName).lineLimit(1)
                     if let usage = item.usage, usage.percent >= 70 {
                         Spacer(minLength: 4)
                         Text("上下文 \(usage.percent)%")
@@ -1032,6 +1152,11 @@ struct SessionRow: View {
         .padding(.vertical, 5)
         .onHover { hovering = $0 }
     }
+
+    /// 状态就是「空闲」（没出错、没在忙、不等确认）
+    private var isIdleStatus: Bool { item.activity == .idle && !item.failed && item.status == L("空闲") }
+    /// 第二行除了「空闲」什么都没有（没有目标、阶段）：新版界面整行不画
+    private var idleOnly: Bool { isIdleStatus && item.goal == nil && item.stage == nil }
 
     private var showsClose: Bool { onClose != nil && (hovering || Self.captureHover == item.title) }
     private var showsMark: Bool { onMark != nil && !marked && (hovering || Self.captureHover == item.title) }
@@ -1263,12 +1388,14 @@ struct ConversationDetail: View {
     private var title: String {
         guard let key else { return L("选择会话") }
         if let group = KitelineKit.groupTitle(key) { return group.title }
+        if let code = KitelineKit.codeTabTitle(key) { return code.title }
         return model.session(key)?.title ?? HistoryModel.shared.past(key)?.displayTitle ?? L("会话已结束")
     }
 
     private var subtitle: String {
         guard let key else { return L("选择会话放入右侧空白分屏，或从左侧拖入") }
         if let group = KitelineKit.groupTitle(key) { return group.subtitle }
+        if let code = KitelineKit.codeTabTitle(key) { return code.subtitle }
         if let item = model.session(key) {
             let status = [Activity.waiting: L("待确认"), .busy: L("正在工作"), .idle: L("空闲")][item.activity] ?? ""
             // 只读（Proma 这类）在状态后标出来
@@ -1396,6 +1523,8 @@ enum NativeConversation {
         KitelineKit.openPage = { page in
             if page.hasPrefix("group:") { KitelineModel.shared.selection = KitelineModel.groupID(String(page.dropFirst("group:".count))); return }
             if page == "groups" { KitelineModel.shared.selection = KitelineModel.groupsID; return }
+            // 新版界面：待办、收藏、项目在左边栏里看（右边的会话不动）
+            if KitelineModel.shared.newLayout, KitelineModel.sideTabs.contains(page) { KitelineModel.shared.showSideTab(page); return }
             KitelineModel.shared.selection = ["today": KitelineModel.todayID, "usage": KitelineModel.usageID, "todos": KitelineModel.todosID,
                                           "favorites": KitelineModel.favoritesID,
                                           "history": KitelineModel.historyID, "projects": KitelineModel.projectsID][page] ?? KitelineModel.shared.selection

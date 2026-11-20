@@ -95,6 +95,7 @@ enum ConfigKey: String, CodingKey {
     case sshHost, sshPort, sshIdentityFile, remotePython, remoteWatcherPath, peerId, peerSource
     // 手机访问
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
+    case shrinkAgentImages, compactWindow
     case browserOn, browserMax, browserIdle, browserRecord
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
     case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal, hostedCloseEditor
@@ -127,6 +128,10 @@ struct MobileConfig: Codable, Equatable {
     var installStageSkill: Bool = true
     /// 每台机器上装了 OpenCode 的，自动给它装 Kiteline 插件（手机才看得到、操作得了 OpenCode 的会话）；关掉时 watcher 会删掉装过的
     var installOpenCodePlugin: Bool = true
+    /// 节省 token：agent 读到的大图先缩小到长边 1280 再给模型看（同一张图再读一次给原图）。默认关
+    var shrinkAgentImages: Bool = false
+    /// 节省 token：上下文到多少 token 就自动整理（写 Claude Code 自带的 autoCompactWindow）；0 = 不设，按 Claude Code 默认
+    var compactWindow: Int = 0
     /// agent 用的浏览器开在哪：client = 用户操作的这台电脑（远端会话经 ssh 反向转发用它，默认）；server = agent 所在的电脑（Remote-SSH 服务器）
     var browserOn: String = "client"
     /// 最多同时开几个浏览器（再按可用内存往下压）、空闲多少分钟回收
@@ -259,6 +264,9 @@ struct MobileConfig: Codable, Equatable {
         installTodoSkill = flag(.installTodoSkill, true)
         installStageSkill = flag(.installStageSkill, true)
         installOpenCodePlugin = flag(.installOpenCodePlugin, true)
+        shrinkAgentImages = flag(.shrinkAgentImages, false)
+        let window = (try? c.decodeIfPresent(Int.self, forKey: .compactWindow)) ?? nil ?? 0
+        compactWindow = [200_000, 300_000, 400_000].contains(window) ? window : 0
         browserOn = text(.browserOn, "client") == "server" ? "server" : "client"
         browserMax = max(1, min(16, (try? c.decodeIfPresent(Int.self, forKey: .browserMax)) ?? nil ?? 4))
         browserIdle = max(1, min(240, (try? c.decodeIfPresent(Int.self, forKey: .browserIdle)) ?? nil ?? 10))

@@ -90,8 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !AppConfig.isolated || ProcessInfo.processInfo.environment["CCPULSE_KEEP_PANES"] == "1" {
             KitelineKit.panes.remember(in: AppConfig.defaults, key: "chatPanes")
             KitelineKit.rememberTabGroups(in: AppConfig.defaults, key: "tabGroups")   // 标签组（正显示那组的分屏就是上面读回的这套）
+            KitelineKit.projectSpaces.remember(in: AppConfig.defaults, key: "projectSpaces")   // 新版界面每个项目一套标签
             if let focused = KitelineKit.panes.focused { model.selection = focused }
         }
+        ProjectStripState.install()   // 新版界面顶上那排项目（先装上，下面切界面时分屏就要留它的高）
+        KitelineModel.shared.applyLayoutToPanes()   // 新版界面不在标签栏顶上画会话组那一排
+        KitelineKit.reserveTitlebarTrailing(LayoutSwitch.reserve)   // 窗口右上角的界面切换按钮：标签栏右边让位
+        KitelineKit.installCodeTabGuard()   // 关有没保存修改的文件标签前问一声
+        NewDraftKey.install()   // 「+」新标签页里的「新建会话」草稿标签
 
         // 上次退出时主窗口开着（或第一次运行），这次也打开；开机自启时安静地待在菜单栏
         let defaults = AppConfig.defaults
@@ -238,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         file.addItem(withTitle: L("历史会话"), action: #selector(menuHistory), keyEquivalent: "y")
         file.addItem(withTitle: L("世界模式"), action: #selector(menuWorld), keyEquivalent: "E")   // ⇧⌘E：进出世界
         file.addItem(withTitle: L("数据流大屏"), action: #selector(menuFlow), keyEquivalent: "D")   // ⇧⌘D：进出数据流大屏
+        file.addItem(withTitle: L("AR 模式"), action: #selector(menuAR), keyEquivalent: "A")   // ⇧⌘A：进出 AR 模式
         file.addItem(.separator())
         // 会话的标签页（同浏览器）：⌘T 新标签、⌘W 关标签（没有标签可关时关窗口）
         file.addItem(withTitle: L("新标签页"), action: #selector(menuNewTab), keyEquivalent: "t").tag = TabNeed.conversation.rawValue
@@ -378,6 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainWindowController.shared.show()
         KitelineModel.shared.toggleWorld(page: "flow")
     }
+    @objc private func menuAR() { KitelineModel.shared.toggleAR() }
     @objc private func menuHistory() { MainWindowController.shared.show(select: KitelineModel.historyID) }
     @objc private func menuSearch() { perform(.search) }
     @objc private func menuFiles() { perform(.files) }

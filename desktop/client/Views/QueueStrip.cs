@@ -44,7 +44,7 @@ public sealed class QueueStrip : Panel
         var rows = store.QueueRows(next);
         IsVisible = rows.Count > 0;
         if (rows.Count == 0) { built = null; editing = null; return; }
-        var signature = string.Join("\n", rows.Select(r => $"{r.Id}|{r.Editable}|{r.Text}")) + $"|{store.QueueCollapsed}|{editing}|{busy}|{Bounds.Width >= 340}";
+        var signature = string.Join("\n", rows.Select(r => $"{r.Id}|{r.Editable}|{r.Sending}|{r.Text}")) + $"|{store.QueueCollapsed}|{editing}|{busy}|{Bounds.Width >= 340}";
         if (signature == built) return;
         built = signature;
         Render(rows);
@@ -87,12 +87,13 @@ public sealed class QueueStrip : Panel
         arrow.HorizontalAlignment = HorizontalAlignment.Center;
         arrow.VerticalAlignment = VerticalAlignment.Center;
         var nowButton = new Tap(arrow, () => Act(row, "now"), 6)
-        { Width = Button, Height = Button, Margin = new Thickness(2, 0, 0, 0), IsEnabled = busy is null, Opacity = busy is null ? 1 : 0.4 }
+        { Width = Button, Height = Button, Margin = new Thickness(2, 0, 0, 0), IsEnabled = busy is null && !row.Sending, Opacity = busy is null && !row.Sending ? 1 : 0.4 }
             .Tip(L("强插：中断 Claude 当前这一步，排队的消息马上发送"));
         var line = Ui.H(2, label,
             row.Editable ? Icon("arrow.up", L("上移"), index == 0, () => Act(row, "move", dir: -1)) : null,
             row.Editable ? Icon("arrow.down", L("下移"), index == count - 1, () => Act(row, "move", dir: 1)) : null,
-            row.Editable ? Icon("pencil", L("编辑"), false, () => { editing = row.Id; Refresh(); }) : null,
+            // 编辑期间电脑先别交这条：以前编辑到一半 Claude 这一轮做完、原文先发了，保存又成了一条（11-20）
+            row.Editable ? Icon("pencil", L("编辑"), false, () => { editing = row.Id; Act(row, "hold"); Refresh(); }) : null,
             row.Editable ? Icon("trash", L("删除"), false, () => Act(row, "delete")) : null,
             nowButton);
         return new Border { Child = line, Padding = new Thickness(12, 0, 8, 0), MinHeight = 36 };
@@ -113,15 +114,17 @@ public sealed class QueueStrip : Panel
             var text = (input.Text ?? "").Trim();
             editing = null;
             if (text.Length > 0 && text != row.Text) Act(row, "edit", text: text);
-            else Refresh();
+            else { Act(row, "release"); Refresh(); }
         }
-        input.KeyDown += (_, e) =>
+        // 先于输入框自己处理（Tunnel）：输入框开着多行（AcceptsReturn），普通的 KeyDown 轮到这里之前回车已经被它当成换行吃掉，
+        // Ctrl+回车保存不了、只多出一行（11-20 真窗口点测发现）。同 Composer 的写法
+        input.AddHandler(InputElement.KeyDownEvent, (_, e) =>
         {
             if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { Save(); e.Handled = true; }
-            else if (e.Key == Key.Escape) { editing = null; Refresh(); e.Handled = true; }
-        };
+            else if (e.Key == Key.Escape) { editing = null; Act(row, "release"); Refresh(); e.Handled = true; }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         var buttons = Ui.H(8,
-            new Tap(Ui.Text(L("取消"), 12, color: "Text2").Pad(8, 3), () => { editing = null; Refresh(); }, 6),
+            new Tap(Ui.Text(L("取消"), 12, color: "Text2").Pad(8, 3), () => { editing = null; Act(row, "release"); Refresh(); }, 6),
             new Tap(Ui.Text(L("保存"), 12, FontWeight.SemiBold, "Accent").Pad(8, 3), Save, 6)).Self(Align.End);
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
         input.AttachedToVisualTree += (_, _) => { input.Focus(); input.CaretIndex = input.Text?.Length ?? 0; };

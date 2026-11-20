@@ -571,12 +571,13 @@ enum Delivery {
 
     /// 排队的消息（Claude 忙时发的、还在 mod 里等着）：move（dir -1 / 1）、edit（text）、delete、now（强插：中断当前这一步，排队的马上进会话）。
     /// 会话的 mod 是老版本（只在会话启动时加载）时只有强插能做（等同按 Esc）
-    static func queue(action: String, qid: String, text: String?, dir: Int?, record: SessionRecord, source: SourceConnection?,
+    static func queue(action: String, qid: String, text: String?, dir: Int?, on: Bool? = nil, record: SessionRecord, source: SourceConnection?,
                       completion: @escaping (Outcome) -> Void) {
         if record.kind == .kiteline {
             var body: [String: Any] = ["action": action, "id": qid]
             if let text { body["text"] = text }
             if let dir { body["dir"] = dir }
+            if let on { body["on"] = on }
             PeerComputers.shared.deliver("/api/queue", record: record, body: body, completion: completion)
             return
         }
@@ -596,10 +597,11 @@ enum Delivery {
         var fields: [String: Any] = ["op": "queue", "action": action, "qid": qid]
         if let text { fields["text"] = text }
         if let dir { fields["dir"] = dir }
+        if let on { fields["on"] = on }
         bridgeReply(fields, record: record, source: source) { reply in
             switch reply.map({ $0["result"] as? String ?? "ok" }) {
             case nil: completion(Outcome(ok: false, submitted: false, message: "未能连接会话，请稍后再试"))
-            case "none": completion(Outcome(ok: false, submitted: false, message: "这条消息已发给 Claude"))
+            case "none": completion(Outcome(ok: false, submitted: false, message: action == "edit" ? "这条消息在保存前已发给 Claude，修改未发送" : "这条消息已发给 Claude"))
             case "dropped":
                 // 电脑上刚按了停止，Claude Code 不收插件提交的（watcher 的 bridge_dropped）：从前台发出去（算你亲自输入），发出去了再从队列里删掉
                 guard let text = reply?["text"] as? String, !text.isEmpty else {

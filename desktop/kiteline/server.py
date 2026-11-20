@@ -502,6 +502,10 @@ class MobileServer:
             if isinstance(result, tuple):
                 return thumb_reply(result[0], result[1], request, "favorite|%s" % request.query.get("ref", ""))
             return Response.json(result, status)
+        if path == "/api/steward" or path.startswith("/api/steward/"):
+            # 总管模式（实验性，见 steward.py）
+            status, result = self.app.steward.handle(method, path, request.json)
+            return Response.json(result, status)
         if path == "/api/groups" or path.startswith("/api/groups/"):
             # 会话群（见 groups.py）：群里的图给缩略图，文件原样
             status, result = self.app.groups.handle(method, path, request.json, request.query)
@@ -983,7 +987,7 @@ def r_hosted_move(s, request, *_):
 
 
 def r_queue(s, request, *_):
-    """排队的消息：{action: move | edit | delete | now, id, text?, dir?}（见 delivery.queue）"""
+    """排队的消息：{action: move | edit | delete | now | hold, id, text?, dir?, on?}（见 delivery.queue；hold = 开始 / 取消编辑）"""
     record, source = s.resolve(request)
     if not record:
         return Response.error("会话不存在或已结束", 404)
@@ -996,7 +1000,8 @@ def r_queue(s, request, *_):
         return Response.error("内容为空", 400)
     direction = body.get("dir") if isinstance(body.get("dir"), int) and not isinstance(body.get("dir"), bool) else None
     log.write("手机调整「%s」的排队消息：%s" % (record.snap.get("name"), action))
-    outcome = delivery.queue(action, qid, text, direction, record, source, s.siblings(record))
+    on = body.get("on") if isinstance(body.get("on"), bool) else None
+    outcome = delivery.queue(action, qid, text, direction, record, source, s.siblings(record), on)
     return Response.json({"ok": outcome.ok, "message": outcome["message"]}, 200 if outcome.ok else 409)
 
 
@@ -1392,7 +1397,7 @@ def r_search(s, request, *_):
 
 
 def r_projects(s, request, *_):
-    return Response.json(aggregate.projects(s.app.store, request.query.get("detail") == "1"))
+    return Response.json(aggregate.projects(s.app.store, request.query.get("detail") == "1", request.query.get("fresh") == "1"))
 
 
 def r_dirs(s, request, *_):
@@ -1877,7 +1882,8 @@ def r_schedules_add(s, request, *_):
     if not s.app.store.source(body.get("sourceId", "")):
         return Response.error("机器不存在", 404)
     ok, result = s.app.schedules.add(body.get("sourceId", ""), body.get("cwd", ""), body.get("prompt", ""),
-                                     body.get("repeat", ""), body.get("time", ""), body.get("date"))
+                                     body.get("repeat", ""), body.get("time", ""), body.get("date"),
+                                     body.get("every"), body.get("until"))
     return Response.json({"ok": True, "schedule": result}) if ok else Response.error(result, 400)
 
 
@@ -1908,7 +1914,8 @@ def r_launchable(s, request, *_):
     if not source or not source.live or "hosted_agents" not in (getattr(source, "features", None) or ()):
         return Response.json({"ok": True, "agents": []})
     try:
-        agents = source.request({"cmd": "launchable"}, timeout=25).get("agents") or []
+        # 装了哪几家很少变：上次的结果先回，旧了后台再问（同项目列表的缓存）
+        agents = aggregate.cached_request((source.id, "launchable"), source, {"cmd": "launchable"}, "agents", 25)
     except Exception:  # noqa: BLE001
         agents = []
     return Response.json({"ok": True, "agents": agents})

@@ -51,6 +51,13 @@ struct QueueStrip: View {
             #endif
             .animation(.snappy(duration: 0.22), value: rows)
             .animation(.snappy(duration: 0.22), value: chat.queueCollapsed)
+            // 编辑到一半离开了这一页：放开那条，别一直拦着不交
+            .onDisappear {
+                if let id = editing {
+                    editing = nil
+                    Task { await model.queueAction(key, id, "release") }
+                }
+            }
         }
     }
 
@@ -107,13 +114,15 @@ struct QueueStrip: View {
                         draft = row.text
                         editing = row.id
                         focused = true
+                        // 编辑期间电脑先别交这条：以前编辑到一半 Claude 这一轮做完、原文先发了，保存又成了一条（11-20）
+                        act(row, "hold")
                     }
                     icon("trash", L("删除")) { act(row, "delete") }
                 }
                 // 强插：一个实心圆圈里一个上箭头（11-11），主题色
                 Button { act(row, "now") } label: {
                     Group {
-                        if busy == row.id { ProgressView().controlSize(.mini) }
+                        if busy == row.id || row.sending { ProgressView().controlSize(.mini) }
                         else { Image(systemName: "arrow.up.circle.fill").font(.app(size: 19, weight: .regular)).foregroundStyle(Theme.claude) }
                     }
                     .frame(width: Self.button, height: Self.button)
@@ -121,7 +130,7 @@ struct QueueStrip: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.leading, 2)
-                .disabled(busy != nil)
+                .disabled(busy != nil || row.sending)
                 .help(L("中断 Claude 当前这一步，排队的消息马上发送"))
                 .accessibilityLabel(L("强插"))
                 .accessibilityHint(L("中断 Claude 当前这一步，排队的消息马上发送"))
@@ -144,13 +153,16 @@ struct QueueStrip: View {
                 .padding(.vertical, 7)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             HStack(spacing: 8) {
-                Button(L("取消")) { editing = nil }
+                Button(L("取消")) {
+                    editing = nil
+                    act(row, "release")
+                }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                 Button(L("保存")) {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     editing = nil
-                    if !text.isEmpty, text != row.text { act(row, "edit", text: text) }
+                    if !text.isEmpty, text != row.text { act(row, "edit", text: text) } else { act(row, "release") }
                 }
                 .buttonStyle(.plain)
                 .fontWeight(.semibold)

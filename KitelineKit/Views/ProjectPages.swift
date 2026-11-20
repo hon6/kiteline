@@ -98,7 +98,16 @@ struct ProjectDetailView: View {
         #endif
         .task { await loadPast() }
         .refreshable { await loadPast() }
+        #if os(iOS)
+        // iPhone / iPad：推进「新会话」页（项目已定，不再选）
+        .onChange(of: showNew) { _, on in
+            guard on else { return }
+            showNew = false
+            open(.newTask(NewTaskSeed(preset: p)))
+        }
+        #else
         .sheetPanel(isPresented: $showNew) { NewTaskView(preset: p) }
+        #endif
     }
 
     private func loadPast() async {
@@ -738,7 +747,7 @@ struct CodeView: View {
 // MARK: 新任务
 
 /// 新任务从哪个项目来（待办「创建会话」：原会话所在的机器和目录）
-struct TaskOrigin: Equatable {
+struct TaskOrigin: Hashable {
     var sourceId: String
     var cwd: String
 }
@@ -785,23 +794,12 @@ struct NewTaskView: View {
         }
         .task {
             if let preset { picked = preset }
+            // 先用上次取到的列表（项目不常变），马上能选；后台再取新的换上（每次打开都从头等电脑问一圈太慢，11-20 反馈）
+            if let cached = model.api.cached(ProjectsReply.self, "/api/projects") { adoptProjects(cached.projects, first: true) }
             do {
-                let reply = try await model.api.get(ProjectsReply.self, "/api/projects")
-                projects = reply.projects.filter(\.exists)
-                if picked == nil, let match, let found = projects?.first(where: { $0.sourceId == match.sourceId && $0.cwd == match.cwd }) {
-                    picked = found
-                }
-                carryFilters()
-                if picked == nil, let hint {
-                    let found = projects?.filter { PromptLink.matches(hint, cwd: $0.cwd, name: $0.name) } ?? []
-                    if found.count == 1 {
-                        picked = found[0]
-                    } else if let first = found.first {
-                        sourceFilter = ""
-                        projectFilter = first.name
-                    }
-                }
-            } catch { self.error = error.localizedDescription }
+                let reply = try await model.api.getCaching(ProjectsReply.self, "/api/projects")
+                adoptProjects(reply.projects, first: projects == nil)
+            } catch { if projects == nil { self.error = error.localizedDescription } }
         }
         .onChange(of: picked?.id) { _, _ in fill() }
         .onAppear { fill() }
@@ -809,6 +807,25 @@ struct NewTaskView: View {
         #if os(macOS)
         .panelFrame(width: 600, height: 640)
         #endif
+    }
+
+    /// 列表到了。first：头一次到（缓存或刚取的）才带入筛选、按待办 / 链接预选；后面换新列表时不动你已经筛的、选的
+    private func adoptProjects(_ list: [ProjectInfo], first: Bool) {
+        projects = list.filter(\.exists)
+        guard first else { return }
+        if picked == nil, let match, let found = projects?.first(where: { $0.sourceId == match.sourceId && $0.cwd == match.cwd }) {
+            picked = found
+        }
+        carryFilters()
+        if picked == nil, let hint {
+            let found = projects?.filter { PromptLink.matches(hint, cwd: $0.cwd, name: $0.name) } ?? []
+            if found.count == 1 {
+                picked = found[0]
+            } else if let first = found.first {
+                sourceFilter = ""
+                projectFilter = first.name
+            }
+        }
     }
 
     /// 选中项目时把带来的内容填进它的草稿（那个项目已经有草稿就不盖掉）
@@ -976,9 +993,18 @@ struct ComposeTask: View {
     let change: () -> Void
     let done: () -> Void
     @State private var when = "now"
-    @State private var repeatMode = "daily"
+    @State private var repeatMode = ComposeTask.initialRepeat
+    /// 定时任务默认的重复方式。截图版可用 KITELINE_DEMO_REPEAT 预选（模拟器点测时系统菜单里的选项点不到）
+    #if SNAPSHOT
+    static let initialRepeat = ProcessInfo.processInfo.environment["KITELINE_DEMO_REPEAT"] ?? "daily"
+    #else
+    static let initialRepeat = "daily"
+    #endif
     @State private var date = Date().addingTimeInterval(86400)
     @State private var time = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
+    /// 「每隔几小时」：隔几小时、当天最后一次不晚于几点（开始时间用上面的 time）
+    @State private var every = 2
+    @State private var until = Calendar.current.date(bySettingHour: 23, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var isolated = false
     @State private var canIsolate = false
     @State private var worktrees = 0
@@ -1000,140 +1026,178 @@ struct ComposeTask: View {
         var viaUI = false
     }
 
+    /// 输入框那一节的最后一行（键盘弹出后滚到这里）
+    private static let inputEnd = "compose-input-end"
     static func draftKey(_ project: ProjectInfo) -> String { "new:\(project.sourceId)\n\(project.cwd)" }
     private var draftKey: String { Self.draftKey(project) }
     private var text: Binding<String> { Binding(get: { model.drafts[draftKey] ?? "" }, set: { model.setDraft(draftKey, $0) }) }
     private var ready: Bool { project.open || project.live > 0 }
     private var scheduled: Bool { scheduleOnly || when == "sched" }
+    /// 输入框上面那几节有几行（变了就把输入框重新滚到键盘上方）
+    private var optionsShape: String { "\(scheduled)|\(repeatMode == "once")|\(attachments.count)|\(clipboardImage)|\(canIsolate)|\(agents.count)" }
     /// 选了别家 agent（定时任务只做 Claude Code）
     private var otherAgent: LaunchableAgent? { scheduled ? nil : agents.first { $0.id == agent } }
 
     var body: some View {
-        Form {
-            Section {
-                Button(action: change) { ProjectPickRow(project: project) }.buttonStyle(RowButtonStyle())
-                if !scheduleOnly {
-                    Picker("执行时间", selection: $when) {
-                        Text("现在开始").tag("now")
-                        Text("定时").tag("sched")
+        // 输入框在最后一节：键盘弹出后系统只保证光标那一行露出来，这里再把整个输入框连同「按住说话」滚到键盘上方
+        ScrollViewReader { proxy in
+            Form {
+                Section {
+                    Button(action: change) { ProjectPickRow(project: project) }.buttonStyle(RowButtonStyle())
+                    if !scheduleOnly {
+                        Picker("执行时间", selection: $when) {
+                            Text("现在开始").tag("now")
+                            Text("定时").tag("sched")
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
-                }
-                if !scheduled, !agents.isEmpty {
-                    Picker("Agent", selection: $agent) {
-                        Text(verbatim: "Claude Code").tag("claude-code")
-                        ForEach(agents) { Text(verbatim: $0.name).tag($0.id) }
+                    if !scheduled, !agents.isEmpty {
+                        Picker("Agent", selection: $agent) {
+                            Text(verbatim: "Claude Code").tag("claude-code")
+                            ForEach(agents) { Text(verbatim: $0.name).tag($0.id) }
+                        }
+                        .pickerStyle(.menu)
                     }
-                    .pickerStyle(.menu)
                 }
-            }
-            Section {
-                TextField(otherAgent.map { L("请描述需要 %@ 在此项目中完成的任务", $0.name) } ?? L("请描述需要 Claude 在此项目中完成的任务"),
-                          text: text, axis: .vertical)
-                    .lineLimit(5...12)
-                    .focused($focused)
-                #if os(iOS)
-                // 说出来转成文字接在后面（同对话页的「转文字」），改好再点开始
-                HoldToDictate { said in text.wrappedValue = Dictation.append(said, to: text.wrappedValue) }
-                    .listRowSeparator(.hidden)
+                #if os(macOS)
+                // Mac 的面板没有键盘挡住的问题：保持原来的顺序（输入框在选项上面）和底部的「开始」按钮
+                inputSection
+                #endif
+                if scheduled {
+                    Section {
+                        Picker("重复", selection: $repeatMode) {
+                            Text("每天").tag("daily")
+                            Text("工作日（周一至周五）").tag("weekdays")
+                            Text("每隔几小时").tag("hourly")
+                            Text("仅一次").tag("once")
+                        }
+                        if repeatMode == "once" { DatePicker("日期", selection: $date, displayedComponents: .date) }
+                        if repeatMode == "hourly" {
+                            // 每隔几小时：从开始时间起每隔这么久一次，到结束时间为止，天天如此
+                            Picker("间隔", selection: $every) {
+                                ForEach([1, 2, 3, 4, 6, 8, 12], id: \.self) { hours in Text(L("每 %lld 小时", count: hours)).tag(hours) }
+                            }
+                            DatePicker("开始时间", selection: $time, displayedComponents: .hourAndMinute)
+                            DatePicker("结束时间", selection: $until, displayedComponents: .hourAndMinute)
+                        } else {
+                            DatePicker("时间", selection: $time, displayedComponents: .hourAndMinute)
+                        }
+                    } footer: { Group {
+                            Text("到达设定时间后，Kiteline 将在该项目的 VS Code 窗口中新建会话并发送任务（电脑需保持开机；因睡眠错过的任务会在 1 小时内补执行）。")
+                        }
+                        .font(.ui(.footnote))
+                    }
+                } else {
+                    Section {
+                        PhotosPicker(selection: $picks, maxSelectionCount: 6, matching: .images) { Label("附图片", systemImage: "photo") }
+                        // 剪贴板里有图（刚截的屏、别处拷的图）：系统输入框只粘贴文字，另给一个「粘贴」（同发消息、加待办）
+                        if clipboardImage, attachments.count < 6 {
+                            HStack(spacing: 10) {
+                                Label("剪贴板里有图片", systemImage: "doc.on.clipboard").foregroundStyle(.secondary)
+                                Spacer(minLength: 8)
+                                PasteButton(supportedContentTypes: [.image]) { providers in
+                                    Task {
+                                        ClipboardImage.handled = ClipboardImage.changeCount
+                                        clipboardImage = false
+                                        let images = await DroppedImages.load(providers)
+                                        if images.isEmpty { model.flash(L("无法读取剪贴板里的图片")) }
+                                        for raw in images where attachments.count < 6 {
+                                            guard let prepared = ImagePrep.prepare(raw) else { continue }
+                                            attachments.append(ComposeAttachment(name: "image-\(attachments.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
+                                        }
+                                    }
+                                }
+                                .labelStyle(.titleAndIcon)
+                                .buttonBorderShape(.capsule)
+                                .controlSize(.small)
+                            }
+                        }
+                        if !attachments.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(attachments) { item in
+                                        if let image = PlatformImage(data: item.preview) {
+                                            Image(platform: image).resizable().scaledToFill().frame(width: 60, height: 60)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                .overlay(alignment: .topTrailing) {
+                                                    Button { attachments.removeAll { $0.id == item.id } } label: {
+                                                        Image(systemName: "xmark.circle.fill").foregroundStyle(.white, .black.opacity(0.6))
+                                                            .frame(width: 30, height: 30, alignment: .topTrailing).contentShape(Rectangle())
+                                                    }
+                                                    .buttonStyle(.steady(.plain))
+                                                    .accessibilityLabel("移除图片")
+                                                }
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)   // 图多了别把一排的总宽往上报
+                        }
+                        if canIsolate {
+                            Toggle(isOn: $isolated) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("在独立分支里做")
+                                    Text(L("新建 Git worktree（分支以 tars/ 开头），Claude 仅在其中修改，不影响主目录中正在进行的改动") + (worktrees > 0 ? L("（此仓库已有 %@ 个 Kiteline 分支）", "\(worktrees)") : ""))
+                                        .font(.ui(.caption)).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    } footer: { Group {
+                            if let otherAgent {
+                                Text(otherAgent.viaUI ? L("将在电脑上的 %@ 中新建任务并发送（会短暂切到 %@）", otherAgent.name, otherAgent.name)
+                                     : L("将在电脑后台运行 %@，可在手机上查看和操作", otherAgent.name))
+                            } else {
+                                Text(isolated ? L("会在电脑上为新分支打开一个新的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")
+                                     : (ready ? L("在已打开的 VS Code 窗口里新建会话") : L("将先在电脑上打开此项目的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")))
+                            }
+                        }
+                        .font(.ui(.footnote))
+                    }
+                }
+                #if os(macOS)
+                Section {
+                    Button {
+                        Task { await go(override: false) }
+                    } label: {
+                        Text(busy ? (scheduled ? "正在创建…" : (ready || otherAgent != nil ? "正在新建会话…" : "正在打开 VS Code…")) : (scheduled ? "创建定时任务" : "开始"))
+                            .font(.ui(.headline)).frame(maxWidth: .infinity)
+                    }
+                    .disabled(busy)
+                }
                 #else
-                MacDictateButton { said in text.wrappedValue = Dictation.append(said, to: text.wrappedValue) }
+                // 输入框放在最后：键盘弹出时它正好在键盘上方，附图、分支这些选项在上面
+                inputSection
                 #endif
             }
-            if scheduled {
-                Section {
-                    Picker("重复", selection: $repeatMode) {
-                        Text("每天").tag("daily")
-                        Text("工作日（周一至周五）").tag("weekdays")
-                        Text("仅一次").tag("once")
-                    }
-                    if repeatMode == "once" { DatePicker("日期", selection: $date, displayedComponents: .date) }
-                    DatePicker("时间", selection: $time, displayedComponents: .hourAndMinute)
-                } footer: { Group {
-                        Text("到达设定时间后，Kiteline 将在该项目的 VS Code 窗口中新建会话并发送任务（电脑需保持开机；因睡眠错过的任务会在 1 小时内补执行）。")
-                    }
-                    .font(.ui(.footnote))
-                }
-            } else {
-                Section {
-                    PhotosPicker(selection: $picks, maxSelectionCount: 6, matching: .images) { Label("附图片", systemImage: "photo") }
-                    // 剪贴板里有图（刚截的屏、别处拷的图）：系统输入框只粘贴文字，另给一个「粘贴」（同发消息、加待办）
-                    if clipboardImage, attachments.count < 6 {
-                        HStack(spacing: 10) {
-                            Label("剪贴板里有图片", systemImage: "doc.on.clipboard").foregroundStyle(.secondary)
-                            Spacer(minLength: 8)
-                            PasteButton(supportedContentTypes: [.image]) { providers in
-                                Task {
-                                    ClipboardImage.handled = ClipboardImage.changeCount
-                                    clipboardImage = false
-                                    let images = await DroppedImages.load(providers)
-                                    if images.isEmpty { model.flash(L("无法读取剪贴板里的图片")) }
-                                    for raw in images where attachments.count < 6 {
-                                        guard let prepared = ImagePrep.prepare(raw) else { continue }
-                                        attachments.append(ComposeAttachment(name: "image-\(attachments.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
-                                    }
-                                }
-                            }
-                            .labelStyle(.titleAndIcon)
-                            .buttonBorderShape(.capsule)
-                            .controlSize(.small)
-                        }
-                    }
-                    if !attachments.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(attachments) { item in
-                                    if let image = PlatformImage(data: item.preview) {
-                                        Image(platform: image).resizable().scaledToFill().frame(width: 60, height: 60)
-                                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            .overlay(alignment: .topTrailing) {
-                                                Button { attachments.removeAll { $0.id == item.id } } label: {
-                                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.white, .black.opacity(0.6))
-                                                        .frame(width: 30, height: 30, alignment: .topTrailing).contentShape(Rectangle())
-                                                }
-                                                .buttonStyle(.steady(.plain))
-                                                .accessibilityLabel("移除图片")
-                                            }
-                                    }
-                                }
-                            }
-                        }
-                        .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)   // 图多了别把一排的总宽往上报
-                    }
-                    if canIsolate {
-                        Toggle(isOn: $isolated) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("在独立分支里做")
-                                Text(L("新建 Git worktree（分支以 tars/ 开头），Claude 仅在其中修改，不影响主目录中正在进行的改动") + (worktrees > 0 ? L("（此仓库已有 %@ 个 Kiteline 分支）", "\(worktrees)") : ""))
-                                    .font(.ui(.caption)).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                } footer: { Group {
-                        if let otherAgent {
-                            Text(otherAgent.viaUI ? L("将在电脑上的 %@ 中新建任务并发送（会短暂切到 %@）", otherAgent.name, otherAgent.name)
-                                 : L("将在电脑后台运行 %@，可在手机上查看和操作", otherAgent.name))
-                        } else {
-                            Text(isolated ? L("会在电脑上为新分支打开一个新的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")
-                                 : (ready ? L("在已打开的 VS Code 窗口里新建会话") : L("将先在电脑上打开此项目的 VS Code 窗口") + (project.kind == "ssh" ? L("（Remote-SSH，约需十余秒）") : "")))
-                        }
-                    }
-                    .font(.ui(.footnote))
+            #if os(iOS)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                guard focused else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.inputEnd, anchor: .bottom) }
+            }
+            // 上面的选项多了一行、少了一行（切到定时、附了图、读到是 Git 仓库）：输入框跟着挪，仍贴着键盘
+            .onChange(of: optionsShape) { _, _ in
+                guard focused else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.inputEnd, anchor: .bottom) }
                 }
             }
-            Section {
-                Button {
-                    Task { await go(override: false) }
-                } label: {
-                    Text(busy ? (scheduled ? "正在创建…" : (ready || otherAgent != nil ? "正在新建会话…" : "正在打开 VS Code…")) : (scheduled ? "创建定时任务" : "开始"))
-                        .font(.ui(.headline)).frame(maxWidth: .infinity)
-                }
-                .disabled(busy)
-            }
+            #endif
         }
         .navigationTitle(scheduled ? "定时任务" : "新任务")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
+        #if os(iOS)
+        // 「开始」放在右上角：键盘弹着也点得到（接了键盘时 ⌘↩）
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                if busy { ProgressView() } else {
+                    Button(scheduled ? "创建" : "开始") { Task { await go(override: false) } }
+                        .fontWeight(.semibold)
+                        .keyboardShortcut(.return, modifiers: .command)
+                }
+            }
+        }
         #endif
         .onAppear {
             focused = true
@@ -1173,6 +1237,36 @@ struct ComposeTask: View {
                       confirm: L("仍然开始")) { Task { await go(override: true) } }
     }
 
+    /// 任务输入框那一节：iPhone / iPad 排在最后（贴着键盘），Mac 排在选项上面
+    @ViewBuilder private var inputSection: some View {
+        #if os(iOS)
+        Section {
+            inputField
+            // 说出来转成文字接在后面（同对话页的「转文字」），改好再点开始
+            HoldToDictate { said in text.wrappedValue = Dictation.append(said, to: text.wrappedValue) }
+                .listRowSeparator(.hidden)
+                .id(Self.inputEnd)
+        } footer: {
+            // 「开始」在右上角：发出去之后的进展写在输入框下面（键盘上方看得到）
+            if busy {
+                Text(scheduled ? "正在创建…" : (ready || otherAgent != nil ? "正在新建会话…" : "正在打开 VS Code…")).font(.ui(.footnote))
+            }
+        }
+        #else
+        Section {
+            inputField
+            MacDictateButton { said in text.wrappedValue = Dictation.append(said, to: text.wrappedValue) }
+        }
+        #endif
+    }
+
+    private var inputField: some View {
+        TextField(otherAgent.map { L("请描述需要 %@ 在此项目中完成的任务", $0.name) } ?? L("请描述需要 Claude 在此项目中完成的任务"),
+                  text: text, axis: .vertical)
+            .lineLimit(5...12)
+            .focused($focused)
+    }
+
     private func go(override: Bool) async {
         let prompt = (model.drafts[draftKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty || (!scheduled && !attachments.isEmpty) else { model.flash(L("请先填写任务内容")); focused = true; return }
@@ -1182,11 +1276,17 @@ struct ComposeTask: View {
             let c = Calendar.current.dateComponents([.hour, .minute], from: time)
             let d = Calendar.current.dateComponents([.year, .month, .day], from: date)
             do {
-                let reply = try await model.api.post("/api/schedules", body: [
+                var body: [String: Any] = [
                     "sourceId": project.sourceId, "cwd": project.cwd, "prompt": prompt, "repeat": repeatMode,
                     "time": String(format: "%02d:%02d", c.hour ?? 9, c.minute ?? 0),
                     "date": String(format: "%04d-%02d-%02d", d.year ?? 2026, d.month ?? 1, d.day ?? 1),
-                ])
+                ]
+                if repeatMode == "hourly" {
+                    let last = Calendar.current.dateComponents([.hour, .minute], from: until)
+                    body["every"] = every
+                    body["until"] = String(format: "%02d:%02d", last.hour ?? 23, last.minute ?? 0)
+                }
+                let reply = try await model.api.post("/api/schedules", body: body)
                 model.setDraft(draftKey, "")
                 model.flash(L("已创建：%@", "\((reply["schedule"] as? [String: Any])?["label"] as? String ?? "定时任务")"))
                 done()

@@ -45,7 +45,13 @@ public sealed class NewTaskSheet
     readonly WrapPanel images = new();
     readonly LookSegmented timing;
     readonly DatePicker datePicker = new() { VerticalAlignment = VerticalAlignment.Center };
-    readonly TimePicker timePicker = new() { VerticalAlignment = VerticalAlignment.Center, ClockIdentifier = "24HourClock", MinuteIncrement = 5 };
+    readonly TimePicker timePicker = new() { VerticalAlignment = VerticalAlignment.Center, ClockIdentifier = "24HourClock", MinuteIncrement = 5, MinWidth = 0, Width = 140 };   // 默认最小宽 242，和「至」「每 2 小时」放一行放不下
+    // 「每隔几小时」：从 timePicker 的时间起每隔 everyBox 这么久一次，到 untilPicker 的时间为止，天天如此
+    readonly TimePicker untilPicker = new() { VerticalAlignment = VerticalAlignment.Center, ClockIdentifier = "24HourClock", MinuteIncrement = 5, SelectedTime = new TimeSpan(23, 0, 0), MinWidth = 0, Width = 140 };
+    static readonly int[] EveryHours = [1, 2, 3, 4, 6, 8, 12];
+    readonly ComboBox everyBox = new() { VerticalAlignment = VerticalAlignment.Center, ItemsSource = EveryHours.Select(h => L("每 %lld 小时", h)).ToList(), SelectedIndex = 1 };
+    readonly TextBlock untilLabel = Ui.Text(L("至"), 12, color: "Text2");
+    Control whenRow = new Panel();
     readonly CheckBox isolated;
     /// 用哪个 agent：除了 Claude Code，还能选这台电脑上装着、可以在后台运行的（GET /api/launchable，按电脑记）。没有可选的就不显示
     readonly ComboBox agentBox = new() { MinWidth = 150, FontSize = Look.Pt(12), VerticalAlignment = VerticalAlignment.Center, IsVisible = false };
@@ -122,24 +128,27 @@ public sealed class NewTaskSheet
         DragDrop.SetAllowDrop(field, true);
         field.AddHandler(DragDrop.DropEvent, (_, e) => OnDrop(e));
 
-        timing = new LookSegmented([("now", L("现在开始")), ("daily", L("每天")), ("weekdays", L("工作日")), ("once", L("仅一次"))], "now", _ => Update())
+        timing = new LookSegmented([("now", L("现在开始")), ("daily", L("每天")), ("weekdays", L("工作日")), ("hourly", L("按小时")), ("once", L("仅一次"))], "now", _ => Update())
         {
-            Width = Lang.Current == "en" ? 340 : 280,   // 英文「Start Now」「Weekdays」放不进 280
+            Width = Lang.Current == "en" ? 400 : 380,   // 五段（「按小时」= 每隔几小时）
         };
+        untilLabel.VerticalAlignment = VerticalAlignment.Center;
         var tomorrow = DateTime.Today.AddDays(1);
         datePicker.SelectedDate = tomorrow;
         timePicker.SelectedTime = new TimeSpan(9, 0, 0);
         isolated = new CheckBox { Content = Ui.Text(L("在独立分支中进行（git worktree）"), 12), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left }
             .Tip(L("在仓库旁新建 worktree 及以 tars/ 开头的分支，Claude 仅在其中修改，不影响主目录中正在进行的改动"));
         agentBox.SelectionChanged += (_, _) => Update();
-        var options = Ui.H(10, timing, datePicker, timePicker, new Spacer(), agentBox);   // 独立分支单独一行，挤在一起窄窗口放不下
+        var options = Ui.H(10, timing, new Spacer(), agentBox);
+        // 定时任务的时间单独一行（和五段的时机选择挤在一行时窄窗口放不下）
+        whenRow = Ui.H(8, datePicker, timePicker, untilLabel, untilPicker, everyBox, new Spacer());   // 独立分支单独一行，挤在一起窄窗口放不下
 
         startButton = new Tap(startLabel.Pad(18, 0), Start, 7) { Height = 30, MinWidth = 88 }.Keys("Action", "Action");
         var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), () => window!.Close(), 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
             .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
         var footer = Ui.H(10, warning, status.Shrink(), new Spacer(), cancel, startButton);
 
-        var stack = new StackPanel { Spacing = 12, Children = { header, scopes, listBox, field, options, isolated, footer } };
+        var stack = new StackPanel { Spacing = 12, Children = { header, scopes, listBox, field, options, whenRow, isolated, footer } };
         window = Dialog.Make(stack.Pad(20), 600, L("新任务"));
         window.KeyDown += (_, e) => { if (e.Key == Key.Escape) window.Close(); };
         window.Closed += (_, _) => { shown = null; MainModel.Shared.NewTaskPreset = null; };
@@ -381,6 +390,8 @@ public sealed class NewTaskSheet
             : other is { } chosen ? L("请描述需要 %@ 在「%@」中完成的任务", chosen.Name, project.Name) : L("请描述需要 Claude 在「%@」中完成的任务", project.Name);
         datePicker.IsVisible = Timing == "once";
         timePicker.IsVisible = Timing != "now";
+        untilLabel.IsVisible = untilPicker.IsVisible = everyBox.IsVisible = Timing == "hourly";
+        whenRow.IsVisible = Timing != "now";
         isolated.IsEnabled = Timing == "now";
         startLabel.Text = sending ? L("正在新建…") : Timing == "now" ? L("开始") : L("创建定时任务");
         startButton.Opacity = CanStart ? 1 : 0.45;
@@ -481,11 +492,18 @@ public sealed class NewTaskSheet
             {
                 var time = timePicker.SelectedTime ?? new TimeSpan(9, 0, 0);
                 var date = datePicker.SelectedDate?.Date ?? DateTime.Today.AddDays(1);
-                var reply = await api.Post("/api/schedules", new JsonObject
+                var schedule = new JsonObject
                 {
                     ["sourceId"] = project.SourceId, ["cwd"] = project.Cwd, ["prompt"] = text, ["repeat"] = Timing,
                     ["time"] = $"{time.Hours:00}:{time.Minutes:00}", ["date"] = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                });
+                };
+                if (Timing == "hourly")
+                {
+                    var last = untilPicker.SelectedTime ?? new TimeSpan(23, 0, 0);
+                    schedule["every"] = EveryHours[Math.Max(0, everyBox.SelectedIndex)];
+                    schedule["until"] = $"{last.Hours:00}:{last.Minutes:00}";
+                }
+                var reply = await api.Post("/api/schedules", schedule);
                 AppModel.Shared.Flash(L("已创建：%@", reply.Obj("schedule").Str("label") ?? L("定时任务")));
                 window.Close();
                 return;

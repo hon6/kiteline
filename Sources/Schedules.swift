@@ -8,7 +8,7 @@ final class Scheduler {
         var sourceId: String
         var cwd: String
         var prompt: String
-        /// once / daily / weekdays
+        /// once / daily / weekdays / hourly（每隔几小时：从 time 起每 every 小时一次，到 until 为止，天天如此）
         var repeatMode: String
         /// "HH:mm"
         var time: String
@@ -19,10 +19,13 @@ final class Scheduler {
         var lastRun: Double?
         var lastOk: Bool?
         var lastResult: String?
+        /// 只有 hourly 用：隔几小时（1～12）、当天最后一次不晚于几点（"HH:mm"，没填是 23:59）
+        var every: Int?
+        var until: String?
     }
 
     static let shared = Scheduler()
-    static let modes = ["once": "一次", "daily": "每天", "weekdays": "工作日"]
+    static let modes = ["once": "一次", "daily": "每天", "weekdays": "工作日", "hourly": "每隔几小时"]
     private static let grace: TimeInterval = 3600
 
     private(set) var tasks: [Task] = []
@@ -50,7 +53,8 @@ final class Scheduler {
 
     // MARK: - 增删改
 
-    func add(sourceId: String, cwd: String, prompt: String, repeatMode: String, time: String, date: String?) -> Result<Task, ValidationError> {
+    func add(sourceId: String, cwd: String, prompt: String, repeatMode: String, time: String, date: String?,
+             every: Int? = nil, until: String? = nil) -> Result<Task, ValidationError> {
         guard Self.modes[repeatMode] != nil else { return .failure(.init("重复方式无效")) }
         guard Self.parseTime(time) != nil else { return .failure(.init("时间格式应为 HH:mm")) }
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -62,6 +66,14 @@ final class Scheduler {
             guard let date = date, let when = Self.onceDate(date, time) else { return .failure(.init("一次性任务需选择日期")) }
             guard when > Date() else { return .failure(.init("该时间已过")) }
             task.date = date
+        }
+        if repeatMode == "hourly" {
+            guard let every, (1...12).contains(every) else { return .failure(.init("间隔应为 1～12 小时")) }
+            if let until, !until.isEmpty {
+                guard let end = Self.parseTime(until), let start = Self.parseTime(time), end >= start else { return .failure(.init("结束时间应不早于开始时间")) }
+                task.until = until
+            }
+            task.every = every
         }
         tasks.append(task)
         save()
@@ -177,6 +189,18 @@ final class Scheduler {
         return Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: day)
     }
 
+    /// hourly 的任务在某一天的各次时间：从 time 起每 every 小时一次，不晚于 until（没填是 23:59）
+    static func occurrences(_ task: Task, on day: Date) -> [Date] {
+        guard let first = at(day, task.time), let last = at(day, task.until ?? "23:59"), let every = task.every, every > 0 else { return [] }
+        var out: [Date] = []
+        var when = first
+        while when <= last, out.count < 24 {
+            out.append(when)
+            when = when.addingTimeInterval(TimeInterval(every) * 3600)
+        }
+        return out
+    }
+
     private static func isWeekday(_ date: Date) -> Bool {
         let weekday = Calendar.current.component(.weekday, from: date)   // 1 = 周日
         return weekday != 1 && weekday != 7
@@ -190,6 +214,13 @@ final class Scheduler {
         case "once":
             guard task.lastRun == nil, let date = task.date, let when = Self.onceDate(date, task.time), when <= now else { return nil }
             return when
+        case "hourly":
+            for back in 0..<2 {
+                guard let day = Calendar.current.date(byAdding: .day, value: -back, to: now),
+                      let when = Self.occurrences(task, on: day).last(where: { $0 <= now }) else { continue }
+                candidate = when
+                break
+            }
         default:
             for back in 0..<8 {
                 guard let day = Calendar.current.date(byAdding: .day, value: -back, to: now),
@@ -210,6 +241,13 @@ final class Scheduler {
             guard task.lastRun == nil, let date = task.date else { return nil }
             return Self.onceDate(date, task.time)
         }
+        if task.repeatMode == "hourly" {
+            for ahead in 0..<2 {
+                if let day = Calendar.current.date(byAdding: .day, value: ahead, to: now),
+                   let when = Self.occurrences(task, on: day).first(where: { $0 > now }) { return when }
+            }
+            return nil
+        }
         for ahead in 0..<9 {
             guard let day = Calendar.current.date(byAdding: .day, value: ahead, to: now),
                   let when = Self.at(day, task.time), when > now else { continue }
@@ -228,6 +266,8 @@ final class Scheduler {
             "label": label(task),
         ]
         if let date = task.date { item["date"] = date }
+        if let every = task.every { item["every"] = every }
+        if let until = task.until { item["until"] = until }
         if let next = nextRun(task) { item["nextRun"] = Int64(next.timeIntervalSince1970 * 1000) }
         if let last = task.lastRun { item["lastRun"] = last }
         if let ok = task.lastOk { item["lastOk"] = ok }
@@ -239,6 +279,7 @@ final class Scheduler {
         switch task.repeatMode {
         case "daily": return "每天 \(task.time)"
         case "weekdays": return "工作日 \(task.time)"
+        case "hourly": return "每 \(task.every ?? 1) 小时（\(task.time)–\(task.until ?? "23:59")）"
         default:
             let parts = (task.date ?? "").split(separator: "-")
             let day = parts.count == 3 ? "\(Int(parts[1]) ?? 0)月\(Int(parts[2]) ?? 0)日" : (task.date ?? "")

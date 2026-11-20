@@ -299,6 +299,9 @@ private struct VirtualScreenSection: View {
 struct GeneralPane: View {
     @State private var config = AppState.shared.config
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    /// 节省 token 分组里开关下面的说明：图片缩小省了多少、哪台电脑缩不了图（问各台在线的 watcher，见 loadSavers）
+    @State private var leanSaved: String?
+    @State private var leanUnable: String?
 
     var body: some View {
         Form {
@@ -451,6 +454,25 @@ struct GeneralPane: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("图片先缩小再给 Agent 看", isOn: binding(\.mobile.shrinkAgentImages))
+                if let leanSaved { Text(leanSaved).font(.callout).foregroundStyle(.secondary) }
+                if config.mobile.shrinkAgentImages, let leanUnable { Text(leanUnable).font(.callout).foregroundStyle(.secondary) }
+                Picker("上下文自动整理", selection: binding(\.mobile.compactWindow)) {
+                    Text("按 Claude Code 默认").tag(0)
+                    Text("到 20 万 token 时").tag(200_000)
+                    Text("到 30 万 token 时").tag(300_000)
+                    Text("到 40 万 token 时").tag(400_000)
+                }
+            } header: {
+                Text("节省 token")
+            } footer: {
+                Text("图片按像素计算 token，进入上下文后每次请求都会重新读取。打开后，Agent 读取的大图会先缩小到长边 1280 像素，需要看清细节时再读一次即可得到原图；在新开的会话中生效。上下文越大，每次请求重新读取的内容越多；选择大小后，上下文达到该大小时自动整理一次，较早的对话细节会被概括。两项均在本机完成，不联网，目前只对 Claude Code 生效。")
+                    .foregroundStyle(.secondary)
+            }
+            .onAppear { loadSavers() }
+            // 实验性功能：总管模式（打开先弹配置；同手机设置里那组，见 KitelineKit/Views/StewardViews.swift）
+            TarsStewardSection()
+            Section {
                 Picker("浏览器运行在", selection: binding(\.mobile.browserOn)) {
                     Text("这台电脑").tag("client")
                     Text("Agent 所在的电脑").tag("server")
@@ -534,6 +556,33 @@ struct GeneralPane: View {
     private func setDigestTime(_ value: String) {
         config.mobile.digestTime = value
         AppState.shared.updatePreferences { $0.mobile.digestTime = value }
+    }
+
+    /// 问各台在线的 watcher：图片缩小省了多少（加起来）、哪几台没有能缩图的工具
+    private func loadSavers() {
+        let sources = AppState.shared.liveSources
+        guard !sources.isEmpty else { return }
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var images = 0, saved = 0
+        var unable: [String] = []
+        for source in sources {
+            group.enter()
+            source.request(["cmd": "savers"], timeout: 8) { result in
+                if case .success(let reply) = result, let lean = reply["lean"] as? [String: Any] {
+                    lock.lock()
+                    images += (lean["images"] as? Int) ?? 0
+                    saved += (lean["saved"] as? Int) ?? 0
+                    if reply["claude"] as? Bool == true, reply["canResize"] as? Bool == false { unable.append(source.config.displayName) }
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            leanSaved = images > 0 ? String(format: L("已缩小 %lld 张图片，少占上下文约 %@ token"), images, UsageInfo.compact(saved)) : nil
+            leanUnable = unable.isEmpty ? nil : String(format: L("%@ 上没有可用的缩图工具，图片不会缩小"), unable.joined(separator: "、"))
+        }
     }
 
     private func binding<T>(_ path: WritableKeyPath<AppConfig, T>) -> Binding<T> {

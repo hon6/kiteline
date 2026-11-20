@@ -307,11 +307,32 @@ enum Hosted {
     }
 
     /// 新任务里能选的别家 agent（这台电脑上装着、插件给了后台启动的配方）。老版本 watcher、Windows 电脑返回空
+    /// 装了哪几家很少变：上次的结果先回，超过 60 秒的在后台再问一次换掉（新任务面板每次打开都等它太慢，11-20 反馈）。只在主线程读写
+    private static var launchableCache: [String: (at: Date, agents: [[String: Any]])] = [:]
+    private static var launchableRefreshing: Set<String> = []
+
     static func launchable(sourceId: String, completion: @escaping ([[String: Any]]) -> Void) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { launchable(sourceId: sourceId, completion: completion) }
+            return
+        }
         guard let connection = AppState.shared.source(withId: sourceId), connection.state.isLive,
               connection.hostFeatures.contains("hosted_agents") else { completion([]); return }
+        if let hit = launchableCache[sourceId], Date().timeIntervalSince(hit.at) < Projects.cacheMaxAge {
+            completion(hit.agents)
+            guard Date().timeIntervalSince(hit.at) > Projects.cacheFresh, !launchableRefreshing.contains(sourceId) else { return }
+            launchableRefreshing.insert(sourceId)
+            connection.request(["cmd": "launchable"], timeout: 25) { result in
+                launchableRefreshing.remove(sourceId)
+                if case .success(let reply) = result, let agents = reply["agents"] as? [[String: Any]] {
+                    launchableCache[sourceId] = (Date(), agents)
+                }
+            }
+            return
+        }
         connection.request(["cmd": "launchable"], timeout: 25) { result in
             guard case .success(let reply) = result, let agents = reply["agents"] as? [[String: Any]] else { completion([]); return }
+            launchableCache[sourceId] = (Date(), agents)
             completion(agents)
         }
     }

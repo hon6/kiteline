@@ -58,6 +58,21 @@ public sealed class ChatPanes
     /// 整个分屏多大
     public (double Width, double Height) Bounds { get; set; }
     public event Action? Changed;
+    /// 开成标签的会话（切到后面的标签也算）：只在标签增删时变。左边栏给这些会话画「已在标签页中打开」的标识
+    HashSet<string> openKeys = [];
+    public event Action? OpenKeysChanged;
+    public bool IsOpen(string key) => openKeys.Contains(key);
+    /// 左边栏里又点了一个已经开成标签的会话：不再开，切过去，那个标签的边框闪几下主题色（告诉你它在哪，同 Mac 版 flashTab）。
+    /// 记下是哪个、什么时候开始的：标签每次布局变了都重建，新建出来的照着时间接着闪
+    public (string Key, DateTime At)? Flash { get; private set; }
+    public event Action? Flashed;
+
+    public void FlashTab(string key)
+    {
+        if (PaneHolding(key) is null) return;
+        Flash = (key, DateTime.UtcNow);
+        Flashed?.Invoke();
+    }
 
     public ChatPanes()
     {
@@ -91,6 +106,8 @@ public sealed class ChatPanes
     {
         Changed?.Invoke();
         Save();
+        var now = Keys.ToHashSet();
+        if (!now.SetEquals(openKeys)) { openKeys = now; OpenKeysChanged?.Invoke(); }
     }
 
     // MARK: 改

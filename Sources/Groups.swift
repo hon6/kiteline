@@ -663,6 +663,19 @@ final class Groups {
     // MARK: - 外面来的事
 
     /// watcher 的 hello：记下这台电脑上 agent 调 watcher 的写法
+    /// 这台电脑上 agent 调 watcher 的写法（hello 里带来的；老版本没给就用默认的）
+    func command(for sourceId: String) -> String { commands[sourceId] ?? "python3 ~/.ccpulse/ccpulse-watch.py" }
+
+    /// 总管模式：总管用 steward group 拉群（总管 + 几个会话），说明作为总管的第一条群消息发给大家（见 Steward）。
+    /// 同样这几个成员的群已经有了就接着用，不重复建
+    func stewardGroup(keys: [String], topic: String, from steward: String) {
+        DispatchQueue.main.async {
+            let wanted = Set(keys)
+            let id = self.store.groups.first(where: { Set($0.members.map(\.key)) == wanted })?.id ?? self.create(keys: keys, topic: "").id
+            self.agentSaid(key: steward, item: ["group": id, "text": topic])
+        }
+    }
+
     func noteHello(sourceId: String, raw: [String: Any]) {
         if let command = raw["selfCommand"] as? String, !command.isEmpty {
             DispatchQueue.main.async { self.commands[sourceId] = command }

@@ -15,7 +15,8 @@ enum Theme {
     #if os(macOS)
     /// Mac 主窗口（同网页版的 Mac 样式）：对话区就是窗口底色，Claude 的气泡、工具卡片是半透明灰
     static let botBubble = dynamic(light: 0x787880, dark: 0xFFFFFF, lightAlpha: 0.12, darkAlpha: 0.08)
-    static let chatBackground = Color(nsColor: .windowBackgroundColor)
+    /// 选了 VS Code 配色方案时是方案里编辑区的底，否则窗口底色
+    static var chatBackground: Color { Look.shared.scheme.map { Color(hex: $0.editor) } ?? Color(nsColor: .windowBackgroundColor) }
     #else
     static let botBubble = dynamic(light: 0xFFFFFF, dark: 0x2C2C2E)
     static let chatBackground = dynamic(light: 0xEDEDED, dark: 0x111111)
@@ -194,7 +195,10 @@ enum MacPalette {
     static let surface2 = Theme.dynamic(light: 0xF7F7F8, dark: 0x2C2C2E)
     static let separator = Theme.dynamic(light: 0x3C3C43, dark: 0x545458, lightAlpha: 0.18, darkAlpha: 0.6)
     /// 分屏的标签栏：压在对话底色上的一层暗色（标签本身是对话底色，和下面的对话连成一片）
-    static let tabStrip = Theme.dynamic(light: 0x000000, dark: 0x000000, lightAlpha: 0.055, darkAlpha: 0.32)
+    /// 选了 VS Code 配色方案时是方案里标签栏的底（不透明，盖住下面的对话底色）
+    static var tabStrip: Color {
+        Look.shared.scheme.map { Color(hex: $0.tabs) } ?? Theme.dynamic(light: 0x000000, dark: 0x000000, lightAlpha: 0.055, darkAlpha: 0.32)
+    }
     static let text2 = Theme.dynamic(light: 0x3C3C43, dark: 0xEBEBF5, lightAlpha: 0.8, darkAlpha: 0.8)
     static let text3 = Theme.dynamic(light: 0x3C3C43, dark: 0xEBEBF5, lightAlpha: 0.6, darkAlpha: 0.6)
     static let red = Color(hex: 0xFF3B30)
@@ -362,15 +366,16 @@ extension View {
 }
 
 #if os(macOS)
-/// Mac 面板顶上的搜索框（见 panelSearch）
+/// Mac 面板顶上的搜索框（见 panelSearch）。在新版界面的侧栏里（sideColumn）照侧栏的尺寸规范：离栏边 8、高 28、圆角 6、底色透明（同导航栏的搜索框）
 struct MacSearchField: View {
     @Binding var text: String
     let prompt: String
     var focus = false
     @FocusState private var focused: Bool
+    @Environment(\.sideColumn) private var side
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: SideMetric.gap) {
             Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
             TextField(prompt, text: $text).textFieldStyle(.plain).focused($focused)
             if !text.isEmpty {
@@ -378,12 +383,62 @@ struct MacSearchField: View {
                     .buttonStyle(.plain).help(L("清除"))
             }
         }
-        .font(.ui(.body))
-        .padding(.horizontal, 10).frame(height: 30)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(Color(nsColor: .controlBackgroundColor))   // 和面板里列表的底色一样，列表滚上来时从下面过
+        .font(side ? .system(size: SideMetric.Text.body) : .ui(.body))
+        .padding(.horizontal, side ? SideMetric.pad : 10).frame(height: side ? SideMetric.control : 30)
+        .background(Color.primary.opacity(side ? 0.055 : 0.06), in: RoundedRectangle(cornerRadius: side ? SideMetric.radius : 8, style: .continuous))
+        .padding(.horizontal, side ? SideMetric.edge : 16).padding(.vertical, side ? SideMetric.edge : 10)
+        .background(side ? Color.clear : Color(nsColor: .controlBackgroundColor))   // 和面板里列表的底色一样，列表滚上来时从下面过
         .onAppear { if focus { focused = true } }
+    }
+}
+
+/// Mac 新版界面侧栏（导航栏、会话列表、文件侧栏）的尺寸规范（11-21 反馈：所有边距、间距认真核对、统一，写成样式规范）。
+/// 规范全文在 docs/platforms/mac-app.md「新版界面样式规范」；新写侧栏里的东西一律用这里的数，不另写魔法数。
+/// 横向只有一条对齐线：栏边 → 框（搜索框、行的选中底、用量条、按钮）8 点，框 → 内容 8 点，所以文字、图标都从离栏边 16 点处起；右边同样
+public enum SideMetric {
+    /// 栏边 → 框（搜索框、行的选中底、用量条、按钮的外沿）
+    public static let edge: CGFloat = 8
+    /// 框 → 框里的内容
+    public static let pad: CGFloat = 8
+    /// 栏边 → 内容（文字、图标）的对齐线 = edge + pad
+    public static let inset: CGFloat = 16
+    /// 一行里图标和文字、文字和文字之间
+    public static let gap: CGFloat = 6
+    /// 行的上下内边距（两三行字的会话行、项目行）
+    public static let rowPad: CGFloat = 6
+    /// 小节标题的高（可折叠的「会话」「文件」，同 VS Code 的 22）
+    public static let header: CGFloat = 22
+    /// 输入框、带字的按钮
+    public static let control: CGFloat = 28
+    /// 图标按钮、状态栏里的项
+    public static let small: CGFloat = 22
+    /// 状态栏的高
+    public static let bar: CGFloat = 24
+    /// 框、行、按钮的圆角（胶囊按钮除外）
+    public static let radius: CGFloat = 6
+
+    /// 字号：四档，加粗只用在标题和选中
+    public enum Text {
+        /// 栏标题、输入框、项目名（栏顶上那个）
+        public static let title: CGFloat = 13
+        /// 输入框里的字
+        public static let body: CGFloat = 13
+        /// 行的标题（会话、项目、待办、收藏）、按钮
+        public static let row: CGFloat = 12
+        /// 行的第二行（状态）、小节标题、状态栏
+        public static let caption: CGFloat = 11
+        /// 第三行（设备 · 目录）、时间
+        public static let meta: CGFloat = 10.5
+    }
+}
+
+private struct SideColumnKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    /// 在 Mac 新版界面的侧栏里（搜索框、列表的边距照 SideMetric）
+    public var sideColumn: Bool {
+        get { self[SideColumnKey.self] }
+        set { self[SideColumnKey.self] = newValue }
     }
 }
 #endif

@@ -42,6 +42,21 @@ struct LookSection: View {
                 LookSegmented(selection: Bindable(Lang.shared).choice, options: Lang.Choice.allCases.map { ($0, Lang.title($0)) })
                     .frame(width: 260)
             }
+            // 配色方案（仿 VS Code 的颜色主题，11-20 用户）：一格一套，小图画着图标栏、侧栏、编辑区、状态栏的颜色；选了窗口深浅跟着它
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("配色方案")
+                    Spacer()
+                    Text("仿 VS Code 的颜色主题，状态栏左下角也能切换").font(.app(size: 11)).foregroundStyle(.secondary)
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+                    SchemeSwatch(scheme: nil, selected: look.schemeID.isEmpty) { look.schemeID = "" }
+                    ForEach(LookScheme.all) { scheme in
+                        SchemeSwatch(scheme: scheme, selected: look.schemeID == scheme.id) { look.schemeID = scheme.id }
+                    }
+                }
+            }
+            .padding(.vertical, 2)
             Toggle("主窗口顶部的纸鸢", isOn: $kite)
                 .onChange(of: kite) { _, value in KiteOverlay.enabled = value }
             VStack(alignment: .leading, spacing: 10) {
@@ -127,6 +142,65 @@ private struct FontRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// 一套配色方案的小样：左边一条图标栏、一条侧栏、右边编辑区、底下状态栏，下面写名字；选中的描强调色边
+private struct SchemeSwatch: View {
+    let scheme: LookScheme?
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Group {
+                    if let scheme {
+                        VStack(spacing: 0) {
+                            HStack(spacing: 0) {
+                                scheme.activityBarColor.frame(width: 9)
+                                scheme.sideBarColor.frame(width: 22)
+                                    .overlay(alignment: .topLeading) {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            ForEach(0..<3) { i in Capsule().fill(scheme.fgColor.opacity(0.35)).frame(width: i == 1 ? 10 : 14, height: 2) }
+                                        }
+                                        .padding(4)
+                                    }
+                                ZStack(alignment: .topLeading) {
+                                    scheme.editorColor
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        scheme.tabsColor.frame(height: 6)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Capsule().fill(scheme.accentColor).frame(width: 18, height: 2)
+                                            Capsule().fill(scheme.fgColor.opacity(0.4)).frame(width: 26, height: 2)
+                                            Capsule().fill(scheme.fgColor.opacity(0.3)).frame(width: 14, height: 2)
+                                        }
+                                        .padding(5)
+                                    }
+                                }
+                            }
+                            scheme.statusBarColor.frame(height: 5)
+                        }
+                    } else {
+                        // 跟随系统：一半浅一半深
+                        HStack(spacing: 0) { Color(white: 0.95); Color(white: 0.15) }
+                            .overlay { Image(systemName: "circle.lefthalf.filled").foregroundStyle(.secondary) }
+                    }
+                }
+                .frame(height: 46)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(selected ? Color.tarsBrand : Color.primary.opacity(0.15), lineWidth: selected ? 2 : 1)
+                }
+                Text(verbatim: scheme?.name ?? L("跟随系统")).font(.app(size: 10.5, weight: selected ? .semibold : .regular)).lineLimit(1)
+                    .foregroundStyle(selected ? .primary : .secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(scheme?.name ?? L("跟随系统"))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

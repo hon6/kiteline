@@ -69,6 +69,10 @@ check("开着的技能经 CCPULSE_SKILLS 带给 watcher", env.get("CCPULSE_SKILL
 check("远端：python 不是 python3 时告诉它", agent_skill.remote_env("python3.11").get("CCPULSE_PYTHON") == "python3.11")
 agent_skill.ENABLED = agent_skill.TODO_ENABLED = agent_skill.STAGE_ENABLED = False
 check("全关：远端也带空值（让它删掉）", agent_skill.remote_env("python3") == {"CCPULSE_SKILLS": "''"})
+agent_skill.SHRINK_IMAGES, agent_skill.COMPACT_WINDOW = True, agent_skill.compact_window(300000)
+check("节省 token 两项开着：和技能同一条通道带给 watcher（images、compact:<N>）", agent_skill.remote_env("python3") == {"CCPULSE_SKILLS": "images,compact:300000"})
+agent_skill.SHRINK_IMAGES, agent_skill.COMPACT_WINDOW = False, agent_skill.compact_window(12345)
+check("自动整理的窗口只认 20 万 / 30 万 / 40 万，别的当不设", agent_skill.COMPACT_WINDOW == 0 and agent_skill.remote_env("python3") == {"CCPULSE_SKILLS": "''"})
 os.environ.pop("KITELINE_SKILL_TEST")
 os.environ["KITELINE_CONFIG_DIR"] = os.environ.get("KITELINE_CONFIG_DIR") or "/tmp/kl-isolated"
 check("隔离的测试实例不带技能开关（不动真的技能目录）", agent_skill.local_env("/x/ccpulse-watch.py") == {})

@@ -141,6 +141,24 @@ extension AppModel {
         flash(L("已取消收藏"))
     }
 
+    /// 电脑端能改收藏的文字（11-20 起；连着旧版电脑时不给「编辑」）
+    var supportsFavoriteEdit: Bool { hostFeatures.contains("favoriteEdit") }
+
+    /// 改一条收藏的文字（收藏下来的内容有错、想补一句）：先在本机换掉，电脑存好后整份换成它回的
+    func updateFavorite(_ id: String, text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let index = favorites.items.firstIndex(where: { $0.id == id }) { favorites.items[index].text = text.isEmpty ? nil : text }
+        Task {
+            do {
+                applyFavorites(try await api.postData("/api/favorites/update", body: ["id": id, "text": text]))
+                flash(L("已保存"))
+            } catch {
+                show(error)
+                await refreshFavorites()
+            }
+        }
+    }
+
     func removeFavorites(_ ids: [String]) {
         favorites.items.removeAll { ids.contains($0.id) }
         favoriteRequest(["ids": ids])

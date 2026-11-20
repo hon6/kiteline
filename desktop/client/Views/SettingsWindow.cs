@@ -201,6 +201,21 @@ public sealed class SettingsWindow : Window
             Form.Toggle(L("安装任务阶段技能"), config["installStageSkill"] is null || config.Truthy("installStageSkill"), on => Set("installStageSkill", on)),
             Form.Row(L("其他编程 agent"), Form.Button(L("在「插件」中管理"), () => Select("plugins"))),
         ], L("技能会装给这台电脑和远端电脑上的各个编程 agent（Claude Code、Codex、OpenCode、DeepSeek Harness 等）。截图技能使 agent 回复时尽量附带相关截图；网页测试技能使 agent 完成网页功能后在浏览器中实际操作一遍，并发来带截图的测试报告；待办与关键信息技能使 agent 把需要以后处理的事加入待办，并把账号、密码等关键信息单独发来，方便收藏；任务阶段技能使 agent 按任务的实际做法规划步骤，并在进入每一步时主动报告，会话列表据此显示「2/4 开发中」；Claude Code 进入下一步却没有报告时，Kiteline 会提醒它补报（未安装时按 agent 的操作自动识别）。各 agent 的接入、开关和兼容情况在「插件」页查看和管理。")));
+        // 节省 token（同 Mac 版）：图片先缩小再给 Agent 看、上下文到多大自动整理；由各台电脑上的 watcher 装上 / 写进 Claude Code 的设置
+        var compactChoices = new[] { (0, L("按 Claude Code 默认")), (200000, L("到 20 万 token 时")), (300000, L("到 30 万 token 时")), (400000, L("到 40 万 token 时")) };
+        var compactBox = new ComboBox { Width = 200, ItemsSource = compactChoices.Select(c => c.Item2).ToList(),
+                                        SelectedIndex = Math.Max(0, Array.FindIndex(compactChoices, c => c.Item1 == (config.Int("compactWindow") ?? 0))) };
+        compactBox.SelectionChanged += (_, _) => { if (compactBox.SelectedIndex >= 0) Set("compactWindow", compactChoices[compactBox.SelectedIndex].Item1); };
+        // 开关下面的说明：图片缩小省了多少、哪几台电脑没有能缩图的工具（主机汇总各台 watcher 的）
+        var savers = status.Obj("savers");
+        var leanNotes = new List<string>();
+        if ((savers?.Int("images") ?? 0) > 0) leanNotes.Add(L("已缩小 %lld 张图片，少占上下文约 %@ token", savers!.Int("images") ?? 0, Format.Tokens(savers.Int("saved") ?? 0)));
+        var leanUnable = savers?.Arr("unable").Items().Select(n => n.ToString()).Where(n => n.Length > 0).ToList() ?? [];
+        if (config.Truthy("shrinkAgentImages") && leanUnable.Count > 0) leanNotes.Add(L("%@ 上没有可用的缩图工具，图片不会缩小", string.Join("、", leanUnable)));
+        form.Children.Add(Form.Section(L("节省 token"), [
+            Form.Toggle(L("图片先缩小再给 Agent 看"), config.Truthy("shrinkAgentImages"), on => Set("shrinkAgentImages", on), leanNotes.Count > 0 ? string.Join("\n", leanNotes) : null),
+            Form.Row(L("上下文自动整理"), compactBox),
+        ], L("图片按像素计算 token，进入上下文后每次请求都会重新读取。打开后，Agent 读取的大图会先缩小到长边 1280 像素，需要看清细节时再读一次即可得到原图；在新开的会话中生效。上下文越大，每次请求重新读取的内容越多；选择大小后，上下文达到该大小时自动整理一次，较早的对话细节会被概括。两项均在本机完成，不联网，目前只对 Claude Code 生效。")));
         // Agent 浏览器（同 Mac 版）：开在哪、最多几个、空闲多久关闭
         var places = new[] { ("client", L("这台电脑")), ("server", L("Agent 所在的电脑")) };
         var placeBox = new ComboBox { Width = 180, ItemsSource = places.Select(p => p.Item2).ToList(), SelectedIndex = config.Str("browserOn") == "server" ? 1 : 0 };

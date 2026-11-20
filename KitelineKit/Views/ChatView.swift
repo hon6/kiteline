@@ -332,7 +332,10 @@ struct ChatView: View {
                 while revealed < limit {
                     try? await Task.sleep(for: .milliseconds(16))
                     if Task.isCancelled { return }
-                    revealed = min(revealed + 16, limit)
+                    // 睡的这一下里别处可能把两个数都设成了最大值（跳到某条消息、翻到顶加载更早的）：这时再 revealed + 16 就整数溢出，
+                    // 整个 App 直接闪退（11-20 反馈：点收藏 / 待办的「原消息」打开另一个会话必闪退——新开的对话页正好还在补画）。
+                    // 所以先看还差多少，不够 16 就直接到头
+                    if revealed < limit { revealed = limit - revealed > 16 ? revealed + 16 : limit }
                 }
             }
             .task(id: jumpTarget) {
@@ -690,7 +693,13 @@ struct ChatView: View {
         case .model: showModel = true
         case .goal: model.chat(key).goalSheet = true
         case .compact: confirmCompact = true
-        case .newTask: showNewTask = true
+        case .newTask:
+            #if os(iOS)
+            // iPhone / iPad：推进「新会话」页，项目就是这个会话的
+            open(.newTask(NewTaskSeed.session(key, model: model)))
+            #else
+            showNewTask = true
+            #endif
         case .info: showInfo = true
         case .agentInfo: showAgentInfo = true
         case .share: showShare = true

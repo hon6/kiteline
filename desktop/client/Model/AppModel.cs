@@ -520,9 +520,44 @@ public sealed partial class AppModel : ObservableObject
         {
             Id = id, Text = text, Previews = images.Select(i => i.Preview).ToList(),
             Payload = images.Select(i => new Dictionary<string, string> { ["name"] = i.Name, ["data"] = Convert.ToBase64String(i.Data) }).ToList(),
+            BusyAtSend = Session(key) is { } s && (s.IsBusy || s.IsWaiting),
         });
         _ = Deliver(key, id);
         return id;
+    }
+
+    /// 设置类的命令（/model、/effort）交给后台的会话执行，不走发消息那一套（同 iOS 版 sendSetting，11-20 反馈：以前点了之后
+    /// 排成一条消息挂在输入框上方，要和 VS Code 里切换一样）。Claude 正忙时后台的送达插件让这一轮接下来的请求直接按新模型发、
+    /// 这一轮做完再执行命令本身；会话还是旧版插件时照旧排到这一轮做完（回 later，队列里看得到）。
+    /// 回这次的编号（记在界面的临时显示上）；没成时调 failed 把显示改回去
+    public string SendSetting(string key, string text, string done, Action failed)
+    {
+        var id = "set-" + NewId();
+        _ = Run();
+        return id;
+
+        async Task Run()
+        {
+            try
+            {
+                var reply = await Api.Post("/api/send", new Dictionary<string, object>
+                {
+                    ["text"] = text, ["images"] = new List<object>(), ["override"] = false, ["cid"] = id,
+                }, new Dictionary<string, string> { ["key"] = key });
+                if (reply.Bool("submitted") != true)
+                {
+                    failed();
+                    Flash(reply.Str("message") ?? L("未能切换，请稍后重试"));
+                }
+                else if (reply.Bool("later") == true) Flash(L("Claude 正在工作，本轮结束后生效"));
+                else Flash(done);
+            }
+            catch (Exception e)
+            {
+                failed();
+                Flash(e.Message);
+            }
+        }
     }
 
     /// 听写、按住说话：录音交给后台转写，转写完直接发
@@ -548,7 +583,11 @@ public sealed partial class AppModel : ObservableObject
         catch (Exception e) { Show(e); return null; }
     }
 
-    public void Discard(string key, string id) => Chat(key).RemovePending(p => p.Id == id);
+    public void Discard(string key, string id)
+    {
+        Chat(key).RemovePending(p => p.Id == id);
+        queuedAttempts.Remove(id);
+    }
 
     public void Retry(string key, string id, bool overrideCap = false)
     {
@@ -585,6 +624,17 @@ public sealed partial class AppModel : ObservableObject
     public async Task<bool> QueueAction(string key, string qid, string action, string? text = null, int? dir = null)
     {
         var chat = Chat(key);
+        // 开始 / 取消编辑：让电脑这条先别交（hold）/ 放开（release）。不改本地显示、出错不提示（老版本插件不认，照旧能编辑；同 iOS）
+        if (action is "hold" or "release")
+        {
+            try
+            {
+                await Api.Post("/api/queue", new Dictionary<string, object> { ["action"] = "hold", ["id"] = qid, ["on"] = action == "hold" },
+                    new Dictionary<string, string> { ["key"] = key });
+            }
+            catch (Exception) { }
+            return true;
+        }
         // 先按调过的显示（电脑的新队列一两秒后才传回来）
         if (action != "now")
         {
@@ -680,6 +730,7 @@ public sealed partial class AppModel : ObservableObject
                     ["text"] = p.Text, ["images"] = p.Payload, ["override"] = p.Override, ["cid"] = p.Id,
                 }, new Dictionary<string, string> { ["key"] = key });
             }
+            queuedAttempts.Remove(id);
             var submitted = reply.Bool("submitted") ?? false;
             var later = submitted && (reply.Bool("later") ?? false);
             chat.Update(id, x => x with { State = submitted ? (later ? SendState.Later : SendState.Sent) : SendState.Filled, Qid = later ? reply.Str("qid") : x.Qid });
@@ -701,6 +752,7 @@ public sealed partial class AppModel : ObservableObject
         catch (OfflineError)
         {
             chat.Update(id, x => x with { State = SendState.Queued });   // 连不上后台：排队，连上后自动发
+            RetryQueuedLater(key, id);
         }
         catch (ApiError e)
         {
@@ -711,6 +763,24 @@ public sealed partial class AppModel : ObservableObject
         {
             chat.Update(id, x => x with { State = SendState.Failed, Error = e.Message });
         }
+    }
+
+    /// 离线排队的这条过一会儿自己再发一次：3、6、12、24 秒……最长 30 秒一次（同 iOS）。
+    /// 只靠重连时的 FlushQueued 不够：一次请求超时时实时连接常常还连着、不会「重连」，消息就一直挂着，只能删了重发（11-20）。
+    /// 带同一个 cid，后台会去重
+    readonly Dictionary<string, int> queuedAttempts = new();
+
+    async void RetryQueuedLater(string key, string id)
+    {
+        var attempt = queuedAttempts.GetValueOrDefault(id) + 1;
+        queuedAttempts[id] = attempt;
+        await Task.Delay(TimeSpan.FromSeconds(Math.Min(3 * Math.Pow(2, attempt - 1), 30)));
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var p = chats.TryGetValue(key, out var chat) ? chat.Pending.FirstOrDefault(x => x.Id == id) : null;
+            if (p is null) { queuedAttempts.Remove(id); return; }
+            if (p.State == SendState.Queued) Retry(key, id);   // 已被重连时的 FlushQueued 拿去发了、发出去了：不管
+        });
     }
 
     /// 连上了：把离线时排队的消息依次发出去

@@ -55,6 +55,8 @@ final class AppModel {
     let browsers = BrowserStore()
     /// 会话群（跨设备、跨项目的会话互相发消息，Model/Groups.swift）
     let groups = GroupBoard()
+    /// 总管模式（实验性）的设置和总管会话，见 Model/Steward.swift
+    let steward = StewardState()
     private(set) var me: Me?
     /// 用户给会话、给某家 agent 设的头像和昵称（电脑上存着，各端同步；见 Views/AgentDetails.swift）
     private(set) var faces = FacesPayload()
@@ -786,6 +788,8 @@ final class AppModel {
             tabGroupShared.apply(data)
         case "groups":
             groups.apply(data)
+        case "steward":
+            steward.apply(data)
         case "group_msg":
             groups.receive(data)
         case "sys":
@@ -841,6 +845,12 @@ final class AppModel {
         if let features = state.features {
             hostFeatures = Set(features)
             registerHostTranslate()
+            // 总管模式：连上时读一次电脑上的设置（开着的话「会话」页签换成总管）；电脑不支持就当关着
+            if hostFeatures.contains("steward") {
+                if !steward.loaded { Task { await steward.refresh(api) } }
+            } else if steward.enabled {
+                steward.apply([String: Any]())
+            }
         }
         if let value = state.hosted, value != hosted { hosted = value }
         // 先登记，下面换会话列表时新 agent 的标志就画得出来；插件信息变了而会话没变（先显示的是上次的缓存）也要重画一遍
@@ -1048,7 +1058,10 @@ final class AppModel {
                                   payload: images.map { ["name": $0.name, "data": $0.data.base64EncodedString()] },
                                   files: files.map { PendingFile(name: $0.name, size: $0.data.count) },
                                   filePayload: files.map { ["name": $0.name, "data": $0.data.base64EncodedString()] })
-        chat(key).pending.append(pending)
+        var queued = pending
+        // 斜杠命令以外的话 Claude 正忙时会排队（后台运行的会话直接键入终端，回的不是排队，回来后照常进对话）
+        queued.busyAtSend = session(key).map { $0.isBusy || $0.isWaiting } ?? false
+        chat(key).pending.append(queued)
         Task { await deliver(key, id) }
         return id
     }
@@ -1080,6 +1093,7 @@ final class AppModel {
     /// 没发出去的消息不要了：从对话里拿掉
     func discard(_ key: String, _ id: String) {
         chat(key).pending.removeAll { $0.id == id }
+        queuedAttempts[id] = nil
     }
 
     func retry(_ key: String, _ id: String, override: Bool = false) {
@@ -1112,6 +1126,7 @@ final class AppModel {
                 reply = try await api.post(live ? "/api/send" : "/api/resume", ["key": key],
                                            body: ["text": p.text, "images": p.payload, "files": p.filePayload, "override": p.override, "cid": p.id])
             }
+            queuedAttempts[id] = nil
             let submitted = reply["submitted"] as? Bool ?? false
             let later = submitted && reply["later"] as? Bool ?? false
             chat.update(id) {
@@ -1133,6 +1148,7 @@ final class AppModel {
             if later { trackQueued(key, id) } else { expirePending(key, id) }
         } catch is OfflineError {
             chat.update(id) { $0.state = .queued }   // 网络不通：排队，连上后自动发
+            retryQueuedLater(key, id)
         } catch let error as APIError {
             chat.update(id) { $0.state = .failed(error.message) }
             if error.data["capExceeded"] as? Bool == true { capPrompt = (key, id, error.message) }
@@ -1196,6 +1212,11 @@ final class AppModel {
     @discardableResult
     func queueAction(_ key: String, _ qid: String, _ action: String, text: String? = nil, dir: Int? = nil) async -> Bool {
         let chat = chat(key)
+        // 开始 / 取消编辑：让电脑这条先别交（hold）/ 放开（release）。不改本地显示、出错不提示（老版本插件不认，照旧能编辑）
+        if action == "hold" || action == "release" {
+            _ = try? await api.post("/api/queue", ["key": key], body: ["action": "hold", "id": qid, "on": action == "hold"])
+            return true
+        }
         // 先按调过的显示（电脑的新队列一两秒后才传回来）
         if action != "now" {
             var items = chat.queueRows(session(key)).filter(\.editable).map { QueuedItem(id: $0.id, text: $0.text) }
@@ -1229,6 +1250,27 @@ final class AppModel {
             chat.queueDraft = nil
             show(error)
             return false
+        }
+    }
+
+    /// 离线排队的这条过一会儿自己再发一次：3、6、12、24 秒……最长 30 秒一次。
+    /// 只靠重连时的 flushQueued 不够：局域网里一次请求超时（Wi-Fi 省电、电脑忙）时实时连接常常还连着，不会「重连」，
+    /// 消息就一直挂在「离线，连接后自动发送」，用户只能删了重发（11-20）。带同一个 cid，电脑那头会去重
+    @ObservationIgnored private var queuedAttempts: [String: Int] = [:]
+
+    private func retryQueuedLater(_ key: String, _ id: String) {
+        let attempt = (queuedAttempts[id] ?? 0) + 1
+        queuedAttempts[id] = attempt
+        let delay = min(3 * pow(2, Double(attempt - 1)), 30)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self else { return }
+            // 已经被重连时的 flushQueued 拿去发了、发出去了、被删了：不管
+            guard let p = self.chats[key]?.pending.first(where: { $0.id == id }), p.state == .queued else {
+                if self.chats[key]?.pending.contains(where: { $0.id == id }) != true { self.queuedAttempts[id] = nil }
+                return
+            }
+            self.retry(key, id)
         }
     }
 

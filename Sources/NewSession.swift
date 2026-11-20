@@ -292,8 +292,21 @@ enum Projects {
         return p("项目：%@", parts.joined(separator: p.semicolon))
     }
 
-    /// detail：项目总览用，多带每个项目的会话数、今天动过几个、git 概况（各台机器并行跑 git，慢一点）
-    static func collect(detail: Bool = false, completion: @escaping ([String: Any]) -> Void) {
+    /// 各台机器上次回的项目（键：来源 id + 简版 / 详细版）。项目不常变，新任务、项目页每次打开都去问每台机器、等最慢的那台回话太慢（11-20）：
+    /// 有缓存先用缓存马上回，超过 cacheFresh 秒的顺手在后台再问一次换掉；没缓存或超过一天的才当场等。
+    /// 运行中的会话、开着的窗口每次现算，不受缓存影响。只在主线程读写
+    private static var cache: [String: (at: Date, projects: [[String: Any]])] = [:]
+    private static var refreshing: Set<String> = []
+    static let cacheFresh: TimeInterval = 60
+    static let cacheMaxAge: TimeInterval = 24 * 3600
+
+    /// detail：项目总览用，多带每个项目的会话数、今天动过几个、git 概况（各台机器并行跑 git，慢一点）。
+    /// fresh：不用缓存，每台机器都当场问（日报要最新的 git 状态）
+    static func collect(detail: Bool = false, fresh: Bool = false, completion: @escaping ([String: Any]) -> Void) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { collect(detail: detail, fresh: fresh, completion: completion) }
+            return
+        }
         let state = AppState.shared
         var items: [String: [String: Any]] = [:]   // 键：来源 id + 目录
         var order: [String] = []
@@ -317,20 +330,39 @@ enum Projects {
                 let liveCwds = state.store.records.filter { $0.sourceId == connection.id }.map { $0.snapshot.cwd }.filter { !$0.isEmpty }
                 request = ["cmd": "project_overview", "limit": 40, "since": startOfDay, "extra": Array(Set(liveCwds))]
             }
+            func apply(_ projects: [[String: Any]]) {
+                for project in projects {
+                    guard let cwd = project["cwd"] as? String else { continue }
+                    upsert(connection.config, cwd) { item in
+                        if Digest.number(project["lastActive"]) > Digest.number(item["lastActive"]) { item["lastActive"] = project["lastActive"] }
+                        item["exists"] = project["exists"] ?? true
+                        if let title = project["title"] as? String { item["title"] = title }
+                        for field in ["sessionId", "sessions", "today", "git"] where project[field] != nil && !(project[field] is NSNull) {
+                            item[field] = project[field]
+                        }
+                    }
+                }
+            }
+            let cacheKey = "\(connection.id)|\(detail ? "detail" : "brief")"
+            if !fresh, let hit = cache[cacheKey], Date().timeIntervalSince(hit.at) < cacheMaxAge {
+                apply(hit.projects)
+                group.leave()
+                guard Date().timeIntervalSince(hit.at) > cacheFresh, !refreshing.contains(cacheKey) else { continue }
+                refreshing.insert(cacheKey)
+                connection.request(request, timeout: 30) { result in
+                    refreshing.remove(cacheKey)
+                    if case .success(let response) = result {
+                        cache[cacheKey] = (Date(), response["projects"] as? [[String: Any]] ?? [])
+                    }
+                }
+                continue
+            }
             connection.request(request, timeout: 30) { result in
                 switch result {
                 case .success(let response):
-                    for project in response["projects"] as? [[String: Any]] ?? [] {
-                        guard let cwd = project["cwd"] as? String else { continue }
-                        upsert(connection.config, cwd) { item in
-                            if Digest.number(project["lastActive"]) > Digest.number(item["lastActive"]) { item["lastActive"] = project["lastActive"] }
-                            item["exists"] = project["exists"] ?? true
-                            if let title = project["title"] as? String { item["title"] = title }
-                            for field in ["sessionId", "sessions", "today", "git"] where project[field] != nil && !(project[field] is NSNull) {
-                                item[field] = project[field]
-                            }
-                        }
-                    }
+                    let projects = response["projects"] as? [[String: Any]] ?? []
+                    cache[cacheKey] = (Date(), projects)
+                    apply(projects)
                 case .failure(let error):
                     errors.append("\(connection.config.displayName)：\(error.description)")
                 }
