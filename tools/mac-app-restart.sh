@@ -34,14 +34,14 @@ done
   open -g "$app" && echo "RESTARTED $app"' _ "$PIDS" "$APP" >> "$LOG" 2>&1 < /dev/null
 
 if [ "$inside" = 1 ]; then
-  echo "    这个终端是 Kiteline 的会话终端：Kiteline 马上退出并重新打开，终端会随之关闭（日志 $LOG）"
+  echo "    这个终端是 Kiteline 的会话终端：Kiteline 马上退出并重新打开，终端会随之关闭（日志 ${LOG}）"
 fi
 for i in $(seq 1 80); do
   grep -q '^RESTARTED' "$LOG" 2>/dev/null && break
   sleep 0.25
 done
 if grep -q '^RESTARTED' "$LOG"; then
-  echo "    已重新打开：$APP${PIDS:+（结束了旧进程 $PIDS）}"
+  echo "    已重新打开：$APP${PIDS:+（结束了旧进程 ${PIDS}）}"
 else
   echo "    ! 20 秒内没等到重新打开，看 $LOG" >&2
   exit 1
