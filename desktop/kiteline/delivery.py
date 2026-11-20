@@ -290,8 +290,9 @@ def waiting_midway(record, where="VS Code 输入框"):
     return "发送途中 Claude 弹出了确认框，为避免回车替你选中默认选项，消息已填入%s但未提交。请先在确认卡片中作出选择，再到 VS Code 中按回车" % where
 
 
-def send(text, attachments, record, source, submit, siblings, allow_waiting=False):
+def send(text, attachments, record, source, submit, siblings, allow_waiting=False, front=False):
     """发文本（可带图）。siblings：同一来源、同一目录下的其他会话数（认「Claude Code」通用标签用）。
+    front：不走后台送达、直接走前台（强插时 Claude Code 不收插件提交的，见 queue）。
     allow_waiting：回答提问时先按 Esc 关掉了提问框，watcher 还没来得及更新状态，不拦。
     走后台送达的会话等确认时也能发：不按回车，消息排在确认之后（后台没接上、改走前台时再拦）"""
     global last_delivered
@@ -325,7 +326,7 @@ def send(text, attachments, record, source, submit, siblings, allow_waiting=Fals
         return _agent_request({"cmd": "agent_send", "text": compose(text, files, [{"file": True}] * len(files)), "images": images,
                                "ui": ["keys"]}, record, source, True)
     # 只填不提交（submit = False）要把字留在 VS Code 输入框里，后台做不到，照旧走前台
-    if submit and via_bridge(record):
+    if submit and not front and via_bridge(record):
         reply = _bridge_reply({"op": "send", "text": prompt}, record, source)
         if reply is not None:
             result = reply.get("result") or "ok"
@@ -426,7 +427,7 @@ UNTITLED_CLOSE = ("「%s」还没有标题（尚未发送消息，或标题正�
 QUEUE_ACTIONS = ("move", "edit", "delete", "now")
 
 
-def queue(action, qid, text, direction, record, source):
+def queue(action, qid, text, direction, record, source, siblings=0):
     """排队的消息（Claude 忙时发的、还在 mod 里等着）：move（dir -1 / 1）、edit（text）、delete、now（强插：中断当前这一步，
     排队的马上进会话）。会话的 mod 是老版本（只在会话启动时加载，快照里没有 queue）时只有强插能做（等同按 Esc）。同 Mac 版 Delivery.queue"""
     if record.kind == "kiteline":
@@ -449,11 +450,20 @@ def queue(action, qid, text, direction, record, source):
         fields["text"] = text
     if direction is not None:
         fields["dir"] = direction
-    result = _bridge(fields, record, source)
+    reply = _bridge_reply(fields, record, source)
+    result = None if reply is None else (reply.get("result") or "ok")
     if result is None:
         return Outcome(False, False, "未能连接会话，请稍后再试")
     if result == "none":
         return Outcome(False, False, "这条消息已发给 Claude")
+    if result == "dropped":
+        # 电脑上刚按了停止，Claude Code 不收插件提交的（watcher 的 bridge_dropped）：从前台发出去（算你亲自输入），发出去了再从队列里删掉
+        if not reply.get("text"):
+            return Outcome(False, False, "未能发送，请在电脑上查看")
+        outcome = send(reply["text"], [], record, source, True, siblings, front=True)
+        if outcome.get("ok") and outcome.get("submitted"):
+            _bridge({"op": "queue", "action": "delete", "qid": qid}, record, source)
+        return outcome
     return Outcome(True, action == "now", "已中断当前这一步，排队的消息马上发送" if action == "now" else "已更新")
 
 

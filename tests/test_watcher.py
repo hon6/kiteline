@@ -1377,10 +1377,10 @@ try:
     check("不带参数：测试 watcher（没有 CCPULSE_SKILLS）不往真实的 ~/.claude 里装、也不抛", "CCPULSE_SKILLS" in os.environ or W.sync_bridge_mod() is False)
     mod_ts = W.BRIDGE_MOD_FILES["hooks/register.ts"]
     check("mod：斜杠命令走 $.command.run，以「/」开头的普通话垫零宽空格（源码里是转义写法）",
-          "$.command.run(" in mod_ts and "`\\u200b${text}` : text" in mod_ts and "await deliver($, { id: item.id, text: item.text, cmd })" in mod_ts and "\u200b" not in mod_ts)
+          "$.command.run(" in mod_ts and "`\\u200b${q.text}` : q.text" in mod_ts and "await deliver($, q, 1500)" in mod_ts and "\u200b" not in mod_ts)
     tc = mod_ts.split("on('turn.complete'")[1].split("on('tool.call'")[0]
     check("mod：Claude 忙时发来的话和斜杠命令都排进队，这一轮做完（turn.complete）再照顺序提交 / 执行",
-          "later.push({ id: item.id, text: item.text, ...(cmd ? { cmd } : {}) })" in mod_ts
+          "later.push(q)" in mod_ts
           and "for (const q of later.splice(0)) await deliver($, q)" in tc
           and "void $.command.run({ command: slash[0], args: slash[1] })" in mod_ts and "result = 'later'" in mod_ts)
     check("读记录时去掉垫的零宽空格：手机上显示、核对送达都照原话", W.user_string_item("\u200b/Users/x 看看", {"id": "1"})["text"] == "/Users/x 看看")
@@ -1389,8 +1389,11 @@ try:
               "type": "queued_command", "prompt": "手机上说的", "origin": {"kind": "plugin", "name": "kiteline", "asUser": True}}})[0].get("t") == "user"
           and W.normalize_line(0, {"type": "attachment", "timestamp": ts(1), "attachment": {
               "type": "queued_command", "prompt": "别的插件", "origin": {"kind": "plugin", "name": "other"}}}) == [])
-    check("mod v3：不再往一轮中间插（session.append 的行 2.1.327 起被标成「不是用户说的」），alive 标 v3",
-          "$.session.append(" not in mod_ts and "classic.PostToolBatch" not in mod_ts and "v: 3" in mod_ts)
+    check("mod v3：不再往一轮中间插（session.append 的行 2.1.327 起被标成「不是用户说的」）",
+          "$.session.append(" not in mod_ts and "classic.PostToolBatch" not in mod_ts)
+    check("mod v4：Claude Code 不收的提交（你在电脑上按了停止，回 drop）放回队列；直发、强插被丢回 dropped，alive 标 v4；会话重开接着排",
+          "v: 4" in mod_ts and ".drop !== undefined" in mod_ts and "requeue($, q)" in mod_ts and mod_ts.count("result = 'dropped'") == 2
+          and "startedAt - q.at < 1800 * 1000" in mod_ts and hasattr(W.Watcher, "bridge_dropped"))
     note = {"type": "attachment", "timestamp": ts(1), "attachment": {"type": "plugin_note", "plugin": "kiteline",
             "content": ["\u200b现在部署"], "sentAs": "system"}}
     got = W.normalize_line(0, note)
@@ -1403,7 +1406,7 @@ try:
           and not any(W.bridge_typeable(x) for x in ("/compact", "!ls", "# 记住", "@file", "看看 @src/ma", "", "  ")))
     check("mod：排队的话写进 <会话>.queue.json，认 queue 指令（move / edit / delete / now），alive 标 v2",
           "queue.json" in mod_ts and "item.op === 'queue'" in mod_ts and all("item.action === '%s'" % a in mod_ts for a in ("move", "edit", "delete", "now"))
-          and "v: 3" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now"} and "queue" in W.BRIDGE_OPS)
+          and "v: 4" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now"} and "queue" in W.BRIDGE_OPS)
     q_dir = W.bridge_dir()
     os.makedirs(q_dir, exist_ok=True)
     q_started = int(time.time() * 1000) - 5000

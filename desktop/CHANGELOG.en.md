@@ -1,5 +1,12 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.47 (2026-11-20)
+
+### Bug Fixes
+
+- **Queued messages are no longer lost**: Messages you send while Claude is working wait in a queue. If you stopped Claude's current work on the computer, the queue used to be cleared without the messages reaching Claude. They now stay in the queue and are sent in order after your next message on the computer, once Claude finishes that turn; you can also send any of them right away from your phone. Messages you send from your phone right after stopping are now delivered as well, and queued messages that have not been sent yet are kept when the session is reopened.
+- **Tapping “Reconnect” repeatedly no longer creates duplicate connections**: When the connection to another computer dropped, tapping “Reconnect Now” on the phone several times could open multiple connections at once and leave duplicate background processes running on that computer, using a lot of memory. Kiteline now keeps only one connection to each computer.
+
 ## 1.0.46 (2026-11-20)
 
 ### New Features

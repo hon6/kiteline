@@ -113,6 +113,9 @@ def python_command():
     return [sys.executable]
 
 
+_ADOPT_LOCK = threading.Lock()   # LocalSource._adopt：几个重启线程同时起了进程时只认一个
+
+
 class LocalSource:
     def __init__(self, source_config, on_event, on_state):
         self.config = source_config
@@ -278,8 +281,8 @@ class LocalSource:
             log.write("本机 watcher 启动失败：%s" % exc)
             self._schedule_restart(str(exc))
             return
-        self._proc = proc
-        self._last_event = time.time()
+        if not self._adopt(proc):
+            return
         self._stderr_tail = []
         log.write("本机 watcher 已启动（pid %d）" % proc.pid)
         threading.Thread(target=self._read_stderr, args=(proc,), daemon=True).start()
@@ -291,6 +294,29 @@ class LocalSource:
         reason = self._stderr_tail[-1] if self._stderr_tail else "watcher 退出码 %s" % proc.returncode
         log.write("本机 watcher 退出：%s" % reason)
         self._schedule_restart(reason)
+
+    def _adopt(self, proc):
+        """刚起的进程记为当前进程；起的这会儿已经被 stop() 了就马上关掉，返回 False（不然成了没人管的 watcher，
+        11-20 Mac 版同类问题让虚拟机上同时跑了 20 个）。已有一个在跑（重复的重启线程）也关掉新起的这个"""
+        with _ADOPT_LOCK:
+            current = self._proc
+            duplicate = self._stopped or (current is not None and current is not proc and current.poll() is None)
+            if not duplicate:
+                self._proc = proc
+                self._last_event = time.time()
+        if duplicate:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+            return False
+        if self._stopped:   # stop() 恰好在上面两行之间
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+            return False
+        return True
 
     def _schedule_restart(self, reason):
         if self._stopped:
@@ -485,13 +511,15 @@ class SSHSource(LocalSource):
             ssh, extra = browser_tunnel(self._ssh(), self.config)
             env.update(extra)
             prefix = "".join("%s=%s " % item for item in env.items()) + plugins.REMOTE_DIR_ENV + " "
+            if self._stopped:   # 部署、同步插件要几十秒，这期间被停掉（手机连点「立即重连」）就别再起了
+                return
             proc = subprocess.Popen(ssh + ["%s%s %s" % (prefix, python, remote_path)], stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, **NO_WINDOW)
         except OSError as exc:
             self._schedule_restart(str(exc))
             return
-        self._proc = proc
-        self._last_event = time.time()
+        if not self._adopt(proc):
+            return
         threading.Thread(target=self._read_stderr, args=(proc,), daemon=True).start()
         self._read_stdout(proc)
         proc.wait()

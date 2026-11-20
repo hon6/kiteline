@@ -991,6 +991,38 @@ os.environ.pop("FAKE_BOOT")
 check("还在连的 restart：换掉没就绪的进程、新进程连上", _wait(lambda: _src3.live, 15) and _src3._proc is not _first and _first.poll() is not None)
 _src3.stop()
 
+# 11-20：手机连点「立即重连」，停掉时还在起的那次照样起了进程、没人管（Mac 版让虚拟机同时跑了 20 个 watcher）
+_src4 = _wmod.LocalSource({"id": "local"}, lambda *_a: None, lambda src: None)
+_late = []
+
+
+def _script_then_stop():
+    _src4.stop()   # 释放脚本这一步时被停掉
+    return _fake_ok
+
+
+_src4._script = _script_then_stop
+_orig_adopt = _src4._adopt
+_src4._adopt = lambda proc: (_late.append(proc), _orig_adopt(proc))[1]
+_src4.start()
+_wait(lambda: bool(_late), 5)
+check("起进程途中被停掉：新起的进程马上关掉、不留下", bool(_late) and _wait(lambda: _late[0].poll() is not None, 5) and _src4._proc is None)
+
+# 重复的重启线程（两个 _launch 同时到）：只留一个进程，多起的那个关掉
+_src5 = _wmod.LocalSource({"id": "local"}, lambda *_a: None, lambda src: None)
+_src5._script = lambda: _fake_ok
+_src5._stopped = False
+_extra = []
+_orig5 = _src5._adopt
+_src5._adopt = lambda proc: (_extra.append(proc), _orig5(proc))[1]
+for _ in range(3):
+    threading.Thread(target=_src5._launch, daemon=True).start()
+_wait(lambda: len(_extra) == 3, 10)
+_time.sleep(0.5)
+_alive = [p for p in _extra if p.poll() is None]
+check("三个重启线程同时到：只剩一个 watcher 进程", len(_alive) == 1 and _alive[0] is _src5._proc, "还活着 %d 个" % len(_alive))
+_src5.stop()
+
 print("== 实时活动：开始、更新、划掉、结束（假网关）")
 import http.server as _lv_http  # noqa: E402
 import json as _lv_json  # noqa: E402

@@ -596,10 +596,21 @@ enum Delivery {
         var fields: [String: Any] = ["op": "queue", "action": action, "qid": qid]
         if let text { fields["text"] = text }
         if let dir { fields["dir"] = dir }
-        bridgeRequest(fields, record: record, source: source) { result in
-            switch result {
+        bridgeReply(fields, record: record, source: source) { reply in
+            switch reply.map({ $0["result"] as? String ?? "ok" }) {
             case nil: completion(Outcome(ok: false, submitted: false, message: "未能连接会话，请稍后再试"))
             case "none": completion(Outcome(ok: false, submitted: false, message: "这条消息已发给 Claude"))
+            case "dropped":
+                // 电脑上刚按了停止，Claude Code 不收插件提交的（watcher 的 bridge_dropped）：从前台发出去（算你亲自输入），发出去了再从队列里删掉
+                guard let text = reply?["text"] as? String, !text.isEmpty else {
+                    completion(Outcome(ok: false, submitted: false, message: "未能发送，请在电脑上查看")); return
+                }
+                deliver(prompt: text, to: record, source: source, submit: true, inFront: true) { outcome in
+                    if outcome.ok, outcome.submitted {
+                        bridgeRequest(["op": "queue", "action": "delete", "qid": qid], record: record, source: source) { _ in }
+                    }
+                    completion(outcome)
+                }
             default:
                 completion(Outcome(ok: true, submitted: action == "now",
                                    message: action == "now" ? "已中断当前这一步，排队的消息马上发送" : "已更新"))

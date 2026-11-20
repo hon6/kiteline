@@ -126,7 +126,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.9"
+WATCHER_VERSION = "2.38.10"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -4490,7 +4490,8 @@ import type { Register } from 'claude-code'
 type Item = { id: string; op: string; text?: string; decision?: string; answers?: Record<string, string>; tool?: string; expires?: number;
   action?: string; qid?: string; dir?: number }
 // cmd：斜杠命令（/effort、/model……）：Claude Code 只在一轮结束后执行，和话一样排到这一轮做完
-type Queued = { id: string; text: string; cmd?: boolean }
+// n：排进来的先后（被 Claude Code 退回来时按它插回原位）；at：排进来的时刻（会话重开时只接着排半小时内的）
+type Queued = { id: string; text: string; cmd?: boolean; n?: number; at?: number }
 type Waiter = { agent: string; tool: string; key: string; wake: (item: Item | null) => void; input: unknown; id: string; at: number }
 
 let dir = ''
@@ -4509,24 +4510,47 @@ const switches: { model: string; at: number }[] = []
 const later: Queued[] = []
 // 强插的那一条：中断这一轮后在 turn.complete 里单独提交，别的照旧排着（手机上空着输入框按回车 = 发最前面一条，再按再发下一条）
 const jumps: Queued[] = []
+// 一次写完再写下一次：两次写同时在跑时后发的可能先落盘，被退回队列的话又让早一步的空队列盖掉（11-20 实测遇到）
+let publishing: Promise<unknown> = Promise.resolve()
 const publishQueue = ($: any) => {
   if (!dir || !sid) return
-  void Promise.resolve($.fs.write(`${dir}/${sid}.queue.json`, JSON.stringify({ items: later }))).catch(() => undefined)
+  const body = JSON.stringify({ items: later })
+  publishing = publishing.then(() => $.fs.write(`${dir}/${sid}.queue.json`, body)).catch(() => undefined)
 }
-const submit = ($: any, text: string) =>
-  void $.prompt.submit({ text: text.startsWith('/') ? `\\u200b${text}` : text, asUser: true })
+let seq = 0
+// 交出去的话 Claude Code 不收（回 { drop }）：你在电脑上按了停止（Esc）之后、在电脑上再输入之前，插件提交的一律丢掉。
+// 以前不看结果，排着的话在你停下的那一轮结束时白交一遍、队列却清空了，手机上就成了「消息丢了」（11-20 实测 2.1.329）。
+// 被丢掉的放回队列（按 n 插回原位），手机上照样看得到、能强插；你下次在电脑上发话、那一轮做完时再交
+const dropped = (r: unknown) => !!r && typeof r === 'object' && (r as { drop?: unknown }).drop !== undefined
+const requeue = ($: any, q: Queued) => {
+  if (later.some(x => x.id === q.id)) return
+  const at = later.findIndex(x => (x.n ?? 0) > (q.n ?? 0))
+  later.splice(at < 0 ? later.length : at, 0, q)
+  publishQueue($)
+}
+// 以你的身份提交。收下的要等真轮到它才有回音（前面还有一轮就等一整轮），所以不等：被丢掉了由回调放回队列。
+// wait > 0（空闲时直接发、强插）：最多等这么多毫秒看是不是被丢掉，丢掉了回 false、不放回，让 Kiteline 改走终端 / 前台
+const submit = async ($: any, q: Queued, wait = 0): Promise<boolean> => {
+  const sent: Promise<boolean> = Promise.resolve($.prompt.submit({ text: q.text.startsWith('/') ? `\\u200b${q.text}` : q.text, asUser: true }))
+    .then((r: unknown) => !dropped(r), () => true)
+  const ok = wait > 0 ? await Promise.race([sent, Promise.resolve($.clock.sleep(wait)).then(() => null)]) : null
+  if (ok !== null) return ok
+  void sent.then(taken => { if (!taken) requeue($, q) })
+  return true
+}
 // 是不是这个会话里有的斜杠命令：是就回 [命令名, 参数]
 const slashOf = async ($: any, text: string): Promise<[string, string] | undefined> => {
   const slash = /^\\/([\\w:.-]+)(?:\\s+([\\s\\S]*))?$/.exec(text.trim())
   if (!slash) return undefined
   return (await $.command.list()).some((c: { name: string }) => c.name === slash[1]) ? [slash[1], slash[2] ?? ''] : undefined
 }
-// 斜杠命令照在输入框里打的那样执行（/model 记下要切的模型，PreModelSwitch 里放行）；别的作为你说的话提交
-const deliver = async ($: any, q: Queued) => {
+// 斜杠命令照在输入框里打的那样执行（/model 记下要切的模型，PreModelSwitch 里放行）；别的作为你说的话提交（wait、回值见 submit）
+const deliver = async ($: any, q: Queued, wait = 0): Promise<boolean> => {
   const slash = q.cmd ? await slashOf($, q.text) : undefined
-  if (!slash) return submit($, q.text)
+  if (!slash) return submit($, q, wait)
   if (slash[0] === 'model') switches.push({ model: slash[1].trim().toLowerCase(), at: await $.clock.now() })
   void $.command.run({ command: slash[0], args: slash[1] })
+  return true
 }
 
 // 正在等的确认（命令、提问、计划）写进 <会话>.asks.json：新版 Claude Code 答完之前不把这次工具调用写进对话记录，
@@ -4634,7 +4658,23 @@ export const register: Register = on => {
     sid = await $.session.id()
     // v2：会写 <会话>.queue.json、认 queue 指令（排队的话能调顺序、改、删、强插）
     // v3：忙时的话不再往这一轮里插（会被标成「不是用户说的」），一律这一轮做完后以你的身份提交
-    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: await $.clock.now(), v: 3 }))
+    // v4：交出去被 Claude Code 丢掉的（你在电脑上按了停止）放回队列；空闲直发、强插被丢掉回 dropped
+    const startedAt = await $.clock.now()
+    // 同一会话换了个进程（恢复、重启 claude）：上一个进程没来得及交的话接着排（半小时内排进来的；以前进程一退就没了）
+    try {
+      const path = `${dir}/${sid}.queue.json`
+      if (!later.length && (await $.fs.exists(path))) {
+        const old: Queued[] = JSON.parse(await $.fs.read(path)).items ?? []
+        for (const q of old) {
+          if (q && typeof q.id === 'string' && typeof q.text === 'string' && typeof q.at === 'number' && startedAt - q.at < 1800 * 1000) {
+            later.push({ ...q, n: ++seq })
+          }
+        }
+      }
+    } catch {
+      // 读不出来就当没有
+    }
+    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: startedAt, v: 4 }))
     publishQueue($)
     if (ticking) return started
     ticking = true
@@ -4656,13 +4696,15 @@ export const register: Register = on => {
             // 斜杠命令（手机上的压缩上下文、切换模型、思考强度……）照在输入框里打的那样执行；别的作为你说的话提交，Claude 正忙就排着、这一轮做完再交。
             // 忙时的命令也排进队（Claude Code 本来就要等这一轮做完才执行；直接交给它的话手机上看不到、改不了，一直显示「发送中」）
             const cmd = (await slashOf($, item.text)) !== undefined
+            const q: Queued = { id: item.id, text: item.text, ...(cmd ? { cmd } : {}), n: ++seq, at: now }
             if (turn) {
-              later.push({ id: item.id, text: item.text, ...(cmd ? { cmd } : {}) })
+              later.push(q)
               publishQueue($)
               result = 'later'
-            } else {
-              // 以「/」开头却不是命令（比如开头是个路径）：submit 前面垫一个零宽空格（引擎不让插件这样提交），模型看到的内容不变
-              await deliver($, { id: item.id, text: item.text, cmd })
+            } else if (!(await deliver($, q, 1500))) {
+              // 空闲时直接交（以「/」开头却不是命令的，submit 前面垫一个零宽空格，见 submit）。
+              // 你刚在电脑上按了停止，Claude Code 不收插件提交的：回 dropped，Kiteline 改走终端 / 前台（算你亲自输入）
+              result = 'dropped'
             }
           } else if (item.op === 'queue') {
             // 排队的话：move（dir -1 上移 / 1 下移）、edit（text）、delete；now = 强插：只把这一条拿出来，中断这一轮，
@@ -4683,7 +4725,11 @@ export const register: Register = on => {
               if (turn) {
                 jumps.push(q)
                 await $.turn.abort({ turnId: turn })
-              } else await deliver($, q)
+              } else if (!(await deliver($, q, 1500))) {
+                // 不收（你在电脑上停下后还没再输入过）：放回原位，回 dropped，Kiteline 改走终端 / 前台发这一条再删掉
+                later.splice(at, 0, q)
+                result = 'dropped'
+              }
             } else {
               result = 'unknown'
             }
@@ -20058,6 +20104,28 @@ class Watcher:
             return {"bridged": True, "result": "ok", "typed": True}
         return bridge_send(sid, "send", text=text)
 
+    def bridge_dropped(self, sid, op, fields):
+        """mod 说 Claude Code 不收它提交的话（你在电脑上按了停止、还没再输入过，见 mod 的 submit）：得当成你亲自输入的送进去。
+        后台运行的会话键入它的终端；别的发消息回 bridged False（电脑端照旧走前台），强插回 dropped + 这条的文字，电脑端从前台发出再删掉"""
+        text = fields.get("text")
+        qid = fields.get("qid")
+        if op == "queue":
+            snap = self.sessions.get(sid) or {}
+            for _ in range(10):   # mod 先放回队列再写回执，但写文件不等：没读到就稍等再读
+                text = next((q.get("text") for q in (bridge_queue(sid, snap.get("startedAt")) or []) if q.get("id") == qid), None)
+                if text:
+                    break
+                time.sleep(0.1)
+            if not text:
+                return {"bridged": True, "result": "none"}
+        if text and self.bridge_type(sid, text):
+            if op == "queue":
+                bridge_send(sid, "queue", action="delete", qid=qid)
+            return {"bridged": True, "result": "ok", "typed": True}
+        if op == "queue":
+            return {"bridged": True, "result": "dropped", "text": text}
+        return {"bridged": False}
+
     def bridge(self, request):
         """后台送达（见 bridge_send）：会话的 claude 进程加载了 mod 才送，等回执要一两秒，放后台线程回、别卡住观察循环。
         回 bridged False 时电脑端照旧走前台。发消息时 Claude 正忙、会话又是后台运行的：键入它的终端（bridge_type）"""
@@ -20106,6 +20174,8 @@ class Watcher:
                     result = bridge_send(sid, op, **fields)
                     if text and result.get("result") == "later":
                         result = self.bridge_retype(sid, text, result)
+                    elif result.get("result") == "dropped":
+                        result = self.bridge_dropped(sid, op, fields)
             except Exception as exc:  # noqa
                 log("后台送达失败：%r" % exc)
                 result = {"bridged": False}

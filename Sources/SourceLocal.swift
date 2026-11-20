@@ -20,6 +20,8 @@ final class LocalSource: SourceConnection {
     private var lastEventAt = Date()
     private var restartAttempt = 0
     private var stoppedByUser = false
+    /// 每次 stop() 加一：停之前排着的重启回来时作废（同 RemoteSession.generation；不然停了马上再开会多起一个 watcher）。只在主线程读写
+    private var generation = 0
     /// 进程是 reload() 换掉的：退出后马上再起，不算断线
     private var reloading = false
     private var stderrTail: [String] = []
@@ -42,6 +44,7 @@ final class LocalSource: SourceConnection {
     func stop() {
         stoppedByUser = true
         reloading = false
+        generation += 1
         rpc.attach(nil)
         rpc.release(failing: "watcher 通道已断开")
         try? stdinPipe?.fileHandleForWriting.close()
@@ -79,7 +82,7 @@ final class LocalSource: SourceConnection {
     // MARK: - 进程
 
     private func launch() {
-        guard !stoppedByUser else { return }
+        guard !stoppedByUser, process?.isRunning != true else { return }   // 已在跑就不另起
         guard let scriptURL = resolveScript() else {
             // 原来就此停住、要退出重开 App；安装包刚换过时可能只是还没拷完，照常退避重试
             scheduleRestart(reason: "App 内缺少 ccpulse-watch.py")
@@ -140,9 +143,9 @@ final class LocalSource: SourceConnection {
         }
         process.terminationHandler = { [weak self] proc in
             DispatchQueue.main.async {
-                guard let self = self else { return }
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
+                guard let self = self, self.process === proc else { return }   // 已被 stop() 换掉的旧进程
                 self.rpc.attach(nil)
                 self.process = nil
                 self.watchdog?.cancel()
@@ -185,8 +188,10 @@ final class LocalSource: SourceConnection {
         let delay = min(30.0, pow(2.0, Double(min(restartAttempt, 5))))
         update(state: .failed(reason: reason))
         delegate?.source(self, didLog: "\(Int(delay)) 秒后重启本机 watcher（第 \(restartAttempt) 次）")
+        let gen = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.launch()
+            guard let self = self, gen == self.generation else { return }
+            self.launch()
         }
     }
 

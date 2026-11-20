@@ -996,7 +996,7 @@ def r_queue(s, request, *_):
         return Response.error("内容为空", 400)
     direction = body.get("dir") if isinstance(body.get("dir"), int) and not isinstance(body.get("dir"), bool) else None
     log.write("手机调整「%s」的排队消息：%s" % (record.snap.get("name"), action))
-    outcome = delivery.queue(action, qid, text, direction, record, source)
+    outcome = delivery.queue(action, qid, text, direction, record, source, s.siblings(record))
     return Response.json({"ok": outcome.ok, "message": outcome["message"]}, 200 if outcome.ok else 409)
 
 

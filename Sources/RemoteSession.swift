@@ -25,6 +25,12 @@ final class RemoteSession: SourceConnection {
     private var stoppedByUser = false
     /// 进程是 reload() 换掉的：退出后马上重连（重新同步插件），不算断线
     private var reloading = false
+    /// 每次 stop() 加一：停之前发出去的连接（部署、探测还在跑、排着的重连）回来时代数对不上就作废。
+    /// 11-20 手机 5 秒内连点 18 次「立即重连」，每次 stop + start，在路上的那些连接照样各自连上、各自退避重连，
+    /// 最后同时开了 20 条 ssh、远端起了 20 个 watcher，内存本来就紧的虚拟机被拖垮。只在主线程读写
+    private var generation = 0
+    /// 这一代有一次连接正在路上（探测 / 部署 / 同步插件）：再要连接不另起
+    private var connecting = false
     private let queue = DispatchQueue(label: "ccpulse.transport")
     private let rpc = WatcherRPC()
     private(set) var hostHome: String?
@@ -59,6 +65,8 @@ final class RemoteSession: SourceConnection {
     func stop() {
         stoppedByUser = true
         reloading = false
+        generation += 1
+        connecting = false
         rpc.attach(nil)
         rpc.release(failing: "watcher 通道已断开")
         try? stdinPipe?.fileHandleForWriting.close()
@@ -102,18 +110,27 @@ final class RemoteSession: SourceConnection {
 
     private func connect() {
         guard !stoppedByUser else { return }
+        reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
+        // 已有事件流在跑、或这一代已经有一次连接在路上：不再另起一条（否则每多一次就多一个远端 watcher）
+        guard !connecting, process?.isRunning != true else { return }
+        connecting = true
+        let gen = generation
         if !rpc.isHolding { update(state: .connecting) }
 
         queue.async { [weak self] in
             guard let self = self else { return }
             self.ensureRemoteWatcher { [weak self] result in
-                guard let self = self else { return }
-                switch result {
-                case .failure(let error):
-                    self.delegate?.source(self, didLog: "远端准备失败：\(error)")
-                    self.scheduleReconnect(reason: LocalNetwork.explain(error.description))
-                case .success:
-                    self.launchStreamProcess()
+                DispatchQueue.main.async {
+                    guard let self = self, gen == self.generation, !self.stoppedByUser else { return }
+                    self.connecting = false
+                    switch result {
+                    case .failure(let error):
+                        self.delegate?.source(self, didLog: "远端准备失败：\(error)")
+                        self.scheduleReconnect(reason: LocalNetwork.explain(error.description))
+                    case .success:
+                        self.launchStreamProcess()
+                    }
                 }
             }
         }
@@ -222,6 +239,11 @@ final class RemoteSession: SourceConnection {
     }
 
     private func launchStreamProcess() {
+        // 兜底：手上还有一条在跑的就先关掉，不让它变成没人管的连接
+        if let old = self.process, old.isRunning {
+            old.terminationHandler = nil
+            old.terminate()
+        }
         let process = Process()
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -259,9 +281,10 @@ final class RemoteSession: SourceConnection {
         }
         process.terminationHandler = { [weak self] proc in
             DispatchQueue.main.async {
-                guard let self = self else { return }
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
+                // 已经被 stop() 或新连接换掉的旧进程：不碰现在这条、也不再排重连
+                guard let self = self, self.process === proc else { return }
                 self.rpc.attach(nil)
                 self.process = nil
                 self.watchdog?.cancel()
@@ -322,7 +345,12 @@ final class RemoteSession: SourceConnection {
         let delay = min(30.0, pow(2.0, Double(min(reconnectAttempt, 5))))
         update(state: .failed(reason: reason))
         delegate?.source(self, didLog: "\(Int(delay)) 秒后重连（第 \(reconnectAttempt) 次）")
-        let item = DispatchWorkItem { [weak self] in self?.connect() }
+        let gen = generation
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self, gen == self.generation else { return }
+            self.connect()
+        }
+        reconnectWorkItem?.cancel()
         reconnectWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }

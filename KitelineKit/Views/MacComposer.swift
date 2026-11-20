@@ -30,6 +30,8 @@ struct MacComposer: View {
     @State private var picking = false
     @State private var focusToken = 0
     @State private var inputHeight: CGFloat = 38
+    /// 空着回车强插排队的第一条：电脑回应前不重复发
+    @State private var jumping = false
 
     /// 附图放在这个会话的数据上（拖进对话区的图也加到这里）
     private var attachments: [ComposeAttachment] {
@@ -192,7 +194,18 @@ struct MacComposer: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard enabled, !text.isEmpty || !attachments.isEmpty else { return }
+        guard enabled else { return }
+        guard !text.isEmpty || !attachments.isEmpty else {
+            // 空着输入框按回车：有排队的消息就把最前面一条马上发出去（强插），再按再发下一条；没有排队的什么也不做（同手机 Composer.send）
+            if group == nil, let first = chat.queueRows(session).first, !jumping {
+                jumping = true
+                Task {
+                    await model.queueAction(key, first.id, "now")
+                    jumping = false
+                }
+            }
+            return
+        }
         if let group {
             model.send(group, text: text, images: attachments.map { ($0.name, $0.data, $0.preview) })
         } else {
