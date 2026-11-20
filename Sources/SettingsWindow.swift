@@ -1069,6 +1069,8 @@ struct SourcesPane: View {
             }
             .tarsCard(padding: 6)
 
+            EditorWindowsCard()
+
             PeerComputersCard()
 
             if addingPeer {
@@ -1228,6 +1230,73 @@ struct SourceRow: View {
 // MARK: - Kiteline 电脑（互联）
 
 /// 已添加的 Kiteline 电脑：在线状态、连不上的原因、移除（来源行在上面的列表里，按对方的来源自动增删）
+/// 会话都在后台运行后自动关掉项目的 VS Code 窗口（开关），以及一次关掉所有「没有会话在运行」的窗口（见 EditorWindows.swift）
+struct EditorWindowsCard: View {
+    @State private var auto = AppState.shared.config.mobile.hostedCloseEditor
+    @State private var idle: [String] = []
+    @State private var closing = false
+    @State private var note = ""
+    private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(get: { auto }, set: { on in
+                auto = on
+                Hosted.update(closeEditor: on)
+            })) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("会话都在后台运行后，自动关闭项目的 VS Code 窗口").font(.app(size: 12.5))
+                    Text("窗口中没有其他会话在运行、没有未保存的改动时才会关闭，可减少 VS Code 的内存占用。需要查看代码时，可随时在会话中选择「在 VS Code 中打开」。")
+                        .font(.app(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .toggleStyle(.switch).controlSize(.small)
+            if !idle.isEmpty || !note.isEmpty {
+                Divider()
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        if !idle.isEmpty {
+                            Text(L("%lld 个 VS Code 窗口中没有会话在运行", idle.count)).font(.app(size: 12.5))
+                            Text(idle.joined(separator: "、"))
+                                .font(.app(size: 11)).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if !note.isEmpty {
+                            Text(note).font(.app(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if !idle.isEmpty {
+                        Button(closing ? "正在关闭…" : "关闭这些窗口") { closeAll() }
+                            .tarsButton().disabled(closing)
+                    }
+                }
+            }
+        }
+        .tarsCard(padding: 12)
+        .onAppear(perform: refresh)
+        .onReceive(timer) { _ in if !closing { refresh() } }
+    }
+
+    private func refresh() {
+        EditorWindows.idle { idle = $0 }
+    }
+
+    private func closeAll() {
+        closing = true
+        note = ""
+        EditorWindows.closeIdle { closed, left in
+            closing = false
+            if left.isEmpty {
+                note = closed.isEmpty ? "" : L("已关闭 %lld 个窗口", closed.count)
+            } else {
+                note = L("%lld 个窗口未能关闭，VS Code 可能正在等待确认，请在 VS Code 中查看", left.count)
+            }
+            refresh()
+        }
+    }
+}
+
 struct PeerComputersCard: View {
     @State private var peers = PeerComputers.shared.all
     @State private var problems = PeerComputers.shared.problems

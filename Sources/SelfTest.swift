@@ -519,6 +519,46 @@ extension SelfTest {
         case "size":
             let wh = arg.split(separator: "x").compactMap { Double($0) }
             if wh.count == 2 { window.setContentSize(NSSize(width: wh[0], height: wh[1])); window.setFrameOrigin(NSPoint(x: -20000, y: -20000)) }
+        case "editorwindows":
+            // 会话都在后台后自动关 VS Code 窗口（EditorWindows）的实测，要带 KITELINE_TEST_EDITOR_PID=<测试用 VS Code 的进程号>：
+            //   editorwindows:inject:<目录>=hosted|vscode|tmux,<目录>=…   本机来源只留这几条假会话
+            //   editorwindows:idle / close                                 列出 / 一次关掉「没有会话在运行」的窗口
+            //   editorwindows:moved:<目录> / started:<目录> / closed:<目录>   当作刚对这个项目做完动作（closed、moved 针对目录下那条 vscode 会话）
+            let bits = arg.split(separator: ":", maxSplits: 1).map(String.init)
+            let local = SourceConfig.local()
+            switch bits.first ?? "" {
+            case "inject":
+                guard let template = SelfTest.fakeSessions().first else { break }
+                let records: [SessionRecord] = (bits.count > 1 ? bits[1] : "").split(separator: ",").enumerated().compactMap { index, item in
+                    let pair = item.split(separator: "=", maxSplits: 1).map(String.init)
+                    guard pair.count == 2 else { return nil }
+                    var snap = template
+                    snap.sessionId = "ew-\(index)"
+                    snap.cwd = pair[0]
+                    snap.name = (pair[0] as NSString).lastPathComponent + "-\(index)"
+                    snap.activity = "idle"
+                    snap.entrypoint = pair[1] == "vscode" ? "claude-vscode" : "cli"
+                    snap.hosted = pair[1] == "hosted" ? "h\(index)" : nil
+                    snap.tmuxPane = pair[1] == "tmux" ? "%\(index)" : nil
+                    return SessionRecord(sourceId: local.id, sourceName: local.displayName, kind: .local, snapshot: snap)
+                }
+                AppState.shared.store.injectForSelfTest(records)
+                Log.write("[capture] editorwindows 假会话：" + records.map { "\($0.snapshot.cwd)（\($0.snapshot.hosted != nil ? "后台" : $0.snapshot.tmuxPane != nil ? "tmux" : "VS Code")）" }.joined(separator: "，"))
+            case "idle":
+                EditorWindows.idle { Log.write("[capture] editorwindows 没有会话在运行的窗口：\($0)") }
+                delay = 2
+            case "close":
+                EditorWindows.closeIdle { closed, left in Log.write("[capture] editorwindows 关掉 \(closed)，没关掉 \(left)") }
+                delay = 4
+            case "moved", "started", "closed":
+                let cwd = bits.count > 1 ? bits[1] : ""
+                let key = AppState.shared.store.records.first { $0.snapshot.cwd == cwd && $0.snapshot.hosted == nil && $0.snapshot.tmuxPane == nil }?.key ?? ""
+                let trigger: EditorWindows.Trigger = bits[0] == "moved" ? .moved(key) : bits[0] == "closed" ? .closed(key) : .started
+                Log.write("[capture] editorwindows \(bits[0])：\(cwd)（会话 \(key.isEmpty ? "无" : key)）")
+                EditorWindows.settle(trigger, cwd: cwd, sourceId: local.id)
+                delay = 7
+            default: break
+            }
         case "fake":
             // 灌入跨来源演示会话（本机 1 + 虚拟机 3，见 fakeRecords）：拍跨电脑会话群这类演示截图。
             // 配合 CCPULSE_SESSIONS_DIR / CCPULSE_PROJECTS_DIR 指空目录，本机来源就只有假会话，画面干净
@@ -781,6 +821,8 @@ extension SelfTest {
                 post(.leftMouseUp, end, after: 0.7 + hold)
                 delay = hold > 0 ? 0.9 : 1.2
             }
+        // 会话浏览器切档 / 接管（先选中在用浏览器的会话）：browser:half / session / app / fullscreen / mini / take / back
+        case "browser": KitelineKit.browserStep(KitelineModel.shared.selection ?? "", arg)
         case "copyshown": KitelineKit.showCopyButtons()   // 代码块、命令、思考右上角的拷贝钮都画出来（放在打开会话之前）
         case "dividerhover": KitelineKit.showDividerHandles(arg != "off")   // 分屏的分隔线画成指针停在上面（看把手）；dividerhover:off 收起
         case "tabgeo": Log.write("[capture] 分屏位置：\n\(KitelineKit.tabGeometry)")

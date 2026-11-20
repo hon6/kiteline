@@ -84,6 +84,8 @@ final class AppModel {
     private(set) var hostFeatures: Set<String> = []
     /// 电脑上「远端项目在后台运行 Claude Code」的设置（见 HostedViews.swift）
     private(set) var hosted = HostedSetting()
+    /// 电脑上没有会话在运行的 VS Code 窗口（项目名）：上次问到的，页面先显示它（见 loadEditorWindows）
+    private(set) var editorIdle: [String] = []
     /// 超过每日花费上限、问一句「仍然发送吗」
     var capPrompt: (key: String, id: String, message: String)?
 
@@ -1306,20 +1308,40 @@ final class AppModel {
     }
 
     /// 改电脑上的后台运行设置：某台开 / 关、提示不再提示（先在本机改，电脑没接住再改回来）
-    func setHosted(sourceId: String? = nil, on: Bool? = nil, tipOff: Bool? = nil) async {
+    func setHosted(sourceId: String? = nil, on: Bool? = nil, tipOff: Bool? = nil, closeEditor: Bool? = nil) async {
         let before = (hosted, sources)
         if let tipOff { hosted.tipOff = tipOff }
+        if let closeEditor { hosted.closeEditor = closeEditor }
         if let sourceId, let on, let index = sources.firstIndex(where: { $0.id == sourceId }) { sources[index].hosted = on ? "on" : "off" }
         var body: [String: Any] = [:]
         if let sourceId { body["sourceId"] = sourceId }
         if let on { body["on"] = on }
         if let tipOff { body["tipOff"] = tipOff }
+        if let closeEditor { body["closeEditor"] = closeEditor }
         do {
             try await api.post("/api/hosted/settings", body: body)
         } catch {
             (hosted, sources) = before
             show(error)
         }
+    }
+
+    /// 问电脑哪些 VS Code 窗口里已经没有会话在运行（只列出来，不关；老版本的电脑没有这个接口）。回问到了没有：
+    /// 没问到（电脑离线、请求没通）时留着上次的，页面上别说「没有可以关闭的窗口」
+    @discardableResult
+    func loadEditorWindows() async -> Bool {
+        guard hostFeatures.contains("editorWindows"), let reply = try? await api.get("/api/editor/windows") else { return false }
+        let idle = reply["idle"] as? [String] ?? []
+        if idle != editorIdle { editorIdle = idle }
+        if let auto = reply["auto"] as? Bool, auto != hosted.closeEditor { hosted.closeEditor = auto }
+        return true
+    }
+
+    /// 让电脑把这些窗口关掉；回关掉了几个、几个没关掉（VS Code 在等确认）
+    func closeEditorWindows() async throws -> (closed: Int, left: Int) {
+        let reply = try await api.post("/api/editor/windows/close")
+        await loadEditorWindows()
+        return ((reply["closed"] as? [String] ?? []).count, (reply["left"] as? [String] ?? []).count)
     }
 
     /// 置顶 / 取消置顶：同标记，先在本机改（行马上挪过去），电脑没接住再改回来

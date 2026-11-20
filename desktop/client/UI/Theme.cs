@@ -192,6 +192,12 @@ public static class Palette
         ("Card", 0xFFFFFF, 1, 0x1C1C1E, 1),
         ("Surface", 0xFFFFFF, 1, 0x1C1C1E, 1),
         ("Surface2", 0xF7F7F8, 1, 0x2C2C2E, 1),
+        // 会话浏览器面板的几层（同 Mac / iPhone 的 BrowserChrome）：外壳（工具栏、指令列表）比对话页抬高一层，
+        // 画面区是凹下去的深色画布，地址栏是嵌在外壳里的一格，外面一圈比分隔线清楚的边
+        ("BrowserShell", 0xFFFFFF, 1, 0x2C2C2E, 1),
+        ("BrowserCanvas", 0xD9D9DE, 1, 0x0B0B0C, 1),
+        ("BrowserField", 0x000000, 0.055, 0x000000, 0.34),
+        ("BrowserEdge", 0x000000, 0.16, 0xFFFFFF, 0.18),
         // 弹出面板的底色（同 Mac 的 sheet / 面板窗口：比里面的输入框、列表亮一档）
         ("Sheet", 0xECECEC, 1, 0x2B2B2D, 1),
         ("Separator", 0x3C3C43, 0.18, 0x545458, 0.6),

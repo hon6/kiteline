@@ -49,6 +49,8 @@ enum AgentSkill {
         env["CCPULSE_BROWSER_MAX"] = String(browser.max)
         env["CCPULSE_BROWSER_IDLE"] = String(browser.idle)
         env["CCPULSE_BROWSER_REC"] = browser.record ? "1" : "0"
+        // 测试实例的入口不用 9339（见 BrowserRelay.gatePort）
+        if BrowserRelay.gatePort != 9339 { env["CCPULSE_BROWSER_PORT"] = String(BrowserRelay.gatePort) }
         return env
     }
 

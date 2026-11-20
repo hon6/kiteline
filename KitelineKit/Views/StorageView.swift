@@ -57,7 +57,7 @@ struct StorageView: View {
                 }
             }
         }
-        .overlay { if rows == nil { SkeletonPage(style: .form(6)) } }
+        .overlay { if rows == nil { SkeletonPage(style: .form(6)).background(Theme.pageBackground) } }   // 垫底色：合计那组和说明别透出来
         .animation(.skeletonFade, value: rows == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("存储空间")
         .navigationBarTitleDisplayMode(.inline)

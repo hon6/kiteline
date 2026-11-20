@@ -56,14 +56,31 @@ struct BrowserTab: Identifiable, Hashable {
     var current: Bool
 }
 
-/// 画面放多大：小窗 / 半个会话 / 整个会话 / 整个应用 / 全屏
+/// 画面放多大：小窗 / 半个会话 / 整个会话 / 整个应用 / 全屏。
+/// iPhone / iPad 上只用其中三种：半屏（half）、全屏（fullscreen）、悬浮小窗（mini）——
+/// 手机屏幕小，「整个会话」「整个应用」和全屏几乎一样，四档反而难选（11-19 反馈：三种状态切换就好）
 enum BrowserSize: String, CaseIterable, Identifiable {
     case mini, half, session, app, fullscreen
     var id: String { rawValue }
+
+    /// 这个平台上能切的几档，按顶栏上从左到右的顺序。Mac 的小窗是旁边单独的「缩回小窗」按钮，不在这一排里
+    static var choices: [BrowserSize] {
+        #if os(macOS)
+        [.half, .session, .app, .fullscreen]
+        #else
+        [.half, .fullscreen, .mini]
+        #endif
+    }
+
     var label: String {
         switch self {
+        #if os(macOS)
         case .mini: L("小窗")
         case .half: L("半个会话")
+        #else
+        case .mini: L("悬浮小窗")
+        case .half: L("半屏")
+        #endif
         case .session: L("整个会话")
         case .app: L("整个应用")
         case .fullscreen: L("全屏")
@@ -132,6 +149,12 @@ final class BrowserStore {
         } else if focus == key {
             focus = nil
         }
+    }
+
+    /// 有会话的浏览器正全屏盖着整个界面（iPhone / iPad 据此藏状态栏，见 MainView）
+    var fullscreenShown: Bool {
+        guard let key = focus, sizes[key] == .fullscreen else { return false }
+        return model?.session(key)?.browser != nil
     }
 
     /// 会话在用浏览器就显示（小窗，或收起后的小圆钮）

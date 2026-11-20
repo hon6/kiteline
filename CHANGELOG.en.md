@@ -1,5 +1,31 @@
 # Kiteline Release Notes
 
+## 3.49.41 (2026-11-20)
+
+### New Features
+
+- **Close a project's VS Code window once all its sessions run in the background**: After you move a session from VS Code to the background, Kiteline closes the project's VS Code window if no session is running in it anymore, reducing the memory VS Code uses. When you start or resume a session in the background, the project's window is also closed if it is minimized and has no running sessions. A window is left open if another session is still running in it, it has unsaved changes, or you are using it in the foreground. To view the code, choose “Open in VS Code” from the session at any time. You can turn this off in Settings → Sources, where you can also close every VS Code window that has no running sessions at once. On iPhone, iPad and the WeChat Mini Program, go to Settings → Run Claude Code in the Background to turn this on or off, see which VS Code windows on your computer have no running sessions, and close them all at once.
+
+### Improvements
+
+- **The in-session browser now stands apart from the conversation**: The enlarged browser panel is styled like a browser — the toolbar and action list sit one level above the conversation background, the page area is a dark canvas, the top bar has Back, Forward, Reload and an address field, and the panel has a clear border and shadow, so it no longer blends into the conversation.
+- **Three browser view sizes** (iPhone, iPad, WeChat Mini Program): The enlarged view now has just three sizes — Half Screen, Full Screen and Floating Window — shown as three icons at the right of the top bar; tap one to switch. In the Mini Program, turn the phone sideways in Full Screen to show only the page.
+- **Taking over now switches to Full Screen** (iPhone, iPad, WeChat Mini Program): Tapping Take Over enlarges the view to Full Screen so it is easier to tap things on the page; switch back to Half Screen whenever you want to watch the conversation while you work — control is not interrupted.
+- **Full Screen follows the phone's rotation** (iPhone): While viewing a page in Full Screen, turn the phone sideways and the interface rotates to landscape, then back when you turn it upright — no need to tap the rotate button.
+- **Easier typing while controlling the browser** (iPhone): After taking over, the text field has its own row, with Backspace, Tab, Return and page keys on the row below.
+
+### Bug Fixes
+
+- **Fixed messages sent from your phone while Claude is busy being treated as plugin notes instead of your own words**: Newer versions of Claude Code mark such mid-turn messages as not coming from the user, so Claude would ask you to confirm again. Background sessions now receive the message as if you typed it in the terminal, and Claude reads it before its next step; other sessions send it as your message once the current turn finishes.
+- **Fixed the status bar staying visible when the browser is in Full Screen** (iPhone, iPad).
+- **Fixed VoiceOver double-tap collapsing the browser mini view** (iPhone, iPad): It now enlarges the view, the same as a tap.
+- **Fixed the half-screen view freezing briefly after returning from Full Screen** (WeChat Mini Program).
+- **Fixed Overview cards blending into the page background** (iPhone, iPad, WeChat Mini Program): In Light appearance, cards such as Today’s Usage and Today's Stats now use a white background, clearly set apart from the page. The New Task and file preview pages in the WeChat Mini Program are adjusted the same way.
+- **Fixed one task stage still showing in Chinese in Demo Mode when the interface is in English** (iPhone, iPad).
+- **Fixed session group tabs being limited to the width of the first column** (Mac): The session group tabs at the top of the window now span the entire title bar and are no longer cut off when the first column is narrow. When there are too many groups to fit in one row, you can scroll sideways, and the row scrolls to the group currently shown.
+- **Fixed scrolling in the terminal of long-running sessions** (iPhone, iPad, WeChat Mini Program): After a Claude Code session had been running for a while, swiping up or down with two fingers in its terminal did nothing. Scrolling now works as expected; on an iPad with a trackpad or mouse connected, a two-finger trackpad swipe or the scroll wheel works too.
+- **Fixed the keyboard closing right after it appeared in the terminal in portrait** (iPad): Tapping the terminal in portrait brought up the keyboard, which then closed immediately, and a blank strip remained below the input bar after the terminal was collapsed. The keyboard now stays up, and the input bar returns to the bottom of the screen once the terminal is collapsed.
+
 ## 3.49.40 (2026-11-16)
 
 ### New Features

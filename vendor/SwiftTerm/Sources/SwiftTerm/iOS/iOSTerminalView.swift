@@ -166,6 +166,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     addGestureRecognizer(pan)
                     twoFingerPan = pan
                 }
+                // iPad 接了触控板 / 鼠标：触控板上双指滑、鼠标滚轮是「滚动事件」，不是两根手指的触摸，上面那个手势收不到，
+                // 自带滚动又关了，结果怎么滑都不动。单独一个只收滚动事件的手势（不收手指触摸），和触屏双指走同一套翻看
+                if scrollWheelPan == nil, #available(iOS 13.4, *) {
+                    let pan = UIPanGestureRecognizer(target: self, action: #selector(twoFingerScroll(_:)))
+                    pan.allowedScrollTypesMask = .all
+                    pan.allowedTouchTypes = []
+                    addGestureRecognizer(pan)
+                    scrollWheelPan = pan
+                }
                 if oneFingerSelect == nil {
                     let pan = UIPanGestureRecognizer(target: self, action: #selector(oneFingerSelectHandler(_:)))
                     pan.minimumNumberOfTouches = 1
@@ -176,12 +185,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             } else {
                 isScrollEnabled = true
                 if let pan = twoFingerPan { removeGestureRecognizer(pan); twoFingerPan = nil }
+                if let pan = scrollWheelPan { removeGestureRecognizer(pan); scrollWheelPan = nil }
                 if let pan = oneFingerSelect { removeGestureRecognizer(pan); oneFingerSelect = nil }
                 mouseModeChanged(source: terminal)
             }
         }
     }
     private var twoFingerPan: UIPanGestureRecognizer?
+    private var scrollWheelPan: UIPanGestureRecognizer?
     private var oneFingerSelect: UIPanGestureRecognizer?
     /// Kiteline 改：单指拖动选完、松手时把选中的文字交给 App（弹「拷贝 / 取消」框）
     public var onTouchSelection: ((String) -> Void)?
@@ -223,19 +234,26 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             let lines = Int(twoFingerCarry / step)
             guard lines != 0 else { return }
             twoFingerCarry -= CGFloat(lines) * step
-            if terminal.isDisplayBufferAlternate {
-                // 全屏界面没有历史可翻：交给程序自己滚（开了鼠标模式发滚轮，没开发上下方向键）
-                let up = lines > 0
-                for _ in 0..<min(abs(lines), 20) {
-                    if terminal.mouseMode != .off {
-                        let flags = terminal.encodeButton(button: up ? 4 : 5, release: false, shift: false, meta: false, control: false)
-                        terminal.sendEvent(buttonFlags: flags, x: terminal.buffer.x, y: terminal.buffer.y)
-                    } else if terminal.alternateScrollMode {
-                        send(up ? EscapeSequences.moveUpNormal : EscapeSequences.moveDownNormal)
-                    }
+            let up = lines > 0              // 手指往下滑 = 看上面的
+            let count = min(abs(lines), 20)
+            if terminal.mouseMode != .off {
+                // 程序开了鼠标上报：滚轮一律交给程序自己滚（同电脑上的终端、同 Mac 版的 scrollWheel），不看是不是备用缓冲区。
+                // 原来只在备用缓冲区里才发：Claude Code 是全屏界面，跑久了回放的输出里早没有「进入备用缓冲区」那一句，
+                // 这边以为在普通屏幕上、去翻本地历史，而全屏界面不留历史，于是怎么滑都不动（11-19 用户 iPad 反馈）
+                let hit = calculateTapHit(gesture: gesture)
+                let cell = hit.grid.toScreenCoordinate(from: terminal.displayBuffer)
+                    ?? Position(col: terminal.buffer.x, row: terminal.buffer.y)
+                let flags = terminal.encodeButton(button: up ? 4 : 5, release: false, shift: false, meta: false, control: false)
+                for _ in 0..<count {
+                    terminal.sendEvent(buttonFlags: flags, x: cell.col, y: cell.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
                 }
-            } else if lines > 0 {
-                scrollUp(lines: lines)      // 手指往下滑 = 看上面的历史
+            } else if terminal.isDisplayBufferAlternate {
+                // 全屏界面没有历史可翻，程序也没要鼠标：发上下方向键（less、man 这类），程序关了这个转换就不发
+                if terminal.alternateScrollMode {
+                    for _ in 0..<count { if up { sendKeyUp() } else { sendKeyDown() } }
+                }
+            } else if up {
+                scrollUp(lines: lines)
             } else {
                 scrollDown(lines: -lines)
             }

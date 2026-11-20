@@ -6,8 +6,16 @@ import Foundation
 /// 远端 watcher 整理 agent 的指令、转达「请接管」。画面、点击、标签页走本机 watcher，指令列表找远端要（MobileServer.sessionBrowser）
 final class BrowserRelay {
     static let shared = BrowserRelay()
-    /// 本机 watcher 的入口端口（反向转发接到这里）
-    static let gatePort = 9339
+    /// 本机 watcher 的入口端口（反向转发接到这里）。正式运行是 9339；隔离的测试实例换一个（按配置目录算，重启不变），
+    /// 经环境变量告诉 watcher（AgentSkill.watcherEnvironment），不占正式版的 9339（11-19 测试实例抢了入口，会话浏览器开到了测试那边）
+    static let gatePort: Int = {
+        let env = ProcessInfo.processInfo.environment
+        if let explicit = env["CCPULSE_BROWSER_PORT"].flatMap(Int.init) { return explicit }
+        guard AppConfig.isolated else { return 9339 }
+        var hash: UInt32 = 2_166_136_261   // FNV-1a
+        for byte in (env["CCPULSE_CONFIG_DIR"] ?? String(getpid())).utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+        return 19400 + Int(hash % 500)
+    }()
 
     private let lock = NSLock()
     private var states: [String: [String: Any]] = [:]

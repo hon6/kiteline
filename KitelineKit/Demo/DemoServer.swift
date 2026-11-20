@@ -634,7 +634,8 @@ final class DemoServer: @unchecked Sendable {
         // 阶段名界面上按词表翻译；备注、分端名是演示内容，英文界面直接给英文
         let english = Lang.shared.isEnglish
         let (steps, step, note): ([String], Int, String?) =
-            doing.contains("ExitPlanMode") ? (["调研了解", "方案设计", "开发中", "测试中", "发布中"], 2, english ? "Export API and pagination design" : "导出接口与分页方案")
+            // 「方案设计」是自定流程里的一步，不在词表里：英文界面直接给英文，否则列表上会露出一个中文阶段名
+            doing.contains("ExitPlanMode") ? (["调研了解", english ? "Design" : "方案设计", "开发中", "测试中", "发布中"], 2, english ? "Export API and pagination design" : "导出接口与分页方案")
             : doing.contains("AskUserQuestion") ? (standard, 1, nil)
             : doing.contains("test") ? (standard, 3, english ? "Run the related unit tests" : "跑相关的单元测试")
             : (standard, 2, nil)

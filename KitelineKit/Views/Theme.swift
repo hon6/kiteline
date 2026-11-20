@@ -36,7 +36,8 @@ enum Theme {
     static let menuBackground = Color(hex: 0x4C4C4C)
     /// 今日动态、用量这些页面的底色（卡片是白的）
     static let pageBackground = dynamic(light: 0xF2F2F7, dark: 0x000000)
-    /// 首页汇总卡片（白色列表上的浅灰块）
+    /// 首页汇总卡片（白色列表上的浅灰块）。只放在白底上：浅色下和 pageBackground 只差两个色阶，
+    /// 压在灰底页面上会和页面融在一起，那里的卡片用 card
     static let tile = dynamic(light: 0xF4F4F6, dark: 0x1C1C1E)
     static let removed = Color(red: 0.85, green: 0.25, blue: 0.25)
 

@@ -33,7 +33,9 @@ print("== 连远端：浏览器开在这台电脑上时加反向转发")
 ssh = ["ssh", "-o", "BatchMode=yes", "me@server"]
 cmd, extra = watcher.browser_tunnel(ssh, {"sshHost": "me@server"})
 port = int(extra.get("CCPULSE_BROWSER_TUNNEL") or 0)
-check("ssh 带 -R 端口:127.0.0.1:9339，放在主机名前面", cmd[-1] == "me@server" and cmd[-3:-1] == ["-R", "%d:127.0.0.1:9339" % port], cmd)
+# 接到本机入口：正式运行是 9339，测试（这里设了隔离配置目录）是按配置目录算的端口（watcher.BROWSER_GATE_PORT）
+check("ssh 带 -R 端口:127.0.0.1:<本机入口>，放在主机名前面", cmd[-1] == "me@server" and cmd[-3:-1] == ["-R", "%d:127.0.0.1:%d" % (port, watcher.BROWSER_GATE_PORT)], cmd)
+check("测试实例的本机入口不占 9339", watcher.BROWSER_GATE_PORT != 9339 and watcher.watcher_env().get("CCPULSE_BROWSER_PORT") == str(watcher.BROWSER_GATE_PORT))
 check("远端带远端模式和通道端口（20000～49999，固定值）", extra.get("CCPULSE_BROWSER_REMOTE") == "1" and 20000 <= port < 50000
       and watcher.browser_tunnel(ssh, {"sshHost": "me@server"})[1] == extra, extra)
 watcher.BROWSER["on"] = "server"

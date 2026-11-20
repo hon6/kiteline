@@ -279,6 +279,8 @@ struct LimitsTile: View {
     let usage: UsageItem?
     /// 标题后面给刷新按钮留个位（LimitsRefreshSlot）：卡片本身是个按钮，刷新按钮要从外面盖上去
     var refreshable = false
+    /// 白色列表上用浅灰块；灰底页面（「概览」页签）上用白卡片，浅灰块和页面底色只差两个色阶、看不出边界
+    var onTile = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -306,7 +308,7 @@ struct LimitsTile: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.tile, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(onTile ? Theme.tile : Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }

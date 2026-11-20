@@ -20,7 +20,7 @@ Not on the same network. From another network, Kiteline tries a direct peer-to-p
 
 ### Do I have to change how I work?
 
-No. Keep starting sessions in VS Code or the terminal. Terminal sessions need to run inside tmux to accept replies from the phone.
+No. Keep starting sessions in VS Code or the terminal. You can also start a task right in Kiteline and let it run in the background, with no VS Code window. Sessions you start in a terminal yourself need to run inside tmux to accept replies from the phone.
 
 ### Does my computer need to stay on?
 

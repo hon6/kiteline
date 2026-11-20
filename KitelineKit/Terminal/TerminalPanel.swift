@@ -516,7 +516,12 @@ struct TermScreen: UIViewRepresentable {
         if view.font.pointSize != fontSize { view.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular) }
     }
 
-    static func dismantleUIView(_ view: TerminalView, coordinator: TermLink) { coordinator.detach() }
+    static func dismantleUIView(_ view: TerminalView, coordinator: TermLink) {
+        // 还拿着键盘就被拆掉（收起面板、切到别的会话）：先正常交回去。直接拆的话键盘是被动收起的，
+        // iPad 上辅助键那一条的高度可能留在底部安全区里，输入栏回来后底下空着一截（11-19）
+        if view.isFirstResponder { _ = view.resignFirstResponder() }
+        coordinator.detach()
+    }
 }
 #else
 struct TermScreen: NSViewRepresentable {

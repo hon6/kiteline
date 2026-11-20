@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 
-from . import aggregate, bark, config, delivery, faces, guest, i18n, log, netinfo, setup_tools, tls, tts
+from . import aggregate, bark, config, delivery, editor_windows, faces, guest, i18n, log, netinfo, setup_tools, tls, tts
 from . import translate as translator
 from .httpd import Response, StreamReply
 from .store import hostable as store_hostable
@@ -939,10 +939,22 @@ def r_hosted_probe(s, request, *_):
 def r_hosted_settings(s, request, *_):
     """后台运行的设置：{sourceId, on}（按设备开关）/ {tipOff}"""
     body = request.json or {}
-    on, tip_off = body.get("on"), body.get("tipOff")
+    on, tip_off, close_editor = body.get("on"), body.get("tipOff"), body.get("closeEditor")
     s.app.set_hosted(source_id=body.get("sourceId") or None, on=on if isinstance(on, bool) else None,
-                     tip_off=tip_off if isinstance(tip_off, bool) else None)
+                     tip_off=tip_off if isinstance(tip_off, bool) else None,
+                     close_editor=close_editor if isinstance(close_editor, bool) else None)
     return Response.json({"ok": True})
+
+
+def r_editor_windows(s, request, *_):
+    """没有会话在运行、可以关的 VS Code 窗口（见 editor_windows.py）：{auto, idle: [标题]}"""
+    return Response.json({"ok": True, "auto": editor_windows.enabled(s.app), "idle": editor_windows.idle(s.app)})
+
+
+def r_editor_windows_close(s, request, *_):
+    """关掉这些窗口：{closed: [标题], left: [没关掉的]}"""
+    closed, left = editor_windows.close_idle(s.app)
+    return Response.json({"ok": True, "closed": closed, "left": left})
 
 
 def r_sources_rename(s, request, *_):
@@ -2038,6 +2050,7 @@ ROUTES = {
     ("GET", "/api/digest/media"): r_digest_media, ("POST", "/api/send"): r_send, ("POST", "/api/key"): r_key, ("POST", "/api/close"): r_close, ("POST", "/api/queue"): r_queue,
     ("POST", "/api/hosted/probe"): r_hosted_probe, ("POST", "/api/hosted/settings"): r_hosted_settings, ("POST", "/api/sources/rename"): r_sources_rename,
     ("POST", "/api/hosted/move"): r_hosted_move,
+    ("GET", "/api/editor/windows"): r_editor_windows, ("POST", "/api/editor/windows/close"): r_editor_windows_close,
     ("POST", "/api/answer"): r_answer, ("POST", "/api/voice"): r_voice, ("GET", "/api/voices"): r_voices,
     ("GET", "/api/voice-audio"): r_voice_audio, ("GET", "/api/git"): r_git, ("GET", "/api/git/diff"): r_git_diff,
     ("GET", "/api/repo"): r_repo_get, ("POST", "/api/repo"): r_repo_post, ("POST", "/api/fs"): r_fs, ("POST", "/api/term"): r_term, ("POST", "/api/restart"): r_restart, ("POST", "/api/browser"): r_browser,

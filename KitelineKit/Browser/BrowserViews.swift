@@ -64,12 +64,9 @@ struct BrowserAppLayer: View {
         let store = model.browsers
         if let key = store.focus, let info = model.session(key)?.browser, store.visible(key, info) {
             BrowserViewer(key: key, info: info, size: store.size(key))
-                // 不铺进安全区：iPhone 上顶栏会跑到状态栏底下，缩回 / 退出全屏的按钮点不到（11-16 反馈：全屏后无法退出）
-                .background(Theme.chatBackground.ignoresSafeArea())
-                #if os(iOS)
-                .statusBarHidden(store.size(key) == .fullscreen)
-                .persistentSystemOverlays(store.size(key) == .fullscreen ? .hidden : .automatic)
-                #endif
+                // 不铺进安全区：iPhone 上顶栏会跑到状态栏底下，换档的按钮点不到（11-16 反馈：全屏后无法退出）。
+                // 全屏时藏状态栏写在 MainView 根上（写在这里传不到系统）
+                .background(BrowserChrome.shell.ignoresSafeArea())
                 .transition(.opacity)
                 #if os(macOS)
                 .onChange(of: store.size(key), initial: true) { _, size in MacFullScreen.set(size == .fullscreen) }
@@ -136,11 +133,11 @@ struct BrowserMini: View {
         }
         .contextMenu {
             if collapsed { Button { withAnimation(.snappy) { store.expand(key) } } label: { Label("展开小窗", systemImage: "pip") } }
-            ForEach(BrowserSize.allCases.filter { $0 != .mini }) { size in
+            ForEach(BrowserSize.choices.filter { $0 != .mini }) { size in
                 Button { withAnimation(.snappy) { store.expand(key); store.setSize(key, size) } } label: { Label(size.label, systemImage: size.icon) }
             }
         }
-        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        .shadow(color: .black.opacity(0.24), radius: 14, y: 6)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .padding(.top, 56).padding(.trailing, 10)
         // 小窗能拖到对话页里任何地方（别挡住要看的内容），位置记住，各会话共用；收起后的小圆钮也一样
@@ -158,6 +155,10 @@ struct BrowserMini: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(collapsed ? L("展开浏览器小窗") : L("浏览器实时画面：%@", info.title.isEmpty ? info.shortURL : info.title))
         .accessibilityAddTraits(.isButton)
+        // 旁白双击 = 同轻点（放大 / 展开）。不写的话合并后的元素会把里面第一个按钮（× 收起）当成默认动作
+        .accessibilityAction {
+            withAnimation(.snappy) { if collapsed { store.expand(key) } else { store.setSize(key, .half) } }
+        }
         // 收起时、浏览器关了不要画面（省流量）；展开再要
         .task(id: collapsed || info.closed) {
             if collapsed || info.closed { store.unwatch(key, token: token) } else { store.watch(key, token: token, level: "thumb") }
@@ -229,6 +230,7 @@ struct BrowserMini: View {
         .frame(width: width)
         .background { BrowserGlass(shape: RoundedRectangle(cornerRadius: 12, style: .continuous)) }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12).hairlineBorder(BrowserChrome.edge, width: 1) }
         .overlay(alignment: .topTrailing) {
             Button { withAnimation(.snappy) { store.dismiss(key, info) } } label: {
                 Image(systemName: "xmark").font(.app(size: 9, weight: .bold))
@@ -280,6 +282,30 @@ struct BrowserGlass<S: Shape>: View {
 
 // MARK: - 放大
 
+/// 浏览器面板自己的几层颜色（11-19 反馈：Mac 上面板和会话是同一个底色，混在一起）。
+/// 面板做成浏览器的样子：外壳（工具栏、指令列表）比对话页抬高一层，画面区是凹下去的深色画布、网页像一页纸放在上面，
+/// 地址栏是嵌在外壳里的一格；外面一圈比原来清楚的边和投影
+enum BrowserChrome {
+    #if os(macOS)
+    /// 对话页是窗口底色（浅 #ECECEC、深 #1E1E1E）
+    static let shell = Theme.dynamic(light: 0xF8F8F9, dark: 0x2C2C2E)
+    #else
+    /// 对话页浅 #EDEDED、深 #111111
+    static let shell = Theme.dynamic(light: 0xF8F8F9, dark: 0x222224)
+    #endif
+    static let canvas = Theme.dynamic(light: 0xD9D9DE, dark: 0x0B0B0C)
+    static let field = Theme.dynamic(light: 0xFFFFFF, dark: 0x000000, lightAlpha: 1, darkAlpha: 0.34)
+    static let edge = Theme.dynamic(light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.16, darkAlpha: 0.18)
+    /// 网页四周在画布上留多宽（全屏时不留）
+    static var inset: CGFloat {
+        #if os(macOS)
+        10
+        #else
+        UIDevice.current.userInterfaceIdiom == .pad ? 10 : 6
+        #endif
+    }
+}
+
 struct BrowserViewer: View {
     @Environment(AppModel.self) private var model
     let key: String
@@ -298,36 +324,37 @@ struct BrowserViewer: View {
         let store = model.browsers
         GeometryReader { geo in
             let wide = geo.size.width >= 720
+            let roomy = geo.size.width >= 520
             VStack(spacing: 0) {
-                header(wide: geo.size.width >= 520)
-                Divider().opacity(0.5)
+                header(wide: roomy)
+                Divider()
                 if info.closed || replay?.active == true {
                     EmptyView()   // 看录像时没有接管（录像点不了）
                 } else if let ask = info.ask, !store.isControlling(key) { askBanner(ask) }
-                else if !store.isControlling(key) { takeOverBar }
-                if store.isControlling(key), !info.closed, replay?.active != true { controlBar }
+                else if !store.isControlling(key) { takeOverBar(roomy: roomy) }
+                if store.isControlling(key), !info.closed, replay?.active != true { controlBar(roomy: roomy) }
                 if wide {
                     HStack(spacing: 0) {
                         screen
-                        Divider().opacity(0.5)
+                        Divider()
                         BrowserActionList(key: key, replay: replay, closed: info.closed).frame(width: min(340, geo.size.width * 0.3))
                     }
                 } else {
                     screen
-                    Divider().opacity(0.5)
+                    Divider()
                     BrowserActionList(key: key, replay: replay, closed: info.closed).frame(height: min(240, geo.size.height * 0.36))
                 }
             }
         }
-        .background(Theme.chatBackground)
-        .clipShape(RoundedRectangle(cornerRadius: size == .half ? 14 : 0, style: .continuous))
+        .background(BrowserChrome.shell)
+        .clipShape(RoundedRectangle(cornerRadius: size == .half ? 12 : 0, style: .continuous))
         .overlay {
             if size == .half {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                RoundedRectangle(cornerRadius: 12).hairlineBorder(BrowserChrome.edge, width: 1)
             }
         }
         .padding(size == .half ? 8 : 0)
-        .shadow(color: .black.opacity(size == .half ? 0.12 : 0), radius: 12, y: 4)
+        .shadow(color: .black.opacity(size == .half ? 0.32 : 0), radius: 18, y: 8)
         .task(id: size) { if !info.closed { store.watch(key, token: token, level: "full") } }
         .task {
             if replay == nil { replay = BrowserReplay(key: key, store: store) }
@@ -337,51 +364,25 @@ struct BrowserViewer: View {
         .task(id: info.last) { await store.refreshActions(key) }
     }
 
-    // 顶栏：标签页 / 地址、大小档位、收起
+    // 顶栏做成浏览器的工具栏：后退 / 前进 / 刷新、地址栏（标题 + 网址，点开是标签页）、画面大小、关闭
     private func header(wide: Bool) -> some View {
         let store = model.browsers
-        return HStack(spacing: 8) {
-            Image(systemName: "globe").foregroundStyle(.secondary)
-            if editingURL {
-                TextField(L("输入网址"), text: $url)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.ui(.footnote))
-                    .onSubmit {
-                        store.input(key, ["type": "nav", "action": "goto", "url": url])
-                        editingURL = false
-                    }
-                    #if os(iOS)
-                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    #endif
-            } else {
-                Menu {
-                    ForEach(store.tabs[key] ?? []) { tab in
-                        Button {
-                            Task { await store.selectTab(key, tab.id) }
-                        } label: {
-                            Label(tab.title.isEmpty ? tab.url : tab.title, systemImage: tab.current ? "checkmark" : "square.on.square")
-                        }
-                    }
-                    if store.isControlling(key) {
-                        Divider()
-                        Button { url = info.url; editingURL = true } label: { Label("输入网址", systemImage: "link") }
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(info.title.isEmpty ? L("浏览器") : info.title).font(.ui(.subheadline).weight(.semibold)).lineLimit(1)
-                        Text(info.shortURL).font(.ui(.caption2)).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        let controlling = store.isControlling(key)
+        return HStack(spacing: wide ? 8 : 4) {
+            // 宽的时候一直摆着（没接管时是灰的、点不了），窄的时候接管了才出来
+            if wide || controlling {
+                HStack(spacing: 0) {
+                    navButton("chevron.left", L("后退")) { store.input(key, ["type": "nav", "action": "back"]) }
+                    navButton("chevron.right", L("前进")) { store.input(key, ["type": "nav", "action": "forward"]) }
+                    navButton("arrow.clockwise", L("刷新")) { store.input(key, ["type": "nav", "action": "reload"]) }
                 }
-                .menuStyle(.button).buttonStyle(.plain)
+                .disabled(!controlling)
+                .opacity(controlling ? 1 : 0.32)
             }
-            if store.isControlling(key) {
-                navButton("chevron.left", L("后退")) { store.input(key, ["type": "nav", "action": "back"]) }
-                navButton("chevron.right", L("前进")) { store.input(key, ["type": "nav", "action": "forward"]) }
-                navButton("arrow.clockwise", L("刷新")) { store.input(key, ["type": "nav", "action": "reload"]) }
-            }
+            addressField(wide: wide)
             sizePicker(wide: wide)
-            // 退出全屏：一直在顶栏上（全屏时系统的标题栏、状态栏都没了，只能靠它）
+            #if os(macOS)
+            // 退出全屏：一直在顶栏上（全屏时系统的标题栏没了，只能靠它）
             if size == .fullscreen || size == .app {
                 Button { withAnimation(.snappy) { store.setSize(key, .session) } } label: {
                     Image(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 30, height: 30)
@@ -396,6 +397,7 @@ struct BrowserViewer: View {
             .buttonStyle(.plain)
             .help(L("缩回小窗"))
             .accessibilityLabel(L("缩回小窗"))
+            #endif
             // 真正结束浏览器（小窗上的 × 只是收起）：agent 再用浏览器时会重新打开
             Button { confirmClose = true } label: {
                 Image(systemName: "stop.circle").frame(width: 30, height: 30)
@@ -409,34 +411,110 @@ struct BrowserViewer: View {
                 Text("Agent 正在进行的网页操作会中断，它再次使用浏览器时会重新打开（登录状态保留）。")
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 10).padding(.vertical, 7)
+    }
+
+    /// 地址栏：嵌在工具栏里的一格，左边小锁 / 地球，标题在前、网址在后；窄的时候只写标题（没有标题才写网址）。
+    /// 点开是标签页列表（接管时还能输入网址），不止一个标签页时右边标个数
+    private func addressField(wide: Bool) -> some View {
+        let store = model.browsers
+        let tabs = store.tabs[key] ?? []
+        return Group {
+            if editingURL {
+                HStack(spacing: 6) {
+                    Image(systemName: "globe").font(.app(size: 11)).foregroundStyle(.secondary)
+                    TextField(L("输入网址"), text: $url)
+                        .textFieldStyle(.plain)
+                        .font(.ui(.footnote))
+                        .onSubmit {
+                            store.input(key, ["type": "nav", "action": "goto", "url": url])
+                            editingURL = false
+                        }
+                        #if os(iOS)
+                        .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        #endif
+                }
+            } else {
+                Menu {
+                    ForEach(tabs) { tab in
+                        Button {
+                            Task { await store.selectTab(key, tab.id) }
+                        } label: {
+                            Label(tab.title.isEmpty ? tab.url : tab.title, systemImage: tab.current ? "checkmark" : "square.on.square")
+                        }
+                    }
+                    if store.isControlling(key) {
+                        Divider()
+                        Button { url = info.url; editingURL = true } label: { Label("输入网址", systemImage: "link") }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: info.url.hasPrefix("https://") ? "lock.fill" : "globe")
+                            .font(.app(size: 10)).foregroundStyle(.secondary)
+                        Text(info.title.isEmpty ? (wide || info.shortURL.isEmpty ? L("浏览器") : info.shortURL) : info.title)
+                            .font(.ui(.footnote).weight(.medium)).lineLimit(1).layoutPriority(1)
+                        if wide, !info.shortURL.isEmpty {
+                            Text(info.shortURL).font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
+                        if tabs.count > 1 {
+                            Text("\(tabs.count)").font(.app(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                                .lineLimit(1).fixedSize()   // 地址栏窄的时候别把数字挤没（只剩一个空框）
+                                .padding(.horizontal, 5).frame(height: 16)
+                                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.secondary.opacity(0.6), lineWidth: 1))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .menuStyle(.button).buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 8).fill(BrowserChrome.field))
+        .overlay(RoundedRectangle(cornerRadius: 8).hairlineBorder(BrowserChrome.edge.opacity(0.7)))
     }
 
     private func navButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).frame(width: 28, height: 28) }
+        Button(action: action) { Image(systemName: icon).font(.app(size: 13, weight: .medium)).frame(width: 28, height: 28).contentShape(Rectangle()) }
             .buttonStyle(.plain).help(label).accessibilityLabel(label)
     }
 
-    /// 四档大小：宽的时候一排图标，窄的时候收进菜单
+    /// 画面大小。Mac 四档（半个会话 / 整个会话 / 整个应用 / 全屏）：宽的时候一排图标，窄的时候收进菜单。
+    /// iPhone / iPad 三种（半屏 / 全屏 / 悬浮小窗）：一直是一排三个，点哪个切到哪个，不另设「缩回」「退出全屏」
     @ViewBuilder
     private func sizePicker(wide: Bool) -> some View {
         let store = model.browsers
-        let sizes: [BrowserSize] = [.half, .session, .app, .fullscreen]
-        if wide {
+        let sizes = BrowserSize.choices
+        #if os(macOS)
+        let row = wide
+        let cell = CGSize(width: 30, height: 24)
+        #else
+        let row = true
+        let cell = CGSize(width: 36, height: 28)   // 手指点的，比 Mac 的大一圈
+        #endif
+        if row {
             HStack(spacing: 2) {
                 ForEach(sizes) { option in
                     Button { withAnimation(.snappy) { store.setSize(key, option) } } label: {
                         Image(systemName: option.icon).font(.app(size: 13))
-                            .frame(width: 30, height: 26)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(option == size ? Theme.claude.opacity(0.12) : .clear))
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(option == size ? Theme.claude.opacity(0.35) : .clear, lineWidth: 0.8))
+                            .frame(width: cell.width, height: cell.height)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(option == size ? Theme.claude.opacity(0.14) : .clear))
+                            .overlay(RoundedRectangle(cornerRadius: 6).hairlineBorder(option == size ? Theme.claude.opacity(0.4) : .clear, width: 1))
                             .foregroundStyle(option == size ? Theme.claude : Color.primary)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(option.label)
                     .accessibilityLabel(option.label)
+                    .accessibilityAddTraits(option == size ? .isSelected : [])
                 }
             }
+            .padding(2)
+            .background(RoundedRectangle(cornerRadius: 8).fill(BrowserChrome.field))
+            .overlay(RoundedRectangle(cornerRadius: 8).hairlineBorder(BrowserChrome.edge.opacity(0.7)))
         } else {
             Menu {
                 ForEach(sizes) { option in
@@ -452,16 +530,18 @@ struct BrowserViewer: View {
         }
     }
 
-    // 画面：接管时点、拖、滚动都送进网页
+    // 画面：深色画布上放着网页这一页（四周留一圈、圆角细边投影；全屏时铺满）；接管时点、拖、滚动都送进网页
     private var screen: some View {
         let store = model.browsers
+        let inset: CGFloat = size == .fullscreen ? 0 : BrowserChrome.inset
         return GeometryReader { geo in
+            let box = CGSize(width: max(0, geo.size.width - inset * 2), height: max(0, geo.size.height - inset * 2))
             ZStack {
-                Color.black.opacity(0.04)
+                BrowserChrome.canvas
                 if let replay, replay.active || info.closed {
                     // 看录像：上面换成录到的画面；角上「回到实时」
                     if let image = replay.image {
-                        Image(platform: image).resizable().aspectRatio(contentMode: .fit)
+                        page(image, fit: Self.fitted(image.size, in: box).size)
                     } else {
                         ProgressView()
                     }
@@ -481,21 +561,21 @@ struct BrowserViewer: View {
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(8)
+                        .padding(inset + 8)
                         Spacer()
                     }
                 } else if let frame = store.frames[key] {
-                    let fit = Self.fitted(frame.image.size, in: geo.size)
-                    Image(platform: frame.image).resizable().aspectRatio(contentMode: .fit)
-                        .frame(width: fit.width, height: fit.height)
+                    let fit = Self.fitted(frame.image.size, in: box).size
+                    page(frame.image, fit: fit)
                         .overlay {
                             if store.isControlling(key) {
-                                BrowserTouchLayer(key: key, size: fit.size)
+                                BrowserTouchLayer(key: key, size: fit)
                             }
                         }
                         .overlay {
                             if store.isControlling(key) {
-                                Rectangle().stroke(Theme.claude.opacity(0.6), lineWidth: 2)
+                                RoundedRectangle(cornerRadius: pageRadius).strokeBorder(Theme.claude.opacity(0.7), lineWidth: 2)
+                                    .allowsHitTesting(false)
                             }
                         }
                 } else {
@@ -509,6 +589,18 @@ struct BrowserViewer: View {
         }
     }
 
+    private var pageRadius: CGFloat { size == .fullscreen ? 0 : 6 }
+
+    /// 一帧网页画面：圆角、细边，底下垫一块带投影的底（投影挂在不变的形状上，不跟着每一帧重算）
+    private func page(_ image: PlatformImage, fit: CGSize) -> some View {
+        let shape = RoundedRectangle(cornerRadius: pageRadius)
+        return Image(platform: image).resizable()
+            .frame(width: fit.width, height: fit.height)
+            .clipShape(shape)
+            .background { shape.fill(Color.white).shadow(color: .black.opacity(size == .fullscreen ? 0 : 0.28), radius: 10, y: 4) }
+            .overlay { if size != .fullscreen { shape.hairlineBorder(BrowserChrome.edge, width: 1).allowsHitTesting(false) } }
+    }
+
     static func fitted(_ image: CGSize, in box: CGSize) -> CGRect {
         guard image.width > 0, image.height > 0, box.width > 0, box.height > 0 else { return .zero }
         let scale = min(box.width / image.width, box.height / image.height)
@@ -516,14 +608,23 @@ struct BrowserViewer: View {
         return CGRect(origin: CGPoint(x: (box.width - size.width) / 2, y: (box.height - size.height) / 2), size: size)
     }
 
-    // 没在接管：一条说明 + 「接管」（接管后点画面就是点网页、可以打字）
-    private var takeOverBar: some View {
+    /// 开始接管。iPhone / iPad 上先放到全屏（11-19 起：接管自动进全屏）：半屏时画面只有一百多点高，点不准；
+    /// 要边看对话边操作，接管后再点回半屏就行（接管不会断）
+    private func beginControl() {
+        #if os(iOS)
+        if size != .fullscreen { withAnimation(.snappy) { model.browsers.setSize(key, .fullscreen) } }
+        #endif
+        Task { await model.browsers.takeOver(key) }
+    }
+
+    // 没在接管：一条说明 + 「接管」（接管后点画面就是点网页、可以打字）。窄的时候只留「实时画面」四个字，把高度让给画面
+    private func takeOverBar(roomy: Bool) -> some View {
         HStack(spacing: 10) {
-            Text("实时画面 · 点「接管」后可以直接在画面上点击、拖动、输入")
-                .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(2)
+            Text(roomy ? L("实时画面 · 点「接管」后可以直接在画面上点击、拖动、输入") : L("实时画面"))
+                .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 8)
             Button {
-                Task { await model.browsers.takeOver(key) }
+                beginControl()
             } label: {
                 Label("接管", systemImage: "hand.tap").font(.ui(.footnote).weight(.semibold))
             }
@@ -541,16 +642,18 @@ struct BrowserViewer: View {
                 Text(ask).font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(3)
             }
             Spacer(minLength: 8)
-            Button("开始接管") { Task { await model.browsers.takeOver(key) } }
+            Button("开始接管") { beginControl() }
                 .buttonStyle(.borderedProminent).tint(Theme.claude).controlSize(.small)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.claude.opacity(0.06))
     }
 
-    // 接管中：打字、常用键、交还
-    private var controlBar: some View {
+    // 接管中：打字、常用键、交还。宽的时候两行（输入框 + 键；说明 + 留言 + 交还）；
+    // 窄的时候输入框单独占一行（原来和五个键挤在一行，只剩一个字宽），键和交还在第二行，留言另起一行
+    private func controlBar(roomy: Bool) -> some View {
         let store = model.browsers
+        let asking = model.session(key)?.browser?.ask != nil
         return VStack(spacing: 6) {
             HStack(spacing: 8) {
                 TextField(L("输入文字，回车发送到网页"), text: $typing)
@@ -569,35 +672,48 @@ struct BrowserViewer: View {
                     if !typing.isEmpty { store.input(key, ["type": "text", "text": typing]); typing = "" }
                 }
                 .controlSize(.small)
-                keyButton("delete.left", "Backspace", L("退格"))
-                keyButton("arrow.right.to.line", "Tab", "Tab")
-                keyButton("return", "Enter", L("回车"))
-                keyButton("chevron.up", "PageUp", L("向上翻页"))
-                keyButton("chevron.down", "PageDown", L("向下翻页"))
+                if roomy { keys(stretch: false) }
             }
+            if !roomy, asking { noteField }
             HStack(spacing: 8) {
-                Label("你正在操作浏览器，Agent 的指令仍会执行", systemImage: "hand.tap")
-                    .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 8)
-                if model.session(key)?.browser?.ask != nil {
-                    TextField(L("给 Agent 留言（可不填）"), text: $handBackNote)
-                        .textFieldStyle(.roundedBorder).font(.ui(.caption)).frame(maxWidth: 220)
+                if roomy {
+                    Label("你正在操作浏览器，Agent 的指令仍会执行", systemImage: "hand.tap")
+                        .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    keys(stretch: true)   // 五个键平分「交还」左边剩下的宽度（交还两个字不能被挤掉）
                 }
+                if roomy { Spacer(minLength: 8) }
+                if roomy, asking { noteField.frame(maxWidth: 220) }
                 Button("交还给 Agent") {
                     let note = handBackNote
                     handBackNote = ""
                     Task { await store.handBack(key, note: note) }
                 }
                 .buttonStyle(.borderedProminent).tint(Theme.claude).controlSize(.small)
+                .fixedSize().layoutPriority(1)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.claude.opacity(0.06))
     }
 
-    private func keyButton(_ icon: String, _ name: String, _ label: String) -> some View {
+    @ViewBuilder
+    private func keys(stretch: Bool) -> some View {
+        keyButton("delete.left", "Backspace", L("退格"), stretch: stretch)
+        keyButton("arrow.right.to.line", "Tab", "Tab", stretch: stretch)
+        keyButton("return", "Enter", L("回车"), stretch: stretch)
+        keyButton("chevron.up", "PageUp", L("向上翻页"), stretch: stretch)
+        keyButton("chevron.down", "PageDown", L("向下翻页"), stretch: stretch)
+    }
+
+    private var noteField: some View {
+        TextField(L("给 Agent 留言（可不填）"), text: $handBackNote)
+            .textFieldStyle(.roundedBorder).font(.ui(.caption))
+    }
+
+    private func keyButton(_ icon: String, _ name: String, _ label: String, stretch: Bool = false) -> some View {
         Button { model.browsers.input(key, ["type": "key", "key": name]) } label: {
-            Image(systemName: icon).frame(width: 26, height: 24)
+            Image(systemName: icon).frame(minWidth: stretch ? 0 : 26, maxWidth: stretch ? .infinity : 26, minHeight: 24, maxHeight: 24)
         }
         .buttonStyle(.bordered).controlSize(.small).help(label).accessibilityLabel(label)
     }
@@ -723,6 +839,14 @@ private struct BrowserActionRow: View {
     }
 }
 
+#if os(iOS)
+/// 浏览器正全屏盖着整个界面：从 MainView 报到根上去藏状态栏（TARSApp 的 PadStatusBar）
+struct BrowserFullscreenKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+#endif
+
 #if KITELINE_MAC
 extension KitelineKit {
     /// Mac 主窗口根上挂这个：会话浏览器放到「整个应用 / 全屏」时盖满窗口
@@ -732,6 +856,19 @@ extension KitelineKit {
             if let model = KitelineKit.model {
                 BrowserAppLayer().environment(model)
             }
+        }
+    }
+
+    /// 自测截图用：把某个会话的浏览器切到某一档（mini / half / session / app / fullscreen），take = 接管、back = 交还
+    public static func browserStep(_ key: String, _ step: String) {
+        guard let store = model?.browsers else { return }
+        switch step {
+        case "take": Task { await store.takeOver(key) }
+        case "back": Task { await store.handBack(key) }
+        default:
+            guard let size = BrowserSize(rawValue: step) else { return }
+            store.expand(key)
+            store.setSize(key, size)
         }
     }
 }

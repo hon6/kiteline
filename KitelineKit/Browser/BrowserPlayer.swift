@@ -158,12 +158,13 @@ struct BrowserReplayBar: View {
                     .lineLimit(1).fixedSize()
             }
             HStack(spacing: 6) {
-                Toggle(isOn: $replay.skipWait) { Text("跳过等待").font(.ui(.caption2)) }
+                Toggle(isOn: $replay.skipWait) { Text("跳过等待").font(.ui(.caption2)).lineLimit(1).fixedSize() }   // 列表窄的时候别折成两行
                     .toggleStyle(.button).controlSize(.mini)
                 Spacer(minLength: 4)
                 ForEach([1.0, 2.0, 4.0, 8.0], id: \.self) { value in
                     Button { replay.speed = value } label: {
                         Text("\(Int(value))×").font(.ui(.caption2).weight(replay.speed == value ? .semibold : .regular))
+                            .lineLimit(1).fixedSize()
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(RoundedRectangle(cornerRadius: 5).fill(replay.speed == value ? Theme.claude.opacity(0.12) : .clear))
                             .overlay(RoundedRectangle(cornerRadius: 5).stroke(replay.speed == value ? Theme.claude.opacity(0.35) : .clear, lineWidth: 0.8))

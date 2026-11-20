@@ -60,7 +60,19 @@ PLUGIN_OPTIONS_ON = ""
 # 会话浏览器（设置 → Agent 浏览器，app 按配置设置）：开在哪、最多几个、空闲几分钟回收。开在这台电脑（client）时连远端带一条
 # ssh 反向转发（-R 0），远端 watcher 的入口经它接到本机入口；分到的端口从 ssh 的输出里读出来告诉远端（同 Mac 版 RemoteSession）
 BROWSER = {"on": "client", "max": 4, "idle": 10, "record": True}
-BROWSER_GATE_PORT = 9339
+def _gate_port():
+    """本机 watcher 的入口端口：正式运行 9339；测试实例（dry-run / 另指定配置目录）换一个 19400～19899 的固定端口，
+    经环境变量告诉 watcher，不占正式版的 9339（11-19 测试电脑留下的 watcher 占着 9339，正式 watcher 绑不上）"""
+    explicit = os.environ.get("CCPULSE_BROWSER_PORT")
+    if explicit:
+        return int(explicit)
+    seed = os.environ.get("KITELINE_CONFIG_DIR") or os.environ.get("CCPULSE_CONFIG_DIR")
+    if not seed and os.environ.get("KITELINE_DRY_RUN") != "1" and os.environ.get("CCPULSE_DRY_RUN") != "1":
+        return 9339
+    return 19400 + zlib.crc32((seed or str(os.getpid())).encode("utf-8")) % 500
+
+
+BROWSER_GATE_PORT = _gate_port()
 
 # 插件变了要换个 watcher 进程才载入（LocalSource.restart）：这么久内新进程就绪就不算断线；换之前手上的请求最多等这么久答完
 RESTART_GRACE = 30
@@ -89,6 +101,8 @@ def watcher_env():
     env["CCPULSE_BROWSER_MAX"] = str(BROWSER["max"])
     env["CCPULSE_BROWSER_IDLE"] = str(BROWSER["idle"])
     env["CCPULSE_BROWSER_REC"] = "1" if BROWSER.get("record", True) else "0"
+    if BROWSER_GATE_PORT != 9339:
+        env["CCPULSE_BROWSER_PORT"] = str(BROWSER_GATE_PORT)   # 测试实例：入口不占 9339
     return env
 
 

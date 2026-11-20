@@ -168,7 +168,7 @@ enum Hosted {
     }
 
     /// 开 / 关某台的后台运行、「不再提示」（各端的设置页、会话页提示都走这里）。只改开关，不重连这台
-    static func update(sourceId: String? = nil, on: Bool? = nil, tipOff: Bool? = nil) {
+    static func update(sourceId: String? = nil, on: Bool? = nil, tipOff: Bool? = nil, closeEditor: Bool? = nil) {
         let state = AppState.shared
         if let sourceId, let on, let index = state.config.sources.firstIndex(where: { $0.id == sourceId }) {
             if state.config.sources[index].kind == .local {
@@ -184,6 +184,10 @@ enum Hosted {
         if let tipOff {
             state.updatePreferences { $0.mobile.hostedTipOff = tipOff }
             if tipOff { Log.write("「支持后台运行 Claude Code」的提示：用户选了不再提示") }
+        }
+        if let closeEditor {
+            state.updatePreferences { $0.mobile.hostedCloseEditor = closeEditor }
+            Log.write("会话都在后台运行后自动关闭 VS Code 窗口：\(closeEditor ? "已开启" : "已关闭")")
         }
         KitelineModel.shared.refresh()
     }
@@ -206,6 +210,8 @@ enum Hosted {
             switch result {
             case .success:
                 setIssue(record.sourceId, nil)
+                // 这个项目的 VS Code 窗口里要是没有别的会话了，顺手关掉（见 EditorWindows）
+                EditorWindows.settle(.moved(record.key), cwd: snap.cwd, sourceId: record.sourceId)
                 completion(.init(ok: true, submitted: false, openedWindow: false, message: "已转到后台运行"))
             case .failure(let error):
                 Log.write("转到后台运行未成功：\(error.description)")
@@ -271,6 +277,8 @@ enum Hosted {
                 }
                 Log.write("新会话：后台会话 \(reply["hosted"] as? String ?? "?") 已就绪（\(reply["sessionId"] as? String ?? "")）")
                 if agent == nil { setIssue(source.id, nil) }
+                // 这个项目有会话在后台了：它那个最小化着、里面没有会话的 VS Code 窗口用不着了（见 EditorWindows）
+                EditorWindows.settle(.started, cwd: cwd, sourceId: source.id)
                 completion(.success(NewSession.Outcome(ok: true, submitted: submitted, openedWindow: false, message: message)))
             case .failure(let error):
                 Log.write(agent == nil ? "新会话：后台启动失败（\(error.description)），改在 VS Code 中打开"

@@ -694,8 +694,20 @@ final class MobileServer {
             case ("POST", "/api/hosted/settings"):
                 let body = request.jsonBody ?? [:]
                 DispatchQueue.main.async {
-                    Hosted.update(sourceId: body["sourceId"] as? String, on: body["on"] as? Bool, tipOff: body["tipOff"] as? Bool)
+                    Hosted.update(sourceId: body["sourceId"] as? String, on: body["on"] as? Bool, tipOff: body["tipOff"] as? Bool,
+                                  closeEditor: body["closeEditor"] as? Bool)
                     respond(.json(["ok": true]))
+                }
+            case ("GET", "/api/editor/windows"):
+                // 没有会话在运行、可以关的 VS Code 窗口（见 EditorWindows）
+                DispatchQueue.main.async {
+                    EditorWindows.idle { titles in
+                        respond(.json(["ok": true, "auto": AppState.shared.config.mobile.hostedCloseEditor, "idle": titles]))
+                    }
+                }
+            case ("POST", "/api/editor/windows/close"):
+                DispatchQueue.main.async {
+                    EditorWindows.closeIdle { closed, left in respond(.json(["ok": true, "closed": closed, "left": left])) }
                 }
             case ("POST", "/api/sources/rename"):
                 // 手机、小程序给设备起别名（清空 = 恢复默认名）。别名记在设备所在的电脑上：

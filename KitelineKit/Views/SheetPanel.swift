@@ -69,18 +69,33 @@ extension View {
         #endif
     }
 
-    /// 代替只有一个确认按钮的 `.confirmationDialog`：iPhone 照旧从底部弹出；Mac 弹一张能拖动的小卡片，同样在所在会话正中。
+    /// 代替只有一个确认按钮的 `.confirmationDialog`。Mac 弹一张能拖动的小卡片，在所在会话正中。
+    /// iPhone / iPad：iOS 26 的 confirmationDialog 是指向挂载视图的气泡，挂在整页上箭头就总指着同一个地方，
+    /// 分不清在操作哪一条（11-16 反馈：关哪个会话都在同一位置、压缩上下文从上面冒出来）。所以：
+    /// anchored = true 时挂在点的那一行 / 那个按钮上，气泡从那里弹出、箭头指着它；
+    /// 其余（从菜单、手势里点的，没有可指的东西）弹屏幕正中的提示框，标题是 title（不给就用确认按钮的字）。
     /// 文字传进来前先 L() 好
+    @ViewBuilder
     func confirmPanel(_ message: String, isPresented: Binding<Bool>, confirm: String, destructive: Bool = false,
-                      cancel: String? = nil, file: String = #fileID, line: Int = #line, action: @escaping () -> Void) -> some View {
+                      cancel: String? = nil, title: String? = nil, anchored: Bool = false,
+                      file: String = #fileID, line: Int = #line, action: @escaping () -> Void) -> some View {
         #if os(macOS)
         sheetPanel(isPresented: isPresented, file: file, line: line) {
             ConfirmCard(message: message, confirm: confirm, destructive: destructive, cancel: cancel ?? L("取消"), action: action)
         }
         #else
-        confirmationDialog(message, isPresented: isPresented, titleVisibility: .visible) {
-            Button(confirm, role: destructive ? .destructive : nil, action: action)
-            if let cancel { Button(cancel, role: .cancel) {} }
+        if anchored {
+            confirmationDialog(message, isPresented: isPresented, titleVisibility: .visible) {
+                Button(confirm, role: destructive ? .destructive : nil, action: action)
+                Button(cancel ?? L("取消"), role: .cancel) {}
+            }
+        } else {
+            alert(title ?? confirm, isPresented: isPresented) {
+                Button(cancel ?? L("取消"), role: .cancel) {}
+                Button(confirm, role: destructive ? .destructive : nil, action: action)
+            } message: {
+                Text(message)
+            }
         }
         #endif
     }

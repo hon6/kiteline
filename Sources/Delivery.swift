@@ -425,6 +425,10 @@ enum Delivery {
         // 关掉了就取消标记（标记是为了多任务时找得到还开着的会话）
         let completion: (Outcome) -> Void = { outcome in
             if outcome.ok { DispatchQueue.main.async { AppState.shared.setMarked(record.key, false) } }
+            // 关的是 VS Code 里的标签：这个项目其余的会话都在后台运行的话，窗口也用不着了（见 EditorWindows）
+            if outcome.ok, record.kind != .kiteline, record.snapshot.agentID == "claude-code", record.snapshot.isVSCode, record.snapshot.hosted == nil {
+                EditorWindows.settle(.closed(record.key), cwd: record.snapshot.cwd, sourceId: record.sourceId)
+            }
             completion(outcome)
         }
         if dryRun {

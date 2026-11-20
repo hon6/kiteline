@@ -590,6 +590,10 @@ struct ChatView: View {
         .animation(.snappy, value: session?.goal?.state)
         .environment(\.chatWidth, chatWidth)   // 分屏的窄块里：卡片按钮上下叠、打字时收起语音和停止键
         .environment(\.promptCap, promptCap)
+        #if os(iOS)
+        // 收起终端面板：它还拿着键盘的话马上交回去，键盘和面板一起落下去；别等面板滑出去、终端视图被拆掉时才被动收起
+        .onChange(of: chat.terminalOpen) { _, open in if !open { Keyboard.hide() } }
+        #endif
         #if os(macOS)
         // 对话内容会滚到底部这一块下面：垫一层窗口底色，别从常用语、输入框之间透出来
         .padding(.top, 8)

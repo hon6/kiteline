@@ -281,6 +281,16 @@ static class SelfTest
                     window.KeyPress(Enum.Parse<Avalonia.Input.Key>(keyParts[0], true), mods, Avalonia.Input.PhysicalKey.None, null);
                     window.KeyRelease(Enum.Parse<Avalonia.Input.Key>(keyParts[0], true), mods, Avalonia.Input.PhysicalKey.None, null);
                     break;
+                // 在正在看的终端中间滚鼠标滚轮（wheel:3 往上三格、wheel:-3 往下），走真的指针滚轮事件
+                case "wheel":
+                    if (window.GetVisualDescendants().OfType<Terminal.TermView>().FirstOrDefault(v => v.IsEffectivelyVisible) is { } wheelTerm
+                        && wheelTerm.TranslatePoint(new Avalonia.Point(wheelTerm.Bounds.Width / 2, wheelTerm.Bounds.Height / 2), window) is { } wheelAt)
+                    {
+                        window.MouseMove(wheelAt);
+                        window.MouseWheel(wheelAt, new Avalonia.Vector(0, double.Parse(arg)));
+                    }
+                    else Console.Error.WriteLine("[selftest] wheel：没有正在看的终端");
+                    break;
                 case "tree": Tree(window, arg); break;
                 case "scrollpos":   // 对话区滚在哪：scrollpos:<标签>
                     foreach (var view in window.GetVisualDescendants().OfType<Views.ChatView>()) Console.Error.WriteLine($"[selftest] 滚动位置 {arg}：{view.SelfTestScroll()}");

@@ -1378,25 +1378,32 @@ try:
     mod_ts = W.BRIDGE_MOD_FILES["hooks/register.ts"]
     check("mod：斜杠命令走 $.command.run，以「/」开头的普通话垫零宽空格（源码里是转义写法）",
           "$.command.run(" in mod_ts and "`\\u200b${text}` : text" in mod_ts and "await deliver($, { id: item.id, text: item.text, cmd })" in mod_ts and "\u200b" not in mod_ts)
-    pb = mod_ts.split("on('classic.PostToolBatch'")[1].split("on('tool.call'")[0]
-    check("mod：Claude 忙时发来的斜杠命令也排进队（带 cmd），不插进这一轮，这一轮做完（turn.complete）再执行",
+    tc = mod_ts.split("on('turn.complete'")[1].split("on('tool.call'")[0]
+    check("mod：Claude 忙时发来的话和斜杠命令都排进队，这一轮做完（turn.complete）再照顺序提交 / 执行",
           "later.push({ id: item.id, text: item.text, ...(cmd ? { cmd } : {}) })" in mod_ts
-          and "if (q.cmd) {" in pb and "later.push(q)" in pb
-          and "await deliver($, q)" in mod_ts.split("on('turn.complete'")[1].split("on('classic.PostToolBatch'")[0]
-          and "void $.command.run({ command: slash[0], args: slash[1] })" in mod_ts)
+          and "for (const q of later.splice(0)) await deliver($, q)" in tc
+          and "void $.command.run({ command: slash[0], args: slash[1] })" in mod_ts and "result = 'later'" in mod_ts)
     check("读记录时去掉垫的零宽空格：手机上显示、核对送达都照原话", W.user_string_item("\u200b/Users/x 看看", {"id": "1"})["text"] == "/Users/x 看看")
     check("手机经 mod 发来、排队进来的话算你说的；别的插件的不算",
           W.normalize_line(0, {"type": "attachment", "timestamp": ts(1), "attachment": {
               "type": "queued_command", "prompt": "手机上说的", "origin": {"kind": "plugin", "name": "kiteline", "asUser": True}}})[0].get("t") == "user"
           and W.normalize_line(0, {"type": "attachment", "timestamp": ts(1), "attachment": {
               "type": "queued_command", "prompt": "别的插件", "origin": {"kind": "plugin", "name": "other"}}}) == [])
-    check("mod：Claude 忙时发的话留着，下一批工具跑完插进这一轮（session.append），没赶上的这一轮完了再提交",
-          "classic.PostToolBatch" in mod_ts and "$.session.append(" in mod_ts and "result = 'later'" in mod_ts
-          and "later.splice(0)" in mod_ts.split("on('turn.complete'")[1].split("on('classic.PostToolBatch'")[0])
-    check("mod：插进去的话开头垫零宽空格（watcher 靠它认）", "text: `\\u200b${q.text}`" in mod_ts.split("on('classic.PostToolBatch'")[1].split("on('tool.call'")[0])
+    check("mod v3：不再往一轮中间插（session.append 的行 2.1.327 起被标成「不是用户说的」），alive 标 v3",
+          "$.session.append(" not in mod_ts and "classic.PostToolBatch" not in mod_ts and "v: 3" in mod_ts)
+    note = {"type": "attachment", "timestamp": ts(1), "attachment": {"type": "plugin_note", "plugin": "kiteline",
+            "content": ["\u200b现在部署"], "sentAs": "system"}}
+    got = W.normalize_line(0, note)
+    check("老 mod 插进来的 plugin_note（垫了零宽空格）照你说的显示；别的插件、没垫的不显示",
+          len(got) == 1 and got[0]["t"] == "user" and got[0]["text"] == "现在部署"
+          and W.normalize_line(0, {"type": "attachment", "attachment": {"type": "plugin_note", "plugin": "other", "content": ["\u200bx"]}}) == []
+          and W.normalize_line(0, {"type": "attachment", "attachment": {"type": "plugin_note", "plugin": "kiteline", "content": ["备注"]}}) == [], str(got))
+    check("忙时键入终端：普通话可以；/ ! # @ 开头、结尾停在 @提及上的不键入",
+          W.bridge_typeable("现在部署") and W.bridge_typeable("看看 a@b.com 这个")
+          and not any(W.bridge_typeable(x) for x in ("/compact", "!ls", "# 记住", "@file", "看看 @src/ma", "", "  ")))
     check("mod：排队的话写进 <会话>.queue.json，认 queue 指令（move / edit / delete / now），alive 标 v2",
           "queue.json" in mod_ts and "item.op === 'queue'" in mod_ts and all("item.action === '%s'" % a in mod_ts for a in ("move", "edit", "delete", "now"))
-          and "v: 2" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now"} and "queue" in W.BRIDGE_OPS)
+          and "v: 3" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now"} and "queue" in W.BRIDGE_OPS)
     q_dir = W.bridge_dir()
     os.makedirs(q_dir, exist_ok=True)
     q_started = int(time.time() * 1000) - 5000

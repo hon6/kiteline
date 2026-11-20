@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
-from . import agent_skill, aggregate, alerts, config, delivery, faces, log, netinfo, reminders, remotessh, setup_tools, tls, tts, voice, vscode_a11y, vscreen
+from . import agent_skill, aggregate, alerts, config, delivery, editor_windows, faces, log, netinfo, reminders, remotessh, setup_tools, tls, tts, voice, vscode_a11y, vscreen
 from .devices import DeviceStore, Pairing
 from .httpd import HTTPServer, Response
 from .p2p import P2P
@@ -37,7 +37,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.45"
+VERSION = "1.0.46"
 
 
 class App:
@@ -49,6 +49,7 @@ class App:
         self._resume_pending = {}   # 「会话 + 消息编号」→ 正在处理的恢复（手机重发的等它的结果，见 resume）
         self._resume_recent = {}    # 「会话 + 消息编号」→ (时刻, 回应)：10 分钟内做成过的恢复
         HOSTED_SETTING[0] = self.hosted_on
+        editor_windows.APP[0] = self   # 会话都在后台后自动关 VS Code 窗口（见 editor_windows.py）
         self.host = tls.host_name()
         self.devices = DeviceStore()
         self.pairing = Pairing()
@@ -624,7 +625,7 @@ class App:
                 return bool(entry.get("hostedOn"))
         return False
 
-    def set_hosted(self, source_id=None, on=None, tip_off=None):
+    def set_hosted(self, source_id=None, on=None, tip_off=None, close_editor=None):
         """开 / 关某台的后台运行、「支持后台运行」的提示不再提示（同 Mac 版 Hosted.update）。只改开关，不重连这台"""
         def change(data):
             if source_id and on is not None:
@@ -636,7 +637,11 @@ class App:
                             entry["hostedOn"] = bool(on)
             if tip_off is not None:
                 data["mobile"]["hostedTipOff"] = bool(tip_off)
+            if close_editor is not None:
+                data["mobile"]["hostedCloseEditor"] = bool(close_editor)
         self.cfg.update(change)
+        if close_editor is not None:
+            log.write("会话都在后台运行后自动关闭 VS Code 窗口：%s" % ("已开启" if close_editor else "已关闭"))
         if source_id:
             HOSTED_BLOCKED.pop(source_id, None)
             if on is not None:
@@ -754,8 +759,9 @@ class App:
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
         # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart"]
-        payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff"))}
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows"]
+        # editorWindows = 能列出、关掉没有会话在运行的 VS Code 窗口（/api/editor/windows）；closeEditor 是自动关的开关
+        payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff")), "closeEditor": editor_windows.enabled(self)}
         return payload
 
     def profile_payload(self):
@@ -1585,6 +1591,8 @@ def move_to_background(record, source, siblings):
     if "reply" in box:
         HOSTED_ISSUES.pop(source.id, None)
         HOSTED_BLOCKED.pop(source.id, None)
+        # 这个项目的 VS Code 窗口里要是没有别的会话了，顺手关掉（见 editor_windows.py）
+        editor_windows.settle(None, "moved", snap.get("cwd") or "", source.id, key=record.key)
         return True, "已转到后台运行"
     issue = hosted_issue(box.get("error"))
     if issue:
@@ -1632,6 +1640,8 @@ def launch_hosted(cwd, prompt, submit, session_id, source, agent=None):
     log.write("新会话：后台会话 %s 已就绪（%s）" % (reply.get("hosted"), reply.get("sessionId")))
     if not agent:
         HOSTED_ISSUES.pop(source.id, None)   # 起来了：会话页的「后台运行未成功」提示不用了
+    # 这个项目有会话在后台了：它那个最小化着、里面没有会话的 VS Code 窗口用不着了（见 editor_windows.py）
+    editor_windows.settle(None, "started", cwd, source.id)
     return {"ok": True, "submitted": submitted, "openedWindow": False, "message": message, "error": "", "cwd": cwd,
             "sessionId": reply.get("sessionId")}, None
 
@@ -1761,6 +1771,8 @@ def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="�
         return {"ok": False, "submitted": False, "openedWindow": False, "message": "未找到 VS Code 命令行（code）", "error": "未找到 VS Code 命令行（code）", "cwd": cwd}
     remote = source_kind == "ssh"
     source_config = getattr(source, "config", None) or {}
+    # 记下刚打开的窗口：会话过一会儿才出现在里面，这段时间别把它当成用不着的窗口关掉（见 editor_windows.py）
+    editor_windows.note_opened(cwd, remote, source_config.get("sshHost"))
     if remote and not source_config.get("sshHost"):
         return {"ok": False, "submitted": False, "openedWindow": False, "message": "此远端来源未配置主机地址", "error": "此远端来源未配置主机地址", "cwd": cwd}
     # 开窗口、开标签都会把 VS Code 切到前台：做完把前台还给用户原来在用的窗口（同 Mac 版；Wayland 下系统不让切别的窗口）

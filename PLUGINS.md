@@ -40,25 +40,25 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 2. Codex has no desktop app for Linux
 3. DeepSeek Harness has no desktop app for Linux
 4. Proma offers no interface for remote control, so it's view-only; reply and approve in Proma on the computer
-5. 回复和确认需要 Antigravity CLI 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+5. Replying and approving need the Antigravity CLI running in tmux, or picked when starting a task in Kiteline (runs in the background)
 6. The CLI can reply and confirm when it runs in a Windows terminal (no tmux needed)
 7. Desktop app and IDE sessions are view-only
-8. 回复和确认需要 CodeBuddy Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+8. Replying and approving need CodeBuddy Code running in tmux, or picked when starting a task in Kiteline (runs in the background)
 9. Phone control isn't available yet (not tested on Windows), so it's view-only
-10. WorkBuddy 桌面版：查看任务和完整对话；从手机发消息、新建任务时 Kiteline 用它的深链接打开任务、粘贴并发送（会短暂切到 WorkBuddy）；确认操作请在 WorkBuddy 中进行
-11. WorkBuddy 桌面版的任务只能查看（Windows 上从手机发消息还没实测）
-12. WorkBuddy 桌面版的任务只能查看（Linux 版还没实测）
+10. WorkBuddy desktop app: view tasks and full conversations; to send a message or start a task from your phone, Kiteline opens the task through its deep link, pastes and sends (briefly switching to WorkBuddy); confirm actions in WorkBuddy
+11. WorkBuddy desktop tasks are view-only (sending messages from your phone hasn't been tested on Windows yet)
+12. WorkBuddy desktop tasks are view-only (the Linux version hasn't been tested yet)
 13. Use Cursor's editor window (the Agents window isn't supported) and restart Cursor once after the plugin is installed; sending to an idle chat from your phone needs Kiteline 3.49.15 / desktop 1.0.20 or later
 14. Replying and approving need the Cursor CLI to run in tmux
 15. Windows has no tmux, so it's view-only; messages sent while Cursor is working go out when the current turn ends
-16. 回复和确认需要 Grok Build 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
-17. 回复和确认需要 Hermes 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
-18. 回复和确认需要 Kimi Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+16. Replying and approving need Grok Build running in tmux, or picked when starting a task in Kiteline (runs in the background)
+17. Replying and approving need Hermes running in tmux, or picked when starting a task in Kiteline (runs in the background)
+18. Replying and approving need Kimi Code running in tmux, or picked when starting a task in Kiteline (runs in the background)
 19. Desktop app sessions are view-only
-20. 回复需要 Muse Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）；从手机确认命令暂未开放
-21. 回复和中断需要 pi 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
-22. 在终端窗口中运行即可回复和中断
-23. 回复和确认需要 Qwen Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+20. Replying needs Muse Code running in tmux, or picked when starting a task in Kiteline (runs in the background); approving commands from your phone isn't available yet
+21. Replying and interrupting need pi running in tmux, or picked when starting a task in Kiteline (runs in the background)
+22. Reply and interrupt when it runs in a terminal window
+23. Replying and approving need Qwen Code running in tmux, or picked when starting a task in Kiteline (runs in the background)
 24. Windows has no tmux, so it's view-only
-25. 发任务需要 trae-agent 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+25. Sending tasks needs trae-agent running in tmux, or picked when starting a task in Kiteline (runs in the background)
 26. Controllable from your phone with models added using an API key; models from your account sign-in are view-only; confirm turns started on your computer there

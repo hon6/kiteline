@@ -1,5 +1,21 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.46 (2026-11-20)
+
+### New Features
+
+- **Close a project's VS Code window once all its sessions run in the background**: After you move a session from VS Code to the background, Kiteline closes the project's VS Code window if no session is running in it anymore, reducing the memory VS Code uses. When you start or resume a session in the background, the project's window is also closed if it is minimized and has no running sessions. A window is left open if another session is still running in it, it has unsaved changes, or you are using it in the foreground. To view the code, choose “Open in VS Code” from the session at any time. You can turn this off in Settings → Sources, where you can also close every VS Code window that has no running sessions at once. On iPhone, iPad and the WeChat Mini Program, go to Settings → Run Claude Code in the Background to turn this on or off, see which VS Code windows on your computer have no running sessions, and close them all at once. On Linux this requires Kiteline's companion extension for VS Code, and windows are closed automatically only after a session is moved to the background or closed.
+
+### Improvements
+
+- **The in-session browser now stands apart from the conversation**: The enlarged browser panel is styled like a browser — the toolbar and action list sit one level above the conversation background, the page area is a dark canvas, the top bar has Back, Forward, Reload and an address field, and the panel has a clear border, so it no longer blends into the conversation.
+
+### Bug Fixes
+
+- **Fixed messages sent from your phone while Claude is busy being treated as plugin notes instead of your own words**: Newer versions of Claude Code mark such mid-turn messages as not coming from the user, so Claude would ask you to confirm again. Background sessions now receive the message as if you typed it in the terminal, and Claude reads it before its next step; other sessions send it as your message once the current turn finishes.
+- **Fixed the scroll wheel doing nothing in the Claude Code terminal**: Scrolling the wheel in a session's "claude" terminal now moves through the conversation; the wheel also works when viewing files in full-screen programs such as less.
+- **Fixed scrolling in the terminal of long-running sessions on the phone**: After a Claude Code session had been running for a while, swiping with two fingers in its terminal on iPhone, iPad or the WeChat Mini Program did nothing. Scrolling works once the computer app is updated.
+
 ## 1.0.45 (2026-11-16)
 
 ### New Features

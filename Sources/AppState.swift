@@ -487,9 +487,10 @@ final class AppState {
             // hostedSetup = 远端电脑上后台运行 Claude Code：按设备检测出口、开关，把会话转到后台（/api/hosted/*）
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
             // renameSource = 手机能给设备起别名（/api/sources/rename，记在设备所在的电脑上）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart"]
+            // editorWindows = 能列出、关掉没有会话在运行的 VS Code 窗口（/api/editor/windows，hosted.closeEditor 是自动关的开关）
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows"]
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
-            "hosted": ["tipOff": config.mobile.hostedTipOff],
+            "hosted": ["tipOff": config.mobile.hostedTipOff, "closeEditor": config.mobile.hostedCloseEditor],
         ]
     }
 

@@ -40,9 +40,15 @@ function state() {
   const group = vscode.window.tabGroups.activeTabGroup;
   const tab = group && group.activeTab;
   const input = tab && tab.input;
+  const folders = vscode.workspace.workspaceFolders || [];
   return {
     ok: true,
     version: 1,
+    // 1.0.4 起：认 close（关掉这个窗口）；dirty = 有没保存的文件；authority = 远端窗口连的是哪台（ssh-remote+主机）。
+    // Kiteline 在项目的会话都转到后台运行以后，靠这几样判断能不能关掉这个窗口（见 editor_windows.py）
+    closable: true,
+    dirty: vscode.workspace.textDocuments.some((doc) => doc.isDirty),
+    authority: (folders[0] && folders[0].uri.authority) || null,
     focused: vscode.window.state.focused,
     folders: (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
     remote: vscode.env.remoteName || null,
@@ -85,6 +91,12 @@ async function handle(request) {
       await sleep(250);
       return state();
     }
+    case "close":
+      // 项目的会话都在后台运行了，这个窗口用不着了。有没保存的文件不关（Kiteline 那边也先看过 dirty）；
+      // 先回话再关：关窗口会连扩展宿主一起结束，通道跟着断
+      if (vscode.workspace.textDocuments.some((doc) => doc.isDirty)) return { ok: false, error: "unsaved changes" };
+      setTimeout(() => { vscode.commands.executeCommand("workbench.action.closeWindow"); }, 100);
+      return { ok: true };
     case "reload":
       // 手机上点「尝试重连」：远端窗口里「工作区不存在」这类关掉对话框后，重新加载这个窗口（Mac / Windows 版用命令面板做同一件事）。
       // 先回话再重载：重载会连扩展宿主一起重启，通道跟着断

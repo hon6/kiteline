@@ -6,7 +6,7 @@
 
 ### 电脑上已经在跑的编程 Agent，用手机来遥控。
 
-Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harness 会话（VS Code 里、终端里、Remote-SSH 远端的都算）放到 iPhone、iPad 和 Apple Watch 上。Agent 照你现在的用法用，人离开电脑时，在手机上看每一步、批准请求、回答提问、派下一件活。
+Kiteline 把你各台电脑上的 Claude Code、Codex、OpenCode、DeepSeek Harness 会话（VS Code 里、终端里、Remote-SSH 远端的，以及由 Kiteline 在后台运行的都算）放到 iPhone、iPad 和 Apple Watch 上，安卓手机用微信小程序。Agent 照你现在的用法用，人离开电脑时，在手机上看每一步、批准请求、回答提问、派下一件活。
 
 <br>
 
@@ -63,7 +63,7 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 ## 为什么用 Kiteline
 
-- **不用换工具**：会话照样在 VS Code、终端或 Remote-SSH 里，手机接管的就是同一个会话，不用搬到另一个界面里重新开。
+- **不用换工具**：会话照样在 VS Code、终端或 Remote-SSH 里，手机接管的就是同一个会话，不用搬到另一个界面里重新开；也可以让 Kiteline 在后台运行 Claude Code，不占 VS Code 窗口，电脑锁屏时照样能回复和确认。
 - **不碰你的 AI 账号**：不登录 Claude 或任何 AI 服务，不读 API Key 和登录凭证，不调用任何模型接口；只读 Agent 自己写下的会话记录，只通过 Agent 自己提供的接口操作。
 - **Agent 自己汇报**：自带技能让 Agent 发截图、用 Playwright 在真实浏览器里把网页功能走一遍并把报告发给你、把只有你能做的事记成待办、报告做到第几步。
 - **抬腕就能批**：命令、计划、提问推到锁屏和 Apple Watch；锁屏和灵动岛上实时显示谁在等你、做到第几步；高风险命令一律二次确认。
@@ -88,10 +88,16 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 | | |
 |---|---|
-| **所有 Agent 一个列表** | Claude Code（VS Code 与终端）、Codex、OpenCode、DeepSeek Harness、Qwen Code、Kimi Code、CodeBuddy、ZCode、Antigravity、Grok Build 等；新的 Agent 以签名插件下发，无需等待 App 更新。 |
+| **所有 Agent 一个列表** | Claude Code（VS Code、终端与后台运行）、Codex、OpenCode、DeepSeek Harness、Cursor、Qwen Code、Kimi Code、CodeBuddy、ZCode、Antigravity、Grok Build、Hermes、Muse Code、pi、trae-agent 等；新的 Agent 以签名插件下发，无需等待 App 更新。 |
 | **随时随地确认** | 权限请求、计划审批、选择题都以卡片形式出现在锁屏、手机和手表上。 |
 | **多种回复方式** | 打字、按住说话（本机离线识别）、附照片或截图，也能在任一项目中新建任务。 |
-| **看到工作本身** | 实时步骤、命令、代码改动、测试输出与图片；内置带 Git 的代码编辑器，以及跑在会话里的终端。 |
+| **看到工作本身** | 实时步骤、命令、代码改动、测试输出与图片；内置带 Git 的代码编辑器，以及跑在会话里的终端。Agent 需要终端时，命令也开在这个会话的终端里，标签上写明所在设备。 |
+| **后台运行** | Mac、Linux 电脑上的项目，新建任务和恢复会话默认由 Kiteline 在后台运行 Claude Code，不打开 VS Code；发消息、确认都不切换前台，电脑锁屏时也能操作，需要看代码时一键转到 VS Code。经 SSH 连接的远端电脑按设备开启。 |
+| **会话组与执行过程** | 电脑上把相关会话收进一组，组标签挂在窗口顶部，切到某组时组里的会话各占一列。Mac 与 iPad 上可打开「执行过程」，按时间线查看 Agent、轮次与每一步，出错处一键定位，还能回放。 |
+| **Agent 浏览器** | Agent 操作网页时统一使用 Kiteline 提供的浏览器：会话里出现实时画面小窗，可放大查看每一步；遇到登录、验证码由你接管，完成后交还。操作全程录像，可以回放。 |
+| **消息排队与重启** | Agent 正忙时发出的消息排在输入框上方，可调整顺序、编辑、删除或强插；会话可单个或批量重启，对话内容保留。 |
+| **多台电脑** | 手机可同时连接多台装有 Kiteline 的电脑，会话合并在一个列表；电脑之间也可以互相添加，每台设备可设别名。 |
+| **小组件与战绩** | iPhone 主屏幕与锁屏小组件显示最近会话、订阅额度与今日 Token 用量；可把一天、一周或单个任务的用量、改动行数与在线时长生成一张只含统计数字的分享图。 |
 | **任务进度** | 每个会话显示当前阶段（如「2/4 开发中」），Agent 可直接把截图和报告发到手机。 |
 | **目标** | 在手机上给 Claude Code 或 Codex 会话设一个目标（`/goal`），Agent 一轮轮做下去，达成才停。会话列表显示第几轮，对话页显示最近一次检查说还差什么，达成、做不到或中途停下时推送提醒。 |
 | **待办** | Agent 需要*你*亲自处理的事项从对话中自动识别并持续跟踪，直到完成。 |
@@ -106,36 +112,35 @@ irm https://tars.betac.cn/install.ps1 | iex
 
 | Agent | 在手机上能做什么 |
 |---|---|
-| **Claude Code** | 完整操作：VS Code 扩展与命令行 |
+| **Claude Code** | 完整操作：VS Code 扩展、命令行，或由 Kiteline 在后台运行（不必打开 VS Code） |
 | **Codex** | 完整操作：命令行、VS Code 扩展、桌面版 |
 | **OpenCode** | 完整操作 |
-| **Cursor** | 插件即将上线（源码在 [`plugins/cursor`](plugins/cursor)） |
-| **Qwen Code** | 在 tmux 中运行时可回复、确认；其他情况只读 |
 | **DeepSeek Harness** | 完整操作（需手动开启） |
-| **Proma** | 只读 |
-| **Kimi Code** · **Hermes** · **Grok Build** | 命令行在 tmux 中运行时可回复、确认、回答提问、中断、关闭；其他情况只读 |
-| **CodeBuddy Code** · **WorkBuddy** | CodeBuddy Code 在 tmux 中可完整操作；WorkBuddy 桌面版只读 |
-| **ZCode** | 从手机发消息，这一轮要确认的命令、要回答的提问出现在手机上，也可以中断 |
-| **Antigravity** | 命令行在 tmux 中可回复、确认、回答、中断、关闭；桌面版和 IDE 只读 |
-| **Muse Code** | 在 tmux 中可回复、中断、关闭（命令在电脑上确认） |
-| **trae-agent** | 查看任务和完整记录；在 tmux 中运行时可从手机派任务 |
+| **Cursor** | 编辑器与命令行：查看、回复、确认、中断 |
+| **ZCode** | 桌面版与命令行均可完整操作 |
+| **Kimi Code** · **Hermes** · **Grok Build** · **CodeBuddy Code** · **Antigravity 命令行** | 完整操作：新建任务时直接选用，由 Kiteline 在后台运行（Mac、Linux），或自己在 tmux 中启动 |
+| **Qwen Code** | 查看、回复、确认、中断（同上：后台运行或 tmux） |
+| **Muse Code** · **pi** | 查看、回复、中断（同上：后台运行或 tmux） |
+| **trae-agent** | 查看任务和完整记录，可从手机派任务 |
+| **WorkBuddy** | 桌面版在 Mac 上可查看、回复；其他平台只读 |
+| **Proma** · **Antigravity 桌面版** | 只读 |
 
 各平台、各形态的详细情况见 **[插件清单](PLUGINS.zh-CN.md)**，它按各插件声明的能力自动生成，随每次发版更新。
 
-**为什么有的 Agent 只能查看？** Kiteline 不碰你的 AI 凭证，也不修改任何 Agent，只通过 Agent 自己提供的途径操作：它的本机服务或 IPC 接口、hooks 或编辑器 URI 这类扩展点，或者它所在的终端（tmux）。一个 Agent 如果这些都没有提供，Kiteline 仍能从磁盘读取并显示它的会话和完整对话，但不会为了操作它而模拟输入或改动 Agent 本身。App 会说明某个会话为什么只读、怎样才能操作（例如把命令行放进 tmux 里运行）。详见[插件开发指南](guide/plugin-development.zh-CN.md#为什么有的-agent-只能查看)。
+**为什么有的 Agent 只能查看？** Kiteline 不碰你的 AI 凭证，也不修改任何 Agent，只通过 Agent 自己提供的途径操作：它的本机服务或 IPC 接口、hooks 或编辑器 URI 这类扩展点，或者它所在的终端（tmux）。一个 Agent 如果这些都没有提供，Kiteline 仍能从磁盘读取并显示它的会话和完整对话，但不会为了操作它而模拟输入或改动 Agent 本身。App 会说明某个会话为什么只读、怎样才能操作（例如在新建任务时直接选用它，或把命令行放进 tmux 里运行）。详见[插件开发指南](guide/plugin-development.zh-CN.md#为什么有的-agent-只能查看)。
 
 **开发插件**：新的 Agent 以插件形式接入，一个插件由一份清单加一个在会话监听里运行的 Python 小模块组成。[插件开发指南](guide/plugin-development.zh-CN.md)介绍了清单、接口和必须遵守的规则，用 `tools/plugin_check.py` 可以在本机测试插件。欢迎提交 Pull Request：我们审核、实测后签名，发布到官方插件索引，所有 Kiteline 用户无需更新 App 即可使用。
 
 ## 常见问题
 
 **会不会导致 Claude、Codex 账号被封？**
-Kiteline 不登录任何 AI 服务，不用你订阅的 token，也不调用任何模型接口，不会改变 Agent 和服务商之间的通信方式。Agent 照旧在你的电脑上、用你自己的账号运行；Kiteline 读它们写下的会话记录，再像你自己打字一样往同一个会话里输入。
+Kiteline 不登录任何 AI 服务，不用你订阅的 token，也不调用任何模型接口，不会改变 Agent 和服务商之间的通信方式。Agent 照旧在你的电脑上、用你自己的账号运行；Kiteline 读它们写下的会话记录，再经 Agent 自己开放的接口把你的话交给同一个会话。
 
 **代码会经过你们的服务器吗？**
 同一个网络里不会：手机直连电脑，走 HTTPS，配对时锁定电脑自己签发的证书。在别的网络时先尝试点对点直连，打不通才经中继转发；全程端到端加密，中继看不到内容，也不存储。详见[远程访问](guide/user/remote-access.zh-CN.md)。
 
 **要改变工作习惯吗？**
-不用。会话照样在 VS Code 或终端里开，Kiteline 自己找到它们。终端里的会话要能从手机回复，需要跑在 tmux 里。
+不用。会话照样在 VS Code 或终端里开，Kiteline 自己找到它们；也可以直接在 Kiteline 里新建任务，让它在后台运行，不必开着 VS Code。自己在终端里启动的会话要能从手机回复，需要跑在 tmux 里。
 
 **有安卓版吗？**
 安卓手机用微信扫[安装](#安装)一节里的小程序码，打开 Kiteline 小程序即可。原生 App 支持 iPhone、iPad 和 Apple Watch。
@@ -189,10 +194,11 @@ flowchart LR
 ## 技术实现
 
 - **会话发现**：会话监听是一个单文件 Python 脚本（`watcher/kiteline-watch.py`），**不依赖任何第三方库**，在本机和任意 Remote-SSH 主机上经普通 SSH 运行。它跟踪 Claude Code 的会话注册表与 JSONL 对话记录，通过 Codex、OpenCode 各自的本机服务协议与其通信，其他 Agent 由插件接入（比如借助 Agent 提供的 hooks），最终统一成一条 JSON Lines 事件流。
-- **输入投递**：Claude Code 没有可写的 stdin，Kiteline 从前端送入：
-  - **VS Code 里的会话**：用辅助功能 API 找到对应窗口，调用扩展自带的 `vscode://anthropic.claude-code/open` URI 切换会话并预填内容，核对输入框后提交。
+- **输入投递**：按会话所在的位置选择送达方式，对不上就报原因，不发错：
+  - **Claude Code**：Kiteline 在 Claude Code 自己的插件目录里放一个带 Kiteline 标记的小插件，由它在会话里接收消息、确认与回答并以用户身份提交，不切换窗口、不模拟按键，电脑锁屏时也能送达。
+  - **后台运行的会话**：由会话监听在项目所在的电脑上后台运行 Agent 的命令行，沿用它在 VS Code 中的网络设置，需要时一键转到 VS Code。
+  - **更新前就开着的 VS Code 会话**：仍从前端送入，用辅助功能 API 找到对应窗口，调用扩展自带的 `vscode://anthropic.claude-code/open` URI 切换会话，核对后提交。
   - **tmux 里的命令行会话**：由会话监听直接投递。
-  - **其他终端会话**：沿进程树找到所在的终端 App 再送入。
   - **Codex、OpenCode**：回复、确认、回答提问都走它们的原生协议。
 - **传输与配对**：手机与电脑在局域网内走 HTTPS。每台电脑生成自己的根证书，并用 X.509 名称约束限定在私有地址段内。实时状态以 Server-Sent Events 推送，电脑经 Bonjour / mDNS 自动发现。配对使用 6 位验证码，或扫描带一次性令牌和根证书指纹的二维码。
 - **端到端加密推送**：通知内容在电脑上按 Web Push（RFC 8291 `aes128gcm`、RFC 8292 VAPID）加密，只在设备上由通知服务扩展解密；推送网关转给 APNs 的始终是密文。
@@ -221,18 +227,18 @@ flowchart LR
 
 <table>
 <tr>
-<td><img src="assets/images/iphone/01-agents.jpg" alt="所有 Agent"></td>
-<td><img src="assets/images/iphone/03-approve.jpg" alt="确认请求"></td>
-<td><img src="assets/images/iphone/06-plan.jpg" alt="批准计划"></td>
-<td><img src="assets/images/iphone/07-live.jpg" alt="实时同步"></td>
-<td><img src="assets/images/iphone/02-world.jpg" alt="世界模式"></td>
+<td><img src="assets/images/iphone/01-sessions.jpg" alt="会话列表"></td>
+<td><img src="assets/images/iphone/02-approve.jpg" alt="确认请求"></td>
+<td><img src="assets/images/iphone/03-plan.jpg" alt="批准计划"></td>
+<td><img src="assets/images/iphone/04-question.jpg" alt="回答提问"></td>
+<td><img src="assets/images/iphone/05-voice.jpg" alt="按住说话"></td>
 </tr>
 <tr>
-<td><img src="assets/images/iphone/04-codex.jpg" alt="Codex"></td>
-<td><img src="assets/images/iphone/05-voice.jpg" alt="语音"></td>
-<td><img src="assets/images/iphone/08-overview.jpg" alt="全局概览"></td>
-<td><img src="assets/images/iphone/09-watch.jpg" alt="Apple Watch"></td>
-<td><img src="assets/images/iphone/10-remote.jpg" alt="远程访问"></td>
+<td><img src="assets/images/iphone/06-codex.jpg" alt="Codex"></td>
+<td><img src="assets/images/iphone/07-overview.jpg" alt="概览：额度、战绩与今日动态"></td>
+<td><img src="assets/images/iphone/08-projects.jpg" alt="项目"></td>
+<td><img src="assets/images/iphone/09-group.jpg" alt="会话群"></td>
+<td><img src="assets/images/iphone/10-world.jpg" alt="世界模式"></td>
 </tr>
 </table>
 
@@ -245,7 +251,16 @@ flowchart LR
 </tr>
 </table>
 
-![Mac 端：两个会话并排，一个计划等批准，两个会话在互发消息](assets/images/mac-main.jpg)
+![Mac 端：顶部是会话组，两个会话并排，一个计划等批准，两个会话在互发消息](assets/images/mac-main.jpg)
+
+<table>
+<tr>
+<td width="58%"><img src="assets/images/mac-trace.jpg" alt="执行过程"><br><sub><b>执行过程</b>：Agent、轮次与步骤排成时间线，模型调用和工具调用分色显示，出错处一键跳到，可以回放。</sub></td>
+<td width="42%"><img src="assets/images/mac-browser.jpg" alt="Agent 浏览器"><br><sub><b>Agent 浏览器</b>：Agent 操作网页时，会话右上角出现实时画面小窗，可放大、可接管。</sub></td>
+</tr>
+</table>
+
+![会话终端：Agent 需要终端时，命令开在这个会话的终端里，标签上写明所在设备](assets/images/mac-terminal.jpg)
 
 ![Mac 端的世界模式](assets/images/mac-world.jpg)
 

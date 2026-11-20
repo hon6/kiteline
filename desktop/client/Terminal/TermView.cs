@@ -425,9 +425,31 @@ public sealed class TermView : Panel, ITermSink, ITerminalDelegate
         protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
         {
             base.OnPointerWheelChanged(e);
-            owner.terminal.ScrollLines((int)Math.Round(-e.Delta.Y * 3));
-            InvalidateVisual();
             e.Handled = true;
+            var lines = (int)Math.Round(e.Delta.Y * 3);   // 正数 = 往上滚
+            if (lines == 0) return;
+            var terminal = owner.terminal;
+            var count = Math.Min(Math.Abs(lines), 20);
+            if (terminal.MouseMode != MouseMode.Off)
+            {
+                // 程序开了鼠标上报（Claude Code 的全屏界面）：滚轮交给程序自己滚（同 Mac、同别的终端）。
+                // 原来只翻本地历史：全屏界面不留历史，滚轮在「claude」终端里一点反应都没有
+                var at = e.GetPosition(this);
+                var col = Math.Clamp((int)((at.X - Pad) / cell.Cell), 0, terminal.Cols - 1);
+                var row = Math.Clamp((int)(at.Y / cell.Line), 0, terminal.Rows - 1);
+                var flags = terminal.EncodeMouseButton(lines > 0 ? 4 : 5, release: false, shift: false, meta: false, control: false);
+                for (var i = 0; i < count; i++) terminal.SendEvent(flags, col, row);
+                return;
+            }
+            if (terminal.Buffers.IsAlternateBuffer)
+            {
+                // 全屏界面没有历史可翻，程序也没要鼠标（less、man）：发上下方向键
+                var key = lines > 0 ? (terminal.ApplicationCursor ? "\u001bOA" : "\u001b[A") : (terminal.ApplicationCursor ? "\u001bOB" : "\u001b[B");
+                owner.Send(string.Concat(Enumerable.Repeat(key, count)));
+                return;
+            }
+            terminal.ScrollLines(-lines);
+            InvalidateVisual();
         }
 
         (int Col, int Row) At(Point p)

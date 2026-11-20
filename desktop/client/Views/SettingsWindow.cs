@@ -826,6 +826,10 @@ public sealed class SettingsWindow : Window
         }
         page.Children.Add(Card.Make(list, 6, 6));
 
+        // 会话都在后台运行后自动关闭项目的 VS Code 窗口（同 Mac 版 EditorWindowsCard）；老版本的电脑端没有这个接口，不显示
+        if (AppModel.Shared.Features.Contains("editorWindows") && await EditorWindowsCard(Reload) is Control windowsCard)
+            page.Children.Add(windowsCard.Margin(0, 12, 0, 0));
+
         // 已添加的 Kiteline 电脑（互联，同 Mac 版 PeerComputersCard）：在线状态、连不上的原因、移除
         var peers = reply.Arr("peers").Items().ToList();
         if (peers.Count > 0)
@@ -962,6 +966,44 @@ public sealed class SettingsWindow : Window
                                       destructive: true, title: L("移除电脑「%@」？", name)))
                 Post("/api/desktop/sources/peer/remove", new JsonObject { ["id"] = peerId }, _ => reload());
         }
+    }
+
+    /// 开关「会话都在后台运行后，自动关闭项目的 VS Code 窗口」，下面列出没有会话在运行的窗口、一次关掉（电脑端 editor_windows.py）
+    static async Task<Control?> EditorWindowsCard(Action reload)
+    {
+        JsonNode? reply;
+        try { reply = await Api.Get("/api/editor/windows"); }
+        catch { return null; }
+        var idle = reply.Arr("idle").Items().Select(n => n.ToString()).ToList();
+        var box = new StackPanel { Spacing = 10 };
+        var toggle = new MacSwitch(reply.Bool("auto") ?? true, on => _ = AppModel.Shared.SetHosted(closeEditor: on));
+        box.Children.Add(Ui.H(10, new StackPanel { Spacing = 3, Children = {
+            Ui.Text(L("会话都在后台运行后，自动关闭项目的 VS Code 窗口"), 12.5).Wrap(),
+            Ui.Text(L("窗口中没有其他会话在运行、没有未保存的改动时才会关闭，可减少 VS Code 的内存占用。需要查看代码时，可随时在会话中选择「在 VS Code 中打开」。"), 11, color: "Text2", lines: 0).Wrap() } }.Grow(),
+            toggle));
+        if (idle.Count > 0)
+        {
+            box.Children.Add(Ui.Rule("Separator", 0.5));
+            var note = Ui.Text(string.Join("、", idle), 11, color: "Text2", lines: 3).Wrap();
+            Tap? button = null;
+            button = Form.Button(L("关闭这些窗口"), async () =>
+            {
+                button!.IsEnabled = false;
+                note.Text = L("正在关闭…");
+                try
+                {
+                    var done = await Api.Post("/api/editor/windows/close", new JsonObject());
+                    var left = done.Arr("left").Items().Count();
+                    if (left == 0) { reload(); return; }
+                    note.Text = L("%lld 个窗口未能关闭，VS Code 可能正在等待确认，请在 VS Code 中查看", left);
+                }
+                catch (Exception e) { note.Text = e.Message; }
+                button.IsEnabled = true;
+            });
+            box.Children.Add(Ui.H(10, new StackPanel { Spacing = 3, Children = {
+                Ui.Text(L("%lld 个 VS Code 窗口中没有会话在运行", idle.Count), 12.5).Wrap(), note } }.Grow(), button));
+        }
+        return Card.Make(box, 12, 12);
     }
 
     /// 一个来源：图标、名字（双击改名）、主机、状态；右边「⋯」菜单

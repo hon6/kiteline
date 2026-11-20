@@ -112,6 +112,65 @@ snaps = [{"sessionId": "s-1"}, {"sessionId": "s-2"}]
 W.TERMS.annotate(snaps)
 check("会话快照带终端个数（角标），没开的不带", snaps[0].get("terminals") == 1 and "terminals" not in snaps[1], str(snaps))
 
+print("== 回放补上被裁掉的终端状态")
+# 全屏程序（Claude Code）启动时进备用屏幕、开鼠标上报，之后只重画；输出超过回放缓冲后那几句被裁掉，
+# 再接上的终端得知道它在备用屏幕里（不然双指滑去翻本地历史，全屏界面不留历史，怎么滑都不动）
+BOOT = b"\x1b[?25h\x1b[?2004h\x1b[?1004h\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h"
+FRAME = b"\x1b[?25l\x1b[H" + "界面重画的一帧 ".encode("utf-8") * 40 + b"\x1b[20;1H\x1b[?25h"
+buf, modes, total = bytearray(), {}, 0
+for piece in [BOOT] + [FRAME] * 3000:
+    buf += piece
+    W.trim_replay(buf, W.TERM_BUFFER, modes)
+    total += len(piece)
+kept_from = total - len(buf)
+seq, data = W.with_prelude(modes, kept_from, bytes(buf))
+head = data[:kept_from - seq]
+check("缓冲裁过、没超过上限加余量", kept_from > 0 and len(buf) <= W.TERM_BUFFER + W.TERM_TRIM_SLACK + len(FRAME), str(len(buf)))
+check("补了以后位置 + 长度仍是输出的结尾（各端照旧接后面的输出）", seq + len(data) == total and seq >= 0, str(seq))
+check("最先补「进备用屏幕」", head.startswith(b"\x1b[?1049h"), repr(head))
+check("鼠标上报、括号粘贴、焦点上报都补上", all(re.search(rb"[?;]%d[;h]" % n, head) for n in (1000, 1002, 1003, 1006, 2004, 1004)), repr(head))
+fresh = bytearray(BOOT + FRAME)
+W.trim_replay(fresh, W.TERM_BUFFER, {})
+check("没裁过的不补", W.with_prelude({}, 0, bytes(fresh)) == (0, BOOT + FRAME))
+buf, modes, total = bytearray(), {}, 0
+for piece in [b"\x1b[?1049h\x1b[?1h", b"x" * 1000, b"\x1b[?1049l\x1b[?1l"] + [b"line\r\n" * 2000] * 60:
+    buf += piece
+    W.trim_replay(buf, W.TERM_BUFFER, modes)
+    total += len(piece)
+seq, data = W.with_prelude(modes, total - len(buf), bytes(buf))
+check("进了又退出全屏（都被裁掉了）：不补备用屏幕", b"1049" not in data[:total - len(buf) - seq], repr(data[:40]))
+kept = True
+for back in range(1, 9):
+    buf, modes = bytearray(b"a" * (W.TERM_BUFFER + W.TERM_TRIM_SLACK + 100)), {}
+    cut = len(buf) - W.TERM_BUFFER
+    buf[cut - back:cut - back + 9] = b"\x1b[?1049h!"
+    W.trim_replay(buf, W.TERM_BUFFER, modes)
+    whole = bytes(buf).count(b"\x1b[?1049h") == 1 and not modes        # 整条留在回放里
+    counted = b"\x1b[?1049h" not in bytes(buf) and modes.get(1049) is True   # 整条被裁掉、记下了
+    kept = kept and (whole or counted)
+check("裁剪点落在控制序列中间：不裁成两半、不丢", kept)
+check("旧守护进程不记模式：被裁过、开着鼠标上报、没切过屏幕 → 按备用屏幕补",
+      W.guess_prelude(500000, FRAME + b"\x1b[2J\x1b[?1000h\x1b[?1006h" + FRAME) == b"\x1b[?1049h")
+check("旧守护进程：这一段里切过屏幕、或没裁过、或没开鼠标 → 不猜",
+      W.guess_prelude(500000, b"\x1b[?1049l" + FRAME + b"\x1b[?1000h") == b"" and W.guess_prelude(0, BOOT + FRAME) == b""
+      and W.guess_prelude(500000, FRAME) == b"")
+if not WIN:   # 真终端里跑一遍（Windows 的 ConPTY 会改写控制序列，那边只验上面的函数）
+    script = os.path.join(cwd, "fullscreen.py")
+    with open(script, "w", encoding="utf-8") as handle:
+        handle.write("import sys, time\nw = sys.stdout.buffer.write\n"
+                     "w(b'\\x1b[?1049h\\x1b[2J\\x1b[?1000h\\x1b[?1006h')\n"
+                     "for i in range(260):\n    w(b'\\x1b[H' + (b'frame %05d ' % i) * 150)\n"
+                     "sys.stdout.flush()\ntime.sleep(4)\nw(b'\\x1b[?1000l\\x1b[?1006l\\x1b[?1049l')\nsys.stdout.flush()\n")
+    full = W.TERMS.handle({"op": "open", "sessionId": "s-1", "cols": 100, "rows": 30}, cwd)["term"]["term"]
+    send(full, '"%s" "%s"' % (sys.executable, script) + NL)
+    wait_for(lambda: W.TERMS.get(full).end > W.TERM_BUFFER + W.TERM_TRIM_SLACK + 8192, 8)
+    time.sleep(0.3)
+    read = W.TERMS.handle({"op": "read", "term": full}, None)
+    data = base64.b64decode(read["data"])
+    check("真终端：输出超过缓冲后回放以「进备用屏幕」开头、带鼠标上报",
+          data.startswith(b"\x1b[?1049h") and b"1000" in data[:40] and read["seq"] + len(data) == read["term"]["end"], repr(data[:60]))
+    W.TERMS.handle({"op": "close", "term": full}, None)
+
 print("== 快速通道")
 before = len(EVENTS)
 handled = W.term_fast(json.dumps({"id": "r-1", "cmd": "term", "op": "input", "term": tid, "data": "echo fast-path" + NL}))

@@ -757,7 +757,7 @@ public sealed partial class AppModel : ObservableObject
     }
 
     /// 改电脑上的后台运行设置：某台开 / 关（按设备）、「支持后台运行」的提示不再提示（先在本机改，电脑没接住再改回来；同 iOS 版 setHosted）
-    public async Task SetHosted(string? sourceId = null, bool? on = null, bool? tipOff = null)
+    public async Task SetHosted(string? sourceId = null, bool? on = null, bool? tipOff = null, bool? closeEditor = null)
     {
         var before = (HostedTipOff, Sources);
         if (tipOff is bool off) HostedTipOff = off;
@@ -766,6 +766,8 @@ public sealed partial class AppModel : ObservableObject
         if (sourceId is not null) body["sourceId"] = sourceId;
         if (on is bool value) body["on"] = value;
         if (tipOff is bool hide) body["tipOff"] = hide;
+        // 会话都在后台运行后自动关闭项目的 VS Code 窗口（设置 → 来源里的开关，见电脑端 editor_windows.py）
+        if (closeEditor is bool close) body["closeEditor"] = close;
         try { await Api.Post("/api/hosted/settings", body); }
         catch (Exception e) { (HostedTipOff, Sources) = before; Show(e); }
     }

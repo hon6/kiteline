@@ -235,6 +235,10 @@
   "one": "%lld window",
   "other": "%lld windows"
  },
+ "%lld 个 VS Code 窗口中没有会话在运行": {
+  "one": "%lld VS Code window has no running sessions",
+  "other": "%lld VS Code windows have no running sessions"
+ },
  "%lld 个 agent": {
   "one": "%lld agent",
   "other": "%lld agents"
@@ -323,6 +327,18 @@
  "%lld 个模型": {
   "one": "%lld model",
   "other": "%lld models"
+ },
+ "%lld 个窗口可关闭": {
+  "one": "%lld window can be closed",
+  "other": "%lld windows can be closed"
+ },
+ "%lld 个窗口未能关闭，VS Code 可能正在等待确认，请到电脑上查看": {
+  "one": "%lld window could not be closed. VS Code may be waiting for confirmation; please check on your computer",
+  "other": "%lld windows could not be closed. VS Code may be waiting for confirmation; please check on your computer"
+ },
+ "%lld 个窗口未能关闭，VS Code 可能正在等待确认，请在 VS Code 中查看": {
+  "one": "%lld window could not be closed. VS Code may be waiting for confirmation; please check in VS Code",
+  "other": "%lld windows could not be closed. VS Code may be waiting for confirmation; please check in VS Code"
  },
  "%lld 个运行中": "%lld running",
  "%lld 个进行中": "%lld in progress",
@@ -1184,6 +1200,7 @@
  "会话群": "Group Chats",
  "会话群不存在": "Group not found",
  "会话菜单": "Session Menu",
+ "会话都在后台运行后，自动关闭项目的 VS Code 窗口": "Close a project's VS Code window once all its sessions run in the background",
  "会话（共 %lld 个%@）": "Sessions (%lld %@ in total)",
  "会话：所有运行中的会话，筛选和显示方式都在这里；设备、项目收成一行，点开再选。": "Sessions: all running sessions. Filters and display options are here. Computers and projects are folded into one row; tap to choose.",
  "估算": "Estimated",
@@ -1382,6 +1399,7 @@
  "关闭终端": "Close Terminal",
  "关闭详情": "Close details",
  "关闭这个会话的浏览器？": "Close this session's browser?",
+ "关闭这些窗口": "Close These Windows",
  "关闭（Esc）": "Close (Esc)",
  "其中估算 %@": "Includes estimated %@",
  "其他": "Other",
@@ -1557,6 +1575,7 @@
  "动物": "Animals",
  "区块 %@：%@": "Hunk %@: %@",
  "半个会话": "Half Session",
+ "半屏": "Half Screen",
  "协作": "Collaboration",
  "协作与汇报": "Collaborating and reporting",
  "协作图": "Collaboration Map",
@@ -2217,6 +2236,10 @@
  "已全部处理": "All Caught Up",
  "已全部提交": "All changes committed.",
  "已关闭": "Off",
+ "已关闭 %lld 个窗口": {
+  "one": "Closed %lld window",
+  "other": "Closed %lld windows"
+ },
  "已关闭会话": "Session closed.",
  "已关闭会话（已在 Codex 中归档；终端里的 Codex 界面仍开着，可直接关掉）": "Session closed (archived in Codex). The Codex interface in your terminal is still open; you can close it directly.",
  "已关闭会话（已在 DeepSeek Harness 中归档）": "Session closed (archived in DeepSeek Harness).",
@@ -2645,6 +2668,7 @@
  "恢复贮藏": "Pop Stash",
  "恢复默认": "Restore Defaults",
  "恢复默认头像和昵称": "Restore Default Avatar and Nickname",
+ "悬浮小窗": "Floating Window",
  "想用 Bash": "Wants to run Bash",
  "意大利语": "Italian",
  "慢": "Slow",
@@ -3663,6 +3687,7 @@
  "正在从电脑取回「%@」…": "Fetching “%@” from your computer…",
  "正在从电脑取回「%@」… %@%%": "Fetching “%@” from your computer… %@%%",
  "正在做：%@": "Now: %@",
+ "正在关闭…": "Closing…",
  "正在切换": "Switching",
  "正在创建…": "Creating…",
  "正在创建分支": "Creating branch",
@@ -4187,6 +4212,7 @@
  "监听中": "Listening",
  "监听中 %@:%@": "Listening on %@:%@",
  "监听的机器": "Monitored Computers",
+ "目前没有可以关闭的 VS Code 窗口。": "There are no VS Code windows to close right now.",
  "目录": "Folder",
  "目录不存在：%@": "Folder does not exist: %@",
  "目录已存在：%@": "Directory already exists: %@",
@@ -4292,6 +4318,7 @@
  "空闲多久后关闭": "Close After Idle For",
  "空间不足，请尝试其他方向": "Not enough space. Try another direction.",
  "窗口": "Window",
+ "窗口中没有其他会话在运行、没有未保存的改动时才会关闭，可减少 VS Code 的内存占用。需要查看代码时，可随时在会话中选择「在 VS Code 中打开」。": "A window is closed only when no other session is running in it and it has no unsaved changes, which reduces the memory VS Code uses. To view the code, choose “Open in VS Code” from the session at any time.",
  "窗口边栏": "the window’s title bar or status bar",
  "立即刷新": "Refresh Now",
  "立即将今日日报推送到手机": "Push today’s daily report to your phone now.",

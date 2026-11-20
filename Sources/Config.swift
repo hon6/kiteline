@@ -97,7 +97,7 @@ enum ConfigKey: String, CodingKey {
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
     case browserOn, browserMax, browserIdle, browserRecord
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
-    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal
+    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal, hostedCloseEditor
     case quietStart, quietEnd, mutedSessions, pinnedSessions, markedSessions, myName, avatar, remoteEnabled, relayURL, watch, usageStats
     // 旧版扁平字段
     case watchedPathPrefixes
@@ -156,6 +156,9 @@ struct MobileConfig: Codable, Equatable {
     /// 这台电脑自己的项目（本机来源）：新任务、恢复会话在后台运行 Claude Code，不打开 VS Code。默认开（11-13）；
     /// 远端电脑仍按设备开，见 SourceConfig.hostedOn。起不来（没装、没走完首次设置、读不了项目文件夹、网络设置对不上）照旧开 VS Code
     var hostedLocal: Bool = true
+    /// 项目的会话都在后台运行后，自动关掉它用不着的 VS Code 窗口（窗口里没有别的会话、没有未保存的改动时才关，见 EditorWindows.swift）。
+    /// 默认开（11-19 反馈：VS Code 开了好多，系统资源都不够了）
+    var hostedCloseEditor: Bool = true
     /// 免打扰时段（"HH:mm"，可跨午夜）：这段时间「有结论了 / 发来图片 / 定时任务」不推到锁屏，「需要你确认」和花费提醒照推；空 = 不启用
     var quietStart: String = "23:00"
     var quietEnd: String = "08:00"
@@ -270,6 +273,7 @@ struct MobileConfig: Codable, Equatable {
         autoCloseIdle = flag(.autoCloseIdle, true)
         hostedTipOff = flag(.hostedTipOff, false)
         hostedLocal = flag(.hostedLocal, true)
+        hostedCloseEditor = flag(.hostedCloseEditor, true)
         quietStart = text(.quietStart, "23:00")
         quietEnd = text(.quietEnd, "08:00")
         mutedSessions = (try? c.decodeIfPresent([String].self, forKey: .mutedSessions)) ?? nil ?? []

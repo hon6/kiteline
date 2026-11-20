@@ -1601,5 +1601,181 @@ finally:
     _delivery.DRY_RUN, _delivery.LOOKUP, _delivery._backend, _app.launch_session, _app.HOSTED_SETTING[0] = _hs_saved
     _app.HOSTED_BLOCKED.clear()
 
+print("== 会话都在后台运行后自动关闭 VS Code 窗口")
+from kiteline import editor_windows as _ew  # noqa: E402
+
+
+class _EwCfg:
+    def __init__(self):
+        self.mobile = {}
+        self.sources = [{"id": "local", "kind": "local"}, {"id": "srv", "kind": "ssh", "sshHost": "srv"},
+                        {"id": "box", "kind": "ssh", "sshHost": "dev@box"}]
+
+
+class _EwLive:
+    def __init__(self, live=True):
+        self.live = live
+
+
+class _EwStore:
+    def __init__(self):
+        self.lock, self.records = threading.RLock(), []
+        self.sources = {"local": _EwLive(), "srv": _EwLive(), "box": _EwLive(False)}
+
+    def source(self, source_id):
+        return self.sources.get(source_id)
+
+
+class _EwApp:
+    def __init__(self):
+        self.cfg, self.store = _EwCfg(), _EwStore()
+
+
+def _ew_rec(source_id, sid, cwd, **snap):
+    kind = "local" if source_id == "local" else "ssh"
+    return _Record(source_id, source_id, kind, dict({"sessionId": sid, "cwd": cwd, "entrypoint": "claude-vscode"}, **snap))
+
+
+class _EwWin(_ew.Window):
+    """假窗口：按了关闭就记下；stuck = VS Code 弹了确认框、窗口还在"""
+
+    def __init__(self, title, stuck=False, **kw):
+        self.pressed, self.stuck = False, stuck
+        _ew.Window.__init__(self, title, kw.pop("place", _ew.place_of_title(title)), close=self._press, alive=lambda: not self.pressed or self.stuck, **kw)
+
+    def _press(self):
+        self.pressed = True
+        return True
+
+
+_ew_saved = (_ew.DISABLED[0], _ew.BACKEND[0], _ew.CLOSE_WAIT[0])
+try:
+    check("测试实例默认一个窗口都不碰（配置目录是隔离的）", _ew.DISABLED[0] is True and _ew.windows() == [])
+    _ew.DISABLED[0], _ew.CLOSE_WAIT[0] = False, 0
+    _ew._opened.clear()
+    check("认窗口在哪台电脑上：本机 / SSH 远端 / WSL 这类不认识的",
+          _ew.place_of_title("a.py - shop - Visual Studio Code") == ("local", None)
+          and _ew.place_of_title("● a.py - shop [SSH: dev@box] - Visual Studio Code") == ("ssh", "dev@box")
+          and _ew.place_of_title("shop [WSL: Ubuntu] - Visual Studio Code") == ("other", None)
+          and _ew.place_of_title("[slug].tsx - shop - Visual Studio Code") == ("local", None))
+
+    app_ = _EwApp()
+    shop = _EwWin("会话甲 - shop [SSH: srv] - Visual Studio Code", minimized=True)
+    blog = _EwWin("blog - Visual Studio Code", minimized=False)
+    _ew.BACKEND[0] = lambda: [shop, blog]
+    moved = _ew_rec("srv", "s1", "/home/u/shop")
+    app_.store.records = [moved]
+    closed = _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False)
+    check("转到后台：窗口里没有别的会话，关掉项目的窗口，别的项目不动", [w.title for w in closed] == [shop.title] and not blog.pressed, closed)
+
+    shop.pressed = False
+    app_.store.records = [moved, _ew_rec("srv", "s2", "/home/u/shop/api")]
+    check("转到后台：窗口里还有别的会话在 VS Code 中运行（子目录里的也算），不关",
+          _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not shop.pressed)
+    app_.store.records = [moved, _ew_rec("srv", "s2", "/home/u/shop", entrypoint="cli", tmuxPane="%3"), _ew_rec("srv", "s3", "/home/u/shop", entrypoint="cli", hosted="h1")]
+    check("tmux 里的、后台运行的会话不算占着窗口", len(_ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False)) == 1)
+
+    shop.pressed, shop.edited = False, True
+    check("有未保存的改动：不关", _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not shop.pressed)
+    shop.edited, shop.watched = False, True
+    check("正在前台使用：不关", _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not shop.pressed)
+    shop.watched = False
+    _ew.note_opened("/home/u/shop", True, "srv")
+    check("Kiteline 刚打开的窗口：不关", _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not shop.pressed)
+    _ew._opened.clear()
+    app_.cfg.mobile["hostedCloseEditor"] = False
+    check("开关关着：不关", _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not shop.pressed)
+    app_.cfg.mobile["hostedCloseEditor"] = True
+
+    app_.store.records = [moved, _ew_rec("srv", "s9", "/home/u/mono/pkg")]   # 在 VS Code 里运行、却对不上任何窗口（多文件夹工作区）
+    check("有会话在 VS Code 中运行却对不上任何窗口：远端窗口一个都不关",
+          _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not shop.pressed)
+    app_.store.records = [moved, _ew_rec("box", "s8", "/home/u/shop")]   # 另一台电脑上同名项目的会话
+    check("别的远端电脑上同名项目的会话也当它占着（主机写法可能对不上，宁可不关）",
+          _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not shop.pressed)
+    ip_win = _EwWin("home [SSH: 10.0.0.8] - Visual Studio Code", minimized=True)
+    ip_other = _EwWin("会话丙 - web [SSH: 10.0.0.9] - Visual Studio Code")   # 那台电脑上的会话自己的窗口（目录里有一级也叫 home）
+    _ew.BACKEND[0] = lambda: [shop, blog, ip_win, ip_other]
+    app_.cfg.sources.append({"id": "ip9", "kind": "ssh", "sshHost": "u@10.0.0.9"})
+    app_.cfg.sources.append({"id": "ip8", "kind": "ssh", "sshHost": "10.0.0.8"})
+    app_.store.records = [_ew_rec("ip9", "p1", "/home/u/home/web"), _ew_rec("ip8", "p2", "/srv/home", entrypoint="cli", hosted="x9")]
+    check("两边都是 IP 地址且不同：肯定不是同一台，那台的会话不算占着这个窗口",
+          [w.title for w in _ew.settle(app_, "started", "/srv/home", "ip8", wait=False)] == [ip_win.title] and not ip_other.pressed)
+    _ew.BACKEND[0] = lambda: [shop, blog]
+    app_.store.records = [moved]
+    check("项目在另一台电脑上：不关这台的同名窗口", _ew.settle(app_, "moved", "/home/u/shop", "box", key="box#s1", wait=False) == [] and not shop.pressed)
+
+    home = _EwWin("u [SSH: srv] - Visual Studio Code", minimized=True)   # 主目录窗口：项目在它下面
+    _ew.BACKEND[0] = lambda: [shop, blog, home]
+    app_.store.records = [_ew_rec("srv", "s2", "/home/u/shop"), _ew_rec("srv", "g1", "/home/u", entrypoint="cli", hosted="x7")]
+    check("项目里的会话算在项目自己的窗口头上，不占着主目录的窗口",
+          [w.title for w in _ew.settle(app_, "started", "/home/u", "srv", wait=False)] == [home.title] and not shop.pressed)
+    home.pressed = False
+    _ew.BACKEND[0] = lambda: [blog, home]
+    check("项目没有自己的窗口时，它的会话算在上级目录的窗口里", _ew.settle(app_, "started", "/home/u", "srv", wait=False) == [] and not home.pressed)
+    _ew.BACKEND[0] = lambda: [shop, blog]
+    hosted = _ew_rec("srv", "h1", "/home/u/shop", entrypoint="cli", hosted="x1")
+    app_.store.records = [hosted]
+    shop.minimized = False
+    check("后台新建：窗口没最小化（可能正开着看代码），不关", _ew.settle(app_, "started", "/home/u/shop", "srv", wait=False) == [] and not shop.pressed)
+    shop.minimized = None
+    check("后台新建：读不到最小化状态（Linux），不关", _ew.settle(app_, "started", "/home/u/shop", "srv", wait=False) == [] and not shop.pressed)
+    shop.minimized = True
+    check("后台新建：窗口最小化着、里面没有会话，关掉", len(_ew.settle(app_, "started", "/home/u/shop", "srv", wait=False)) == 1)
+
+    shop.pressed = False
+    gone = _ew_rec("srv", "v1", "/home/u/shop")
+    app_.store.records = [gone]
+    check("关闭 VS Code 里的会话：项目没有会话在后台运行，窗口留着", _ew.settle(app_, "closed", "/home/u/shop", "srv", key=gone.key, wait=False) == [] and not shop.pressed)
+    app_.store.records = [gone, hosted]
+    check("关闭 VS Code 里的会话：其余会话都在后台运行，关掉窗口", len(_ew.settle(app_, "closed", "/home/u/shop", "srv", key=gone.key, wait=False)) == 1)
+
+    # 设置页的「关闭没有会话在运行的窗口」
+    shop.pressed = False
+    local_bg = _EwWin("notes - Visual Studio Code")
+    offline = _EwWin("api [SSH: dev@box] - Visual Studio Code")
+    wsl = _EwWin("lab [WSL: Ubuntu] - Visual Studio Code")
+    busy = _EwWin("会话乙 - docs [SSH: srv] - Visual Studio Code")
+    _ew.BACKEND[0] = lambda: [shop, blog, local_bg, offline, wsl, busy]
+    app_.store.records = [_ew_rec("local", "n1", "/home/me/notes", entrypoint="cli", hosted="x2"), _ew_rec("srv", "d1", "/home/u/docs")]
+    check("没有会话在运行的窗口：连着的远端电脑的窗口、有后台会话的本机项目；本机没有后台会话的、没连上的远端、WSL、有会话的都不算",
+          _ew.idle(app_) == ["shop [SSH: srv]", "notes"], _ew.idle(app_))
+    shop.stuck = True
+    closed, left = _ew.close_idle(app_)
+    check("一次关掉：VS Code 弹了确认框没关掉的如实报（给界面的是项目名）", closed == ["notes"] and left == ["shop [SSH: srv]"], (closed, left))
+    shop.stuck = False
+
+    # Linux：配套扩展报打开的文件夹，按路径认
+    lin = _EwWin("shop", place=("ssh", "srv"), folders=["/home/u/shop"], minimized=None)
+    _ew.BACKEND[0] = lambda: [lin]
+    app_.store.records = [moved]
+    check("Linux 按打开的文件夹认项目：转到后台后关掉", len(_ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False)) == 1)
+    lin.pressed = False
+    check("Linux：别的项目（只是名字相同）的窗口不关", _ew.settle(app_, "moved", "/srv/other/shop", "srv", key=moved.key, wait=False) == [] and not lin.pressed)
+    app_.store.records = [moved, _ew_rec("srv", "s2", "/home/u/shop/api")]
+    check("Linux：窗口文件夹下面的子目录里有会话在运行，不关", _ew.settle(app_, "moved", "/home/u/shop", "srv", key=moved.key, wait=False) == [] and not lin.pressed)
+
+    _ew_called = []
+    _ew_saved_settle = _ew.settle
+    _ew.settle = lambda app, trigger, cwd, source_id, key=None, wait=True: _ew_called.append((trigger, cwd, source_id, key)) or []
+    try:
+        _ew_saved_dry, _ew_saved_backend = _delivery.DRY_RUN, _delivery._backend
+
+        class _EwBackend:
+            @staticmethod
+            def press_vscode(key, times, record, siblings):
+                return _delivery.Outcome(True)
+        _delivery.DRY_RUN, _delivery._backend = False, lambda: _EwBackend
+        try:
+            titled = _ew_rec("srv", "v2", "/home/u/shop", title="会话甲")
+            check("关闭 VS Code 里的会话后会去看窗口用不用得着", _delivery.close(titled, None, []).ok and _ew_called == [("closed", "/home/u/shop", "srv", titled.key)], _ew_called)
+        finally:
+            _delivery.DRY_RUN, _delivery._backend = _ew_saved_dry, _ew_saved_backend
+    finally:
+        _ew.settle = _ew_saved_settle
+finally:
+    _ew.DISABLED[0], _ew.BACKEND[0], _ew.CLOSE_WAIT[0] = _ew_saved
+    _ew._opened.clear()
+
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

@@ -381,7 +381,7 @@ public sealed class BrowserMini : Border
         ClipToBounds = true;
         BorderThickness = new Thickness(1);
         // 不在自己身上挂阴影：Avalonia 里元素自带 BoxShadow 时后画的子元素会被吞掉（离屏截图实测整块空白）
-        this.Res(BackgroundProperty, "Surface").Res(BorderBrushProperty, "Separator");
+        this.Res(BackgroundProperty, "Surface").Res(BorderBrushProperty, "BrowserEdge");
         var live = Ui.H(4, Ui.Dot(6, Brushes.Red), Ui.Text(L("实时"), 9, FontWeight.SemiBold, "White")).Pad(6, 3);
         live.Background = new SolidColorBrush(Color.FromArgb(128, 0, 0, 0));
         live.CornerRadius = new CornerRadius(8);
@@ -520,8 +520,8 @@ public sealed class BrowserViewer : Grid
     readonly Image image = new() { Stretch = Stretch.Uniform };
     readonly Panel screen = new() { ClipToBounds = true, Focusable = true };
     readonly Border outline = new() { BorderThickness = new Thickness(2), IsHitTestVisible = false, IsVisible = false };
-    readonly TextBlock title = Ui.Text("", 13, FontWeight.SemiBold).Trim();
-    readonly TextBlock url = Ui.Text("", 11, color: "Text2").Trim();
+    readonly TextBlock title = Ui.Text("", 12.5, FontWeight.Medium).Trim();
+    readonly TextBlock url = Ui.Text("", 11.5, color: "Text2").Trim();
     readonly Panel bars = new();
     readonly StackPanel actionList = new();
     readonly ScrollViewer actionScroll;
@@ -537,15 +537,20 @@ public sealed class BrowserViewer : Grid
         this.key = key;
         this.info = info;
         this.size = size;
-        this.Res(BackgroundProperty, "ChatBackground");
+        // 做成浏览器的样子（同 Mac，11-19 反馈：面板和会话是同一个底色，混在一起）：外壳比对话页抬高一层，
+        // 顶栏是后退 / 前进 / 刷新 + 地址栏，画面区是凹下去的深色画布；半个会话时外面一圈圆角边
+        this.Res(BackgroundProperty, "BrowserShell");
         RowDefinitions = new RowDefinitions("Auto,Auto,*");
         if (size == BrowserSize.Half)
         {
             ClipToBounds = true;
+            SizeChanged += (_, e) => Clip = new RectangleGeometry(new Rect(e.NewSize), 12, 12);
         }
 
-        // 顶栏
-        var tabsButton = new Tap(Ui.VFill(1, title, url).Pad(4, 2), null, 6).Grow();
+        // 顶栏：地址栏是嵌在外壳里的一格（标题在前、网址在后），点开是标签页
+        var address = Ui.Box(Ui.H(6, Ui.Sym("globe", 11, "Text2"), title.Shrink(), url.Shrink().Grow()), new Thickness(10, 0), "BrowserField", 8, "BrowserEdge");
+        address.Height = 28;
+        var tabsButton = new Tap(address, null, 8).Grow();
         tabsButton.Menu(() =>
         {
             var items = new List<Control>();
@@ -562,14 +567,15 @@ public sealed class BrowserViewer : Grid
             SizeButton(L("整个会话"), L("整个会话"), BrowserSize.Session),
             SizeButton(L("整个应用"), L("整个应用"), BrowserSize.App),
             SizeButton(L("全屏"), L("全屏"), BrowserSize.FullScreen));
-        var header = Ui.H(8, Ui.Sym("globe", 14, "Text2"), tabsButton, navButtons, sizesBar,
+        var sizesBox = Ui.Box(sizesBar, new Thickness(2), "BrowserField", 8, "BrowserEdge");
+        var header = Ui.H(8, navButtons, tabsButton, sizesBox,
             IconButton("arrow.down.right.and.arrow.up.left", L("缩回小窗"), () => BrowserStore.Shared.SetSize(key, BrowserSize.Mini)),
             // 真正结束浏览器（小窗上的 × 只是收起）：agent 再用浏览器时会重新打开
             IconButton("stop", L("关闭浏览器"), async () =>
             {
                 if (await Dialogs.Confirm(L("Agent 正在进行的网页操作会中断，它再次使用浏览器时会重新打开（登录状态保留）。"), L("关闭浏览器"), true, L("关闭这个会话的浏览器？")))
                     await BrowserStore.Shared.CloseBrowser(key);
-            })).Pad(12, 8);
+            })).Pad(10, 7);
         var headerBox = new Border { Child = header, BorderThickness = new Thickness(0, 0, 0, 1) }.Res(Border.BorderBrushProperty, "Separator");
         SetRow(headerBox, 0);
         Children.Add(headerBox);
@@ -578,6 +584,7 @@ public sealed class BrowserViewer : Grid
 
         // 画面 + 指令列表
         outline.Res(Border.BorderBrushProperty, "Accent");
+        image.Margin = replayImage.Margin = outline.Margin = new Thickness(Inset);   // 网页四周在画布上留一圈（全屏时不留）
         screen.Children.Add(image);
         screen.Children.Add(outline);
         // 看录像：盖在实时画面上（「回到实时」在角上）
@@ -593,12 +600,12 @@ public sealed class BrowserViewer : Grid
         replayBadge.VerticalAlignment = VerticalAlignment.Top;
         replayBadge.Margin = new Thickness(8);
         replayLayer = new Panel { IsVisible = false, Children = { replayImage, replayBadge, back } };
-        replayLayer.Res(Panel.BackgroundProperty, "ChatBackground");
+        replayLayer.Res(Panel.BackgroundProperty, "BrowserCanvas");
         backButton = back;
         screen.Children.Add(replayLayer);
         replay = new BrowserReplayBar(key);
         replay.Changed += () => Dispatcher.UIThread.Post(OnReplay);
-        screen.Res(Panel.BackgroundProperty, "Fill03");
+        screen.Res(Panel.BackgroundProperty, "BrowserCanvas");
         screen.PointerPressed += Pressed;
         screen.PointerMoved += Moved;
         screen.PointerReleased += Released;
@@ -641,6 +648,14 @@ public sealed class BrowserViewer : Grid
         };
         SetRow(body, 2);
         Children.Add(body);
+        if (size == BrowserSize.Half)
+        {
+            // 外面一圈边：画在最上面、不接鼠标
+            var frame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), IsHitTestVisible = false }
+                .Res(Border.BorderBrushProperty, "BrowserEdge");
+            SetRowSpan(frame, 3);
+            Children.Add(frame);
+        }
 
         Update(info);
         AttachedToVisualTree += (_, _) =>
@@ -736,11 +751,12 @@ public sealed class BrowserViewer : Grid
         {
             // 看录像时没有接管（录像点不了）
             bars.Children.Clear();
-            navButtons.IsVisible = outline.IsVisible = false;
+            outline.IsVisible = false;
+            NavEnabled(false);
             return;
         }
         var controlling = store.IsControlling(key);
-        navButtons.IsVisible = controlling;
+        NavEnabled(controlling);
         outline.IsVisible = controlling;
         bars.Children.Clear();
         if (controlling)
@@ -796,6 +812,16 @@ public sealed class BrowserViewer : Grid
 
     void Nav(string action) => BrowserStore.Shared.Input(key, new JsonObject { ["type"] = "nav", ["action"] = action });
 
+    /// 后退 / 前进 / 刷新一直摆在地址栏左边（像浏览器）：没接管时是灰的、点不了
+    void NavEnabled(bool on)
+    {
+        navButtons.Opacity = on ? 1 : 0.32;
+        navButtons.IsHitTestVisible = on;
+    }
+
+    /// 网页四周在画布上留多宽
+    double Inset => size == BrowserSize.FullScreen ? 0 : 10;
+
     // MARK: 画面上的鼠标、键盘（接管时才送进网页）
 
     /// 画面在 screen 里实际画在哪（等比缩放居中）
@@ -803,7 +829,8 @@ public sealed class BrowserViewer : Grid
     {
         if (image.Source is not Bitmap bitmap || bitmap.PixelSize.Width == 0) return default;
         var box = screen.Bounds.Size;
-        var scale = Math.Min(box.Width / bitmap.PixelSize.Width, box.Height / bitmap.PixelSize.Height);
+        var inner = new Size(Math.Max(0, box.Width - Inset * 2), Math.Max(0, box.Height - Inset * 2));
+        var scale = Math.Min(inner.Width / bitmap.PixelSize.Width, inner.Height / bitmap.PixelSize.Height);
         var w = bitmap.PixelSize.Width * scale;
         var h = bitmap.PixelSize.Height * scale;
         return new Rect((box.Width - w) / 2, (box.Height - h) / 2, w, h);

@@ -889,10 +889,12 @@ struct NewTaskView: View {
                     Text(projects?.isEmpty == true ? "暂无使用过 Claude Code 的项目" : "无匹配的项目").foregroundStyle(.secondary)
                 }
                 if projects != nil, model.hostFeatures.contains("dirs") { otherFolderRow }
-            } footer: { Group {
+            } footer: {
+                // 读取中上面盖着骨架：说明等读回来再出，不然和骨架叠在一起（11-16）
+                if projects != nil {
                     Text("各机器上最近使用过 Claude Code 的目录、正在运行的会话，以及电脑上已打开的 VS Code 窗口。")
+                        .font(.ui(.footnote))
                 }
-                .font(.ui(.footnote))
             }
         }
         .overlay { if projects == nil { if let error { Text(error).foregroundStyle(.secondary) } else { SkeletonPage("正在读取项目…", style: .list(5, trail: .none)) } } }

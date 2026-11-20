@@ -145,6 +145,26 @@ final class Rotation {
 
     func toggle() { set(!landscape) }
 
+    /// 会话浏览器正全屏（MainView 设）：手机横过来、竖回去，界面直接跟着转，不用点角上的转屏按钮
+    /// （11-19 反馈：全屏要支持旋转；同看视频）。这样转成横屏的，退出全屏时转回竖屏
+    var follow = false {
+        didSet {
+            guard oldValue, !follow, followed else { return }
+            followed = false
+            set(false)
+        }
+    }
+    /// 现在的横屏是跟着手机自己转过去的（不是用户点转屏按钮转的）
+    @ObservationIgnored private var followed = false
+
+    /// 转屏提示判断出手里的方向稳住了、和界面不一样：正跟着转时直接转过去，返回 true（不用出按钮）
+    func followTo(_ landscape: Bool) -> Bool {
+        guard follow, available, landscape != self.landscape else { return false }
+        followed = landscape
+        set(landscape)
+        return true
+    }
+
     func set(_ on: Bool) {
         guard available, on != landscape else { return }
         landscape = on
@@ -176,9 +196,19 @@ final class Rotation {
 extension View {
     /// 根视图上挂一次：iPhone 横过来按宽屏排，竖回来照旧
     func tracksRotation() -> some View {
-        onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { wide in
+        // 按连安全区算上的整块大小判断：小屏 iPhone 竖着打字、键盘带候选栏时，剩下的高度比宽度小，只看 size 会当成横过来了
+        onGeometryChange(for: Bool.self) { $0.sizeWithSafeArea.width > $0.sizeWithSafeArea.height } action: { wide in
             Rotation.shared.fit(wide: wide)
         }
+    }
+}
+
+extension GeometryProxy {
+    /// 连安全区算上的整块大小。判断界面横着还是竖着要用它，不能只看 size：键盘弹出来时 size 被压矮（底部安全区多出键盘那一截），
+    /// 两样加起来才是不随键盘变的高度
+    var sizeWithSafeArea: CGSize {
+        CGSize(width: size.width + safeAreaInsets.leading + safeAreaInsets.trailing,
+               height: size.height + safeAreaInsets.top + safeAreaInsets.bottom)
     }
 }
 
@@ -245,6 +275,7 @@ struct RotationHint: View {
             guard let line = note.object as? String, line.hasPrefix("hint ") else { return }
             let next: Physical? = ["topLeft": .topLeft, "topRight": .topRight, "portrait": .portrait][String(line.dropFirst(5))]
             physical = next
+            if let next, rotation.followTo(next.landscape) { return }   // 浏览器全屏：直接转
             withAnimation(.snappy) { shown = next.map { $0.landscape != rotation.landscape } ?? false }
         }
         #endif
@@ -308,6 +339,8 @@ struct RotationHint: View {
         let mismatch = next.landscape != rotation.landscape
         let age = Date().timeIntervalSince(since)
         let want = mismatch && age > 0.75
+        // 会话浏览器全屏时直接跟着转（同看视频），不出按钮
+        if want, rotation.followTo(next.landscape) { return }
         if want != shown { withAnimation(.snappy) { shown = want } }
         let calm = age >= 12.75
         if calm != steady { steady = calm }
@@ -350,6 +383,10 @@ struct GlanceBoard: View {
     @Environment(\.openRoute) private var open
     @AppStorage("listFilter") private var statusFilter = "all"
     var large = false
+
+    /// 卡片底色：紧凑版在首页的白色列表顶上，用浅灰块；大号版在概览页的灰底上，用白卡片
+    ///（浅灰块和页面底色只差两个色阶，压上去就和页面融在一起）
+    private var surface: Color { large ? Theme.card : Theme.tile }
 
     var body: some View {
         VStack(spacing: large ? 14 : 10) {
@@ -398,7 +435,7 @@ struct GlanceBoard: View {
             }
             .padding(large ? 18 : 14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.tile, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .buttonStyle(PressableStyle())
@@ -419,7 +456,7 @@ struct GlanceBoard: View {
             cell("error", L("出错"), counts.error, dot: Theme.removed)
         }
         .padding(.vertical, 4)
-        .background(Theme.tile, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var divider: some View {
@@ -461,11 +498,11 @@ struct GlanceBoard: View {
         return HStack(spacing: 8) {
             GlanceLink(symbol: "sun.max.fill", title: L("今日动态"),
                        value: today.map { $0.prompts > 0 ? "\($0.prompts)" : "" } ?? "",
-                       alert: (today?.testFailed ?? 0) > 0) { open(.today) }
+                       alert: (today?.testFailed ?? 0) > 0, surface: surface) { open(.today) }
             GlanceLink(symbol: "folder.fill", title: L("项目"),
                        value: projects.isEmpty ? "" : "\(projects.count)",
-                       alert: false) { open(.projects) }
-            GlanceLink(symbol: "clock.arrow.circlepath", title: L("历史"), value: "", alert: false) { open(.history) }
+                       alert: false, surface: surface) { open(.projects) }
+            GlanceLink(symbol: "clock.arrow.circlepath", title: L("历史"), value: "", alert: false, surface: surface) { open(.history) }
         }
     }
 }
@@ -486,6 +523,7 @@ private struct GlanceLink: View {
     let title: String
     let value: String
     let alert: Bool
+    var surface: Color = Theme.tile
     let action: () -> Void
 
     var body: some View {
@@ -499,7 +537,7 @@ private struct GlanceLink: View {
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 40)
-            .background(Theme.tile, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(PressableStyle())

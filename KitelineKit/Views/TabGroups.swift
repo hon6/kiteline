@@ -1091,7 +1091,7 @@ public struct TarsTabGroupChip: View {
 
 /// 窗口最上沿一排会话组「倒挂标签」（11-11）：贴着窗口顶边，上面两个角是直的、和顶边连成一片，下面两个角圆，
 /// 像标签页倒过来吸在顶上；点了切到这一组。最前面「未分组」，最后「+」新建；右键改名改色、添加会话、每个会话一列、拉成群、删除。
-/// 放在最左上那一块标签栏上面那一带（标签栏往上长到窗口顶的那段，见 ChatPanes.macBody 的 rise）
+/// 横跨整个分屏的顶边（最上面一排各块的标签栏往上长到窗口顶的那段，见 ChatPanesView.groupStrip、PaneHeader.rise）
 public struct TarsTabGroupStrip: View {
     let height: CGFloat
     public init(height: CGFloat) { self.height = height }
@@ -1106,42 +1106,58 @@ private struct TabGroupStrip: View {
     let height: CGFloat
     @Environment(AppModel.self) private var model
 
+    private static let ungrouped = "tabgroup.ungrouped"
+
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 3) {
-                HangingGroupTab(title: L("未分组"), tint: nil, active: groups.active == nil, height: height,
-                                digest: TabGroupDigest(keys: groups.keys(nil), model: model)) { groups.activate(nil) }
-                    .contextMenu {
-                        if groups.active == nil, !groups.panes.isPristine {
-                            Button(L("用这些标签页新建会话组")) { groups.create(name: nil, keys: [], fromCurrent: true) }
-                        }
-                        Button(L("新建会话组…")) { TabGroupRequest.shared.picking = .create([]) }
+        // 放得下就只占这排标签那么宽：右边空着的地方还是标签栏（按住拖窗口、双击缩放）。
+        // 组多到一整行都放不下才横着滚，并把正显示的那一组滚到看得见的地方
+        ViewThatFits(in: .horizontal) {
+            row
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) { row }
+                    // 不指定停靠位置：已经整个看得见就不动（点的那个标签不会从指针底下滑开），看不见的才滚最短的一段进来
+                    .onChange(of: groups.active, initial: true) { _, active in
+                        if let active { proxy.scrollTo(active) } else { proxy.scrollTo(Self.ungrouped) }
                     }
-                ForEach(groups.groups) { group in
-                    HangingGroupTab(title: group.name, tint: groups.color(of: group.id).color, active: groups.active == group.id, height: height,
-                                    digest: TabGroupDigest(keys: groups.keys(group.id), model: model)) { groups.activate(group.id) }
-                        .contextMenu {
-                            Button(L("重命名和颜色…")) { TabGroupRequest.shared.renaming = group.id }
-                            Button(L("添加会话…")) { TabGroupRequest.shared.picking = .add(group.id) }
-                            Button(L("每个会话一列")) { groups.arrange(group.id) }
-                            if model.supportsGroups {
-                                Button(L("把组里的会话拉成群")) { KitelineKit.groupChat(from: group.id) }
-                            }
-                            Divider()
-                            Button(L("删除会话组…"), role: .destructive) { TabGroupRequest.shared.deleting = group.id }
-                        }
-                }
-                Button { TabGroupRequest.shared.picking = .create([]) } label: {
-                    Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                        .frame(width: 24, height: height - 4)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(L("新建会话组…"))
             }
         }
-        .scrollClipDisabled(false)
         .frame(height: height, alignment: .top)
+    }
+
+    private var row: some View {
+        HStack(alignment: .top, spacing: 3) {
+            HangingGroupTab(title: L("未分组"), tint: nil, active: groups.active == nil, height: height,
+                            digest: TabGroupDigest(keys: groups.keys(nil), model: model)) { groups.activate(nil) }
+                .contextMenu {
+                    if groups.active == nil, !groups.panes.isPristine {
+                        Button(L("用这些标签页新建会话组")) { groups.create(name: nil, keys: [], fromCurrent: true) }
+                    }
+                    Button(L("新建会话组…")) { TabGroupRequest.shared.picking = .create([]) }
+                }
+                .id(Self.ungrouped)
+            ForEach(groups.groups) { group in
+                HangingGroupTab(title: group.name, tint: groups.color(of: group.id).color, active: groups.active == group.id, height: height,
+                                digest: TabGroupDigest(keys: groups.keys(group.id), model: model)) { groups.activate(group.id) }
+                    .contextMenu {
+                        Button(L("重命名和颜色…")) { TabGroupRequest.shared.renaming = group.id }
+                        Button(L("添加会话…")) { TabGroupRequest.shared.picking = .add(group.id) }
+                        Button(L("每个会话一列")) { groups.arrange(group.id) }
+                        if model.supportsGroups {
+                            Button(L("把组里的会话拉成群")) { KitelineKit.groupChat(from: group.id) }
+                        }
+                        Divider()
+                        Button(L("删除会话组…"), role: .destructive) { TabGroupRequest.shared.deleting = group.id }
+                    }
+                    .id(group.id)
+            }
+            Button { TabGroupRequest.shared.picking = .create([]) } label: {
+                Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    .frame(width: 24, height: height - 4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L("新建会话组…"))
+        }
     }
 }
 

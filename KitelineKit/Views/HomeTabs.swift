@@ -233,7 +233,7 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HomeTiles(entries: false)
+                HomeTiles(entries: false, onTile: false)
                 if let today = model.home.today {
                     VStack(alignment: .leading, spacing: 8) {
                         SectionLabel(text: L("今日动态"))

@@ -138,6 +138,10 @@ struct HostedSetupSheet: View {
     @State private var saving: Set<String> = []
     @State private var failure: String?
     @State private var moving = false
+    /// 「关闭这些窗口」：正在关、关完的说明
+    @State private var closingWindows = false
+    @State private var windowsNote: String?
+    @State private var windowsLoaded = false
 
     private var machines: [SourceInfo] {
         model.sources.filter { $0.hosted != nil && (sourceId == nil || $0.id == sourceId) }
@@ -155,6 +159,7 @@ struct HostedSetupSheet: View {
                     Text("没有可在后台运行 Claude Code 的电脑（Windows 电脑暂不支持）。").font(.ui(.footnote)).foregroundStyle(.secondary)
                 }
                 ForEach(machines, id: \.id) { card($0) }
+                if model.hostFeatures.contains("editorWindows") { windowsCard }
                 if let failure {
                     Text(failure).font(.ui(.footnote)).foregroundStyle(.red)
                 }
@@ -182,6 +187,73 @@ struct HostedSetupSheet: View {
                         .font(.ui(.caption)).foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    /// 会话都在后台运行后自动关闭项目的 VS Code 窗口（开关），以及电脑上没有会话在运行的窗口、一次关掉
+    /// （电脑的 features 里有 editorWindows 才显示；规则见电脑端 EditorWindows.swift / editor_windows.py）
+    private var windowsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(get: { model.hosted.closeEditor }, set: { on in Task { await model.setHosted(closeEditor: on) } })) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("会话都在后台运行后，自动关闭项目的 VS Code 窗口").font(.ui(.subheadline)).fontWeight(.semibold)
+                    Text("窗口中没有其他会话在运行、没有未保存的改动时才会关闭，可减少 VS Code 的内存占用。需要查看代码时，可随时在会话中选择「在 VS Code 中打开」。")
+                        .font(.ui(.caption)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if !model.editorIdle.isEmpty {
+                Divider()
+                Text(L("%lld 个 VS Code 窗口中没有会话在运行", count: model.editorIdle.count)).font(.ui(.subheadline)).fontWeight(.semibold)
+                Text(model.editorIdle.joined(separator: "、")).font(.ui(.caption)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    Task { await closeWindows() }
+                } label: {
+                    Text(closingWindows ? L("正在关闭…") : L("关闭这些窗口")).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered).disabled(closingWindows)
+            } else if windowsLoaded {
+                Divider()
+                Text("目前没有可以关闭的 VS Code 窗口。").font(.ui(.caption)).foregroundStyle(.secondary)
+            }
+            if let windowsNote {
+                Text(windowsNote).font(.ui(.caption)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .task {
+            #if SNAPSHOT
+            // 截图版一启动就是这个面板，连接可能还没建好：没问到就隔一秒再问，最多 8 次
+            var asked = await model.loadEditorWindows()
+            for _ in 0..<8 where !asked {
+                try? await Task.sleep(for: .seconds(1))
+                asked = await model.loadEditorWindows()
+            }
+            #else
+            let asked = await model.loadEditorWindows()
+            #endif
+            windowsLoaded = asked   // 没问到就不说「目前没有可以关闭的窗口」
+            #if SNAPSHOT
+            if Snapshot.closeWindows, !model.editorIdle.isEmpty {   // 截图版点不了按钮：替它点一下，看关完以后的样子
+                try? await Task.sleep(for: .seconds(2))
+                await closeWindows()
+            }
+            #endif
+        }
+    }
+
+    private func closeWindows() async {
+        closingWindows = true
+        windowsNote = nil
+        defer { closingWindows = false }
+        do {
+            let result = try await model.closeEditorWindows()
+            if result.closed > 0 { model.flash(L("已关闭 %lld 个窗口", count: result.closed)) }
+            if result.left > 0 { windowsNote = L("%lld 个窗口未能关闭，VS Code 可能正在等待确认，请到电脑上查看", count: result.left) }
+        } catch {
+            windowsNote = error.localizedDescription
         }
     }
 

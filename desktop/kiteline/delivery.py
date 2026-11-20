@@ -485,6 +485,10 @@ def close(record, source, siblings):
             return Outcome(False, False, CLOSE_WHILE_WAITING)
         outcome = send("/exit", [], record, source, True, siblings)
     if outcome.ok:
+        if entry is None or entry == "claude-vscode":
+            # 关的是 VS Code 里的标签：这个项目其余的会话都在后台运行的话，窗口也用不着了（见 editor_windows.py）
+            from . import editor_windows
+            editor_windows.settle(None, "closed", snap.get("cwd") or "", record.source_id, key=record.key)
         return Outcome(True, False, "已关闭会话")
     message = outcome["message"].replace("此消息未发送", "会话未关闭").replace("未按下按键", "会话未关闭")
     return Outcome(False, False, message, keep_front=outcome.keep_front)

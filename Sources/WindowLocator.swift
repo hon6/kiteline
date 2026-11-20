@@ -117,6 +117,8 @@ enum WindowLocator {
     static func open(_ link: URL, completion: (() -> Void)? = nil) {
         let finish = { DispatchQueue.main.async { completion?() } }
         let scheme = link.scheme ?? "vscode"
+        // 记下刚打开的窗口：会话过一会儿才出现在里面，这段时间别把它当成用不着的窗口关掉（见 EditorWindows）
+        if let target = launchTarget(for: link) { EditorWindows.noteOpened(folder: target.folder, remote: target.remote, host: target.host) }
         guard let target = launchTarget(for: link),
               EditorSettings.promptsForFolderLinks(remote: target.remote, scheme: scheme),
               let bundleId = Delivery.Editor.known.first(where: { $0.scheme == scheme })?.bundleId,

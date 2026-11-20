@@ -671,6 +671,9 @@ struct SessionChips: View {
     let onCompact: () -> Void
     let onTodos: () -> Void
     let onAgents: () -> Void
+    #if os(iOS)
+    @State private var confirmCompact = false
+    #endif
 
     var body: some View {
         HStack(spacing: Bar.spacing) {
@@ -688,7 +691,13 @@ struct SessionChips: View {
             }
             if let percent = session.usage?.percent {
                 // 压缩上下文：电脑端说有才能点（caps）
-                Button(action: onCompact) {
+                Button {
+                    #if os(iOS)
+                    confirmCompact = true
+                    #else
+                    onCompact()
+                    #endif
+                } label: {
                     HStack(spacing: 4) {
                         ContextRing(percent: percent)
                         Text("\(percent)%").font(.ui(.caption).monospacedDigit())
@@ -699,6 +708,13 @@ struct SessionChips: View {
                 }
                 .buttonStyle(PressableStyle())
                 .allowsHitTesting(session.can("compact"))
+                #if os(iOS)
+                // 手机上确认框从这颗胶囊弹出、箭头指着它（不小心碰到时知道是点了哪里）；Mac 照旧交给对话页弹小卡片
+                .confirmPanel(L("压缩上下文等同于在 Claude Code 中输入 /compact：将此前的对话总结为摘要以释放空间，部分细节可能丢失"),
+                              isPresented: $confirmCompact, confirm: L("压缩上下文"), anchored: true) {
+                    model.send(key, text: "/compact", images: [])
+                }
+                #endif
             }
             // 目标（/goal）：没设时点开写一个，设了的显示进行中 / 暂停（会话支持才有）
             if session.can("goal"), session.canReply { GoalChip(key: key, session: session) }

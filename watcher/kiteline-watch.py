@@ -126,7 +126,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.8"
+WATCHER_VERSION = "2.38.9"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -897,7 +897,7 @@ def scan_transcript(path):
             # 忙时排队进来的话并进当前这一轮：别的会话的来信不改发起方，你插的话要等你看（改成 user）
             attachment = entry.get("attachment") if isinstance(entry.get("attachment"), dict) else {}
             origin = attachment.get("origin") if isinstance(attachment.get("origin"), dict) else {}
-            if attachment.get("type") == "queued_command" and user_origin(origin):
+            if (attachment.get("type") == "queued_command" and user_origin(origin)) or bridge_note(attachment):
                 turn_from = "user"
             continue
         if etype == "ai-title" and isinstance(entry.get("aiTitle"), str):
@@ -1795,6 +1795,20 @@ def bridge_said(entry):
         isinstance(block, dict) and block.get("type") == "text" and str(block.get("text") or "").startswith("​") for block in content)
 
 
+def bridge_note(attachment):
+    """bridge_said 那件事在 Claude Code 2.1.327 起的记法：插件往一轮中间加的行存成 plugin_note 附件（plugin = kiteline、
+    content 是文字列表），发给模型时前面加「Note from the kiteline plugin, not from the user」，Claude 不当你的话照做——
+    所以新版 mod（v3）不再往中间插。装新 mod 之前就开着的会话还会这样记：照你说的显示，回去掉零宽空格的原话；
+    不是这种附件（别的插件的、没垫零宽空格的）回 None"""
+    if attachment.get("type") != "plugin_note" or attachment.get("plugin") != BRIDGE_MOD_NAME:
+        return None
+    content = attachment.get("content")
+    parts = [part for part in (content if isinstance(content, list) else [content]) if isinstance(part, str)]
+    if not parts or not parts[0].startswith("​"):
+        return None
+    return "\n\n".join(parts).lstrip("​").strip() or None
+
+
 def peer_body(origin, raw):
     """收到的消息正文：优先 origin.body，老版本没有就从 <cross-session-message> 标签里抠"""
     body = origin.get("body")
@@ -2017,6 +2031,15 @@ def normalize_line(offset, entry):
         if attachment.get("type") == "goal_status":
             item = goal_status_item(attachment, base())
             return [item] if item else []
+        note = bridge_note(attachment)
+        if note:
+            # 旧版后台送达 mod 趁 Claude 忙时插进这一轮的话（2.1.327 起记成 plugin_note）：照你说的显示
+            text, attached = split_attachments(note)
+            text, _ = clip(text, USER_TEXT_MAX)
+            item = dict(base(), t="user", text=text, queued=True)
+            if attached:
+                item["images"] = attached
+            return [item] if text or attached else []
         if attachment.get("type") != "queued_command":
             return []
         origin = peer_origin(entry)
@@ -4442,8 +4465,10 @@ def _sync_mod(root, name, marker, files, label):
 # Claude Code 的 mod 接口能在会话进程里以用户身份提交消息（$.prompt.submit asUser）、中断（$.turn.abort）、
 # 应答确认请求（PermissionRequest 钩子：电脑上照常弹框，手机先答 CLI 自己撤掉框）。watcher 装这个 mod（名字就叫 kiteline，
 # VS Code 里这类消息上方标「Prompt from the kiteline plugin」），把指令写进 <Claude 配置目录>/kiteline/inbox/<会话>.json，
-# mod 照做后写 <会话>.ack-<id>.json。Claude 正忙时发的话（$.prompt.submit 要等这一轮做完）由 mod 在下一批工具跑完后
-# 插进这一轮（$.session.append，回执 later），跟在 VS Code 里趁它忙时打字一样；见 bridge_said。
+# mod 照做后写 <会话>.ack-<id>.json。Claude 正忙时发的话排在 mod 里（回执 later），这一轮做完再以用户身份提交：
+# 插件往一轮中间加的行（$.session.append）Claude Code 2.1.327 起标成「插件的备注，不是用户说的」，Claude 不照做、
+# 自动权限也不认，所以不再往中间插（老记录的显示见 bridge_said）。后台运行的会话忙时改为把话键入它的终端
+# （bridge_type）：那是 Claude Code 自己认的「趁它忙时打字」，下一批工具跑完就读到。
 # mod 只在会话启动时加载：装之前开着的会话快照里 bridge 为假，电脑端照旧走前台
 # ---------------------------------------------------------------------------
 
@@ -4464,7 +4489,7 @@ import type { Register } from 'claude-code'
 // 照做后写 <会话>.ack-<id>.json；<会话>.alive 记下这个进程什么时候装上的，Kiteline 据此知道这个会话能走这条路
 type Item = { id: string; op: string; text?: string; decision?: string; answers?: Record<string, string>; tool?: string; expires?: number;
   action?: string; qid?: string; dir?: number }
-// cmd：斜杠命令（/effort、/model……）：Claude Code 只在一轮结束后执行，不能像话那样插进这一轮，排到这一轮做完
+// cmd：斜杠命令（/effort、/model……）：Claude Code 只在一轮结束后执行，和话一样排到这一轮做完
 type Queued = { id: string; text: string; cmd?: boolean }
 type Waiter = { agent: string; tool: string; key: string; wake: (item: Item | null) => void; input: unknown; id: string; at: number }
 
@@ -4526,10 +4551,10 @@ export const register: Register = on => {
     if (e.turnId === turn) {
       turn = undefined
       if (jumps.length) {
-        // 强插中断的：只交强插的那条，其余等它这一轮的下一批工具跑完再插进去
+        // 强插中断的：只交强插的那条，其余等它这一轮做完再交
         for (const q of jumps.splice(0)) await deliver($, q)
       } else if (later.length) {
-        // 这一轮后面没再调用工具（在写最后的回复，或被中断了）：没赶上的话作为下一句提交，排着的命令这时执行
+        // 这一轮做完了：排着的话照顺序作为你说的话提交（$.prompt.submit asUser），排着的命令这时执行
         for (const q of later.splice(0)) await deliver($, q)
         publishQueue($)
       }
@@ -4537,25 +4562,12 @@ export const register: Register = on => {
     return result
   })
 
-  // Claude 正忙时发来的话：跟在 VS Code 里趁它忙时打字一样，这一批工具跑完、下一次请求模型之前交给它，不用等这一轮做完。
-  // 插进去的是一行你说的话（记录里 isMeta、origin 是 kiteline 插件，watcher 照你发的显示；VS Code 里不显示这一行）
-  on('classic.PostToolBatch', async ($, e, next) => {
-    const result = await next(e)
-    if (e.agent_id !== undefined) return result
-    if (!later.some(q => !q.cmd)) return result
-    // 斜杠命令插不进这一轮，留在队里等这一轮做完（turn.complete）
-    for (const q of later.splice(0)) {
-      if (q.cmd) {
-        later.push(q)
-        continue
-      }
-      // 开头垫零宽空格：watcher 据此认出是你的话（替插件执行命令时 Claude Code 写的说明行也是 isMeta、kiteline 来源，不能显示）
-      const added = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: `\\u200b${q.text}` }] } }).catch(() => undefined)
-      if (!added || added.deny !== undefined) later.push(q)
-    }
-    publishQueue($)
-    return result
-  })
+  // Claude 正忙时发来的话不往这一轮里插。以前在一批工具跑完后用 $.session.append 插一行，Claude Code 2.1.327 起
+  // 插件自己加的行一律标成「kiteline 插件的备注，不是用户说的」：Claude 不当你的话照做，自动权限也不认（11-19 截图）。
+  // 能算你说的话的只有 $.prompt.submit asUser，而它要等空闲：所以留在 later 里，这一轮做完（上面的 turn.complete）
+  // 照顺序提交；急的在手机上点「强插」（中断这一轮马上发）。
+  // 后台运行的会话不走这里：Kiteline 把话直接键入它的终端（见 watcher 的 bridge_type），Claude Code 自己排队、
+  // 下一批工具跑完就读到，记录里就是你打的字
 
   // 确认框电脑上已经答了（工具跑完或被拒）：别再等手机
   on('tool.call', async ($, e, next) => {
@@ -4621,7 +4633,8 @@ export const register: Register = on => {
     dir = `${root}/kiteline/inbox`
     sid = await $.session.id()
     // v2：会写 <会话>.queue.json、认 queue 指令（排队的话能调顺序、改、删、强插）
-    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: await $.clock.now(), v: 2 }))
+    // v3：忙时的话不再往这一轮里插（会被标成「不是用户说的」），一律这一轮做完后以你的身份提交
+    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: await $.clock.now(), v: 3 }))
     publishQueue($)
     if (ticking) return started
     ticking = true
@@ -4640,7 +4653,7 @@ export const register: Register = on => {
           done.add(item.id)
           let result = 'ok'
           if (item.op === 'send' && typeof item.text === 'string') {
-            // 斜杠命令（手机上的压缩上下文、切换模型、思考强度……）照在输入框里打的那样执行；别的作为你说的话提交，Claude 正忙就留到它下一步。
+            // 斜杠命令（手机上的压缩上下文、切换模型、思考强度……）照在输入框里打的那样执行；别的作为你说的话提交，Claude 正忙就排着、这一轮做完再交。
             // 忙时的命令也排进队（Claude Code 本来就要等这一轮做完才执行；直接交给它的话手机上看不到、改不了，一直显示「发送中」）
             const cmd = (await slashOf($, item.text)) !== undefined
             if (turn) {
@@ -4900,6 +4913,19 @@ def bridge_send(session_id, op, wait=BRIDGE_WAIT, **fields):
         return {"bridged": False}
     # 排队了：编号（= 这条指令的 id，mod 的队列用它）回给电脑端，客户端拿它对上输入框上方的排队列表
     return {"bridged": True, "result": result, "qid": item_id} if result == "later" else {"bridged": True, "result": result}
+
+
+# 后台运行的会话（Kiteline 自己拿着它的伪终端）正忙时手机发来的话：键入终端 + 回车，不经 mod。Claude Code 把它当你在
+# 终端里趁它忙时打的字：自己排队（画面上「Queued」）、下一批工具跑完就交给模型（「The user sent a new message while you
+# were working」），记录里是 queued_command、来源 human。mod 给不了这个：它往一轮中间加的行会被标成「不是用户说的」
+# （见 BRIDGE_MOD_FILES 里的说明），只能等这一轮做完再提交。11-19 实测 Claude Code 2.1.327。
+# 不键入的：开头是输入框里有特殊含义的字符（/ 命令、! 直接跑命令行、# @ ? 等）、结尾停在 @提及 上（回车会选中补全项而不是发出去）
+BRIDGE_TYPE_SKIP = "/!#&@?$>\\"
+
+
+def bridge_typeable(text):
+    text = (text or "").strip()
+    return bool(text) and text[0] not in BRIDGE_TYPE_SKIP and not re.search(r"@\S*$", text)
 
 
 def _iso_ms(value):
@@ -15118,6 +15144,75 @@ TERM_RATE = 512 * 1024   # 每秒最多推这么多：输出再快就先不读�
 TERM_RUN_KEEP = 30 * 60  # 兜底：跑完还没收掉的 agent 终端最多留这么久（正常跑完立刻收，见 Terminals.gone）
 TERM_RUN_DIR = os.path.join(DATA_DIR, "term-run")   # term run 子命令和 watcher 之间的交接目录（见 command_term）
 
+# 回放缓冲只留最后一段，前面裁掉的输出里程序设过的终端状态（进了备用屏幕、开了鼠标上报、括号粘贴、焦点上报、光标键模式……）
+# 也跟着没了。Claude Code 是全屏界面：启动时进备用屏幕，之后一直在里面重画，跑久了「进备用屏幕」那一句早被裁掉，
+# 手机再接上时终端以为它在普通屏幕上——双指滑去翻本地历史（全屏界面不留历史，怎么滑都不动），粘贴、光标键的编码也可能不对
+# （11-19 用户 iPad 反馈）。所以裁的时候把被裁掉那段里设过的模式记下来（trim_replay），回放时先补上（replay_prelude）。
+TERM_TRIM_SLACK = 16 * 1024   # 超出这么多再裁：一次裁一截，不用每来一段输出就挪一遍 256KB；也保证被裁掉的比补的那一小段长
+_TERM_MODE_RE = re.compile(rb"\x1b\[\?([0-9;]{1,48})([hl])")
+_TERM_HALF_CSI = re.compile(rb"\x1b(?:\[[0-9;:<=>?!]{0,48})?\Z")   # 结尾是半截控制序列：ESC、ESC[、ESC[?10 ……还没等到结束的字母
+_TERM_SCREEN_MODES = (47, 1047, 1049)                              # 备用屏幕
+_TERM_SKIP_MODES = (1048, 2026)   # 保存 / 恢复光标是动作不是状态；同步输出是一小段一小段的，不带过去
+
+
+def trim_replay(buffer, limit, modes):
+    """回放缓冲（bytearray）超出 limit 一截后裁回 limit。被裁掉那段里设过的终端模式记进 modes（{模式号: 开着没有}，
+    按最后一次设置的先后）。不裁在控制序列、UTF-8 字符的中间：否则回放开头是半截序列，显示成乱码"""
+    if len(buffer) <= limit + TERM_TRIM_SLACK:
+        return
+    cut = len(buffer) - limit
+    probe = bytes(buffer[cut - 64:cut])
+    half = _TERM_HALF_CSI.search(probe)
+    if half:
+        cut -= len(probe) - half.start()
+    else:
+        for _ in range(3):   # 落在一个字的中间：把剩下的那一两个字节也裁掉
+            if not 0x80 <= buffer[cut] < 0xC0:
+                break
+            cut += 1
+    for found in _TERM_MODE_RE.finditer(bytes(buffer[:cut])):
+        on = found.group(2) == b"h"
+        for part in found.group(1).split(b";"):
+            number = int(part) if part else 0
+            if not number or number in _TERM_SKIP_MODES:
+                continue
+            modes.pop(number, None)
+            modes[number] = on
+    for stale in list(modes)[:max(0, len(modes) - 64)]:   # 正常就十来个；乱七八糟的输出别让它一直长
+        del modes[stale]
+    del buffer[:cut]
+
+
+def replay_prelude(modes, start):
+    """回放时先补上的那一小段：被裁掉的输出里程序设过的终端模式（start：一共裁掉了多少字节）。
+    备用屏幕放最前（进去会清屏）；关着的备用屏幕不补（本来就在普通屏幕上，补了反而多恢复一次光标）"""
+    on = [n for n, state in modes.items() if state and n not in _TERM_SCREEN_MODES]
+    off = [n for n, state in modes.items() if not state and n not in _TERM_SCREEN_MODES]
+    out = b"".join(b"\x1b[?%dh" % n for n in _TERM_SCREEN_MODES if modes.get(n))
+    if on:
+        out += b"\x1b[?" + b";".join(b"%d" % n for n in on) + b"h"
+    if off:
+        out += b"\x1b[?" + b";".join(b"%d" % n for n in off) + b"l"
+    return out if len(out) <= start else b""   # 回放的位置要往前挪这么多（见 with_prelude），不能挪成负的
+
+
+def with_prelude(modes, start, data):
+    """(回放从哪个位置算起, 回放的内容)：内容前面补上终端模式，位置跟着往前挪同样多——位置 + 长度仍是输出的结尾，
+    各端（包括没更新的旧版）照原来的办法接后面的输出，不用改"""
+    prelude = replay_prelude(modes, start)
+    return start - len(prelude), prelude + data
+
+
+def guess_prelude(start, data):
+    """更新前就在跑的托管守护进程不记终端模式，回放里只有最后一段。被裁过、这一段里没切换过屏幕、却开着鼠标上报
+    （Claude Code 每次整屏重画都会重新开一遍）：按它在备用屏幕里处理。守护进程换成新的以后不走这里"""
+    if start < 8 or re.search(rb"\x1b\[\?(?:[0-9;]*;)?(?:47|1047|1049)(?:;[0-9;]*)?[hl]", data):
+        return b""
+    mouse = None
+    for found in re.finditer(rb"\x1b\[\?(?:[0-9;]*;)?(?:1000|1002|1003)(?:;[0-9;]*)?([hl])", data):
+        mouse = found.group(1) == b"h"
+    return b"\x1b[?1049h" if mouse else b""
+
 
 def host_label():
     """这台电脑的名字（终端标签上标「在哪台设备上跑」用；电脑端会换成用户起的来源名）"""
@@ -15161,6 +15256,7 @@ class Term:
         self.created = time.time()
         self.buffer = bytearray()
         self.end = 0              # 一共输出了多少字节（buffer 是最后那段）
+        self.modes = {}           # 被裁掉的输出里程序设过的终端模式（见 trim_replay）
         self.lock = threading.Lock()
         self.exit_code = None
         self.shell = ""
@@ -15377,8 +15473,7 @@ class Term:
             with self.lock:
                 seq = self.end
                 self.buffer += chunk
-                if len(self.buffer) > TERM_BUFFER:
-                    del self.buffer[:len(self.buffer) - TERM_BUFFER]
+                trim_replay(self.buffer, TERM_BUFFER, self.modes)
                 self.end += len(chunk)
             try:
                 self._event({"event": "term", "term": self.id, "sessionId": self.session_id, "seq": seq,
@@ -15466,7 +15561,7 @@ class Term:
 
     def tail(self):
         with self.lock:
-            return self.end - len(self.buffer), bytes(self.buffer)
+            return with_prelude(self.modes, self.end - len(self.buffer), bytes(self.buffer))
 
 
 class Terminals:
@@ -17125,7 +17220,20 @@ class BrowserPool:
 # 不用记端口。有程序连进来，按「哪个进程连的 → 它的环境变量 / 父进程链 → 哪个会话」认出会话，接到这个会话自己的浏览器上
 # （没开就让调度器开，满了排队）。Playwright MCP 经环境变量 PLAYWRIGHT_MCP_CDP_ENDPOINT 指到这里（sync_browser_env），
 # agent-browser / playwright-cli 由技能 kiteline-browser 教 agent 带 --cdp。只听本机地址。
-BROWSER_GATE_PORT = int(os.environ.get("CCPULSE_BROWSER_PORT") or 9339)
+def _browser_gate_port():
+    """入口端口：电脑端经 CCPULSE_BROWSER_PORT 指定的优先；测试实例（dry-run）没指定时按配置目录算一个 19400～19899 的固定端口，
+    不占 9339（11-19：测试电脑留下的 watcher 占着 9339，正式 watcher 重启后绑不上，虚拟机上所有会话的浏览器都开到了测试那边）"""
+    explicit = os.environ.get("CCPULSE_BROWSER_PORT")
+    if explicit:
+        return int(explicit)
+    if os.environ.get("CCPULSE_DRY_RUN") == "1" or os.environ.get("KITELINE_DRY_RUN") == "1":
+        seed = (os.environ.get("CCPULSE_CONFIG_DIR") or os.environ.get("KITELINE_CONFIG_DIR")
+                or os.environ.get("CCPULSE_DATA_DIR") or str(os.getpid()))
+        return 19400 + zlib.crc32(seed.encode("utf-8")) % 500
+    return 9339
+
+
+BROWSER_GATE_PORT = _browser_gate_port()
 BROWSER_GATE = "http://127.0.0.1:%d" % BROWSER_GATE_PORT
 
 
@@ -18377,6 +18485,7 @@ class HostedHolder:
         self.base = os.path.join(spec.get("dir") or HOSTED_DIR, self.id)
         self.sock_path = spec.get("sock") or hosted_sock_path(self.id)
         self.buffer, self.end = bytearray(), 0
+        self.modes = {}   # 被裁掉的输出里程序设过的终端模式（见 trim_replay）
         self.lock = threading.Lock()
         self.write_lock = threading.Lock()
         # 屏幕模拟（读屏用）：有人问才把攒下的输出喂进去，screen_at = 已经喂到输出的哪儿
@@ -18474,8 +18583,7 @@ class HostedHolder:
             with self.lock:
                 seq = self.end
                 self.buffer += chunk
-                if len(self.buffer) > HOSTED_BUFFER:
-                    del self.buffer[:len(self.buffer) - HOSTED_BUFFER]
+                trim_replay(self.buffer, HOSTED_BUFFER, self.modes)
                 self.end += len(chunk)
                 self.last_output = time.time()
             self._broadcast({"seq": seq, "data": base64.b64encode(chunk).decode("ascii")})
@@ -18829,12 +18937,18 @@ class HostedHolder:
             pass
         conn.close()
 
+    def _replay(self):
+        """留着的那段输出，前面补上被裁掉的输出里设过的终端模式（拿着 self.lock 调）。prelude：补了多少字节——
+        有这一项说明守护进程自己记着模式，watcher 不用再猜（见 guess_prelude）"""
+        start = self.end - len(self.buffer)
+        seq, data = with_prelude(self.modes, start, bytes(self.buffer))
+        return {"seq": seq, "data": base64.b64encode(data).decode("ascii"), "prelude": start - seq, "info": self.info()}
+
     def _subscribe(self, conn):
         """持续收输出：先给最近留着的一段，之后有输出就推 {seq, data}，claude 退出推 {exit}。对面关了连接就不推了"""
         with self.lock:
-            start, data = self.end - len(self.buffer), bytes(self.buffer)
             conn.settimeout(3)
-            conn.sendall(json.dumps({"seq": start, "data": base64.b64encode(data).decode("ascii"), "info": self.info()}).encode("utf-8") + b"\n")
+            conn.sendall(json.dumps(self._replay()).encode("utf-8") + b"\n")
             self.subscribers.append(conn)
         try:
             conn.settimeout(None)
@@ -18860,8 +18974,7 @@ class HostedHolder:
             return {}
         if op == "tail":
             with self.lock:
-                start, data = self.end - len(self.buffer), bytes(self.buffer)
-            return {"seq": start, "data": base64.b64encode(data).decode("ascii"), "info": self.info()}
+                return self._replay()
         if op == "screen":
             return {"text": self.screen_now(int(request.get("lines") or 0))}
         if op == "keys":
@@ -18938,7 +19051,11 @@ class HostedTerm:
 
     def tail(self):
         reply = hosted_call(self.entry, {"op": "tail"})
-        return reply.get("seq", 0), base64.b64decode(reply.get("data") or "")
+        seq, data = reply.get("seq", 0), base64.b64decode(reply.get("data") or "")
+        if "prelude" not in reply:   # 更新前就在跑的守护进程：它不记终端模式，按这一段输出猜
+            prelude = guess_prelude(seq, data)
+            seq, data = seq - len(prelude), prelude + data
+        return seq, data
 
     def write(self, data):
         hosted_call(self.entry, {"op": "input", "data": base64.b64encode(data).decode("ascii")})
@@ -19914,9 +20031,36 @@ class Watcher:
             return {"pane": pane}
         raise RuntimeError("未知请求：%s" % cmd)
 
+    def bridge_type(self, sid, text):
+        """Claude 正忙时手机发来的话：后台运行的会话直接键入它的终端 + 回车（为什么见 bridge_typeable 上面的说明）。
+        回 True = 键进去了；不是后台运行的、这句话不能照原样键入、终端正停在选择框上（守护进程不送）回 False"""
+        if not bridge_typeable(text):
+            return False
+        entry = HOSTED.by_pid((self.sessions.get(sid) or {}).get("pid"))
+        if not entry or entry.get("agent"):
+            return False
+        try:
+            HOSTED.send(entry, text, [], True)
+            return True
+        except Exception as exc:  # noqa
+            log("后台运行的会话 %s 忙时键入终端没成，改交给 mod 排队：%s" % (sid[:8], exc))
+            return False
+
+    def bridge_retype(self, sid, text, queued):
+        """mod 说 Claude 正忙、把话排进了它的队（快照比它晚一两秒，按快照没认出忙）：后台运行的会话把这条从队里撤下，
+        改成键入终端。撤不下（刚好这一轮做完、已经提交了）照 mod 的结果回；撤下了却键不进去就放回队里"""
+        entry = HOSTED.by_pid((self.sessions.get(sid) or {}).get("pid"))
+        if not queued.get("qid") or not entry or entry.get("agent") or not bridge_typeable(text):
+            return queued
+        if bridge_send(sid, "queue", action="delete", qid=queued["qid"]).get("result") != "ok":
+            return queued
+        if self.bridge_type(sid, text):
+            return {"bridged": True, "result": "ok", "typed": True}
+        return bridge_send(sid, "send", text=text)
+
     def bridge(self, request):
         """后台送达（见 bridge_send）：会话的 claude 进程加载了 mod 才送，等回执要一两秒，放后台线程回、别卡住观察循环。
-        回 bridged False 时电脑端照旧走前台"""
+        回 bridged False 时电脑端照旧走前台。发消息时 Claude 正忙、会话又是后台运行的：键入它的终端（bridge_type）"""
         sid = str(request.get("sessionId") or "")
         op = request.get("op")
         snap = self.sessions.get(sid) or {}
@@ -19955,7 +20099,13 @@ class Watcher:
         def work():
             response = {"event": "response", "id": rid, "ok": True}
             try:
-                result = bridge_send(sid, op, **fields)
+                text = fields.get("text") if op == "send" else None
+                if text and snap.get("activity") == "busy" and self.bridge_type(sid, text):
+                    result = {"bridged": True, "result": "ok", "typed": True}
+                else:
+                    result = bridge_send(sid, op, **fields)
+                    if text and result.get("result") == "later":
+                        result = self.bridge_retype(sid, text, result)
             except Exception as exc:  # noqa
                 log("后台送达失败：%r" % exc)
                 result = {"bridged": False}

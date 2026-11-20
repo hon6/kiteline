@@ -146,11 +146,14 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
 /// 电脑上后台运行 Claude Code 的提示设置：tipOff =「支持后台托管」的提示选了不再提示（开关按设备，在 SourceInfo.hosted）
 struct HostedSetting: Decodable, Hashable {
     var tipOff = false
+    /// 会话都在后台运行后，电脑自动关闭项目的 VS Code 窗口（电脑的设置，默认开；features 里有 editorWindows 的电脑才有这回事）
+    var closeEditor = true
 
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.fields()
         tipOff = c.one("tipOff") ?? false
+        closeEditor = c.one("closeEditor") ?? true
     }
 }
 

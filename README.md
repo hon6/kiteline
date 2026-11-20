@@ -6,7 +6,7 @@
 
 ### A remote for the coding agents already running on your computers.
 
-Kiteline puts every Claude Code, Codex, OpenCode and DeepSeek Harness session on your computers (in VS Code, the terminal or over Remote-SSH) on your iPhone, iPad and Apple Watch. Keep using your agents exactly as you do now. When you step away, follow every step, approve requests, answer questions and send the next task from your phone.
+Kiteline puts every Claude Code, Codex, OpenCode and DeepSeek Harness session on your computers (in VS Code, the terminal, over Remote-SSH, or run by Kiteline in the background) on your iPhone, iPad and Apple Watch — and on Android through a WeChat Mini Program. Keep using your agents exactly as you do now. When you step away, follow every step, approve requests, answer questions and send the next task from your phone.
 
 <br>
 
@@ -63,7 +63,7 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 
 ## Why Kiteline
 
-- **Nothing new to move into.** Your sessions stay in VS Code, the terminal or Remote-SSH, exactly where they are. The phone picks up the very same session; there is no second interface to start your work in.
+- **Nothing new to move into.** Your sessions stay in VS Code, the terminal or Remote-SSH, exactly where they are. The phone picks up the very same session; there is no second interface to start your work in. Or let Kiteline run Claude Code in the background: no VS Code window, and replies and approvals still go through when the computer is locked.
 - **Never touches your AI login.** Kiteline doesn't sign in to Claude or any other AI service, never reads API keys or tokens and never calls a model API. It reads the transcripts your agents already write and acts only through interfaces they offer.
 - **Agents report back.** Built-in skills let agents send screenshots, walk through web features in a real browser with Playwright and send you the report, track what only you can do as to-dos, and show which stage they are at.
 - **Approve from your wrist.** Commands, plans and questions reach the lock screen and Apple Watch; a Live Activity shows who is waiting and what step each session is on; risky commands always ask twice.
@@ -88,10 +88,16 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 
 | | |
 |---|---|
-| **One list for every agent** | Claude Code (VS Code and terminal), Codex, OpenCode, DeepSeek Harness, Qwen Code, Kimi Code, CodeBuddy, ZCode, Antigravity, Grok Build and more. New agents ship as signed plugins, so supporting one doesn't need an app update. |
+| **One list for every agent** | Claude Code (VS Code, terminal and background), Codex, OpenCode, DeepSeek Harness, Cursor, Qwen Code, Kimi Code, CodeBuddy, ZCode, Antigravity, Grok Build, Hermes, Muse Code, pi, trae-agent and more. New agents ship as signed plugins, so supporting one doesn't need an app update. |
 | **Approve anywhere** | Permission requests, plan approvals and multiple-choice questions become cards on the lock screen, the phone and the watch. |
 | **Reply your way** | Type, hold to talk (on-device speech recognition), attach photos and screenshots, or start a new task in any project. |
-| **See the work, not just the chat** | Live steps, commands, diffs, test output and images, plus a code editor with Git and a terminal that runs inside each session. |
+| **See the work, not just the chat** | Live steps, commands, diffs, test output and images, plus a code editor with Git and a terminal that runs inside each session. When an agent needs a terminal, its command runs in that session's terminal too, labelled with the device. |
+| **Background sessions** | On a Mac or Linux computer, new tasks and resumed sessions run Claude Code in the background by default, with no VS Code window. Messages and approvals never take the foreground and still work with the computer locked; move a session into VS Code with one click. Remote hosts over SSH can be turned on device by device. |
+| **Session groups and execution trace** | On the computer, put related sessions into a group: group tabs sit along the top of the window and switching to a group lays its sessions out in columns. On Mac and iPad, the execution trace shows agents, turns and every step on a timeline, jumps to the first error and replays the run. |
+| **Agent browser** | Agents use the browser Kiteline provides. A live preview appears in the session; enlarge it to follow every step, take over for sign-ins and CAPTCHAs, then hand back. Every run is recorded for replay. |
+| **Message queue and restart** | Messages sent while the agent is busy line up above the input box: reorder, edit, delete or jump the queue. Restart one session or many; the conversation is kept. |
+| **Several computers** | Connect your phone to several computers running Kiteline and see their sessions in one list; computers can add each other too, and every device can have an alias. |
+| **Widgets and stats** | Home Screen and Lock Screen widgets show recent sessions, plan limits and today's tokens. Turn a day, a week or a single task into a shareable image of tokens, lines changed and time online — numbers only. |
 | **Task progress** | Each session shows its current stage (for example "2/4 Developing"), and agents can send screenshots and reports straight to your phone. |
 | **Goals** | Give a Claude Code or Codex session a goal (`/goal`) from your phone and the agent keeps working, round after round, until it is met. The session list shows which round it is on, the chat shows what the last check said is still missing, and you get a notification when the goal is met, can't be met or stops. |
 | **To-dos** | Anything the agent needs *you* to do is picked up from the conversation and tracked until it's done. |
@@ -106,36 +112,35 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 
 | Agent | What you can do from your phone |
 |---|---|
-| **Claude Code** | Full control: VS Code extension and CLI |
-| **Codex** | Full control: CLI, VS Code extension and desktop app |
+| **Claude Code** | Full control: VS Code extension, CLI, or run by Kiteline in the background (no VS Code window needed) |
+| **Codex** | Full control: CLI, VS Code extension, desktop app |
 | **OpenCode** | Full control |
-| **Cursor** | Plugin coming soon (source in [`plugins/cursor`](plugins/cursor)) |
-| **Qwen Code** | Reply and approve when it runs in tmux; view-only otherwise |
 | **DeepSeek Harness** | Full control (opt-in) |
-| **Proma** | View only |
-| **Kimi Code** · **Hermes** · **Grok Build** | Reply, approve, answer, interrupt and close when the CLI runs in tmux; view-only otherwise |
-| **CodeBuddy Code** · **WorkBuddy** | CodeBuddy Code: full control in tmux. WorkBuddy desktop app: view only |
-| **ZCode** | Send messages from your phone; that turn's approvals and questions come to your phone, and you can interrupt it |
-| **Antigravity** | CLI in tmux: reply, approve, answer, interrupt, close. Desktop app and IDE: view only |
-| **Muse Code** | In tmux: reply, interrupt, close (commands are confirmed on the computer) |
-| **trae-agent** | View tasks and full records; send tasks when it runs in tmux |
+| **Cursor** | Editor and CLI: view, reply, approve, interrupt |
+| **ZCode** | Full control in the desktop app and the CLI |
+| **Kimi Code** · **Hermes** · **Grok Build** · **CodeBuddy Code** · **Antigravity CLI** | Full control: pick one when starting a task and Kiteline runs it in the background (Mac and Linux), or start it in tmux yourself |
+| **Qwen Code** | View, reply, approve, interrupt (same: background or tmux) |
+| **Muse Code** · **pi** | View, reply, interrupt (same: background or tmux) |
+| **trae-agent** | View tasks and full records; send tasks from your phone |
+| **WorkBuddy** | Desktop app on the Mac: view and reply. View only elsewhere |
+| **Proma** · **Antigravity desktop app** | View only |
 
 The per-platform matrix is in **[PLUGINS.md](PLUGINS.md)**. It is generated from the capabilities each plugin declares and updated with every release.
 
-**Why are some agents view-only?** Kiteline never touches your AI credentials and never modifies an agent. It only acts through interfaces the agent itself offers: its local server or IPC, extension points such as hooks or an editor URI, or the terminal (tmux) it runs in. When an agent offers none of these, Kiteline can still show its sessions and full transcripts from disk, but it won't simulate input or patch the agent to take control. The app tells you why a session is view-only and how to enable more, for example by starting the CLI in tmux. Details are in the [plugin guide](guide/plugin-development.md#why-some-agents-are-view-only).
+**Why are some agents view-only?** Kiteline never touches your AI credentials and never modifies an agent. It only acts through interfaces the agent itself offers: its local server or IPC, extension points such as hooks or an editor URI, or the terminal (tmux) it runs in. When an agent offers none of these, Kiteline can still show its sessions and full transcripts from disk, but it won't simulate input or patch the agent to take control. The app tells you why a session is view-only and how to enable more, for example by picking the agent when you start a task, or by starting the CLI in tmux. Details are in the [plugin guide](guide/plugin-development.md#why-some-agents-are-view-only).
 
 **Build a plugin.** New agents are added as plugins: a manifest plus a small Python module running in the watcher. The [plugin development guide](guide/plugin-development.md) covers the manifest, the interface and the rules, and `tools/plugin_check.py` lets you test a plugin on your own machine. Open a pull request: we review and test it, then sign it and publish it to the official plugin index, and every Kiteline user gets it without an app update.
 
 ## FAQ
 
 **Can this get my Claude or Codex account banned?**
-Kiteline doesn't sign in to any AI service, doesn't use your subscription's tokens and never calls a model API, so it doesn't change how your agents talk to their providers. Your agents keep running on your computer under your own account, exactly as before. Kiteline reads the transcripts they write and types into the same session the way you would.
+Kiteline doesn't sign in to any AI service, doesn't use your subscription's tokens and never calls a model API, so it doesn't change how your agents talk to their providers. Your agents keep running on your computer under your own account, exactly as before. Kiteline reads the transcripts they write and hands your words to the same session through interfaces the agent itself offers.
 
 **Does my code go through your servers?**
 On the same network, no: the phone talks to your computer directly over HTTPS, pinned to a certificate your computer issued at pairing. From another network Kiteline first tries a direct peer-to-peer connection and only falls back to the relay when that fails. Everything is end-to-end encrypted; the relay can't read it and doesn't store it. See [Remote access](guide/user/remote-access.md).
 
 **Do I have to change how I work?**
-No. Keep starting sessions in VS Code or the terminal. Kiteline finds them on its own. Terminal sessions that should accept replies from the phone need to run inside tmux.
+No. Keep starting sessions in VS Code or the terminal. Kiteline finds them on its own. You can also start a task right in Kiteline and let it run in the background, with no VS Code window. Sessions you start in a terminal yourself need to run inside tmux to accept replies from the phone.
 
 **Is there an Android app?**
 Use the Kiteline WeChat Mini Program: scan the [code under Install](#install) with WeChat. Native apps are available for iPhone, iPad and Apple Watch.
@@ -189,10 +194,11 @@ flowchart LR
 ## Under the hood
 
 - **Session discovery.** A single-file Python watcher (`watcher/kiteline-watch.py`) with **zero third-party dependencies** runs on the local machine and on any Remote-SSH host over plain SSH. It follows Claude Code's session registry and JSONL transcripts, talks to Codex and OpenCode through their own local server protocols, and lets plugins cover other agents, for example through hooks an agent provides. Everything is normalized into one JSON Lines event stream.
-- **Input delivery.** Claude Code has no writable stdin, so Kiteline delivers input through the front end:
-  - **VS Code sessions**: Kiteline finds the right window through the Accessibility API, opens the extension's own `vscode://anthropic.claude-code/open` URI to select the session and prefill the prompt, checks the input box and then submits.
+- **Input delivery.** Kiteline picks the route by where the session lives, and reports why rather than deliver to the wrong place:
+  - **Claude Code**: a small plugin, marked as Kiteline's and placed in Claude Code's own plugin folder, receives messages, approvals and answers inside the session and submits them as the user. No window switching, no simulated keystrokes, and it works with the computer locked.
+  - **Background sessions**: the watcher runs the agent's CLI in the background on the computer that holds the project, with the same network settings as in VS Code; one click moves the session into VS Code.
+  - **VS Code sessions opened before the update**: still delivered through the front end. Kiteline finds the right window through the Accessibility API, opens the extension's own `vscode://anthropic.claude-code/open` URI to select the session, checks it and then submits.
   - **CLI sessions in tmux**: the watcher drives them directly.
-  - **Other terminal sessions**: Kiteline walks the process tree to the terminal app that hosts the session.
   - **Codex and OpenCode**: replies, approvals and answers go over their native protocols.
 - **Transport and pairing.** The phone talks to the host over HTTPS on the local network. Each computer has its own root CA, and X.509 name constraints limit it to private address ranges. Live state is streamed as Server-Sent Events, and the computer is found automatically via Bonjour / mDNS. Pairing uses a 6-digit code, or a QR code that carries a one-time token and the CA fingerprint.
 - **End-to-end encrypted notifications.** Payloads are encrypted on the computer with Web Push (RFC 8291 `aes128gcm`, VAPID per RFC 8292). They are decrypted only on the device, by a notification service extension. The push gateway only ever relays ciphertext to APNs.
@@ -221,18 +227,18 @@ flowchart LR
 
 <table>
 <tr>
-<td><img src="assets/images/iphone-en/01-agents.jpg" alt="All agents"></td>
-<td><img src="assets/images/iphone-en/03-approve.jpg" alt="Approve"></td>
-<td><img src="assets/images/iphone-en/06-plan.jpg" alt="Plan approval"></td>
-<td><img src="assets/images/iphone-en/07-live.jpg" alt="Live steps"></td>
-<td><img src="assets/images/iphone-en/02-world.jpg" alt="World mode"></td>
+<td><img src="assets/images/iphone-en/01-sessions.jpg" alt="Session list"></td>
+<td><img src="assets/images/iphone-en/02-approve.jpg" alt="Approve"></td>
+<td><img src="assets/images/iphone-en/03-plan.jpg" alt="Plan approval"></td>
+<td><img src="assets/images/iphone-en/04-question.jpg" alt="Answer a question"></td>
+<td><img src="assets/images/iphone-en/05-voice.jpg" alt="Hold to talk"></td>
 </tr>
 <tr>
-<td><img src="assets/images/iphone-en/04-codex.jpg" alt="Codex"></td>
-<td><img src="assets/images/iphone-en/05-voice.jpg" alt="Voice"></td>
-<td><img src="assets/images/iphone-en/08-overview.jpg" alt="Overview"></td>
-<td><img src="assets/images/iphone-en/09-watch.jpg" alt="Apple Watch"></td>
-<td><img src="assets/images/iphone-en/10-remote.jpg" alt="Remote access"></td>
+<td><img src="assets/images/iphone-en/06-codex.jpg" alt="Codex"></td>
+<td><img src="assets/images/iphone-en/07-overview.jpg" alt="Overview: limits, stats and today's activity"></td>
+<td><img src="assets/images/iphone-en/08-projects.jpg" alt="Projects"></td>
+<td><img src="assets/images/iphone-en/09-group.jpg" alt="Group chat"></td>
+<td><img src="assets/images/iphone-en/10-world.jpg" alt="World mode"></td>
 </tr>
 </table>
 
@@ -245,7 +251,16 @@ flowchart LR
 </tr>
 </table>
 
-![Mac app: sessions side by side, a plan waiting for approval and two sessions messaging each other](assets/images/mac-main-en.jpg)
+![Mac app: session groups along the top, two sessions side by side, a plan waiting for approval and two sessions messaging each other](assets/images/mac-main-en.jpg)
+
+<table>
+<tr>
+<td width="58%"><img src="assets/images/mac-trace-en.jpg" alt="Execution trace"><br><sub><b>Execution trace.</b> Agents, turns and steps on a timeline, model calls and tool calls in different colors, a jump to the first error, and replay.</sub></td>
+<td width="42%"><img src="assets/images/mac-browser-en.jpg" alt="Agent browser"><br><sub><b>Agent browser.</b> When an agent drives a web page, a live preview appears in the corner of the session. Enlarge it, or take over.</sub></td>
+</tr>
+</table>
+
+![Session terminal: when an agent needs a terminal, its command runs in a tab of the session's own terminal, labelled with the device](assets/images/mac-terminal-en.jpg)
 
 ![World mode on the Mac](assets/images/mac-world-en.jpg)
 
