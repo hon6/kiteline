@@ -31,11 +31,8 @@ echo "==== 2/4 安装到 /Applications ===="
 STAGE="/Applications/.Kiteline-installing.app"
 rm -rf "$STAGE"
 cp -R "$APP" "$STAGE"
-# 先退出正在运行的旧版本（手机端口等资源要释放）；改名前的 TARS / CC Pulse 一并退出并移除
-pkill -f "Kiteline.app/Contents/MacOS/TARS" 2>/dev/null || true
-pkill -f "TARS.app/Contents/MacOS/TARS" 2>/dev/null || true
-pkill -f "CC Pulse.app/Contents/MacOS/CCPulse" 2>/dev/null || true
-sleep 0.5
+# 旧版还在跑也先换包（同一块盘上改名一步完成；运行中的进程不受影响），最后第 4 步才重启 App：
+# 在 Kiteline 的会话终端里跑时，Kiteline 一退出这个脚本就被带走，先结束再换包的话「应用程序」里会一个 Kiteline 都没有
 if [ -d "/Applications/TARS.app" ]; then
   # 同一个 bundle id、同一个签名：数据目录、配对、系统权限都沿用，手机不用重配
   rm -rf "/Applications/TARS.app"
@@ -60,8 +57,9 @@ fi
 "$CC" sources list
 
 echo "==== 4/4 启动 ===="
-# -g：后台启动，不抢前台（VS Code 被挤到后台时，手机发的消息不会自动提交）
-open -g "$DEST"
+# 结束旧版、后台打开新版（-g 不抢前台：VS Code 被挤到后台时，手机发的消息不会自动提交）。
+# 不用 pkill：macOS 的 pkill 跳过自己的祖先进程，在 Kiteline 会话终端里跑时找不到 Kiteline（见 tools/mac-app-restart.sh）
+bash "$ROOT/tools/mac-app-restart.sh" "$DEST"
 
 cat <<'TXT'
 
