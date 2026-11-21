@@ -769,7 +769,7 @@ struct MacImageViewer: View {
         }
         ToolbarItem(placement: .confirmationAction) {
             Button(L("完成")) { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton()
-        }
+        }.panelBare()
     }
 
     private func cached(_ image: ViewerImage) -> NSImage? {

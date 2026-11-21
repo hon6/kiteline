@@ -884,6 +884,27 @@ extension SelfTest {
                                             context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53) {
                 NSApp.postEvent(event, atStart: false)
             }
+        case "tour":
+            // 新版界面引导：tour = 从第一步开始；tour:<第几步>（从 0 起）；tour:announce 经典界面的「新版界面上线」卡片；tour:off 关掉
+            switch arg {
+            case "announce": NewLayoutTour.shared.announcing = true
+            case "off": NewLayoutTour.shared.index = nil; NewLayoutTour.shared.announcing = false
+            default: NewLayoutTour.shared.index = Int(arg) ?? 0
+            }
+            delay = 1
+        case "hscrollers":
+            // 横着滚的一排（筛选条、输入框下面那排按钮……）：有没有横向滚动条、是不是悬浮样式、内容比可视宽多少（能不能横着拖）
+            func walkH(_ view: NSView, _ out: inout [NSScrollView]) {
+                if let scroll = view as? NSScrollView, scroll.frame.height < 80, scroll.frame.width > 40 { out.append(scroll) }
+                for child in view.subviews { walkH(child, &out) }
+            }
+            var rows: [NSScrollView] = []
+            if let root = window.contentView?.superview { walkH(root, &rows) }
+            for scroll in rows {
+                let doc = scroll.documentView?.frame.width ?? 0
+                Log.write("[capture] 横向一排 \(Int(scroll.frame.width))×\(Int(scroll.frame.height))：内容宽 \(Int(doc))，横向滚动条 \(scroll.hasHorizontalScroller)，"
+                          + "样式 \(scroll.scrollerStyle == .overlay ? "悬浮" : "常驻")，自动藏 \(scroll.autohidesScrollers)，滚动条下移 \(Int(-scroll.scrollerInsets.bottom))")
+            }
         case "scrollers":
             // 排查用：窗口里每个竖着滚的 NSScrollView：内容高、可视高、离底部多远、滚动条位置和长短（切会话组后滚动条位置不对）
             func walk(_ view: NSView, _ out: inout [NSScrollView]) {

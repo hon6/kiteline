@@ -16,8 +16,6 @@ import KitelineKit
 ///   GET  /api/media?key=&ref=    图片（带缓存）
 ///   POST /api/send?key=          {text, images:[{name, data(base64)}], files:[{name, data(base64)}], submit?}
 ///   GET  /api/download?key=&path=[&cwd=&reveal=1]  电脑上的文件原样取回（手机预览、转发到别的 App）
-///   GET  /api/steward                    总管模式（实验性）的设置和总管会话；POST /api/steward {enabled, sourceId, agent, existing, speak} 开启 / 关闭；
-///   POST /api/steward/wake               总管会话不在了，重新开一个（见 Steward.swift）
 ///   POST /api/key?key=           {key: enter|esc|1|2|3}
 ///   POST /api/answer?key=        回答 AskUserQuestion：{answers:[{question, picked:[...], other}]}
 ///   GET  /api/ping[?bytes=N]     网络检测（延迟 / 下行速率）
@@ -1194,8 +1192,6 @@ final class MobileServer {
                 respond(TabGroupStore.shared.handle(request))
             case (_, let path) where path == "/api/groups" || path.hasPrefix("/api/groups/"):
                 Groups.shared.handle(request, respond: respond)
-            case (_, let path) where path == "/api/steward" || path.hasPrefix("/api/steward/"):
-                Steward.shared.handle(request, respond: respond)
             default:
                 respond(.error("接口不存在", status: 404))
             }

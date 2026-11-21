@@ -112,7 +112,7 @@ private struct FitSheetClose: ViewModifier {
     func body(content: Content) -> some View {
         if cancel {
             content.toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(L("取消"), action: close).keyboardShortcut(.cancelAction).panelToolbarButton() }
+                ToolbarItem(placement: .cancellationAction) { Button(L("取消"), action: close).keyboardShortcut(.cancelAction).panelToolbarButton() }.panelBare()
             }
         } else {
             content.doneButton(close)

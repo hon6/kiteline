@@ -87,6 +87,8 @@ struct MainView: View {
             ProjectSplit(model: model)
                 // 窗口右上角的界面切换按钮：不放工具栏，挂在右边这一栏上（挂在外层会被系统的分栏视图盖住），见 LayoutSwitchCorner
                 .overlay(alignment: .topTrailing) { LayoutSwitchCorner(model: model) }
+                // 装了带新版界面的版本：右上角按钮下面提示一次（NewLayoutTour.swift）
+                .overlay(alignment: .topTrailing) { NewLayoutAnnouncement() }
         }
         .searchable(text: $model.query, placement: .sidebar, prompt: "搜索会话")
     }
@@ -108,6 +110,7 @@ struct LayoutSwitchCorner: View {
     var body: some View {
         LayoutSwitch(model: model)
             .buttonStyle(CornerButtonStyle(hovering: hovering))
+            .tourAnchor("layoutSwitch")
             .onHover { hovering = $0 }
             // 右上角那一块标签栏让出：按钮宽 + 右边 6 + 和标签栏按钮之间留 8（中英文字数不同，按实际宽度）
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; reserve() }
@@ -152,6 +155,13 @@ struct MainChrome: ViewModifier {
         .sheetPanel(isPresented: $model.showBatchRestart) { KitelineKit.BatchRestartView() }   // 能拖动、改大小的面板，在窗口正中
         .sheetPanel(isPresented: $model.showOpenProject) { OpenProjectSheet() }
         .sheetPanel(isPresented: $model.showLayoutSetup) { LayoutSetupSheet() }
+        // 新版界面：今日动态、用量开成能拖动、改大小的弹窗（见 KitelineModel.selection）
+        .sheetPanel(isPresented: Binding(get: { model.popupPage != nil }, set: { if !$0 { model.popupPage = nil } })) {
+            Group {
+                if model.popupPage == KitelineModel.todayID { TodayView() } else { UsageReportView() }
+            }
+            .frame(minWidth: 760, idealWidth: 960, maxWidth: .infinity, minHeight: 520, idealHeight: 760, maxHeight: .infinity)
+        }
         .sheetPanel(isPresented: Binding(get: { model.agentDetail != nil }, set: { if !$0 { model.agentDetail = nil } })) {
             if let key = model.agentDetail { TarsAgentInfoView(key: key) }
         }
@@ -287,7 +297,7 @@ struct SidebarView: View {
         ForEach(items) { item in
             SessionRow(item: item, pinned: model.isPinned(item.id), marked: model.isMarked(item.id),
                        onMark: { withAnimation(.snappy) { model.toggleMark(item.id) } },
-                       onClose: item.canReply && item.can("close") ? { model.close(item.id) } : nil, avatar: !embedded)
+                       onClose: item.canReply && item.can("close") ? { model.close(item.id, confirmed: true) } : nil, avatar: !embedded)
                 .modifier(SidebarRowHighlight(selected: model.selection == item.id) { model.pick(item.id) })
                 // 新版界面：系统侧栏列表每边自带 16 点，行的框要离栏边 8（侧栏规范 SideMetric），减回去
                 .listRowInsets(embedded ? EdgeInsets(top: 1, leading: SideMetric.edge - 16, bottom: 1, trailing: SideMetric.edge - 16) : nil)
@@ -467,30 +477,25 @@ struct SidebarView: View {
 
     /// 收起时的一行：「🖥 全部设备 · 📁 ccpulse ⌄」；筛着的那项用品牌色。点一下展开 / 收起两排胶囊
     private func scopeSummary(bySource: Bool, byProject: Bool) -> some View {
-        let narrowed = activeSource != nil || activeProject != nil
         return Button {
             withAnimation(.snappy) { scopeOpen.toggle() }
         } label: {
             HStack(spacing: 6) {
+                // 不画设备、文件夹两个小图标：侧栏宽 270 时「全部设备 · 全部项目」放不下，设备被截成「全部…」（11-21 自测）
                 if bySource {
-                    Image(systemName: "desktopcomputer").font(.app(size: 11, weight: .semibold))
                     Text(activeSource?.name ?? L("全部设备")).lineLimit(1)
                         .foregroundStyle(activeSource == nil ? Color.primary : Color.tarsBrand)
                 }
                 if bySource && byProject { Text("·").foregroundStyle(.tertiary) }
                 if byProject {
-                    Image(systemName: "folder").font(.app(size: 11, weight: .semibold))
                     Text(activeProject ?? L("全部项目")).lineLimit(1).truncationMode(.middle)
                         .foregroundStyle(activeProject == nil ? Color.primary : Color.tarsBrand)
                 }
                 Image(systemName: scopeOpen ? "chevron.up" : "chevron.down").font(.app(size: 9, weight: .bold)).foregroundStyle(.secondary)
             }
-            .font(.app(size: 12, weight: .medium))
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background(narrowed ? Color.tarsBrand.opacity(0.10) : Color.primary.opacity(0.05), in: Capsule(style: .circular))
-            .overlay { if narrowed { Capsule(style: .circular).hairlineBorder(Color.tarsBrand.opacity(0.28), width: 1) } }
-            .contentShape(Capsule())
+            // 按钮样式规范（KiteButtonStyle 的外观）：同旁边的筛选；筛着的那项字是品牌色
+            .kiteLook()
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(scopeOpen ? L("收起设备、项目筛选") : L("按设备、项目筛选会话"))
@@ -525,13 +530,13 @@ struct SidebarView: View {
                 }
             }
         } label: {
-            ViewMenuLabel(summary: viewSummary, isDefault: isDefaultView)
+            ViewMenuLabel(summary: viewSummary, isDefault: isDefaultView, compact: true)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize(horizontal: false, vertical: true)
-        .help("会话的分组与排序")
+        .fixedSize()
+        .help(L("会话的分组与排序") + "：" + viewSummary)
     }
 
     /// 按钮上的字：分组 · 排序（默认的不写）
@@ -680,10 +685,9 @@ private struct SidebarTabs: View {
                     .overlay(alignment: .topTrailing) {
                         if tab.alert { Circle().fill(Color.tarsOrange).frame(width: 6, height: 6).offset(x: 5, y: 1) }
                     }
-                    .padding(.vertical, 4)
-                    .overlay(alignment: .bottom) {
-                        Capsule().fill(on ? Color.tarsBrand : .clear).frame(height: 2).offset(y: 3)
-                    }
+                    .padding(.vertical, 4).padding(.horizontal, 8)
+                    // 选中：整块淡染主题色（不画下面那道色条，11-21 反馈：单边色条是 AI 样式）
+                    .background(on ? Color.tarsBrand.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -700,16 +704,8 @@ struct SidebarTabButton: View {
     let title: String
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol).font(.app(size: 11, weight: .semibold))
-            Text(title).lineLimit(1)
-        }
-        .font(.app(size: 12, weight: .medium))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 9)
-        .frame(height: 26)
-        .background(Color.primary.opacity(0.06), in: Capsule())
-        .contentShape(Capsule())
+        KiteLabel(title, symbol: symbol).lineLimit(1)
+            .kiteLook()
         .fixedSize()
     }
 }
@@ -1026,6 +1022,32 @@ struct TileGrid: Layout {
     }
 }
 
+/// 会话卡片上点「×」后，挨着按钮弹出的确认气泡（同原来的确认框：标题、关了会怎样、取消 / 关闭会话；回车关、Esc 取消）
+struct CloseConfirm: View {
+    let key: String
+    let onCancel: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L("关闭此会话？")).font(.app(size: 13, weight: .semibold))
+            if let note = KitelineModel.shared.closeNote(key) {
+                Text(note).font(.app(size: 11.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                Button(L("取消"), action: onCancel).keyboardShortcut(.cancelAction)
+                Button(L("关闭会话"), role: .destructive, action: onClose).keyboardShortcut(.defaultAction)
+            }
+            .controlSize(.small)
+            .padding(.top, 2)
+        }
+        .padding(14)
+        .frame(width: 270)
+    }
+}
+
 struct SessionRow: View {
     let item: SessionItem
     var pinned = false
@@ -1039,6 +1061,7 @@ struct SessionRow: View {
     /// 第三行写不写项目名：项目里的会话列表不写（选了项目进来的，都是这个项目的，11-20 用户），只写设备
     var folder = true
     @State private var hovering = false
+    @State private var confirmingClose = false
     /// 自测截图：标题是这个的卡片画成鼠标停在上面（截不到真的悬停）
     static var captureHover: String?
 
@@ -1098,7 +1121,8 @@ struct SessionRow: View {
                                     .hoverTip(L("标记：排在所有列表的最上面"))
                                 }
                                 if let onClose {
-                                    Button(action: onClose) {
+                                    // 点了在按钮旁边弹气泡确认（11-21 反馈：弹到屏幕中间不方便，应该弹在关闭按钮附近）
+                                    Button { confirmingClose = true } label: {
                                         Image(systemName: "xmark")
                                             .font(.app(size: 8.5, weight: .bold))
                                             .foregroundStyle(.secondary)
@@ -1108,6 +1132,12 @@ struct SessionRow: View {
                                     }
                                     .buttonStyle(.plain)
                                     .hoverTip(L("关闭会话…"))
+                                    .popover(isPresented: $confirmingClose, arrowEdge: .trailing) {
+                                        CloseConfirm(key: item.id) { confirmingClose = false } onClose: {
+                                            confirmingClose = false
+                                            onClose()
+                                        }
+                                    }
                                 }
                             }
                             .opacity(showsClose || showsMark ? 1 : 0)
@@ -1158,7 +1188,8 @@ struct SessionRow: View {
     /// 第二行除了「空闲」什么都没有（没有目标、阶段）：新版界面整行不画
     private var idleOnly: Bool { isIdleStatus && item.goal == nil && item.stage == nil }
 
-    private var showsClose: Bool { onClose != nil && (hovering || Self.captureHover == item.title) }
+    /// 气泡开着时「×」留着（鼠标移进气泡，卡片就不算悬停了，按钮一隐气泡就没了依附）
+    private var showsClose: Bool { onClose != nil && (hovering || confirmingClose || Self.captureHover == item.title) }
     private var showsMark: Bool { onMark != nil && !marked && (hovering || Self.captureHover == item.title) }
 
     private var lineColor: Color {

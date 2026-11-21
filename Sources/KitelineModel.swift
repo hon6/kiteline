@@ -177,7 +177,17 @@ final class KitelineModel: ObservableObject {
                 selection = nil
                 sideTab = page
             }
-            applyLayoutToPanes()
+applyLayoutToPanes()
+            // 两套界面的标题栏 + 工具栏一样高的前提不成立（经典版启动时量到的高度要大得多）：换完重新量一次，
+            // 不然从经典版换到新版时左边栏顶上空出一大块（11-21 自测截图）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let window = NSApp.windows.first(where: { $0.frameAutosaveName == "TARSMainWindow" }) else { return }
+                let band = window.frame.height - window.contentLayoutRect.maxY
+                if band > 20, abs(band - TitlebarInset.band) > 0.5 { TitlebarInset.band = band }
+                // 分栏重建一次：从经典版换过来时系统分栏（HSplitView）是在窗口还没量好时排的，侧栏被分得很宽、中间的标签页很窄
+                //（11-21 截图）；重启后打开是正常的，换完量好再按重启时的方式排一遍
+                self?.layoutEpoch += 1
+            }
         }
     }
 
@@ -268,7 +278,7 @@ final class KitelineModel: ObservableObject {
     /// 点项目：没开就打开它的二级侧边栏，开着的正是它就收起
     func toggleProject(_ id: String) {
         projectShowsCode = false
-        if newLayout { openProject(id); return }   // 新版：点项目就是切到它（中间的标签跟着换），回列表用「‹」
+        if newLayout { openProject(id); return }   // 新版：点项目就是切到它（列表里选中、中间的标签和会话列表跟着换）
         projectPane = projectPane == id ? nil : id
     }
 
@@ -325,8 +335,20 @@ final class KitelineModel: ObservableObject {
     @Published private(set) var phoneClients = 0
     @Published private(set) var serverStatus = ""
     @Published private(set) var accessibility = AXIsProcessTrusted()
+    /// 换界面后让新版界面的分栏重建（见 newLayout 的 didSet）
+    @Published var layoutEpoch = 0
+
+    /// 新版界面里弹窗显示的整页（今日动态 / 用量的 id），nil = 没开
+    @Published var popupPage: String?
+
     @Published var selection: String? {
         didSet {
+            // 新版界面（11-21）：今日动态、用量弹窗显示，不占中间的标签页区域；历史会话不单独成页（项目里有），去项目栏。经典版照旧
+            if newLayout, let key = selection, [Self.todayID, Self.usageID, Self.historyID].contains(key) {
+                selection = oldValue
+                if key == Self.historyID { showSideTab("projects") } else { popupPage = key }
+                return
+            }
             // 世界模式里点了左边栏顶上的入口（今日动态、待办……）：离开世界去那一页；点会话 = 世界里镜头飞过去（见 WorldView）
             if worldMode, let key = selection, key.hasPrefix("@") { worldMode = false }
             // 二级侧边栏开着、右边正看着代码时选了会话（哪怕就是原来那个）：右边回到会话
@@ -494,6 +516,19 @@ final class KitelineModel: ObservableObject {
             }
     }
 
+    /// 一组会话按最近活动排（项目栏「正在运行」）：标记的最前，然后置顶的，其余最近有动静的在上，同时间按 id 定死
+    func recentFirst(_ list: [SessionItem]) -> [SessionItem] {
+        let marked = state.config.mobile.markedSessions
+        let pinned = state.config.mobile.pinnedSessions
+        func mark(_ s: SessionItem) -> Int { marked.firstIndex(of: s.id) ?? Int.max }
+        func pin(_ s: SessionItem) -> Int { pinned.firstIndex(of: s.id) ?? Int.max }
+        return list.sorted {
+            if mark($0) != mark($1) { return mark($0) < mark($1) }
+            if pin($0) != pin($1) { return pin($0) < pin($1) }
+            return ($0.updatedAt ?? 0) != ($1.updatedAt ?? 0) ? ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) : $0.id < $1.id
+        }
+    }
+
     /// 菜单栏面板最上面一区：标记的会话（按标记先后）
     var markedSessions: [SessionItem] {
         let marked = state.config.mobile.markedSessions
@@ -625,20 +660,29 @@ final class KitelineModel: ObservableObject {
         }
     }
 
-    func close(_ sessionKey: String) {
-        guard let record = record(sessionKey) else { return }
-        let alert = NSAlert()
-        alert.messageText = L("关闭此会话？")
+    /// 关闭确认框里那句说明（关了会怎样）；会话已不在时为空
+    func closeNote(_ sessionKey: String) -> String? {
+        guard let record = record(sessionKey) else { return nil }
         let speaker = Agents.info(record.snapshot.agentID).speaker
-        alert.informativeText = Delivery.viaAgent(record)
+        return Delivery.viaAgent(record)
             ? L("将结束此 %@ 会话，并关闭或归档它在电脑上的窗口，正在进行的工作会中断。之后可在 %@ 中找回。", speaker, speaker)
             : record.snapshot.isVSCode
             ? L("将关闭此会话在 VS Code 中的标签页，Claude 随之结束此会话，正在进行的工作会中断。之后可在「历史会话」中恢复。")
             : L("将向终端中的 Claude 发送 /exit 结束此会话，正在进行的工作会中断。之后可在「历史会话」中恢复。")
-        alert.addButton(withTitle: L("关闭会话"))
-        alert.addButton(withTitle: L("取消"))
-        alert.buttons.first?.hasDestructiveAction = true
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+    }
+
+    /// confirmed：调用方已经确认过（会话卡片上的「×」在按钮旁弹气泡确认，见 CloseConfirm），不再弹框
+    func close(_ sessionKey: String, confirmed: Bool = false) {
+        guard let record = record(sessionKey), let note = closeNote(sessionKey) else { return }
+        if !confirmed {
+            let alert = NSAlert()
+            alert.messageText = L("关闭此会话？")
+            alert.informativeText = note
+            alert.addButton(withTitle: L("关闭会话"))
+            alert.addButton(withTitle: L("取消"))
+            alert.buttons.first?.hasDestructiveAction = true
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
         Delivery.close(record: record, source: state.source(withId: record.sourceId)) { outcome in
             if !outcome.ok { Self.alert(L("无法关闭会话"), ServerLang.ui(outcome.message)) }
         }

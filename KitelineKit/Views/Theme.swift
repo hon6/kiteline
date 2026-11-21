@@ -140,7 +140,7 @@ struct LoadFailed: View {
             } label: {
                 if busy { ProgressView() } else { Text("重试") }
             }
-            .buttonStyle(.bordered)
+            .kiteButton()
             .disabled(busy)
         }
     }
@@ -360,7 +360,7 @@ extension View {
     /// 面板的「完成」，Esc 也能关：放在右上角（Mac 的面板是能拖动的小窗，「完成」和标题都在小窗的工具栏里，同 FitSheet）
     func doneButton(_ action: @escaping () -> Void) -> some View {
         toolbar {
-            ToolbarItem(placement: .confirmationAction) { Button("完成", action: action).keyboardShortcut(.cancelAction).panelToolbarButton() }
+            ToolbarItem(placement: .confirmationAction) { Button("完成", action: action).keyboardShortcut(.cancelAction).panelToolbarButton() }.panelBare()
         }
     }
 }
@@ -460,3 +460,274 @@ struct HoverHighlight: ViewModifier {
 extension View {
     func hoverHighlight() -> some View { modifier(HoverHighlight()) }
 }
+
+// MARK: 按钮样式规范（11-21 反馈：所有按钮样式保持一致；规范全文在 docs/platforms/mac-app.md「按钮样式规范」）
+
+/// 按钮的数：全 App 只有这两个尺寸、一种形状（小圆角矩形，参照 VS Code）、两种状态。新写、改按钮一律用 `.kite` / `.kiteProminent`，不另写样式
+/// 弹窗（面板）的边距规范（11-21 反馈：边距、间距统一）：内容四边 16、各块之间 12；底部按钮条左右 16、上下 12
+public enum DialogMetric {
+    public static let pad: CGFloat = 16
+    public static let gap: CGFloat = 12
+    public static let barV: CGFloat = 12
+}
+
+public enum KiteMetric {
+    /// 紧凑（侧栏、工具条、一行里的小按钮、筛选胶囊）高 / 标准（弹窗、表单、独占一行的按钮）高
+    public static let compact: CGFloat = 26
+    public static let regular: CGFloat = 32
+    /// 左右内边距：紧凑 11（同 VS Code）、标准 16；图标和字、字和角标之间 6（= SideMetric.gap）；圆角 6（= SideMetric.radius）
+    public static let padCompact: CGFloat = 11
+    public static let padRegular: CGFloat = 16
+    public static let gap: CGFloat = 6
+    public static let radius: CGFloat = 6
+    /// 描边 1（1x 屏上也画满 1 像素）；普通按钮的描边比底色重：底色 6%、描边 28%
+    public static let border: CGFloat = 1
+}
+
+public enum KiteSize { case compact, regular }
+
+private struct KiteProminentKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// 当前按钮是不是亮起（主题色底）：里面的角标反色用
+    var kiteProminent: Bool {
+        get { self[KiteProminentKey.self] }
+        set { self[KiteProminentKey.self] = newValue }
+    }
+}
+
+/// 统一按钮：小圆角矩形 + 描边（同 VS Code 的按钮）。普通 = 淡底 + 比底重的描边 + 主色字；选中 / 主要 = 主题色亮起 + 白字。
+/// 悬停略亮、按下略暗、禁用 45%。字号：紧凑 12 粗体、标准 13 粗体，跟「设置 → 外观」的字号倍数走
+public struct KiteButtonStyle: ButtonStyle {
+    public var prominent: Bool
+    public var size: KiteSize
+    public var expand: Bool
+
+    public init(prominent: Bool = false, size: KiteSize = .compact, expand: Bool = false) {
+        self.prominent = prominent
+        self.size = size
+        self.expand = expand
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        KiteButtonBody(configuration: configuration, style: self)
+    }
+
+    private struct KiteButtonBody: View {
+        let configuration: ButtonStyleConfiguration
+        let style: KiteButtonStyle
+        @State private var hovering = false
+        @Environment(\.isEnabled) private var enabled
+
+        var body: some View {
+            let height = style.size == .compact ? KiteMetric.compact : KiteMetric.regular
+            let pad = style.size == .compact ? KiteMetric.padCompact : KiteMetric.padRegular
+            let pressed = configuration.isPressed
+            configuration.label
+                .font(.app(size: style.size == .compact ? 12 : 13, weight: .semibold))
+                .foregroundStyle(style.prominent ? Color.white : Color.primary)
+                .padding(.horizontal, pad)
+                .frame(maxWidth: style.expand ? .infinity : nil, minHeight: height)
+                .background(fill(pressed: pressed), in: shape)
+                .overlay(shape.strokeBorder(stroke, lineWidth: KiteMetric.border))
+                .contentShape(shape)
+                .opacity(enabled ? 1 : 0.45)
+                .environment(\.kiteProminent, style.prominent)
+                #if os(macOS)
+                .onHover { hovering = $0 }
+                #endif
+        }
+
+        private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: KiteMetric.radius, style: .continuous) }
+
+        private func fill(pressed: Bool) -> Color {
+            if style.prominent { return Theme.claude.opacity(pressed ? 0.78 : (hovering ? 0.92 : 1)) }
+            return Color.primary.opacity(pressed ? 0.14 : (hovering ? 0.10 : 0.06))
+        }
+
+        private var stroke: Color {
+            style.prominent ? Color.white.opacity(0.30) : Color.primary.opacity(0.28)
+        }
+    }
+}
+
+extension ButtonStyle where Self == KiteButtonStyle {
+    /// 普通按钮（紧凑）
+    public static var kite: KiteButtonStyle { KiteButtonStyle() }
+    /// 主要 / 选中按钮：主题色亮起（紧凑）
+    public static var kiteProminent: KiteButtonStyle { KiteButtonStyle(prominent: true) }
+    public static func kite(prominent: Bool = false, size: KiteSize = .compact, expand: Bool = false) -> KiteButtonStyle {
+        KiteButtonStyle(prominent: prominent, size: size, expand: expand)
+    }
+}
+
+extension View {
+    /// 按钮样式规范在 Mac 上生效；iPhone / iPad 先保留系统样式（触控尺寸另有要求）
+    @ViewBuilder
+    public func kiteButton(prominent: Bool = false, size: KiteSize = .compact, expand: Bool = false) -> some View {
+        #if os(macOS)
+        buttonStyle(KiteButtonStyle(prominent: prominent, size: size, expand: expand))
+        #else
+        if prominent { buttonStyle(.borderedProminent).tint(Theme.claude) } else { buttonStyle(.bordered) }
+        #endif
+    }
+}
+
+/// 按钮里的角标（待推送 2、待拉取 3）：普通按钮里主题色底白字，亮起的按钮里反过来白底主题色字
+public struct KiteBadge: View {
+    let count: Int
+    @Environment(\.kiteProminent) private var prominent
+
+    public init(_ count: Int) { self.count = count }
+
+    public var body: some View {
+        Text("\(count)")
+            .font(.app(size: 10, weight: .bold)).monospacedDigit()
+            .foregroundStyle(prominent ? Theme.claude : Color.white)
+            .padding(.horizontal, 5).frame(minWidth: 16, minHeight: 16)
+            .background(prominent ? Color.white : Theme.claude, in: Capsule())
+    }
+}
+
+/// 按钮里的内容：可选图标 + 文字 + 可选角标，间距统一 6
+public struct KiteLabel: View {
+    let title: String?
+    let symbol: String?
+    let badge: Int
+
+    public init(_ title: String? = nil, symbol: String? = nil, badge: Int = 0) {
+        self.title = title
+        self.symbol = symbol
+        self.badge = badge
+    }
+
+    public var body: some View {
+        HStack(spacing: KiteMetric.gap) {
+            if let symbol { Image(systemName: symbol) }
+            if let title { Text(title) }
+            if badge > 0 { KiteBadge(badge) }
+        }
+    }
+}
+
+extension View {
+    /// 只套按钮的外观（字号、内边距、高、底、描边），不管点击：给「放在菜单 / 自己的 Button 里、用 .plain 样式」的标签用，
+    /// 看上去和 KiteButtonStyle 完全一样。prominent = 选中 / 非默认，主题色亮起
+    public func kiteLook(prominent: Bool = false, size: KiteSize = .compact) -> some View {
+        modifier(KiteLook(prominent: prominent, size: size))
+    }
+}
+
+private struct KiteLook: ViewModifier {
+    let prominent: Bool
+    let size: KiteSize
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: KiteMetric.radius, style: .continuous)
+        content
+            .font(.app(size: size == .compact ? 12 : 13, weight: .semibold))
+            .foregroundStyle(prominent ? Color.white : Color.primary)
+            .padding(.horizontal, size == .compact ? KiteMetric.padCompact : KiteMetric.padRegular)
+            .frame(minHeight: size == .compact ? KiteMetric.compact : KiteMetric.regular)
+            .background(prominent ? Theme.claude : Color.primary.opacity(0.06), in: shape)
+            .overlay(shape.strokeBorder(prominent ? Color.white.opacity(0.30) : Color.primary.opacity(0.28), lineWidth: KiteMetric.border))
+            .contentShape(shape)
+            .environment(\.kiteProminent, prominent)
+    }
+}
+
+extension Font {
+    /// 输入框下面那排小按钮里的字：Mac 同统一按钮（12 粗），手机照旧小字
+    static var chip: Font {
+        #if os(macOS)
+        .app(size: 12, weight: .semibold)
+        #else
+        .ui(.caption)
+        #endif
+    }
+}
+
+extension View {
+    /// 输入框下面那排小按钮的外观：Mac 套统一按钮外观（高 26、描边，见 KiteMetric），手机保持原来的胶囊
+    @ViewBuilder
+    public func chipFace(height: CGFloat, hPad: CGFloat = 9) -> some View {
+        #if os(macOS)
+        kiteLook()
+        #else
+        padding(.horizontal, hPad).frame(height: height).background(Theme.field, in: Capsule())
+        #endif
+    }
+}
+
+/// 横向滚动的一排（芯片、筛选、标签）：Mac 上给一条悬浮的细滚动条——平时看不见、不占高度不挤内容，
+/// 滚动或鼠标移到底边时出来，鼠标能拖着它横着看（11-21 反馈：没有横向滚轮的鼠标没法横着拖）；iPhone / iPad 手指划，不要
+public let kiteScrollIndicators: Bool = {
+    #if os(macOS)
+    true
+    #else
+    false
+    #endif
+}()
+
+public struct KiteHScroll<Content: View>: View {
+    let content: Content
+    public init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    public var body: some View {
+        ScrollView(.horizontal, showsIndicators: kiteScrollIndicators) {
+            #if os(macOS)
+            content.background(OverlayScrollerHook())
+            #else
+            content
+            #endif
+        }
+    }
+}
+
+#if os(macOS)
+/// 找到外面那个 NSScrollView，滚动条一律用悬浮样式（接了鼠标时系统默认是常驻的粗条，会占掉一排的高度）
+struct OverlayScrollerHook: NSViewRepresentable {
+    func makeNSView(context: Context) -> HookView { HookView() }
+    func updateNSView(_ view: HookView, context: Context) { view.apply() }
+
+    final class HookView: NSView {
+        private var observer: NSObjectProtocol?
+        private var styleWatch: NSKeyValueObservation?
+        private weak var hooked: NSScrollView?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+            if observer == nil {
+                observer = NotificationCenter.default.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification,
+                                                                  object: nil, queue: .main) { [weak self] _ in
+                    DispatchQueue.main.async { self?.apply() }
+                }
+            }
+        }
+
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+
+        func apply() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let scroll = self.enclosingScrollView else { return }
+                Self.force(scroll)
+                // SwiftUI 自己也会按系统设置把样式改回常驻的粗条（接了鼠标时），盯着改回来（11-21 自测：粗条盖住了输入框下面那排按钮）
+                if self.hooked !== scroll {
+                    self.hooked = scroll
+                    self.styleWatch = scroll.observe(\.scrollerStyle, options: [.new]) { scroll, _ in
+                        if scroll.scrollerStyle != .overlay { DispatchQueue.main.async { Self.force(scroll) } }
+                    }
+                }
+            }
+        }
+
+        private static func force(_ scroll: NSScrollView) {
+            if scroll.scrollerStyle != .overlay { scroll.scrollerStyle = .overlay }
+            scroll.autohidesScrollers = true
+            // 滚动条画在这一排下面的空里，不盖住按钮上的字
+            scroll.scrollerInsets = NSEdgeInsets(top: 0, left: 0, bottom: -8, right: 0)
+            if scroll.hasVerticalScroller { scroll.hasVerticalScroller = false }
+        }
+    }
+}
+#endif

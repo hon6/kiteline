@@ -17,7 +17,13 @@ struct HoverTip: ViewModifier {
                 pending?.cancel()
                 pending = nil
                 if inside {
-                    let work = DispatchWorkItem { HoverTipPanel.show(text) }
+                    // 鼠标已经移开了就不出：标签栏在标题栏那一带，移出时的「离开」有时收不到，提示会出现在鼠标移到的远处（11-21 截图）
+                    let start = NSEvent.mouseLocation
+                    let work = DispatchWorkItem {
+                        let now = NSEvent.mouseLocation
+                        guard abs(now.x - start.x) < 30, abs(now.y - start.y) < 30 else { return }
+                        HoverTipPanel.show(text)
+                    }
                     pending = work
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
                 } else {
@@ -47,8 +53,14 @@ enum HoverTipPanel {
 
     static func show(_ text: String) {
         hide()
+        // 按最宽 320 量出真实大小：fittingSize 量多行文字时是按很窄的宽度算的，高出好几倍，窗口里的字一行排完后居中，
+        // 看起来提示离按钮很远（11-21 截图：「在 VS Code 中打开」的提示掉到按钮下面一大截）
         let hosting = NSHostingView(rootView: Label(text: text).tarsLook())
-        let size = hosting.fittingSize
+        let measure = NSHostingController(rootView: Label(text: text).tarsLook())
+        // 宽度按文字一行的实际宽度给（最宽 320）：直接给 320 的话短提示也被撑成 300 宽的长条（11-21 截图）
+        let lineWidth = ceil((text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width) + 34
+        let fit = measure.sizeThatFits(in: CGSize(width: min(lineWidth, 320), height: 2000))
+        let size = CGSize(width: ceil(fit.width), height: ceil(fit.height))
         let panel = NSPanel(contentRect: CGRect(origin: .zero, size: size), styleMask: [.nonactivatingPanel, .borderless],
                             backing: .buffered, defer: false)
         panel.contentView = hosting

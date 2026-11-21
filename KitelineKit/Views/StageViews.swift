@@ -207,7 +207,7 @@ struct StageStrip: View {
         .overlay(RoundedRectangle(cornerRadius: Self.corner, style: .continuous).hairlineBorder(MacPalette.separator).allowsHitTesting(false))
         .shadow(color: .black.opacity(0.06), radius: 5, y: 2)
         .frame(maxWidth: 832)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Bar.spacing)   // 同输入框的左右边距（11-21 反馈：间距一致）
         .frame(maxWidth: .infinity)
         #else
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Self.corner, style: .continuous))

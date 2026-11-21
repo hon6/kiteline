@@ -254,7 +254,7 @@ struct NewTaskSheet: View {
                     .disabled(!canStart)
             }
         }
-        .padding(20)
+        .padding(DialogMetric.pad)   // 弹窗边距规范
         // 打开时 600 宽，能拖边改大小
         .frame(minWidth: 520, idealWidth: 600, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(L("新任务"))   // 放进面板的标题栏

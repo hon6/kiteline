@@ -170,7 +170,7 @@ struct HostedSetupSheet: View {
                         } label: {
                             Text(moving ? L("正在转到后台…") : L("把当前会话转到后台运行")).frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent).tint(Theme.added)
+                        .kiteButton(prominent: true)
                         .disabled(moving || session.isBusy || session.isWaiting)
                         Text(session.isBusy || session.isWaiting ? L("Claude 正在处理这个会话，请在这一轮完成后再转到后台。")
                                                                  : L("将关闭这个会话在 VS Code 中的标签页，并在后台接着这段对话。"))
@@ -211,7 +211,7 @@ struct HostedSetupSheet: View {
                 } label: {
                     Text(closingWindows ? L("正在关闭…") : L("关闭这些窗口")).frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered).disabled(closingWindows)
+                .kiteButton().disabled(closingWindows)
             } else if windowsLoaded {
                 Divider()
                 Text("目前没有可以关闭的 VS Code 窗口。").font(.ui(.caption)).foregroundStyle(.secondary)
@@ -299,7 +299,7 @@ struct HostedSetupSheet: View {
                 } label: {
                     Label(probe == nil ? L("检测出口 IP") : L("重新检测"), systemImage: "network")
                 }
-                .buttonStyle(.bordered)
+                .kiteButton()
                 .disabled(probing.contains(machine.id) || !machine.online)
                 if probing.contains(machine.id) {
                     ProgressView().controlSize(.small)
@@ -309,13 +309,13 @@ struct HostedSetupSheet: View {
                     Button(role: .destructive) {
                         Task { await set(machine.id, false) }
                     } label: { Text("关闭") }
-                    .buttonStyle(.bordered)
+                    .kiteButton()
                     .disabled(saving.contains(machine.id))
                 } else {
                     Button {
                         Task { await set(machine.id, true) }
                     } label: { Text("确认开启") }
-                    .buttonStyle(.borderedProminent).tint(Theme.added)
+                    .kiteButton(prominent: true)
                     .disabled(probe?.ip == nil || saving.contains(machine.id))
                 }
             }

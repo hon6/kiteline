@@ -55,8 +55,6 @@ final class AppModel {
     let browsers = BrowserStore()
     /// 会话群（跨设备、跨项目的会话互相发消息，Model/Groups.swift）
     let groups = GroupBoard()
-    /// 总管模式（实验性）的设置和总管会话，见 Model/Steward.swift
-    let steward = StewardState()
     private(set) var me: Me?
     /// 用户给会话、给某家 agent 设的头像和昵称（电脑上存着，各端同步；见 Views/AgentDetails.swift）
     private(set) var faces = FacesPayload()
@@ -788,8 +786,6 @@ final class AppModel {
             tabGroupShared.apply(data)
         case "groups":
             groups.apply(data)
-        case "steward":
-            steward.apply(data)
         case "group_msg":
             groups.receive(data)
         case "sys":
@@ -845,12 +841,6 @@ final class AppModel {
         if let features = state.features {
             hostFeatures = Set(features)
             registerHostTranslate()
-            // 总管模式：连上时读一次电脑上的设置（开着的话「会话」页签换成总管）；电脑不支持就当关着
-            if hostFeatures.contains("steward") {
-                if !steward.loaded { Task { await steward.refresh(api) } }
-            } else if steward.enabled {
-                steward.apply([String: Any]())
-            }
         }
         if let value = state.hosted, value != hosted { hosted = value }
         // 先登记，下面换会话列表时新 agent 的标志就画得出来；插件信息变了而会话没变（先显示的是上次的缓存）也要重画一遍

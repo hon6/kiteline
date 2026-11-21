@@ -522,17 +522,6 @@ extension KitelineKit {
     }
 }
 
-/// Mac 设置 → 通用里的「实验性功能 · 总管模式」：同手机设置里那组（打开先弹配置，见 StewardViews.swift）
-public struct TarsStewardSection: View {
-    public init() {}
-
-    public var body: some View {
-        if let model = KitelineKit.model, model.hostFeatures.contains("steward") {
-            StewardSettingsSection().environment(model)
-        }
-    }
-}
-
 /// 会话（或群、历史会话）已经开成右边分屏里的标签：标题后一个小标签页图标（左边栏的会话行、群行、历史行共用，11-20 用户）。
 /// 再点这一行不会再开一个标签：切过去，那个标签的边框闪几下主题色（ChatPanes.flashTab）。
 /// 单独一层只读 openKeys：标签增删时只有这些小图标重画，行本身不动

@@ -19,7 +19,7 @@ struct RailSidebar: View {
     var body: some View {
         // 搜索框搜的是会话：搜索时不管原来在哪一栏都列会话
         let tab = model.query.isEmpty ? model.sideTab : "sessions"
-        let project = tab == "projects" && !model.projectListShown ? model.projectPane : nil
+        // 点项目不进项目页（11-21 反馈：不要带返回的那一页，列表里显示选中、下面的会话跟着换就好）：「项目」这一栏始终是项目列表
         let none = AnyView(EmptyView())
         HStack(spacing: 0) {
             // 图标栏压暗一档、右边一道细线（11-20 反馈：背景色对比太小，所有内容像平铺上去的）：和旁边的内容栏分成两层
@@ -29,32 +29,25 @@ struct RailSidebar: View {
             // 叠在导航栏下面的块只在「项目」那一栏时出现：导航栏列着全部会话时再叠一个项目的会话列表是重复的（11-21 自测看到）
             let stacked = ProjectBlock.visible(model) && tab == "projects" ? below : []
             let content = Group {
-                if let project {
-                    ProjectPaneView(model: model, id: project, inline: true).id(project)
-                } else {
-                    switch tab {
-                    case "todos": TarsTodosSidebar(header: none)
-                    case "favorites": TarsFavoritesSidebar(header: none)
-                    case "projects": SidebarProjects(model: model, header: none)
-                    default: SidebarView(model: model, embedded: true)
-                    }
+                switch tab {
+                case "todos": TarsTodosSidebar(header: none)
+                case "favorites": TarsFavoritesSidebar(header: none)
+                case "projects": SidebarProjects(model: model, header: none)
+                default: SidebarView(model: model, embedded: true)
                 }
             }
             if stacked.isEmpty {
                 content.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if project != nil, !stacked.isEmpty {
-                // 开着项目：导航那一块只有项目名和用量，不用占多高，下面的块拿走剩下的
-                VStack(spacing: 0) {
-                    content.fixedSize(horizontal: false, vertical: true)
-                    VSplitView {
-                        ForEach(stacked, id: \.self) { block in ProjectBlock(model: model, block: block).frame(minHeight: 110, maxHeight: .infinity) }
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VSplitView {
-                    content.frame(minHeight: 120, maxHeight: .infinity)
-                    ForEach(stacked, id: \.self) { block in ProjectBlock(model: model, block: block).frame(minHeight: 110, maxHeight: .infinity) }
+                // 项目列表和下面的会话一样是能收起的一块（11-21 反馈：同样能拖，为什么项目不能收起）
+                PanelStack(slots: [L("项目")] + stacked.map { $0 == "sessions" ? L("会话") : L("文件") },
+                           key: "nav." + stacked.joined(separator: ",")) {
+                    content
+                        .environment(\.sidebarInPanel, true)
+                        // 「打开项目」在列表「活动中」那一节的标题右边（11-21），标题条上不再重复
+                        .modifier(SidebarPanel(title: L("项目"), count: ProjectsModel.shared.groups.count))
+                        .frame(maxHeight: .infinity, alignment: .top)
+                    ForEach(stacked, id: \.self) { block in ProjectBlock(model: model, block: block).frame(maxHeight: .infinity, alignment: .top) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -82,7 +75,7 @@ struct SidebarRail: View {
             tab("todos", "checklist", L("待办"), count: todos.suggested > 0 ? todos.suggested : todos.open, alert: todos.suggested > 0)
             tab("favorites", "star", L("收藏"), count: KitelineKit.favoriteCount)
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 24, height: 1).padding(.vertical, 6)
-            page(KitelineModel.historyID, "clock.arrow.circlepath", L("历史"))
+            // 历史会话不单独放（11-21 反馈：项目里已经有了，更方便）；今日动态、用量点了弹窗显示
             page(KitelineModel.todayID, "sun.max", L("今日"))
             page(KitelineModel.usageID, "chart.bar", L("用量"))
             Spacer(minLength: 8)
@@ -102,15 +95,14 @@ struct SidebarRail: View {
     private func tab(_ id: String, _ symbol: String, _ title: String, count: Int = 0, alert: Bool = false) -> some View {
         // 正搜索时列的是会话，图标栏上还是原来那一栏亮着（清空搜索就回去）
         RailItem(symbol: symbol, title: title, on: model.sideTab == id && !model.worldMode, count: count, alert: alert) {
-            // 已经在「项目」里、又点开着一个项目：回到项目列表
-            // 已经在「项目」里：在项目列表和当前项目之间换（当前项目、中间的标签不变）
-            if id == "projects", model.sideTab == id, model.projectPane != nil { model.projectListShown.toggle() }
             model.showSideTab(id)
         }
+        .tourAnchor("rail." + id)
     }
 
     private func page(_ id: String, _ symbol: String, _ title: String) -> some View {
-        RailItem(symbol: symbol, title: title, on: model.selection == id && !model.worldMode, bar: false) { model.selection = id }
+        RailItem(symbol: symbol, title: title, on: model.popupPage == id && !model.worldMode, bar: false) { model.selection = id }
+            .tourAnchor(id == KitelineModel.todayID ? "rail.today" : "rail.usage")
     }
 }
 
@@ -133,8 +125,16 @@ private struct RailItem: View {
         let inactive = scheme?.activityInactiveColor ?? Color.secondary
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 20, weight: .regular))
-                .foregroundStyle(on || hovering ? active : inactive)
+                .foregroundStyle(on ? Color.tarsBrand : (hovering ? active : inactive))
                 .frame(width: 48, height: 46)
+                // 选中：整块淡淡染主题色、图标主题色（11-21 反馈：不要左边那道单边色条，那是 AI 样式）
+                .background {
+                    if on || hovering {
+                        RoundedRectangle(cornerRadius: SideMetric.radius, style: .continuous)
+                            .fill(on ? Color.tarsBrand.opacity(0.16) : Color.primary.opacity(0.06))
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                    }
+                }
                 .overlay(alignment: .bottomTrailing) {
                     if count > 0 {
                         Text(count > 99 ? "99+" : "\(count)")
@@ -145,9 +145,6 @@ private struct RailItem: View {
                             .background(alert ? Color.tarsOrange : (scheme?.badgeColor ?? Color.tarsBrand), in: Capsule())
                             .padding(.trailing, 7).padding(.bottom, 8)
                     }
-                }
-                .overlay(alignment: .leading) {
-                    if on, bar { Rectangle().fill(scheme?.activityBorderColor ?? Color.tarsBrand).frame(width: 2) }
                 }
                 .contentShape(Rectangle())
         }
@@ -260,6 +257,7 @@ struct StatusBar: View {
                 TarsLimitsStrip(json: stats.limits).padding(.leading, 6)
             }
             .layoutPriority(-1)
+            .tourAnchor("status.usage")
             StatusItem(help: L("刷新额度")) { stats.refresh() } label: {
                 if stats.limitsBusy { ProgressView().controlSize(.mini) } else { Image(systemName: "arrow.clockwise") }
             }
@@ -432,6 +430,9 @@ final class AppPerf: ObservableObject {
 /// 会话列表、文件侧栏只在「项目」里开着项目时出现，没开时它们让出地方（只剩它们的栏整个不画）。状态栏放顶部或底部
 struct NewLayoutRoot: View {
     @ObservedObject var model: KitelineModel
+    @ObservedObject private var collapse = PanelCollapse.shared
+    /// 收起的侧栏列的展开按钮画在哪（键 = 那一列的收起键）
+    @State private var unfoldSpots: [String: UnfoldSpot] = [:]
 
     var body: some View {
         let open = ProjectBlock.visible(model)
@@ -448,21 +449,66 @@ struct NewLayoutRoot: View {
                     .overlay(alignment: .topTrailing) { LayoutSwitchCorner(model: model, overTabs: false) }
             }
             HSplitView {
-                ForEach(Array(columns.enumerated()), id: \.element) { index, column in
-                    columnView(column, first: index == 0, inset: !model.statusOnTop)
+                // 收起的侧栏列不占宽度（11-21）：不画它，在它旁边那一栏贴着它的那条边、上下居中浮一个小按钮，点了展开
+                let hidden = Set(columns.indices.filter { index in
+                    let column = columns[index]
+                    return !column.contains("nav") && !column.contains("tabs") && collapse.has("column." + column.joined(separator: ","))
+                })
+                let visible = columns.indices.filter { !hidden.contains($0) }
+                let tabsIndex = columns.firstIndex { $0.contains("tabs") }
+                ForEach(visible, id: \.self) { index in
+                    let column = columns[index]
+                    let position = visible.firstIndex(of: index) ?? 0
+                    // 左右收起：只给没有导航栏、没有标签页的侧栏列（文件侧栏、单独的会话列）。侧栏在标签页区域左边就往左收，在右边就往右收；
+                    // 收起按钮在这一栏最上面那块的小节标题右边（原来竖在栏边中间，跟滚动条混在一起）
+                    let side = !column.contains("nav") && !column.contains("tabs")
+                    let edge: HorizontalEdge = (tabsIndex.map { index > $0 } ?? false) ? .leading : .trailing
+                    let key = "column." + column.joined(separator: ",")
+                    // 右边紧挨着一栏收起的：按钮在本栏右边缘；左边紧挨着收起的、而它左边没有别的栏可挂：按钮在本栏左边缘
+                    let rightHidden = index + 1 < columns.count && hidden.contains(index + 1) ? columns[index + 1] : nil
+                    let leftHidden = index >= 1 && hidden.contains(index - 1) && !visible.contains(index - 2) ? columns[index - 1] : nil
+                    columnView(column, first: position == 0, inset: !model.statusOnTop, last: position == visible.count - 1,
+                               fold: side ? ColumnFold(edge: edge) { withAnimation(.snappy(duration: 0.18)) { collapse.toggle(key) } } : nil)
+                        // 展开按钮要压在两栏的分隔线上（一半在这栏外面），挂在栏自己身上会被分栏裁掉一半：报出位置，画在外层（见下面 overlay）
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                            if let rightHidden { unfoldSpots["column." + rightHidden.joined(separator: ",")] = UnfoldSpot(column: rightHidden, toward: .trailing, frame: frame) }
+                            if let leftHidden { unfoldSpots["column." + leftHidden.joined(separator: ",")] = UnfoldSpot(column: leftHidden, toward: .leading, frame: frame) }
+                        }
                         .overlay(alignment: .topTrailing) {
-                            if !model.statusOnTop, index == columns.count - 1 { LayoutSwitchCorner(model: model, overTabs: column.contains("tabs")) }
+                            if !model.statusOnTop, position == visible.count - 1 { LayoutSwitchCorner(model: model, overTabs: column.contains("tabs")) }
                         }
                 }
             }
             if !model.statusOnTop { StatusBar(model: model) }
         }
-        .ignoresSafeArea(edges: .top)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button { model.newTask() } label: { Label("新任务", systemImage: "square.and.pencil") }
-                    .help("在指定项目中新建 Claude Code 会话")
+        .id(model.layoutEpoch)
+        // 各栏宽度：默认侧栏取最窄（导航栏 290、文件 / 会话栏 230，11-21 起的默认宽度），拖过就记住（换界面、重启都不变）
+        .background(SplitWidths(columns: columns.filter { column in
+            !(!column.contains("nav") && !column.contains("tabs") && collapse.has("column." + column.joined(separator: ",")))
+        }, epoch: model.layoutEpoch))
+        .overlay {
+            GeometryReader { geo in
+                let origin = geo.frame(in: .global).origin
+                ForEach(Array(unfoldSpots.keys).sorted(), id: \.self) { key in
+                    if let spot = unfoldSpots[key], collapse.has(key) {
+                        FloatingUnfold(column: spot.column, toward: spot.toward) {
+                            withAnimation(.snappy(duration: 0.22)) { collapse.toggle(key) }
+                            unfoldSpots[key] = nil
+                        }
+                        .position(x: (spot.toward == .trailing ? spot.frame.maxX : spot.frame.minX) - origin.x, y: spot.frame.midY - origin.y)
+                    }
+                }
             }
+        }
+        .ignoresSafeArea(edges: .top)
+        // 各栏都铺进标题栏那一带（文件侧栏顶上的文件 / Git / 分支 / 历史四个按钮就在那里）：标题栏一直透明，
+        // 不透明时标题栏把那一带的点击全收走（拖窗口用）。原来只有对话分屏显示时才透明，右边换成历史会话、用量这类整页时
+        // 文件侧栏顶上的按钮全点不动（11-21 自测：AX 查到点在标题栏的文字上）
+        .background(KeepTitlebarTransparent())
+        // 第一次进新版界面的引导（NewLayoutTour.swift）
+        .overlayPreferenceValue(TourAnchorKey.self) { anchors in TourOverlay(anchors: anchors) }
+        .toolbar {
+            // 新版界面不放「新任务」（11-21）：新会话在项目的会话列表、标签栏「+」里开，打开项目在项目列表里
             ToolbarItem(placement: .navigation) {
                 let on = model.worldMode && model.worldPage == "world"
                 Button { model.toggleWorld(page: "world") } label: { Label { Text("世界") } icon: { WorldGlobeIcon(active: on) } }
@@ -485,17 +531,26 @@ struct NewLayoutRoot: View {
         }
     }
 
-    @ViewBuilder private func columnView(_ blocks: [String], first: Bool, inset: Bool) -> some View {
+    @ViewBuilder private func columnView(_ blocks: [String], first: Bool, inset: Bool, last: Bool, fold: ColumnFold? = nil) -> some View {
         // 导航栏和别的块叠在一栏：图标栏占满整栏高，导航栏下面的块叠在它旁边那一栏里（RailSidebar.below）；导航栏上面的块照常上下分
         let nav = blocks.firstIndex(of: "nav")
         let above = nav.map { Array(blocks[..<$0]) } ?? blocks
         let below = nav.map { Array(blocks[($0 + 1)...]).filter { $0 != "tabs" } } ?? []
         let tabsBelowNav = nav.map { blocks[($0 + 1)...].contains("tabs") } ?? false
-        let stack = VSplitView {
-            ForEach(above, id: \.self) { block in blockView(block, first: first, below: []) }
+        // 夹在中间、没有导航栏的侧栏（文件侧栏、会话列表单独成一栏）：标题栏那一带上面没东西，直接顶上去（11-21 截图：这里不要空着）；
+        // 最左一栏有红绿灯和工具栏按钮、最右一栏有界面切换按钮，照旧让开
+        let rise = nav == nil && !first && !last
+        // 上下收起只在一栏里有两块以上时才有；单独一列（只有会话列表或只有文件侧栏）没有可让的，不给
+        let alone = nav == nil && above.count == 1
+        let stack = PanelStack(slots: above.map { $0 == "sessions" ? L("会话") : $0 == "files" ? L("文件") : nil } + (nav != nil ? [nil] : []) + (tabsBelowNav ? [nil] : []),
+                               key: "col." + blocks.joined(separator: ",")) {
+            ForEach(above, id: \.self) { block in
+                blockView(block, first: first, below: [], rise: rise).environment(\.columnFold, block == above.first ? fold : nil)
+            }
             if nav != nil { blockView("nav", first: first, below: below) }
             if tabsBelowNav { blockView("tabs", first: first, below: []) }
         }
+        .environment(\.panelCollapsible, !alone)
         if blocks.contains("tabs") {
             stack.modifier(TitlebarInset(on: inset && blocks != ["tabs"])).frame(minWidth: 420, maxWidth: .infinity).layoutPriority(1)
         } else {
@@ -504,7 +559,10 @@ struct NewLayoutRoot: View {
                 if nav != nil { SidebarSearch(text: $model.query) }
                 stack
             }
-            .modifier(TitlebarInset(on: inset))
+            .modifier(TitlebarInset(on: inset && !rise))
+            // 顶上去的那栏：系统分栏（HSplitView）给每栏留的标题栏安全区也不认
+            .ignoresSafeArea(.container, edges: rise ? .top : [])
+            // 默认宽度由 SplitWidths 摆（系统分栏 HSplitView 不认 idealWidth，多出来的宽度平摊给各栏，侧栏会长到上限）
             .frame(minWidth: nav != nil ? 290 : 230, idealWidth: nav != nil ? 340 : 300, maxWidth: 640)
             .background(SideColumnShade().ignoresSafeArea())
             // 侧栏里的搜索框、列表边距照侧栏规范（SideMetric）
@@ -512,7 +570,7 @@ struct NewLayoutRoot: View {
         }
     }
 
-    @ViewBuilder private func blockView(_ block: String, first: Bool, below: [String]) -> some View {
+    @ViewBuilder private func blockView(_ block: String, first: Bool, below: [String], rise: Bool = false) -> some View {
         switch block {
         case "nav":
             RailSidebar(model: model, below: below)
@@ -529,7 +587,9 @@ struct NewLayoutRoot: View {
         case "tabs":
             ProjectSplit(model: model).frame(minHeight: 220, maxHeight: .infinity)
         default:
-            ProjectBlock(model: model, block: block).frame(minHeight: 110, maxHeight: .infinity)
+            // 顶上去的那栏：栏里的 VSplitView 也是系统分栏，每块又让一次标题栏安全区，也不认
+            ProjectBlock(model: model, block: block).frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(.container, edges: rise ? .top : [])
         }
     }
 }
@@ -568,7 +628,7 @@ struct LayoutSetupSheet: View {
                     .tarsButton(prominent: true)
             }
         }
-        .padding(20)
+        .padding(DialogMetric.pad)   // 弹窗边距规范
         .frame(width: 760)
         .navigationTitle(L("新版界面布局"))
     }
@@ -782,28 +842,274 @@ struct RailShade: View {
     }
 }
 
+/// 侧栏里「收起」的记录（块的上下收起、栏的左右收起），存在设置里
+final class PanelCollapse: ObservableObject {
+    static let shared = PanelCollapse()
+    private static let storeKey = "collapsedPanels"
+    @Published private(set) var keys: Set<String>
+
+    private init() {
+        var set = Set(AppConfig.defaults.stringArray(forKey: Self.storeKey) ?? [])
+        // 老版本按标题各存一个布尔值（会话、文件）
+        for title in [L("会话"), L("文件")] where AppConfig.defaults.bool(forKey: "panelCollapsed." + title) { set.insert("panel." + title) }
+        keys = set
+    }
+
+    func has(_ key: String) -> Bool { keys.contains(key) }
+
+    func toggle(_ key: String) {
+        if keys.contains(key) { keys.remove(key) } else { keys.insert(key) }
+        AppConfig.defaults.set(Array(keys), forKey: Self.storeKey)
+        AppConfig.defaults.set(false, forKey: "panelCollapsed." + key.replacingOccurrences(of: "panel.", with: ""))
+    }
+}
+
+private struct PanelCollapsibleKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    var panelCollapsible: Bool {
+        get { self[PanelCollapsibleKey.self] }
+        set { self[PanelCollapsibleKey.self] = newValue }
+    }
+}
+
+/// 侧栏列（文件侧栏、单独的会话列）左右收起：按钮是这一栏最上面那块小节标题右边的一个小图标（同 VS Code 视图标题上的操作），
+/// 侧栏在标签页左边往左收、在右边往右收（图标朝向跟着变）
+struct ColumnFold {
+    let edge: HorizontalEdge   // 往哪边收
+    let action: () -> Void
+}
+
+private struct ColumnFoldKey: EnvironmentKey { static let defaultValue: ColumnFold? = nil }
+extension EnvironmentValues {
+    var columnFold: ColumnFold? {
+        get { self[ColumnFoldKey.self] }
+        set { self[ColumnFoldKey.self] = newValue }
+    }
+}
+
+struct ColumnFoldIcon: View {
+    let fold: ColumnFold
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: fold.action) {
+            Image(systemName: fold.edge == .trailing ? "sidebar.left" : "sidebar.right")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(hovering ? Color.primary : Color.secondary)
+                .frame(width: 22, height: 20)
+                .background(Color.primary.opacity(hovering ? 0.10 : 0), in: RoundedRectangle(cornerRadius: SideMetric.radius, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(L("收起侧栏"))
+    }
+}
+
+/// 收起的侧栏列留下的展开按钮（11-21）：浮在旁边那一栏贴边、上下居中，不占宽度。平时是这一栏的图标（文件 / 会话），
+/// 指上去换成朝展开方向的双箭头、略放大，点了展开
+struct UnfoldSpot: Equatable {
+    let column: [String]
+    let toward: HorizontalEdge
+    let frame: CGRect
+}
+
+struct FloatingUnfold: View {
+    let column: [String]
+    /// 收起的那栏在按钮的哪一边（展开朝哪边）
+    let toward: HorizontalEdge
+    let action: () -> Void
+    @State private var hovering = false
+    static let size: CGFloat = 28
+
+    var body: some View {
+        // 圆形，圆心压在两栏之间的分隔线上（11-21 反馈：放在边线中间、显示文件夹标识、边线过圆心）
+        let symbol = column.contains("files") ? "folder" : "bubble.left.and.bubble.right"
+        let arrows = toward == .trailing ? "chevron.right.2" : "chevron.left.2"
+        Button(action: action) {
+            ZStack {
+                Image(systemName: symbol).opacity(hovering ? 0 : 1).scaleEffect(hovering ? 0.5 : 1)
+                Image(systemName: arrows).opacity(hovering ? 1 : 0).scaleEffect(hovering ? 1 : 0.5)
+                    .offset(x: hovering ? 0 : (toward == .trailing ? -4 : 4))
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(hovering ? Color.white : Color.secondary)
+            .frame(width: Self.size, height: Self.size)
+            .background(hovering ? AnyShapeStyle(Color.tarsBrand) : AnyShapeStyle(.regularMaterial), in: Circle())
+            .overlay(Circle().strokeBorder(Color.primary.opacity(hovering ? 0 : 0.18), lineWidth: 1))
+            .shadow(color: .black.opacity(0.2), radius: 5, y: 1)
+            .scaleEffect(hovering ? 1.12 : 1)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in withAnimation(.snappy(duration: 0.18)) { hovering = inside } }
+        .help(column.contains("files") ? L("展开文件侧栏") : L("展开侧栏"))
+    }
+}
+
+/// 收起后留下的窄边：点一下展开
+struct ColumnEdgeStrip: View {
+    let edge: HorizontalEdge
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            // 图标在顶上，和别的栏的小节标题一排（原来在中间，像一截滚动条）
+            ZStack(alignment: .top) {
+                Rectangle().fill(hovering ? Color.primary.opacity(0.08) : Color.clear)
+                Image(systemName: edge == .trailing ? "sidebar.left" : "sidebar.right")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(hovering ? Color.primary : Color.secondary)
+                    .padding(.top, 8)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 24)
+        .frame(maxHeight: .infinity)
+        .background(SideColumnShade().ignoresSafeArea())
+        .onHover { hovering = $0 }
+        .help(L("展开侧栏"))
+    }
+}
+
+/// 一栏里上下叠的几块（项目列表 + 会话 + 文件）：平时各占一样高（两块就是上下各一半），分隔条能拖，拖到哪记到哪、
+/// 切项目、重开都不变（11-21 反馈：不该上面项目那么高、下面会话那么少，拖到一半切项目又变回去）；
+/// 只要有一块收起了就改成竖排：收起的那块只剩 22 点的标题条贴在栏底，别的块占满整栏高度
+/// （系统的 VSplitView 会一直保留收起前分到的高度，下面白白空一块）
+struct PanelStack<Content: View>: View {
+    /// 每一块的标题（会收起的那几块，和 SidebarPanel 的 title 对应）；不会收起的块写 nil。顺序和 content 里的块一一对应
+    let slots: [String?]
+    /// 记高度比例用的键
+    let key: String
+    @ViewBuilder var content: () -> Content
+    @ObservedObject private var collapse = PanelCollapse.shared
+    @State private var weights: [Double] = []
+
+    private var count: Int { slots.count }
+    private var storeKey: String { "panelWeights." + key }
+
+    private func current() -> [Double] {
+        if weights.count == count { return weights }
+        if let saved = AppConfig.defaults.array(forKey: storeKey) as? [Double], saved.count == count, saved.allSatisfy({ $0 > 0 }) { return saved }
+        return Array(repeating: 1.0 / Double(max(count, 1)), count: count)
+    }
+
+    var body: some View {
+        // 收起的块：固定一条标题条高，别的块分剩下的（收起的是最底下那块时，标题条就贴在栏底）
+        let folded = Set(slots.indices.filter { index in slots[index].map { collapse.has("panel." + $0) } ?? false })
+        if count < 2 {
+            VStack(spacing: 0) { content() }
+        } else if !folded.isEmpty {
+            WeightedColumn(weights: current(), fixed: folded) { content() }
+        } else {
+            let w = current()
+            WeightedColumn(weights: w, fixed: []) { content() }
+                .coordinateSpace(name: "panelstack")
+                .overlay {
+                    GeometryReader { geo in
+                        ForEach(0..<(count - 1), id: \.self) { i in
+                            let boundary = w[0...i].reduce(0, +) * geo.size.height
+                            Color.clear.frame(width: geo.size.width, height: 7).contentShape(Rectangle())
+                                .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+                                .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .named("panelstack"))
+                                    .onChanged { value in
+                                        guard geo.size.height > 0 else { return }
+                                        var next = current()
+                                        let before = i == 0 ? 0 : next[0..<i].reduce(0, +)
+                                        let pair = next[i] + next[i + 1]
+                                        let minShare = min(110 / geo.size.height, pair / 2)
+                                        let wanted = value.location.y / geo.size.height - before
+                                        next[i] = min(max(wanted, minShare), pair - minShare)
+                                        next[i + 1] = pair - next[i]
+                                        weights = next
+                                    }
+                                    .onEnded { _ in AppConfig.defaults.set(current(), forKey: storeKey) })
+                                .offset(y: boundary - 3.5)
+                        }
+                    }
+                }
+        }
+    }
+}
+
+/// 上下叠的几块按比例分高度（比例之和为 1）
+private struct WeightedColumn: Layout {
+    var weights: [Double]
+    /// 收起的块（只剩标题条的高度）
+    var fixed: Set<Int>
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: proposal.width ?? 300, height: proposal.height ?? 400)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let open = subviews.indices.filter { !fixed.contains($0) }
+        let room = max(bounds.height - CGFloat(fixed.count) * SideMetric.header, 0)
+        let total = open.map { $0 < weights.count ? weights[$0] : 1 }.reduce(0, +)
+        var y = bounds.minY
+        for (index, view) in subviews.enumerated() {
+            let height: CGFloat
+            if fixed.contains(index) {
+                height = SideMetric.header
+            } else {
+                let share = index < weights.count ? weights[index] : 1
+                height = fixed.isEmpty ? bounds.height * share : room * (total > 0 ? share / total : 1 / Double(max(open.count, 1)))
+            }
+            view.place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: height))
+            y += height
+        }
+    }
+}
+
 /// 侧栏里的一块（会话列表、文件侧栏）：照 VS Code 侧栏的视图小节——平铺在侧栏底上，顶上一条 22 点的小节标题
 /// （折叠箭头 + 加粗小字），上面一道分隔线；点标题收起 / 展开（记住）。没选配色方案时颜色跟系统
+private struct SidebarInPanelKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// 放在 SidebarPanel 里（标题条已经写了名字）：里面别再重复标题
+    var sidebarInPanel: Bool {
+        get { self[SidebarInPanelKey.self] }
+        set { self[SidebarInPanelKey.self] = newValue }
+    }
+}
+
 struct SidebarPanel: ViewModifier {
     var title: String = ""
-    @AppStorage private var collapsed: Bool
+    var count: Int = 0
+    /// 标题条右边的小按钮（如「打开项目」）
+    var accessory: AnyView? = nil
+    @ObservedObject private var collapse = PanelCollapse.shared
+    /// 一栏里只有这一块时不给上下收起（11-21）：没有别的块可让
+    @Environment(\.panelCollapsible) private var collapsible
+    /// 这块在侧栏列最上面：标题右边放左右收起这一栏的图标
+    @Environment(\.columnFold) private var fold
 
-    init(title: String = "") {
+    init(title: String = "", count: Int = 0, accessory: AnyView? = nil) {
         self.title = title
-        _collapsed = AppStorage(wrappedValue: false, "panelCollapsed." + title, store: AppConfig.defaults)
+        self.count = count
+        self.accessory = accessory
     }
+
+    private var collapsed: Bool { collapsible && collapse.has("panel." + title) }
 
     func body(content: Content) -> some View {
         let scheme = Look.shared.scheme
         VStack(spacing: 0) {
             if !title.isEmpty {
-                Button { withAnimation(.snappy(duration: 0.18)) { collapsed.toggle() } } label: {
+                Button { withAnimation(.snappy(duration: 0.18)) { collapse.toggle("panel." + title) } } label: {
                     // 箭头放在对齐线左边的空里，标题字和下面的内容一样从离栏边 16 点起（同 VS Code：箭头在缩进里）
                     HStack(spacing: 0) {
-                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
-                            .rotationEffect(.degrees(collapsed ? 0 : 90))
-                            .frame(width: SideMetric.inset - 4)
+                        if collapsible {
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
+                                .rotationEffect(.degrees(collapsed ? 0 : 90))
+                                .frame(width: SideMetric.inset - 4)
+                        } else {
+                            Color.clear.frame(width: SideMetric.inset - 4, height: 1)
+                        }
                         Text(title).font(.app(size: SideMetric.Text.caption, weight: .bold))
+                        if count > 0 {
+                            Text("\(count)").font(.app(size: SideMetric.Text.caption).monospacedDigit()).foregroundStyle(.tertiary).padding(.leading, 5)
+                        }
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(scheme?.fgColor ?? Color.primary)
@@ -814,6 +1120,14 @@ struct SidebarPanel: ViewModifier {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(!collapsible)
+                .overlay(alignment: .trailing) {
+                    HStack(spacing: 2) {
+                        if let accessory { accessory.foregroundStyle(scheme?.fgColor ?? Color.primary) }
+                        if let fold { ColumnFoldIcon(fold: fold) }
+                    }
+                    .padding(.trailing, SideMetric.edge - 4)
+                }
                 .overlay(alignment: .top) { Rectangle().fill(scheme?.borderColor ?? Color.primary.opacity(0.1)).frame(height: 1) }
             }
             if !collapsed || title.isEmpty {
@@ -911,7 +1225,9 @@ struct TitlebarInset: ViewModifier {
     func body(content: Content) -> some View {
         let band = Self.band
         content
-            .padding(.top, on ? max(0, band - minY) : 0)
+            // minY 不取负数：从经典版换过来时这一栏是从窗口上面滑进来的，量到的是动画途中的负值（-85…-178），
+            // 停下后不一定再报一次，留空就变成 52 + 178，左边栏顶上空一大块（11-21 截图，日志查实）
+            .padding(.top, on ? max(0, band - max(0, minY)) : 0)
             .background {
                 GeometryReader { geo in
                     Color.clear
@@ -919,5 +1235,140 @@ struct TitlebarInset: ViewModifier {
                         .onChange(of: geo.frame(in: .global).minY) { _, value in minY = value }
                 }
             }
+    }
+}
+
+
+/// 整页（历史会话、今日动态、用量、项目总览）的标题、副标题、范围选择和刷新这类按钮。
+/// 经典版放进窗口工具栏；新版界面的窗口工具栏横跨所有栏，标题会叠在左边几栏上、按钮会挤进右上角的界面切换按钮里
+///（11-21 自测截图：「历史会话 · 204 个会话」压在文件栏上、刷新按钮把「经典界面」挤成「经典」），改成页面自己顶上一行
+struct PageChrome<Center: View, Actions: View>: ViewModifier {
+    let title: String
+    let subtitle: String
+    let center: Center
+    let actions: Actions
+    @ObservedObject private var model = KitelineModel.shared
+
+    init(title: String, subtitle: String, @ViewBuilder center: () -> Center = { EmptyView() }, @ViewBuilder actions: () -> Actions) {
+        self.title = title
+        self.subtitle = subtitle
+        self.center = center()
+        self.actions = actions()
+    }
+
+    func body(content: Content) -> some View {
+        if model.newLayout {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    // 标题写在弹窗的标题栏上（新版界面里这几页都是弹窗），这一行只放副标题和按钮
+                    Text(subtitle).font(.app(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 8)
+                    center
+                    HStack(spacing: KiteMetric.gap) { actions }
+                        .labelStyle(.iconOnly)
+                        .kiteButton()
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                Divider()
+                content
+            }
+            .navigationTitle(title)   // 弹窗的标题栏
+        } else {
+            content
+                .navigationTitle(title)
+                .navigationSubtitle(subtitle)
+                .toolbar {
+                    ToolbarItem(placement: .principal) { center }
+                    ToolbarItemGroup(placement: .primaryAction) { actions }
+                }
+        }
+    }
+}
+
+
+/// 新版界面开着时窗口标题栏一直透明（见 NewLayoutRoot）：对话分屏离开时会把它还原成不透明，这里盯着改回来
+struct KeepTitlebarTransparent: NSViewRepresentable {
+    func makeNSView(context: Context) -> Holder { Holder() }
+    func updateNSView(_ view: Holder, context: Context) {}
+
+    final class Holder: NSView {
+        private var watch: NSKeyValueObservation?
+
+        /// 进新版界面前窗口标题原来的样子：换回经典版时照原样还原。别一律设成显示——经典版的标签栏铺在标题栏那一带，
+        /// 显示出来的标题文字整条横在上面，右上角「新版界面」、标签的 × 都被它接走点不动（11-21 自测）
+        private static var savedVisibility: NSWindow.TitleVisibility?
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil, let window, let saved = Self.savedVisibility { window.titleVisibility = saved }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            watch = nil
+            guard let window else { return }
+            window.titlebarAppearsTransparent = true
+            // 窗口标题（当前会话名）不画：标题栏透明后它压在左边几栏顶上（11-21 截图：用量页时「QQ_….png 会话内容空白」叠在文件栏上）
+            if Self.savedVisibility == nil { Self.savedVisibility = window.titleVisibility }
+            window.titleVisibility = .hidden
+            watch = window.observe(\.titlebarAppearsTransparent, options: [.new]) { [weak self] window, _ in
+                guard !window.titlebarAppearsTransparent else { return }
+                DispatchQueue.main.async { if self?.window === window { window.titlebarAppearsTransparent = true } }
+            }
+        }
+    }
+}
+
+
+/// 新版界面左右几栏的宽度：系统分栏（HSplitView）不认 idealWidth，多出来的宽度平摊给各栏，侧栏会被分得很宽。
+/// 找到这个分栏（NSSplitView），没记过宽度时把侧栏摆成默认宽度，之后用户拖了由系统记住（autosaveName，按这一套栏的摆法分开记）
+struct SplitWidths: NSViewRepresentable {
+    let columns: [[String]]
+    let epoch: Int
+
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) {
+        view.columns = columns
+        view.schedule()
+    }
+
+    final class Probe: NSView {
+        var columns: [[String]] = []
+        private var appliedName: String?
+
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); schedule() }
+
+        func schedule() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.apply() }
+        }
+
+        private func findSplit(_ view: NSView) -> NSSplitView? {
+            if let split = view as? NSSplitView, split.isVertical, split.arrangedSubviews.count == columns.count { return split }
+            for child in view.subviews { if let found = findSplit(child) { return found } }
+            return nil
+        }
+
+        private func apply() {
+            guard columns.count > 1, let root = window?.contentView, let split = findSplit(root) else { return }
+            let name = "KitelineNewLayout." + columns.map { $0.joined(separator: ",") }.joined(separator: "|")
+            if split.autosaveName != name {
+                let saved = UserDefaults.standard.object(forKey: "NSSplitView Subview Frames " + name) != nil
+                split.autosaveName = name
+                if saved { return }   // 设了名字系统就按记下的摆
+            } else if appliedName == name {
+                return
+            }
+            appliedName = name
+            // 没记过：侧栏按默认宽度从左往右摆（标签页那栏拿剩下的）
+            var x: CGFloat = 0
+            for (index, column) in columns.enumerated() where index < columns.count - 1 {
+                let width: CGFloat = column.contains("tabs") ? max(420, split.bounds.width - x - CGFloat(columns.count - 1 - index) * 230)
+                    : column.contains("nav") ? 290 : 230
+                x += width
+                split.setPosition(x, ofDividerAt: index)
+                x += split.dividerThickness
+            }
+        }
     }
 }

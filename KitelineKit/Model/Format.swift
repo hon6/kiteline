@@ -39,6 +39,13 @@ enum Format {
     }
 
     /// 会话列表右上角：今天写时分，昨天写「昨天」，一周内写星期，更早写日期
+    /// 完整的年月日时分秒（收藏等要看清具体哪天哪刻的地方；11-21 反馈：不要「星期几」）
+    static func fullTime(_ ms: Double?) -> String {
+        guard let ms, ms > 0 else { return "" }
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date(ms))
+        return String(format: "%04d-%02d-%02d %02d:%02d:%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
+    }
+
     static func listTime(_ ms: Double?) -> String {
         guard let ms, ms > 0 else { return "" }
         let d = date(ms)

@@ -130,8 +130,13 @@ final class MacClient: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         case .cancelled, .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot, .secureConnectionFailed:
             return PairingError(L("%@%@的证书不匹配：扫描的可能不是这台电脑的二维码，或电脑已重置证书。", "\(host)", "\(gap)"))
         case .timedOut, .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed:
+            #if os(macOS)
+            // 电脑端自己连本机服务（文件、Git 侧栏等）：配对、iPhone 本地网络这套说明对不上（11-21 自测：Mac 文件侧栏里写着去 iPhone 设置）
+            return PairingError(L("无法连接本机的 Kiteline 服务，请稍后重试；如果一直这样，请从菜单栏重新打开 Kiteline。"))
+            #else
             return PairingError(L("无法连接%@%@。首次配对时，手机与电脑需连接同一 Wi-Fi，且电脑上的 Kiteline 需保持运行；", "\(gap)", "\(host)")
                                 + L("若此前未允许 Kiteline 访问本地网络，请前往 iPhone「设置 → Kiteline」开启「本地网络」。"))
+            #endif
         default:
             return PairingError(L("无法连接%@%@：%@", "\(gap)", "\(host)", "\(error.localizedDescription)"))
         }

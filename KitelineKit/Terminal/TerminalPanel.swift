@@ -22,10 +22,16 @@ struct TerminalChip: View {
         } label: {
             Image(systemName: "apple.terminal")
                 .font(.app(size: 12, weight: .semibold))
+                #if os(macOS)
+                .foregroundStyle(open ? Color.white : Color.primary)
+                .frame(width: 14)
+                .kiteLook(prominent: open)   // 开着 = 主题色亮起，同统一按钮样式
+                #else
                 .foregroundStyle(open ? AnyShapeStyle(Theme.claude) : AnyShapeStyle(.primary.opacity(0.75)))
                 .frame(width: height + 12, height: height)
                 .background(open ? Theme.claude.opacity(0.12) : Theme.field, in: Capsule(style: .circular))
                 .overlay { if open { Capsule(style: .circular).hairlineBorder(Theme.claude.opacity(0.45)) } }
+                #endif
                 .overlay(alignment: .topTrailing) {
                     if count > 0 {
                         Text("\(count)")
@@ -102,7 +108,7 @@ struct TerminalPanel: View {
                                 Label("新建终端", systemImage: "plus").font(.ui(.subheadline))
                             }
                         }
-                        .buttonStyle(.bordered)
+                        .kiteButton()
                     }
                 }
             }
@@ -119,7 +125,8 @@ struct TerminalPanel: View {
         .background(Theme.inputBar)
         .task(id: key) {
             #if canImport(UIKit)
-            if !guideOff { withAnimation(.easeOut(duration: 0.2)) { guideShown = true } }
+            // 只出现一次：一出现就记下看过了（没点掉直接离开，下次也不再出）
+            if !guideOff { guideOff = true; withAnimation(.easeOut(duration: 0.2)) { guideShown = true } }
             #endif
             await store.refresh(key)
             if store.lists[key]?.isEmpty == true { await openNew() }
@@ -156,35 +163,31 @@ struct TerminalPanel: View {
         }
     }
 
-    /// 手机上的手势引导：盖在终端上的半透明遮罩，「知道了」只关这一次，「不再显示」以后都不出现
+    /// 手机上的手势引导：只在第一次打开终端时出现；一张贴在终端顶上的小卡片（不盖灰色遮罩、不挡下面的输入区），
+    /// 点卡片任意处或右上角关闭就收起，看过一次以后都不再出现（11-21：之前每次都弹、半屏灰遮罩挡住状态和输入）
     private var gestureGuide: some View {
-        ZStack {
-            SwiftUI.Color.black.opacity(0.55)
-            VStack(alignment: .leading, spacing: 12) {
-                Text("终端手势").font(.ui(.headline))
-                guideRow("hand.tap", L("单指轻点"), L("相当于鼠标单击：定位光标、插入"))
-                guideRow("hand.point.up.left.and.text", L("单指拖动"), L("选中文字，松手后可拷贝"))
-                guideRow("hand.draw", L("双指上下滑"), L("翻看终端里的历史输出"))
-                guideRow("hand.point.up.left", L("长按"), L("显示拷贝、粘贴等菜单"))
-                HStack(spacing: 10) {
-                    Button { withAnimation(.easeOut(duration: 0.2)) { guideOff = true; guideShown = false } } label: {
-                        Text("不再显示").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    Button { withAnimation(.easeOut(duration: 0.2)) { guideShown = false } } label: {
-                        Text("知道了").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.claude)
-                }
-                .font(.ui(.subheadline))
-                .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("终端手势").font(.ui(.subheadline).weight(.semibold))
+                Spacer()
+                Image(systemName: "xmark.circle.fill").font(.app(size: 18)).foregroundStyle(.tertiary)
+                    .accessibilityLabel(L("关闭"))
             }
-            .padding(16)
-            .frame(maxWidth: 340)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(16)
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .topLeading), GridItem(.flexible(), alignment: .topLeading)], spacing: 8) {
+                guideRow("hand.tap", L("单指轻点"), L("定位光标"))
+                guideRow("hand.point.up.left.and.text", L("单指拖动"), L("选中文字"))
+                guideRow("hand.draw", L("双指上下滑"), L("翻看历史"))
+                guideRow("hand.point.up.left", L("长按"), L("拷贝、粘贴"))
+            }
         }
+        .padding(12)
+        .frame(maxWidth: 420)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { guideOff = true; guideShown = false } }
         .transition(.opacity)
     }
 

@@ -13,6 +13,10 @@ enum CCPulseMain {
         let args = CommandLine.arguments
         // watcher 退出、手机断线时往管道/套接字写会触发 SIGPIPE，默认会直接杀掉进程
         signal(SIGPIPE, SIG_IGN)
+        // 整个 App 的滚动条一律用悬浮样式（11-21 反馈：滚动条太粗、一直显示、还占掉一条宽度）：
+        // 接了鼠标时系统默认是常驻的粗条；只在本 App 自己的设置里改，不动系统设置。
+        // 悬浮的细条平时不显示，滚动或鼠标移进列表时出来，盖在内容上、不占宽度；要在第一个滚动视图建出来之前设
+        UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
         // 隔离的测试实例：界面语言用自己那份、每次从「跟随系统」开始（不然跟着正式版里用户选的语言走，测试结果看用户当时的设置）；
         // 截图要英文就带 TARS_LANG=en
         if AppConfig.isolated {

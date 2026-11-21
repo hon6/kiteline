@@ -240,6 +240,7 @@
 "%@，需要你确认。%@" = "%@ needs your approval. %@";
 "%@，额度恢复后自动继续" = "%@, continues automatically when the limit resets";
 "%@：定时任务已暂停，新建任务和手机发送消息需先确认。" = "%@: scheduled tasks are paused. New tasks and messages sent from your phone require confirmation first.";
+"%@：未连接" = "%@: not connected";
 "%d 个" = "%d";
 "%d 个未能重启：%@" = "%d could not restart: %@";
 "%d 个正在工作，这一轮做完后自动重启" = "%d busy, will restart after the current turn";
@@ -704,7 +705,6 @@
 "…（离线仅保存前 4000 字）" = "…(offline, only the first 4,000 characters are saved)";
 "→ %@" = "→ %@";
 "⌘V 粘贴截图 · ⌘↩ %@" = "⌘V to paste a screenshot · ⌘↩ %@";
-"　运行中 %@ 个会话" = "　%@ sessions running";
 "、" = ", ";
 "。也可以在电脑终端运行：%@" = ". You can also run this in the terminal on your computer: %@";
 "。另有 %@ 项需注意，详见下方" = ". %@ more items need attention. See below.";
@@ -1084,6 +1084,7 @@
 "会话列表有新的排法" = "The session list has a new layout";
 "会话列表（悬停展开，点击固定）" = "Session list (hover to expand, click to pin)";
 "会话在另一台电脑上" = "Session Is on Another Computer";
+"会话已关闭" = "Session closed";
 "会话已在后台运行，窗口处于最小化" = "The session is running in the background, and the window is minimized.";
 "会话已结束" = "Session ended";
 "会话已结束或没有工作目录" = "The session has ended or has no working directory";
@@ -1165,6 +1166,7 @@
 "保存（Ctrl+S）" = "Save (Ctrl+S)";
 "保存（⌘S）" = "Save (⌘S)";
 "保持联网，模型下载完成后即可使用" = "Stay connected. The model can be used once the download finishes.";
+"保留" = "Keep";
 "信任" = "Trust";
 "信号灯闪得越快，在工作的会话越多" = "The faster the lights blink, the more sessions are working";
 "信息 " = "Info ";
@@ -1242,6 +1244,7 @@
 "入口已失效" = "This Link Has Expired";
 "全不选" = "Deselect All";
 "全屏" = "Full Screen";
+"全屏（M）" = "Full Screen (M)";
 "全景" = "Overview";
 "全景视图" = "Live views";
 "全选" = "Select All";
@@ -1254,6 +1257,7 @@
 "全部会话（不按项目分）" = "All sessions (not grouped by project)";
 "全部保存并关闭" = "Save All and Close";
 "全部做完 stage done。" = "When everything is done, use stage done.";
+"全部关闭" = "Close All";
 "全部分支" = "All Branches";
 "全部取消暂存" = "Unstage All";
 "全部复制" = "Copy All";
@@ -1727,6 +1731,7 @@
 "启动" = "Start";
 "启动 %@ 失败：%@" = "Failed to start %@: %@";
 "启动中" = "Starting…";
+"启动失败" = "Failed to start";
 "启动失败：%@" = "Failed to start: %@";
 "启用" = "Enable";
 "启用 / 停用定时任务" = "Enable / Disable Scheduled Task";
@@ -1742,6 +1747,7 @@
 "周日" = "Sun";
 "命令" = "Command";
 "命令行" = "CLI";
+"命令行版" = "CLI";
 "命令输出" = "Command output";
 "命令输出回流" = "Command output flowing back";
 "和 %@ 一致" = "Same as %@";
@@ -1946,6 +1952,7 @@
 "多处修改" = "Multiple Edits";
 "大" = "Large";
 "大型任务多代理并行" = "Parallel Agents for Large Tasks";
+"天空" = "Sky";
 "失败" = "Failed";
 "失败 %@ 次" = "%@ failed";
 "头像" = "Avatar";
@@ -1984,6 +1991,7 @@
 "存储失败：%@" = "Storage failed: %@";
 "存储空间" = "Storage";
 "存到相册" = "Save to Photos";
+"宇宙" = "Space";
 "安全" = "Security";
 "安卓手机" = "Android Phone";
 "安卓：微信扫码，打开 Kiteline 小程序" = "Android: scan with WeChat to open the Kiteline Mini Program";
@@ -2018,6 +2026,8 @@
 "宋体" = "Songti";
 "宋体-简，适合长篇阅读" = "Songti, suited to long reading";
 "完成" = "Done";
+"完整对话" = "Full Conversation";
+"定位光标" = "Place cursor";
 "定时" = "Schedule";
 "定时任务" = "Scheduled Tasks";
 "定时任务 · 选择项目" = "Scheduled Task · Choose Project";
@@ -2130,11 +2140,13 @@
 "屏幕自动锁定" = "Auto Screen Lock";
 "展开" = "Expand";
 "展开会话列表" = "Show Session List";
+"展开侧栏" = "Show Sidebar";
 "展开全文" = "Show All";
 "展开全部步骤" = "Show all steps";
 "展开前 %@ 步" = "Show the previous %@ steps";
 "展开前 %lld 步" = "Show %lld Earlier Steps";
 "展开小窗" = "Show Mini View";
+"展开文件侧栏" = "Show File Sidebar";
 "展开浏览器小窗" = "Show Browser View";
 "展开组里的会话" = "Show sessions in this group";
 "岩灰" = "Slate";
@@ -2503,6 +2515,7 @@
 "开发版 · 已解锁全部功能" = "Development Build · All Features Unlocked";
 "开发版不支持自动更新" = "Automatic updates aren't available in development builds";
 "开启" = "Turn On";
+"开启…" = "Turn On…";
 "开启「%@」" = "Turn On “%@”";
 "开启「%@」接入？" = "Connect %@?";
 "开启「%@」？" = "Turn on “%@”?";
@@ -2519,6 +2532,7 @@
 "开始做：先应用补丁" = "Started: applying the patch first";
 "开始接管" = "Take Over";
 "开始时间" = "Start Time";
+"开始说话" = "Start speaking";
 "开机时自动启动 Kiteline" = "Start Kiteline Automatically at Startup";
 "开机自动启动" = "Launch at Login";
 "开源许可" = "Open Source Licenses";
@@ -2527,6 +2541,8 @@
 "张截图" = "screenshots";
 "弧形" = "Arc";
 "弧形排列" = "Arc layout";
+"弱" = "Low";
+"强" = "High";
 "强制删除" = "Force Delete";
 "强制推送" = "Force Push";
 "强制推送会用本地的「%@」覆盖远端分支（使用 --force-with-lease：远端有别人新推的提交时会拒绝）。确定吗？" = "Force push will overwrite the remote branch with your local “%@” (using --force-with-lease, which refuses if someone else pushed new commits). Continue?";
@@ -2611,7 +2627,6 @@
 "思考等级和 Ultracode 仅作用于此会话（发送 /effort 命令）。" = "Thinking level and Ultracode apply only to this session (sends the /effort command).";
 "思考等级和 Ultracode 仅作用于此会话；Claude 正在工作时本轮结束后生效。" = "Thinking level and Ultracode apply to this session only. While Claude is working, they take effect after the current turn.";
 "总是允许" = "Always Allow";
-"总管" = "Steward";
 "总结本次改动" = "Summarize this change.";
 "恢复" = "Pop";
 "恢复为 Kiteline 默认短语？" = "Restore Kiteline’s Default Quick Replies?";
@@ -2703,6 +2718,7 @@
 "手表版 Kiteline 随本 App 提供，安装后即可使用。" = "Kiteline for Apple Watch is included with this app and is ready to use once installed.";
 "手表经由 iPhone 连接，无需单独配对" = "The watch connects through iPhone; no separate pairing is needed.";
 "手表选项" = "Watch Options";
+"打字" = "Type";
 "打开" = "Open";
 "打开 / 关闭终端" = "Open / Close Terminal";
 "打开 App 或小程序，扫描此二维码，或输入下方的 6 位配对码。首次配对时手机与电脑需连接同一网络。" = "Open the app or Mini Program and scan this QR code, or enter the 6-digit pairing code below. For the first pairing, your phone and computer must be on the same network.";
@@ -2809,6 +2825,7 @@
 "拖动" = " drag";
 "拖动下面的板块摆成你习惯的样子：拖到某一栏上会叠放在那一栏里（上下排），拖到两栏之间的缝隙会单独成为一栏（左右排）。状态栏可以拖到顶部或底部。也可以点板块上的箭头移动。" = "Drag the areas below to arrange them the way you like: drop one onto a column to stack it in that column (top to bottom), or into the gap between two columns to make it a column of its own (side by side). The status bar can be dragged to the top or bottom. You can also move an area with the arrows on it.";
 "拖动地板移动视角 · 右键拖动旋转 · 滚动缩放" = "Drag the floor to move · Right-drag to rotate · Scroll to zoom";
+"拖动移动窗口，双击切换全屏" = "Drag to move the window; double-click to toggle full screen";
 "拖动空白处" = "Drag empty space";
 "拖动调整大小，双击恢复均分" = "Drag to resize. Double-click to restore equal sizes.";
 "拖动调整流程图和对话的宽度" = "Drag to resize the flow chart and conversation";
@@ -2818,6 +2835,7 @@
 "拣选到当前分支" = "Cherry-Pick onto Current Branch";
 "拷贝" = "Copy";
 "拷贝 Git 输出" = "Copy Git Output";
+"拷贝、粘贴" = "Copy, paste";
 "拷贝分支名" = "Copy Branch Name";
 "拷贝图片" = "Copy Image";
 "拷贝图片（Ctrl+C）" = "Copy Image (Ctrl+C)";
@@ -2860,6 +2878,7 @@
 "换一句" = "Another line";
 "换上新版本失败：%@" = "Couldn't switch to the new version: %@";
 "换个关键词试试。" = "Try a different keyword.";
+"换背景" = "Background";
 "换进程载入插件变化" = "Switch process to load plugin changes";
 "据此生成与 DeepSeek Harness 桌面窗口相同的访问凭证，连接其在本机（127.0.0.1）提供的服务，" = "uses it to create the same access credentials as the DeepSeek Harness desktop window, and connects to the service it provides on this computer (127.0.0.1) ";
 "授予必要的权限" = "Grant Required Permissions";
@@ -2980,6 +2999,7 @@
 "收起" = "Collapse";
 "收起久未更新的 %lld 条" = "Clear %lld stale items";
 "收起会话列表" = "Hide Session List";
+"收起侧栏" = "Hide Sidebar";
 "收起头像选择" = "Hide Avatar Choices";
 "收起常用语" = "Hide Quick Replies";
 "收起思考" = "Hide thinking";
@@ -3210,6 +3230,7 @@
 "无法连接到会话所在的终端（AttachConsole 失败，错误 %@）" = "Couldn't connect to the session's terminal (AttachConsole failed, error %@)";
 "无法连接更新服务器" = "Unable to connect to the update server";
 "无法连接本机 Kiteline：%@" = "Can’t connect to Kiteline on this computer: %@";
+"无法连接本机的 Kiteline 服务，请稍后重试；如果一直这样，请从菜单栏重新打开 Kiteline。" = "Can't reach the Kiteline service on this computer. Try again shortly; if it keeps happening, reopen Kiteline from the menu bar.";
 "无法连接电脑" = "Can’t Connect to Computer";
 "无法连接电脑，正在重新连接…（当前显示上次缓存的内容）" = "Can’t connect to your computer. Reconnecting… (showing the last cached content)";
 "无法连接远端仓库：请检查这台电脑的网络" = "Couldn't reach the remote repository. Check this computer's network.";
@@ -3571,6 +3592,7 @@
 "松开后转为文字，编辑后发送" = "Release to convert to text, then edit before sending.";
 "松开拉群" = "Drop to Group";
 "松绿" = "Pine Green";
+"极光" = "Aurora";
 "构建" = "Build";
 "架构" = "Architecture";
 "查找和替换" = "Find and Replace";
@@ -3639,6 +3661,7 @@
 "检测到出口后才能开启。" = "Check the outbound IP before turning this on.";
 "检测未完成：%@" = "Check didn't finish: %@";
 "检测通过查询 IP 的公共网址（如 ipinfo.io）进行，不连接 Claude。若代理按域名分流（例如仅让 Claude 的域名走专线），Claude 实际使用的出口可能与此处显示的不同，但与 VS Code 中的 Claude Code 使用同一套网络设置。" = "The check queries a public IP lookup site (such as ipinfo.io) and does not connect to Claude. If your proxy routes by domain (for example, only Claude's domains go through a dedicated line), the outbound address Claude actually uses may differ from the one shown here, but it uses the same network settings as Claude Code in VS Code.";
+"森林" = "Forest";
 "楷体" = "Kaiti";
 "楷体-简，端正的手写感" = "Kaiti, upright handwriting";
 "概览" = "Overview";
@@ -3698,6 +3721,7 @@
 "正在后台启动 Claude Code，启动后将自动提交" = "Starting Claude Code in the background. The message will be submitted once it starts.";
 "正在后台启动，启动后将自动提交" = "Starting in the background. The task will be submitted once it's ready.";
 "正在向电脑查询…" = "Checking with your computer…";
+"正在听…" = "Listening…";
 "正在处理" = "Already in progress";
 "正在安装 Kiteline %@" = "Installing Kiteline %@";
 "正在安装 Kiteline %@…" = "Installing Kiteline %@…";
@@ -3906,6 +3930,7 @@
 "没有可用的更新" = "No Updates Available";
 "没有可用的网络地址" = "No network address available.";
 "没有回应" = "No response";
+"没有在线的电脑" = "No computers are online";
 "没有已结束的会话" = "No closed sessions.";
 "没有开着的终端" = "No open terminals";
 "没有待安装的更新" = "No Updates Waiting to Install";
@@ -3986,6 +4011,7 @@
 "浏览器进程已退出" = "Browser process has exited";
 "浏览文件" = "Browse Files";
 "海蓝" = "Sea Blue";
+"海面" = "Sea";
 "消息" = "Messages";
 "消息中的文件" = "Files in Message";
 "消息仍在送达途中，请稍后在对话中确认" = "The message is still being delivered. Check the conversation later.";
@@ -4389,7 +4415,6 @@
 "等待确认" = "Waiting for approval";
 "等待确认超过 10 分钟、30 分钟时再次提醒" = "Remind again when an approval has waited more than 10 or 30 minutes.";
 "等待确认：%@" = "Awaiting approval: %@";
-"等用户确认" = "Waiting for user approval";
 "筛选" = "Filter";
 "筛选分支和标签" = "Filter branches and tags";
 "筛选文件夹" = "Filter folders";
@@ -4533,6 +4558,7 @@
 "群：把几个会话拉到一起互相沟通，建群在这里。" = "Groups: bring several sessions together to talk to each other. Create groups here.";
 "翩翩体" = "Pianpian";
 "翩翩体-简，轻快的硬笔字" = "Pianpian, light pen script";
+"翻看历史" = "Scroll history";
 "翻看终端里的历史输出" = "Scroll through earlier output in the terminal";
 "翻译" = "Translate";
 "翻译中…" = "Translating…";
@@ -4545,6 +4571,7 @@
 "翻译质量较好；部分网络环境下无法连接，连不上时自动改用其他服务" = "Good quality; unreachable on some networks, in which case another service is used automatically";
 "翻译这条消息" = "Translate This Message";
 "联网" = "Online";
+"背景" = "Background";
 "能做到：%@" = "Supports: %@";
 "能跑就别动" = "If it works,\ndon't touch it";
 "腾出位置给别的会话" = "Making room for other sessions";
@@ -4565,6 +4592,7 @@
 "自定义" = "Custom";
 "自定义回答…" = "Custom Answer…";
 "自定义颜色" = "Custom Color";
+"自己开的" = "Yours";
 "自己点、自己输入（比如登录、过验证码），弄完交还给 Agent" = "Click and type yourself (for example, to sign in or pass a verification), then hand it back to the agent";
 "自然" = "Nature";
 "自行构建的 App 每次重新构建后，macOS 可能要求重新授予以上权限。" = "If you build the app yourself, macOS may ask you to grant the permissions above again after each rebuild.";
@@ -4608,6 +4636,7 @@
 "要它们协作什么（可选）" = "What should they work on together? (Optional)";
 "要用户做的事" = "What the user needs to do";
 "观察器版本过旧：%@" = "Watcher version is outdated: %@";
+"视频" = "Video";
 "解决" = "Fix";
 "解压下载的压缩包，在 Kiteline 目录中运行 ./install.sh。需要 Python 3.10 或更新版本。" = "Extract the download and run ./install.sh in the Kiteline folder. Requires Python 3.10 or later.";
 "解压下载的压缩包，运行其中的 Kiteline.exe。如出现 SmartScreen 提示，选择「更多信息」→「仍要运行」。需要 64 位 Windows 10 或 11。" = "Unzip the download and run Kiteline.exe. If SmartScreen appears, choose More info → Run anyway. Requires 64-bit Windows 10 or 11.";
@@ -5011,6 +5040,7 @@
 "这台电脑上没有在后台运行的 Claude Code。" = "No Claude Code is running in the background on this computer.";
 "这台电脑上没有安装" = "Not installed on this computer";
 "这台电脑上的 Claude Code 命令行还没有完成首次设置（停在登录或首次设置画面）" = "Claude Code's command line on this computer hasn't finished first-time setup (it stopped at the sign-in or setup screen)";
+"这台电脑上的 Kiteline 版本较旧，请先更新" = "Kiteline on this computer is out of date. Please update it first";
 "这台电脑上的 Kiteline 版本较旧，请先更新到最新版本再添加" = "Kiteline on this computer is out of date. Update it to the latest version, then add it again.";
 "这台电脑上的 Kiteline 版本较旧，请先更新后再设置别名" = "Kiteline on this computer is out of date. Update it before setting an alias.";
 "这台电脑上的会话用的是你操作的那台电脑上的浏览器，但 Kiteline 还没接通到它的通道" = "This computer’s session uses the browser on the computer you’re using, but Kiteline hasn’t connected to its channel yet.";
@@ -5068,6 +5098,7 @@
 "远端探测失败（%@），尝试部署 watcher" = "Remote probe failed (%@). Trying to deploy the watcher.";
 "远端有新的提交，推送被拒绝：请先拉取" = "The remote has new commits, so the push was rejected. Pull first.";
 "远端未安装 python3" = "python3 is not installed on the remote host.";
+"远端电脑" = "Remote computer";
 "远端终端中的 CLI 会话需在 tmux 中运行才能远程发送" = "CLI sessions in a remote terminal must run in tmux to send messages remotely.";
 "远端终端中的 CLI 会话需在 tmux 中运行才能远程操作" = "CLI sessions in a remote terminal must run in tmux to be controlled remotely.";
 "远端项目" = "Remote Projects";
@@ -5098,6 +5129,7 @@
 "退出 Kiteline" = "Quit Kiteline";
 "退出 Kiteline 时窗口自动回到原处；可随时在「设置 → 通用」或主窗口左下角的显示器按钮中开关。" = "Windows return to their original place when Kiteline quits. Turn this on or off anytime in Settings → General or with the display button at the bottom left of the main window.";
 "退出全屏" = "Exit Full Screen";
+"退出全屏，回到软件窗口大小（M）" = "Exit Full Screen and return to the window size (M)";
 "退出演示模式" = "Exit Demo Mode";
 "退出演示，连接我的电脑" = "Exit Demo and Connect My Computer";
 "退出码 %@" = "Exit code %@";
@@ -5108,6 +5140,7 @@
 "适合长篇阅读" = "Comfortable for long reading";
 "适应" = "Fit";
 "适应宽度" = "Fit to width";
+"选中文字" = "Select text";
 "选中文字，可拷贝" = "Select text to copy it";
 "选中文字，松手后可拷贝" = "Select text, then copy it when you lift your finger";
 "选中的会话会在这一组里各占一列，切到这组时一起显示；之后可以像平时一样拖动、分屏、开标签。" = "Each selected session gets its own column in this group, and they're shown together when you switch to it. You can still drag, split and open tabs as usual.";
@@ -5118,6 +5151,7 @@
 "选择…" = "Choose…";
 "选择一张图片作为头像（将居中裁剪为正方形）" = "Choose an image for your avatar. It will be cropped to a centered square.";
 "选择一张图片（将居中裁剪为正方形）" = "Choose an image (it will be cropped to a centered square)";
+"选择一段视频（会循环播放）或一张图片作为 AR 背景" = "Choose a video (it loops) or an image as the AR background";
 "选择任意电脑上的任意文件夹，在其中新建会话" = "Choose any folder on any computer and start a session there";
 "选择会话" = "Choose Session";
 "选择会话放入右侧空白分屏，或从左侧拖入" = "Select a session to place in the empty pane on the right, or drag one in from the left.";
@@ -5133,12 +5167,15 @@
 "选择要在其中新建会话的文件夹" = "Choose a folder to start a session in";
 "选择要在此打开的会话，或从左侧拖入" = "Choose a session to open here, or drag one in from the left.";
 "选择要在此显示的会话" = "Choose a session to show here";
+"选择视频或图片…" = "Choose Video or Image…";
 "选择项目" = "Choose a Project";
 "选择项目并填写任务内容，可附截图。将在该项目的 VS Code 窗口中新建会话（窗口未打开时将先打开）。" = "Choose a project and describe the task. You can attach screenshots. A new session starts in that project’s VS Code window; if the window isn’t open, it opens first.";
 "选择项目所在的文件夹" = "Choose the project folder";
 "选择项目所在的文件夹和要使用的 Agent，Kiteline 会在其中打开一个会话；项目的文件、Git 和会话显示在左侧栏中。" = "Choose the project folder and the agent to use. Kiteline opens a session in it, and the project’s files, Git, and sessions appear in the left sidebar.";
 "选确认框选项，只授予当前登录在电脑屏幕前的用户），需要在电脑上输入一次密码；装好后关闭并重新打开 VS Code" = "choosing the option that limits access to the user currently logged in at the computer). This requires entering your password on the computer once. After installing, quit and reopen VS Code";
 "选项 3" = "Option 3";
+"透明" = "Transparent";
+"透明（看到桌面）" = "Transparent (Show Desktop)";
 "通用" = "General";
 "通知" = "Notifications";
 "通知 → 允许通知" = "Notifications → Allow Notifications";

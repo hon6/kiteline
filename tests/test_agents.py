@@ -1632,6 +1632,8 @@ with open(CBCHAT, "w") as handle:
     for entry in CBLINES:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 os.environ["CODEBUDDY_CONFIG_DIR"] = CBHOME
+# 插件除了环境变量指的目录，还会看 ~/.codebuddy、~/.workbuddy：别读到这台机器上真装的 CodeBuddy / WorkBuddy 的记录（插件载入时拷一份 HOME，所以载入前换）
+real_home, W.HOME = W.HOME, ROOT
 cb = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "codebuddy")
 cbsnap = W.AgentPlugins([], external=[cb], off=()).sessions()
 check("CodeBuddy：sessions/<pid>.json 认出开着的会话、标题取 ai-title、有没结果的工具调用算忙", len(cbsnap) == 1
@@ -1687,10 +1689,11 @@ wb.desktop_running = lambda: True
 wbsnap = {s["sessionId"]: s for s in W.AgentPlugins([], external=[wb], off=()).sessions()}
 check("WorkBuddy：预热的工作进程不算会话；桌面版任务按 workbuddy.db 列（最近 24 小时、没删、本机的、不是自动化的）",
       set(wbsnap) == {"wb-1", "wb-2"}, sorted(wbsnap))
-check("WorkBuddy：状态 working 算忙，completed 空闲；标题优先用户改的；只读、写明桌面版没有操作接口；带对话记录路径",
+wb_send = sys.platform == "darwin"   # 插件的 DESKTOP_SEND：Mac 上桌面版任务能发消息，别的系统只读
+check("WorkBuddy：状态 working 算忙，completed 空闲；标题优先用户改的；Mac 上能发消息、别的系统只读并写明桌面版的原因；带对话记录路径",
       wbsnap.get("wb-1", {}).get("activity") == "busy" and wbsnap.get("wb-2", {}).get("activity") == "idle"
-      and wbsnap.get("wb-2", {}).get("title") == "我改的标题" and wbsnap["wb-1"]["readOnly"] is True
-      and "桌面版" in (wbsnap["wb-1"].get("readOnlyReason") or "") and (wbsnap["wb-1"].get("transcriptPath") or "").endswith("wb-1.jsonl")
+      and wbsnap.get("wb-2", {}).get("title") == "我改的标题" and wbsnap["wb-1"]["readOnly"] is (not wb_send)
+      and (wb_send or "桌面版" in (wbsnap["wb-1"].get("readOnlyReason") or "")) and (wbsnap["wb-1"].get("transcriptPath") or "").endswith("wb-1.jsonl")
       and wbsnap["wb-1"]["entrypoint"] == "workbuddy-desktop", str(wbsnap)[:500])
 wbitems = [i for n, line in enumerate(open(wbsnap["wb-1"]["transcriptPath"])) for i in wb.normalize(n, json.loads(line))]
 check("WorkBuddy：用户的话去掉带属性的系统提示块、只留 <user_query> 里的", [(i["t"], i.get("text")) for i in wbitems]
@@ -1775,6 +1778,7 @@ wb.desktop_running = lambda: False
 check("WorkBuddy 没开着：桌面版任务不列（进历史）", not [s for s in W.AgentPlugins([], external=[wb], off=()).sessions()
                                                     if s["sessionId"].startswith("wb-")])
 del os.environ["WORKBUDDY_HOME"]
+W.HOME = real_home
 
 print("\n== ZCode 插件（plugins/zcode：~/.zcode/cli/db/db.sqlite，只读；单独下发）")
 ZHOME = os.path.join(ROOT, "zcode")

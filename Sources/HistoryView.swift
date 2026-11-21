@@ -183,7 +183,7 @@ struct HistoryView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .tarsGlass(cornerRadius: 12)
-            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
             if !model.sessions.isEmpty || isFiltering { filterRows }
             if let results = model.results {
                 searchList(results)
@@ -211,14 +211,11 @@ struct HistoryView: View {
             }
         }
         .animation(.skeletonFade, value: model.loaded)   // 读回来时骨架淡出、内容淡入
-        .navigationTitle("历史会话")
-        .navigationSubtitle(model.results.map { L("找到 %lld 个会话", count: filtered($0).count) }
-                            ?? (model.loaded ? L("%lld 个会话", count: model.sessions.count) : L("正在读取…")))
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.query = ""; model.load() } label: { Label("刷新", systemImage: "arrow.clockwise") }
-            }
-        }
+        .modifier(PageChrome(title: L("历史会话"),
+                             subtitle: model.results.map { L("找到 %lld 个会话", count: filtered($0).count) }
+                                 ?? (model.loaded ? L("%lld 个会话", count: model.sessions.count) : L("正在读取…"))) {
+            Button { model.query = ""; model.load() } label: { Label("刷新", systemImage: "arrow.clockwise") }.help(L("刷新"))
+        })
         // 切过来、来源连上 / 断开时重新拉（不定时拉：列表一变会回到顶上，翻着看时别打扰）
         .liveReload { model.setProject(projectFilter, fetch: false); model.load() }
         .onChange(of: projectFilter) { _, name in model.setProject(name) }
@@ -305,7 +302,7 @@ struct HistoryView: View {
         let bySource = sourceNames.count > 1 || activeSource != nil
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                FilterBar(bleed: 20, trailingBleed: 0) {
+                FilterBar(bleed: 16, trailingBleed: 0) {
                     ForEach(Self.statusOptions, id: \.0) { option in
                         FilterChip(title: option.1, count: base.filter { matches($0, option.0) }.count, dot: option.2,
                                    selected: statusFilter == option.0) {
@@ -317,13 +314,13 @@ struct HistoryView: View {
             }
             // 不止一台设备、不止一个项目时才有（筛着的时候也留着，好点回全部）
             if bySource {
-                ScopeBar(symbol: "desktopcomputer", allTitle: L("全部设备"), options: sourceOptions(all), selection: $sourceFilter, bleed: 20)
+                ScopeBar(symbol: "desktopcomputer", allTitle: L("全部设备"), options: sourceOptions(all), selection: $sourceFilter, bleed: 16)
             }
             if projects.count > 1 || !projectFilter.isEmpty {
-                ScopeBar(symbol: "folder", allTitle: L("全部项目"), options: projects, selection: $projectFilter, bleed: 20)
+                ScopeBar(symbol: "folder", allTitle: L("全部项目"), options: projects, selection: $projectFilter, bleed: 16)
             }
         }
-        .padding(.horizontal, 20).padding(.bottom, 6)
+        .padding(.horizontal, 16).padding(.bottom, 6)
     }
 
     /// 「显示方式」：分组放在一个菜单里，按钮上写着现在怎么分

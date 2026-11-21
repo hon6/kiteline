@@ -23,11 +23,8 @@ extension View {
     /// 玻璃按钮（prominent = 主操作，带强调色）；字跟着「设置 → 外观」走（见 LookButtonStyle）
     @ViewBuilder
     func tarsButton(prominent: Bool = false) -> some View {
-        if #available(macOS 26.0, *) {
-            if prominent { self.buttonStyle(LookButtonStyle(base: .glassProminent)) } else { self.buttonStyle(LookButtonStyle(base: .glass)) }
-        } else {
-            if prominent { self.buttonStyle(LookButtonStyle(base: .borderedProminent)) } else { self.buttonStyle(LookButtonStyle(base: .bordered)) }
-        }
+        // 照按钮样式规范（KiteButtonStyle）：原来是系统玻璃按钮，设置里套了主题色后普通按钮也整个是橙的（11-21 自测：关于、手机访问、来源页一排全橙）
+        self.buttonStyle(KiteButtonStyle(prominent: prominent))
     }
 
     /// 卡片：玻璃之上的一层内容容器

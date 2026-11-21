@@ -99,10 +99,10 @@ struct NewSessionDraftView: View {
             .frame(maxWidth: 560)
             .padding(.horizontal, 24)
             Spacer(minLength: 20)
+            // 输入框的边距同会话页的输入区（四边 8），从新会话标签换成会话时输入框不跳（11-21 反馈：会话页边距要一致；原来左右 24、下 18）
             composer
                 .frame(maxWidth: 760)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 18)
+                .padding(8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Look.shared.scheme?.editorColor ?? Color(nsColor: .windowBackgroundColor))
@@ -174,12 +174,7 @@ struct NewSessionDraftView: View {
 
     private struct ChipStyle: ViewModifier {
         func body(content: Content) -> some View {
-            content
-                .font(.app(size: 12, weight: .medium))
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(Color.primary.opacity(0.07), in: Capsule())
-                .contentShape(Capsule())
+            content.kiteLook()
         }
     }
 

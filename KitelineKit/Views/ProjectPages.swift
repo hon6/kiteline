@@ -13,7 +13,11 @@ struct ProjectDetailView: View {
     @State private var pastError: String?
     @State private var showNew = false
 
-    private var lives: [SessionInfo] { model.sessions.filter { $0.sourceId == project.sourceId && $0.cwd == project.cwd } }
+    /// 这个项目正在跑的会话，最近有动静的在上（行上显示的就是这个时间；同 Mac 项目栏 recentFirst）
+    private var lives: [SessionInfo] {
+        model.sessions.filter { $0.sourceId == project.sourceId && $0.cwd == project.cwd }
+            .sorted { ($0.updatedAt ?? 0) != ($1.updatedAt ?? 0) ? ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) : $0.key < $1.key }
+    }
     private var key: String? { lives.first?.key ?? project.sessionKey }
 
     var body: some View {
@@ -513,7 +517,7 @@ struct FilesView: View {
                     }
                 } header: {
                     // 当前路径当组头（单独一张卡片只放一个目录名太空）；路径深了左右滑
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    KiteHScroll {
                         HStack(spacing: 4) {
                             crumb((list.root as NSString).lastPathComponent.isEmpty ? L("项目") : (list.root as NSString).lastPathComponent, target: "")
                             let parts = list.path.split(separator: "/").map(String.init)
@@ -790,7 +794,7 @@ struct NewTaskView: View {
                     adopt(path, source: source)
                 }
             }
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.panelToolbarButton() } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.panelToolbarButton() }.panelBare() }
         }
         .task {
             if let preset { picked = preset }
@@ -1113,7 +1117,7 @@ struct ComposeTask: View {
                             }
                         }
                         if !attachments.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
+                            KiteHScroll {
                                 HStack(spacing: 8) {
                                     ForEach(attachments) { item in
                                         if let image = PlatformImage(data: item.preview) {

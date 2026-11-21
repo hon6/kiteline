@@ -15,6 +15,8 @@ APP="$DIST/$APP_NAME.app"
 CACHE="$ROOT/.build-cache"
 # 架构：平时只编 Apple 芯片（本机自用）；官网下载版（release.sh）传 ARCHS="arm64 x86_64" 编通用版，Intel Mac 也能装
 ARCHS="${ARCHS:-arm64}"
+# FAST=1：只为看效果的测试包，不做优化、并行编译，快好几倍（正式版 / 官网下载版不要用）
+OPT="-O"; [ "${FAST:-}" = 1 ] && OPT="-Onone -j 10"
 rust_triple() { if [ "$1" = x86_64 ]; then echo x86_64-apple-darwin; else echo aarch64-apple-darwin; fi; }
 
 # 装了 Xcode 但还没同意许可协议时，xcrun 会拒绝工作；有命令行工具就先用它编译
@@ -68,7 +70,7 @@ for arch in $ARCHS; do
   if [ ! -f "$ST/$arch/libSwiftTerm.a" ]; then
     STTMP="$ST/$arch.tmp-$$"
     rm -rf "$STTMP"; mkdir -p "$STTMP"
-    swiftc -O -parse-as-library -swift-version 5 -module-name SwiftTerm -target "$arch-apple-macosx14.0" \
+    swiftc $OPT -parse-as-library -swift-version 5 -module-name SwiftTerm -target "$arch-apple-macosx14.0" \
       -emit-library -static -emit-module -emit-module-path "$STTMP/SwiftTerm.swiftmodule" -o "$STTMP/libSwiftTerm.a" \
       $(find "$ROOT/vendor/SwiftTerm/Sources/SwiftTerm" -name '*.swift' | sort)
     rm -rf "$ST/$arch"; mv "$STTMP" "$ST/$arch"
@@ -90,7 +92,7 @@ KIT_SOURCES="$KIT_SOURCES $ROOT/KitelineKit/Shared/PaperKite.swift $ROOT/Kitelin
 for arch in $ARCHS; do
   mkdir -p "$KIT/$arch"
   swiftc \
-    -O \
+    $OPT \
     -parse-as-library \
     -swift-version 5 \
     -module-name KitelineKit \
@@ -110,7 +112,7 @@ for arch in $ARCHS; do
   P2P_FLAGS=()
   [ -n "$HAS_P2P" ] && P2P_FLAGS=(-I "$ROOT/p2p/include" -L "$ROOT/p2p/target/$(rust_triple "$arch")/release")
   swiftc \
-    -O \
+    $OPT \
     -parse-as-library \
     -target "$arch-apple-macosx14.0" \
     ${P2P_FLAGS[@]+"${P2P_FLAGS[@]}"} \

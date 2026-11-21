@@ -967,12 +967,11 @@ struct GroupRecipientsChip: View {
                 HStack(spacing: 4) {
                     Image(systemName: picked.isEmpty ? "person.2" : "person").font(.app(size: 11, weight: .semibold))
                     Text(picked.isEmpty ? L("发给全部成员") : L("只发给 %@", picked.map { model.title(of: $0) }.joined(separator: L("、"))))
-                        .font(.ui(.caption)).lineLimit(1)
+                        .font(.chip).lineLimit(1)
                     Image(systemName: "chevron.down").font(.app(size: 9, weight: .semibold))
                 }
                 .foregroundStyle(picked.isEmpty ? Color.primary.opacity(0.75) : Theme.claude)
-                .padding(.horizontal, 9).frame(height: height)
-                .background(Theme.field, in: Capsule())
+                .chipFace(height: height)
                 .contentShape(Capsule())
             }
             #if os(macOS)

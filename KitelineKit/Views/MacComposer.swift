@@ -73,8 +73,12 @@ struct MacComposer: View {
                     }
                     .buttonStyle(PressableStyle())
                     .disabled(!enabled)
-                } else {
-                    CircleGlyph(kind: .plus) { picking = true }.foregroundStyle(MacPalette.text2).disabled(!enabled || !canAttach).help(L("发送图片"))
+                } else if quickAvailable {
+                    // 原来这里是「+」发图（11-21 反馈：几乎没用过，电脑上都是复制粘贴），换成展开 / 收起常用语（原来在下面那排最右）
+                    CircleGlyph(kind: quickShown ? .down : .up) { quickShown.toggle() }
+                        .foregroundStyle(quickShown ? Theme.claude : MacPalette.text2)
+                        .help(quickShown ? L("收起常用语") : L("常用语"))
+                        .accessibilityLabel(quickShown ? L("收起常用语") : L("常用语"))
                 }
             }
             .padding(.trailing, -Bar.iconInset)   // 最右边的圆圈和下面那排右边对齐
@@ -82,7 +86,7 @@ struct MacComposer: View {
         }
         .animation(.snappy(duration: 0.2), value: quickShown)
         .frame(maxWidth: 832)
-        .padding(.horizontal, 24).padding(.top, Bar.spacing).padding(.bottom, Bar.edge)
+        .padding(.horizontal, Bar.spacing).padding(.bottom, Bar.spacing)   // 左右下都是 8（11-21）；上面不再留：输入区（deck）上面已经留了 8、和上面的目标 / 进展条之间也是 8，原来叠成 16（11-21 反馈：这里间距大，用统一间距）
         .frame(maxWidth: .infinity)
         // 点开一个会话就能直接打字（分屏时只有当前块抢输入焦点）
         .onAppear { if pane?.isFocused ?? true { focusToken += 1 } }
@@ -106,31 +110,25 @@ struct MacComposer: View {
 
     /// 同手机：权限模式、模型、上下文……横着一排（窄的分屏块里横着滚）；最右边「⌃」展开 / 收起常用语
     private var chipRow: some View {
-        HStack(spacing: Bar.spacing) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                if let session, session.canReply {
-                    SessionChips(key: key, session: session, chat: chat, onMode: onMode, onModel: onModel,
-                                 onCompact: onCompact, onTodos: onTodos, onAgents: onAgents)
-                        .padding(.top, Bar.badgeRoom)
-                } else if let group {
-                    GroupRecipientsChip(target: group).padding(.top, Bar.badgeRoom)
+        HStack(alignment: .top, spacing: Bar.spacing) {
+            if quickShown, let session, session.canReply {
+                // 点开了常用语：这排按钮也放开，放不下的折到第二行（11-21），不用横着滚
+                SessionChips(key: key, session: session, chat: chat, onMode: onMode, onModel: onModel,
+                             onCompact: onCompact, onTodos: onTodos, onAgents: onAgents, wrap: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                KiteHScroll {
+                    if let session, session.canReply {
+                        SessionChips(key: key, session: session, chat: chat, onMode: onMode, onModel: onModel,
+                                     onCompact: onCompact, onTodos: onTodos, onAgents: onAgents)
+                            .padding(.top, Bar.badgeRoom)
+                    } else if let group {
+                        GroupRecipientsChip(target: group).padding(.top, Bar.badgeRoom)
+                    }
                 }
-            }
-            .padding(.top, -Bar.badgeRoom)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)   // 同手机：别把一排的总宽往上报，撑宽整页
-            if quickAvailable {
-                Button { quickShown.toggle() } label: {
-                    Image(systemName: quickShown ? "chevron.down" : "chevron.up")
-                        .font(.app(size: 11, weight: .semibold))
-                        .foregroundStyle(quickShown ? Theme.claude : Color.primary.opacity(0.75))
-                        .frame(width: 28, height: 28)
-                        .background(quickShown ? Theme.tile : Theme.field, in: Circle())
-                        .contentShape(Circle())
-                }
-                .buttonStyle(PressableStyle())
-                .help(quickShown ? L("收起常用语") : L("常用语"))
-                .accessibilityLabel(quickShown ? L("收起常用语") : L("常用语"))
+                .padding(.top, -Bar.badgeRoom)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)   // 同手机：别把一排的总宽往上报，撑宽整页
             }
         }
     }
@@ -218,7 +216,7 @@ struct MacComposer: View {
 
 /// 细线圆圈里一个方块（停止）或加号，28pt，和网页版的图标一样
 private struct CircleGlyph: View {
-    enum Kind { case stop, plus }
+    enum Kind { case stop, plus, up, down }
     let kind: Kind
     let action: () -> Void
 
@@ -235,6 +233,8 @@ private struct CircleGlyph: View {
                     }
                     .stroke(style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
                     .frame(width: 30, height: 30)
+                case .up, .down:
+                    Image(systemName: kind == .up ? "chevron.up" : "chevron.down").font(.system(size: 12, weight: .semibold))
                 }
             }
             .frame(width: Bar.iconWidth, height: 38)
@@ -255,17 +255,14 @@ private struct QuickChip: View {
     var body: some View {
         Group {
             if let text {
-                Text(text).font(.ui(.subheadline)).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary)
+                Text(text).lineLimit(1).truncationMode(.tail)
             } else if let symbol {
                 Image(systemName: symbol).font(.app(size: 12)).foregroundStyle(MacPalette.text3)
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 30)   // 有字的、只有铅笔的一样高
+        .kiteLook()   // 同输入框下面那排小按钮：有字的、只有铅笔的一样高
         .frame(maxWidth: 360)
-        .background(Theme.field, in: Capsule())
-        .overlay(Capsule().fill(Color.primary.opacity(hovering ? 0.06 : 0)))
-        .contentShape(Capsule())
+        .overlay(RoundedRectangle(cornerRadius: KiteMetric.radius, style: .continuous).fill(Color.primary.opacity(hovering ? 0.06 : 0)))
         .onHover { hovering = $0 }
         .onTapGesture(perform: action)
         .onLongPressGesture(minimumDuration: 0.48) { longPress?() }

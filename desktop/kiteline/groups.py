@@ -632,16 +632,6 @@ class Groups:
 
     # MARK: 外面来的事
 
-    def steward_group(self, keys, topic, steward):
-        """总管模式：总管用 steward group 拉群（总管 + 几个会话），说明作为总管的第一条群消息发给大家（见 steward.py）。
-        同样这几个成员的群已经有了就接着用"""
-        wanted = set(keys)
-        with self._lock:
-            gid = next((g["id"] for g in self._groups if {m["key"] for m in g["members"]} == wanted), None)
-        if gid is None:
-            gid = self._create(keys, "")["id"]
-        self.agent_said(steward, {"group": gid, "text": topic})
-
     def note_hello(self, source_id, event):
         command = event.get("selfCommand")
         if command:

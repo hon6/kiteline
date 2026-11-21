@@ -436,7 +436,7 @@ struct BatchRestartSheet: View {
             } label: {
                 Text(L("重启所选（%d）", picked.count)).font(.ui(.body).weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent).tint(Theme.claude)
+            .kiteButton(prominent: true)
             .disabled(picked.isEmpty)
             .padding(16)
         }

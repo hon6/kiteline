@@ -277,7 +277,7 @@ private struct DeckCard: ViewModifier {
             .overlay(RoundedRectangle(cornerRadius: Self.corner, style: .continuous).hairlineBorder(MacPalette.separator).allowsHitTesting(false))
             .shadow(color: .black.opacity(0.06), radius: 5, y: 2)
             .frame(maxWidth: 832)
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Bar.spacing)   // 同输入框的左右边距（11-21 反馈：间距一致）
             .frame(maxWidth: .infinity)
             #else
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
@@ -306,12 +306,16 @@ struct GoalChip: View {
         Button { model.chat(key).goalSheet = true } label: {
             HStack(spacing: 4) {
                 Image(systemName: GoalText.symbol(goal?.state ?? "active")).font(.app(size: 11, weight: .semibold))
-                Text(goal.map { GoalText.label($0.state) } ?? L("目标")).font(.ui(.caption)).lineLimit(1)
+                Text(goal.map { GoalText.label($0.state) } ?? L("目标")).font(.chip).lineLimit(1)
             }
             .fixedSize()   // 状态字比「目标」长：按内容定宽，别被挤成「目标进…」
             .foregroundStyle(goal.map { GoalText.tint($0.state) } ?? .primary.opacity(0.75))
+            #if os(macOS)
+            .kiteLook()
+            #else
             .padding(.horizontal, 9).frame(height: height)
             .background(goal.map { GoalText.tint($0.state).opacity(0.12) } ?? Theme.field, in: Capsule())
+            #endif
         }
         .buttonStyle(PressableStyle())
         .help(L("设定目标：%@ 围绕目标持续工作，确认达成才停", session.speaker))

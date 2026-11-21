@@ -431,6 +431,8 @@ enum PastSessions {
         var errors: [String] = []
         var truncated = false
         let group = DispatchGroup()
+        // 指定了电脑、它却还没连上（电脑端刚启动）：算出错，不当成「没有会话」（11-21：项目栏「最近的会话」被空结果冲掉）
+        if let sourceId, !state.liveSources.contains(where: { $0.id == sourceId }) { errors.append("\(sourceId)：未连接") }
         for connection in state.liveSources where sourceId == nil || connection.id == sourceId {
             group.enter()
             connection.request(request, timeout: timeout) { result in

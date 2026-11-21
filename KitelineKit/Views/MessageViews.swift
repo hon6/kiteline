@@ -18,8 +18,8 @@ struct MessageRow<Content: View>: View {
     @State private var copied = false
 
     #if os(macOS)
-    // 照网页版 Mac 样式：头像 30，两边留 24，我的气泡最宽约七成；头像和气泡隔 12
-    private let avatarSize: CGFloat = 30, gap: CGFloat = 12, edge: CGFloat = 24, meRoom: CGFloat = 200, meRatio: CGFloat = 0.23
+    // 头像 30，两边留 8（同输入框、上面那几条提示条的左右边距，11-21 反馈：左右边距太大、间距要一致；原来照网页版留 24），我的气泡最宽约七成
+    private let avatarSize: CGFloat = 30, gap: CGFloat = 12, edge: CGFloat = 8, meRoom: CGFloat = 200, meRatio: CGFloat = 0.23
     // 每条上下各 10（两条之间 20，下面的时间和自己那条只隔 6，看得出归属）；换人说话时上面留 20，合起来 30
     private let rowGap: CGFloat = 10, turnGap: CGFloat = 20
     #else
@@ -396,8 +396,8 @@ struct SelectTextSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("全部复制") { Clipboard.copy(text); dismiss() }.panelToolbarButton() }
-                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton() }
+                ToolbarItem(placement: .cancellationAction) { Button("全部复制") { Clipboard.copy(text); dismiss() }.panelToolbarButton() }.panelBare()
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton() }.panelBare()
             }
         }
     }

@@ -3,6 +3,12 @@ import SwiftUI
 /// 源代码管理（同 VS Code 左边那一栏）：当前分支和同步、进行中的合并 / 变基、提交信息、冲突 / 暂存 / 未暂存的改动。
 /// 宽屏是 IDE 的侧栏，手机是一页；点改动看对比、点文件打开都交给外面（宽屏开标签，手机推一页）
 struct SourceControlPanel: View {
+    /// 提交信息框的字号、圆角：Mac 照侧栏规范（SideMetric 只在 Mac 上有），手机照常
+    #if os(macOS)
+    static let fieldFont: CGFloat = SideMetric.Text.body, fieldRadius: CGFloat = SideMetric.radius
+    #else
+    static let fieldFont: CGFloat = 15, fieldRadius: CGFloat = 8
+    #endif
     @Environment(AppModel.self) private var model
     @Bindable var store: RepoStore
     var openDiff: (RepoChange, String) -> Void
@@ -40,7 +46,7 @@ struct SourceControlPanel: View {
             Button("初始化仓库") {
                 Task { await store.perform("init", label: L("正在初始化"), done: L("已初始化 Git 仓库")) }
             }
-            .buttonStyle(.borderedProminent)
+            .kiteButton(prominent: true)
         }
     }
 
@@ -138,16 +144,16 @@ struct SourceControlPanel: View {
                 .foregroundStyle(o.conflicts.isEmpty ? Theme.added : .orange)
             HStack(spacing: 8) {
                 Button("继续") { Task { await store.perform("continue", label: L("正在继续"), done: L("已完成")) } }
-                    .buttonStyle(.borderedProminent).disabled(!o.conflicts.isEmpty)
+                    .kiteButton(prominent: true).disabled(!o.conflicts.isEmpty)
                 if state != "merge" {
-                    Button("跳过此提交") { Task { await store.perform("skip", label: L("正在跳过")) } }.buttonStyle(.bordered)
+                    Button("跳过此提交") { Task { await store.perform("skip", label: L("正在跳过")) } }.kiteButton()
                 }
                 Button("中止", role: .destructive) {
                     ask = CodeAsk(message: L("放弃这次操作？仓库会回到开始之前的状态。"), confirm: L("中止"), destructive: true) {
                         Task { await store.perform("abort", label: L("正在放弃"), done: L("已放弃")) }
                     }
                 }
-                .buttonStyle(.bordered)
+                .kiteButton()
             }
             .controlSize(.small)
         }
@@ -160,27 +166,30 @@ struct SourceControlPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField(L("提交信息（在「%@」上提交）", o.branch ?? "HEAD"), text: $message, axis: .vertical)
                 .lineLimit(2...8)
-                .font(.ui(.body))
+                .font(.app(size: Self.fieldFont))
                 .textFieldStyle(.plain)
+                .focusEffectDisabled()   // 去掉系统自带的那圈焦点框（它比下面自己画的边框大一圈，看起来像两层边）
+                #if os(macOS)
+                .scrollContentBackground(.hidden)   // 多行输入框自己带一块更深的底，会在我们的底里再套出一个框
+                #endif
                 .focused($editing)
-                .padding(8)
-                .background(Theme.field, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(editing ? Theme.claude.opacity(0.6) : Color.primary.opacity(0.12), lineWidth: 1))
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous).strokeBorder(editing ? Theme.claude.opacity(0.6) : Color.primary.opacity(0.12), lineWidth: 1))
                 .onSubmit { commit() }
             #if os(iOS)
             HoldToDictate { text in message = message.isEmpty ? text : message + (message.hasSuffix("\n") ? "" : " ") + text }
             #endif
-            HStack(spacing: 8) {
+            HStack(spacing: KiteMetric.gap) {
                 Button {
                     commit()
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: KiteMetric.gap) {
                         if store.busy == L("正在提交") { ProgressView().controlSize(.small) } else { Image(systemName: "checkmark") }
                         Text(o.staged.isEmpty && !o.changes.isEmpty ? L("提交全部") : L("提交改动"))
                     }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .kiteButton(prominent: true, expand: true)
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(store.busy != nil || (o.staged.isEmpty && o.changes.isEmpty) || o.state == "rebase")
                 Menu {
@@ -195,13 +204,18 @@ struct SourceControlPanel: View {
                         } label: { Label("让 Claude 写提交信息并提交", systemImage: "sparkles") }
                     }
                 } label: {
-                    Image(systemName: "chevron.down").frame(width: 16)
+                    Image(systemName: "chevron.down").frame(width: 12)
                 }
+                .menuStyle(.button)
                 .menuIndicator(.hidden)
+                .kiteButton()
                 .fixedSize()
-                .buttonStyle(.bordered)
             }
+            #if os(macOS)
+            .controlSize(.small)   // 和上面拉取 / 推送那排同大（别比整个界面大一号）
+            #else
             .controlSize(.regular)
+            #endif
         }
         .padding(.vertical, 4)
     }
@@ -284,7 +298,7 @@ struct BranchSyncBar: View {
                 }
             }
             .controlSize(.small)
-            .buttonStyle(.bordered)
+            .kiteButton()
         }
         .padding(.vertical, 2)
     }
@@ -294,14 +308,16 @@ struct BranchSyncBar: View {
         let hasRemote = !o.remotes.isEmpty
         if hasRemote {
             Button { Task { await store.perform("pull", label: L("正在拉取"), done: L("已拉取")) } } label: {
-                Label(o.behind > 0 ? L("拉取 %@", "\(o.behind)") : L("拉取"), systemImage: "arrow.down")
+                KiteLabel(L("拉取"), badge: o.behind)
             }
+            .kiteButton()
             .help(L("拉取"))
             Button {
                 Task { await store.perform("push", label: L("正在推送"), done: o.upstream == nil ? L("已推送并关联远端分支") : L("已推送")) }
             } label: {
-                Label(o.ahead > 0 ? L("推送 %@", "\(o.ahead)") : (o.upstream == nil ? L("发布分支") : L("推送到远端")), systemImage: "arrow.up")
+                KiteLabel(o.upstream == nil && o.ahead == 0 ? L("发布分支") : L("推送"), badge: o.ahead)
             }
+            .kiteButton()
             .help(o.upstream == nil ? L("推送并关联远端分支") : L("推送到远端"))
         } else {
             Text("未配置远端仓库").font(.ui(.caption)).foregroundStyle(.secondary)
@@ -335,9 +351,11 @@ struct BranchSyncBar: View {
             Divider()
             Button { Task { await store.refresh() } } label: { Label("刷新", systemImage: "arrow.clockwise") }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(systemName: "ellipsis").frame(width: 12)
         }
+        .menuStyle(.button)
         .menuIndicator(.hidden)
+        .kiteButton()
         .fixedSize()
     }
 }

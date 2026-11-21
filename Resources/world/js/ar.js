@@ -7,13 +7,14 @@ import * as THREE from '../vendor/three.module.min.js';
 import { CSS3DRenderer } from '../vendor/addons/renderers/CSS3DRenderer.js';
 import { SessionPanel, BrowserTile, GroupLabel, PW, PH, projectOf, statusOf, esc } from './arpanel.js';
 import { setStrings, t } from './i18n.js';
+import { Backdrop, BACKDROPS } from './arbg.js';
 
 const GX = 30, GY = 28, GROUP_GAP = 96;     // 窗口之间、组之间的空隙（场景单位）
 const REST_SCALE = [0.74, 0.9];               // 平时窗口看起来是原尺寸的多少（字 14px → 10.4～12.6px）
 const HOVER_SCALE = 0.97;                     // 指着时放到多大（接近 1:1，字最清楚）
-const HOVER_W = 640, HOVER_H = 470;           // 指着时窗口本身放大到多大
+const HOVER_W = 640, HOVER_H = 500;           // 指着时窗口本身放大到多大
 const FOCUS_LIFT = 150;                       // 打开的窗口往前挪一点，和邻居分开
-const PING_EVERY = 3600;                      // 有消息的窗口隔多久抖一下（毫秒）
+const PING_EVERY = 3200;                      // 有消息的窗口隔多久抖一次（每次抖 1 秒，像 QQ 窗口抖动）
 
 const host = {
   connected: !!(window.webkit?.messageHandlers?.world || window.chrome?.webview),
@@ -38,6 +39,8 @@ class AR {
     this.layoutMode = 'arc';
     this.passthrough = false;
     this.follow = false;
+    this.fullscreen = false;
+    this.background = 'none';     // none 透明 / space / sky / sea / forest / aurora / video（宿主在下面放用户自己的视频或图片）       // 默认只铺在软件窗口那一块（宿主在 init / prefs 里告诉）
     this.mediaBase = ''; this.mediaSuffix = '';
     this.marks = {};
     this.visible = true;
@@ -66,9 +69,10 @@ class AR {
     this.renderer.domElement.className = 'ar-world';
     this.dummy = new THREE.Object3D();
 
+    this.backdrop = new Backdrop($('ar-bg'), this);
     this.bind();
     this.resize();
-    addEventListener('resize', () => { this.resize(); this.layout(); });
+    addEventListener('resize', () => { this.resize(); this.layout(); if (this.focused?.el.classList.contains('under')) this.postDetail(); });
     this.hint(true);
     this.clock();
     setInterval(() => this.clock(), 15000);
@@ -111,6 +115,10 @@ class AR {
       this.rectSig = '';
     }
     if (typeof p.follow === 'boolean') this.follow = p.follow;
+    if (typeof p.background === 'string') this.background = p.background;
+    // 穿透时要看得见桌面：背景先藏起来
+    this.backdrop.set(this.passthrough ? 'none' : this.background);
+    if (typeof p.fullscreen === 'boolean') { this.fullscreen = p.fullscreen; document.body.classList.toggle('windowed', !p.fullscreen); }
     this.hudButtons();
   }
 
@@ -120,6 +128,7 @@ class AR {
       case 'next': this.nextAttention(); break;
       case 'layout': this.cycleLayout(); break;
       case 'hint': this.hint(); break;
+      case 'unfocus': this.unfocus(); break;
     }
   }
 
@@ -127,7 +136,7 @@ class AR {
     $('ar-door').textContent = t('离开');
     this.hintHTML = [
       ['WASD', t('移动')], ['Q / E', t('升降')], [t('拖动空白处'), t('转向')], [t('滚轮'), t('前后')], [t('悬停'), t('放大')],
-      [t('点击'), t('打开')], ['Tab', t('下一个待处理')], ['Esc', t('返回')],
+      [t('点击'), t('打开')], ['Tab', t('下一个待处理')], ['B', t('换背景')], ['M', t('全屏')], ['Esc', t('返回')],
     ].map(([k, v]) => `<span><kbd>${esc(k)}</kbd>${esc(v)}</span>`).join('');
     $('ar-hint').innerHTML = this.hintHTML;
     this.hudButtons();
@@ -177,7 +186,7 @@ class AR {
       if (s) p.setSession(s);
       if (p.fresh) { p.fresh = false; p.render?.(); }
     }
-    if (changed) this.layout();
+    if (changed) this.layout(); else this.applyDepth();
     if (first) this.backfill();
     this.watchBrowsers();
     this.stats();
@@ -337,6 +346,7 @@ class AR {
         const c = Math.floor(i / R), r = i % R;
         const u = spans[gi] + c * (PW + GX) + PW / 2;
         const was = p.rest;
+        p.slot = { u, y: rowY(r, R) };
         p.rest = place({}, u, rowY(r, R));
         if (!was) {
           // 新窗口从远处、下方飘进来
@@ -359,6 +369,26 @@ class AR {
       this.scene.remove(label.obj); label.el.remove(); this.labels.delete(g);
     }
     this.D = Dr;
+    this.geo = { Ra, k, Dr };
+    this.applyDepth();
+    this.dirty = true;
+  }
+
+  /// 深度层次：最近有动静的会话在最前面，越早的越往里退（同一个方向上往后推，看起来更小、更淡；各占各的位置，不互相挡）。
+  /// 会话一有新动静就慢慢飘到前面来（11-21 用户要的）
+  applyDepth() {
+    if (!this.geo) return;
+    const { Ra, k, Dr } = this.geo;
+    const when = (p) => this.sessions.get(p.key)?.updatedAt || 0;
+    const list = [...this.panels.values()].filter(p => p.slot).sort((a, b) => when(b) - when(a));
+    const keys = [...new Set(list.map(p => p.key))];
+    const span = Math.min(1500, Dr * 0.85);
+    for (const p of list) {
+      const rank = keys.indexOf(p.key), f = keys.length > 1 ? rank / (keys.length - 1) : 0;
+      const R = Ra + f * span, beta = p.slot.u / Ra;
+      p.rest = { pos: new THREE.Vector3(R * Math.sin(beta), p.slot.y, k - R * Math.cos(beta)), quat: p.rest.quat };
+      p.el.style.setProperty('--fade', (f * 0.38).toFixed(3));
+    }
     this.dirty = true;
   }
 
@@ -388,41 +418,60 @@ class AR {
     this.cam.yaw = this.cur.yaw + wrapAngle(yaw - this.cur.yaw);
   }
 
+  /// 点了一个窗口（或 Tab、侧栏、边上的方向标）：镜头转过去看它，它飘到眼前、放大、停住，直接在里面打字（11-21 反馈：不要再飞到中间弹一个会话页）
   focus(p) {
     if (!p || !p.rest) return;
-    if (this.focused === p) return;
-    if (this.focused) this.unfocus(true, true);
-    else this.saved = { pos: this.cam.pos.clone(), yaw: this.cam.yaw, pitch: this.cam.pitch };
-    this.focused = p;
-    this.hovered = null;
-    document.body.classList.add('focusing');
-    for (const q of this.panels.values()) q.el.classList.toggle('dim', q !== p);
-    // 窗口展开成完整尺寸（离镜头正好 P 远，1:1 最清楚），往前挪一点和邻居分开，镜头运到它正前方
-    const fw = Math.round(Math.min(940, innerWidth * 0.62, Math.max(PW, innerWidth - 160)));
-    const fh = Math.round(Math.min(innerHeight * 0.84, 980));
-    p.setSize(fw, fh);
-    p.el.classList.add('focus');
-    p.el.classList.remove('hover');
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(p.rest.quat);
-    p.focusPos = p.rest.pos.clone().addScaledVector(normal, FOCUS_LIFT);
-    this.cam.pos.copy(p.focusPos).addScaledVector(normal, this.P);
-    this.lookAt(p.focusPos);
-    this.cam.yaw = this.cur.yaw + wrapAngle(this.cam.yaw - this.cur.yaw);
-    this.flyTo(3.6);
-    if (p instanceof SessionPanel) {
-      p.render();
-      p.seen();
-      if (!p.full) { p.full = true; this.loadHistory(p, 120); }
-      // 不自动把光标放进输入框：打开后照样能按 WASD 走开（点输入框才开始打字）
+    const ndc = p.rest.pos.clone().project(this.camera);
+    if (Math.abs(ndc.x) > .8 || Math.abs(ndc.y) > .8 || ndc.z > 1) { this.lookAt(p.rest.pos); this.flyTo(4); }
+    this.pin(p);
+  }
+
+  /// 选中一个窗口：保持悬停时那个放大的样子（没悬停着的先放大到那个样子），停住不动，光标进它自己的输入框直接打字
+  /// （11-21 反馈：悬停放大的状态下点击直接输入，不要换成别的样子）。Esc / 点空白 / 按 WASD 放开
+  pin(p) {
+    if (this.pinned !== p) {
+      this.pinned = null;
+      if (this.hovered !== p) this.setHover(p);
+      for (const q of this.panels.values()) q.el.classList.toggle('pinned', q === p);
+      this.pinned = p;
+      if (p instanceof SessionPanel) { p.seen(); if (!p.full) { p.full = true; this.loadHistory(p, 120); } }
+      this.watchBrowsers();
+      this.stats();
     }
-    this.watchBrowsers();
-    this.stats();
+    if (p instanceof SessionPanel && !p.input.disabled && document.activeElement !== p.input) p.input.focus({ preventScroll: true });
+  }
+
+  unpin() {
+    const p = this.pinned;
+    if (!p) return;
+    this.pinned = null;
+    p.el.classList.remove('pinned');
+    if (p instanceof SessionPanel) p.input.blur();
+    this.setHover(null);
+    this.post({ type: 'typing', on: false });
+  }
+
+  /// 点了对话里的图：铺满窗口看大图，点一下或 Esc 关
+  lightbox(src) {
+    const box = $('ar-lightbox');
+    box.querySelector('img').src = src;
+    box.hidden = false;
+  }
+
+  /// 打开的窗口在屏幕上的位置（镜头正对着它、1:1，所以就是屏幕正中那一块）
+  postDetail() {
+    const p = this.focused;
+    if (!p) return;
+    this.post({ type: 'detail', key: p.key, rect: [Math.round((innerWidth - p.w) / 2), Math.round((innerHeight - p.h) / 2), p.w, p.h] });
   }
 
   unfocus(stay = false, quiet = false) {
+    if (this.pinned) this.unpin();
     const p = this.focused;
     if (!p) return;
     this.focused = null;
+    clearTimeout(this.detailTimer);
+    if (p.el.classList.contains('under')) { p.el.classList.remove('under'); this.post({ type: 'detail', key: '' }); }
     p.el.classList.remove('focus');
     p.setSize(PW, PH);
     p.focusPos = null;
@@ -470,6 +519,7 @@ class AR {
       if (e.button === 2 || e.button === 1 || (e.button === 0 && !pn)) {
         // 左键拖空白处 = 抓着空间拖（内容跟着鼠标走）；按住右键 = 转头（鼠标往哪边，视线往哪边）
         this.look = { x: e.clientX, y: e.clientY, moved: 0, empty: !pn, id: e.pointerId, sign: e.button === 0 ? 1 : -1 };
+        if (this.focused?.el.classList.contains('under') && e.button !== 0) this.unfocus(true);
         stage.setPointerCapture?.(e.pointerId);
         document.body.classList.add('looking');
         this.setHover(null);
@@ -484,6 +534,7 @@ class AR {
         const dx = e.clientX - this.look.x, dy = e.clientY - this.look.y;
         this.look.x = e.clientX; this.look.y = e.clientY;
         this.look.moved += Math.abs(dx) + Math.abs(dy);
+        if (this.look.moved > 6 && this.focused?.el.classList.contains('under')) this.unfocus(true);
         const k = 0.0042 * (this.camera.fov / 48);
         this.cam.yaw += dx * k * this.look.sign;
         this.cam.pitch = clamp(this.cam.pitch + dy * k * this.look.sign, -1.15, 1.15);
@@ -500,13 +551,14 @@ class AR {
         stage.releasePointerCapture?.(this.look.id);
         this.look = null;
         document.body.classList.remove('looking');
+        if (click && this.pinned) this.unpin();
         if (click && this.focused) this.unfocus();
       } else if (this.press) {
         const moved = Math.abs(e.clientX - this.press.x) + Math.abs(e.clientY - this.press.y);
         const p = this.panels.get(this.press.id);
         this.press = null;
         const inControl = e.target.closest?.('button, textarea, input, a, .pn-opts');
-        if (p && moved < 6 && !inControl && p !== this.focused && !getSelection()?.toString()) this.focus(p);
+        if (p && moved < 6 && !inControl && p !== this.pinned && !getSelection()?.toString()) this.pin(p);
       }
     };
     stage.addEventListener('pointerup', end);
@@ -536,6 +588,8 @@ class AR {
       const typing = e.target.closest?.('textarea, input');
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (!$('ar-lightbox').hidden) { $('ar-lightbox').hidden = true; return; }
+        if (this.pinned) { this.unpin(); return; }
         if (this.focused) this.unfocus();
         else if (this.hovered) this.setHover(null);
         else this.askExit();
@@ -545,6 +599,7 @@ class AR {
       const k = e.key.toLowerCase();
       if ('wasdqe'.includes(k) && k.length === 1 || e.key.startsWith('Arrow') || e.key === 'Shift') {
         if (this.focused && 'wasdqe'.includes(k)) this.unfocus(true);
+        if (this.pinned && 'wasdqe'.includes(k)) this.unpin();
         this.keys.add(e.key.startsWith('Arrow') ? e.key : k);
         this.flying = 0;
         e.preventDefault();
@@ -555,8 +610,11 @@ class AR {
       if (k === 'l') { this.cycleLayout(); return; }
       if (k === 'f') { this.follow = !this.follow; this.post({ type: 'prefs', follow: this.follow }); this.toast(this.follow ? t('跟随新消息：已打开') : t('跟随新消息：已关闭')); this.hudButtons(); return; }
       if (k === 'p') { this.post({ type: 'prefs', passthrough: !this.passthrough }); return; }
+      if (k === 'b') { const list = BACKDROPS, i = list.indexOf(this.background); this.post({ type: 'prefs', background: list[(i + 1) % list.length] }); return; }
+      if (k === 'm') { this.post({ type: 'prefs', fullscreen: !this.fullscreen }); return; }
       if (k === 'h' || e.key === '?') { this.hint(); return; }
       // 回车：打开着的窗口 → 光标进输入框；指着的窗口 → 打开它
+      if (e.key === 'Enter' && this.pinned?.input && !this.pinned.input.disabled) { e.preventDefault(); this.pinned.input.focus({ preventScroll: true }); return; }
       if (e.key === 'Enter' && this.focused?.input && !this.focused.input.disabled) { e.preventDefault(); this.focused.input.focus({ preventScroll: true }); return; }
       if (e.key === 'Enter' && this.hovered) { this.focus(this.hovered); }
     });
@@ -566,11 +624,14 @@ class AR {
     });
     addEventListener('blur', () => this.keys.clear());
     $('ar-door').addEventListener('click', () => this.post({ type: 'exit' }));
+    $('ar-lightbox').addEventListener('click', () => { $('ar-lightbox').hidden = true; });
     $('ar-tools').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-cmd]');
       if (!b) return;
       const cmd = b.dataset.cmd;
       if (cmd === 'pass') this.post({ type: 'prefs', passthrough: !this.passthrough });
+      else if (cmd === 'bg') { const list = BACKDROPS, i = list.indexOf(this.background); this.post({ type: 'prefs', background: list[(i + 1) % list.length] }); }
+      else if (cmd === 'full') this.post({ type: 'prefs', fullscreen: !this.fullscreen });
       else if (cmd === 'follow') { this.follow = !this.follow; this.post({ type: 'prefs', follow: this.follow }); this.hudButtons(); }
       else this.command(cmd);
     });
@@ -588,6 +649,7 @@ class AR {
   }
 
   wantHover(p) {
+    if (this.pinned) return;
     if (this.focused || this.look) p = null;
     if (p === this.hoverWant) return;
     this.hoverWant = p;
@@ -598,12 +660,13 @@ class AR {
 
   setHover(p) {
     if (p === this.hovered) return;
+    if (this.pinned && p !== this.pinned) return;   // 停住的窗口不因为鼠标移开、拖动等缩回去，只有 unpin 能放开
     if (this.hovered) { this.hovered.el.classList.remove('hover'); if (this.hovered !== this.focused) this.hovered.setSize(PW, PH); }
     this.hovered = p;
     if (p) {
       p.el.classList.add('hover');
       // 窗口本身也放大（多显示几行），再飞到接近 1:1 的位置：看起来大一圈，字仍然清楚（只靠拉近会糊）
-      p.setSize(HOVER_W, HOVER_H);
+      p.setSize(HOVER_W, Math.min(HOVER_H, Math.round(innerHeight * 0.72)));
       if (p instanceof SessionPanel) { p.render(); clearTimeout(this.seenTimer); this.seenTimer = setTimeout(() => { if (this.hovered === p) { p.seen(); this.stats(); } }, 1200); }
       this.peeked = null;
     }
@@ -661,9 +724,9 @@ class AR {
       this.lastInput = now;
     }
 
-    // 鼠标停在屏幕左右边缘（中间那段）：慢慢转过去，像转头
+    // 鼠标停在屏幕左右边缘（中间那段）：慢慢转过去，像转头。只在全屏时：窗口模式下边缘是拖着改窗口大小的地方
     const m = this.mouse;
-    const edge = m.inside && !this.look && !this.focused && !this.hovered && m.y > innerHeight * 0.22 && m.y < innerHeight * 0.8
+    const edge = this.fullscreen && m.inside && !this.look && !this.focused && !this.hovered && m.y > innerHeight * 0.22 && m.y < innerHeight * 0.8
       ? (m.x < 8 ? 1 : m.x > innerWidth - 8 ? -1 : 0) : 0;
     if (edge) {
       this.edgeSince ||= now;
@@ -672,7 +735,8 @@ class AR {
     } else this.edgeSince = 0;
 
     // 视差：镜头朝鼠标那边略微偏一点（像头跟着眼睛转），指着窗口、打开着、拖动时不动
-    const calm = !this.look && !this.focused && !this.hovered && m.inside;
+    // 视差（镜头随鼠标微偏）关掉：鼠标一动就要重排所有窗口的变换，11-21 觉得卡
+    const calm = false;
     const py = calm ? -(m.x / innerWidth - 0.5) * 0.045 : 0;
     const pp = calm ? -(m.y / innerHeight - 0.5) * 0.03 : 0;
     this.para.yaw += (py - this.para.yaw) * damp(3, dt);
@@ -703,6 +767,7 @@ class AR {
       else if (p === this.hovered || p === this.peeked) {
         const eye = this.camera.position;
         const dir = p.rest.pos.clone().sub(eye);
+        // 停住的（点了 / 在打字）飘到视野正中，整块看得见；只是悬停的沿视线往前拉
         const dist = dir.length();
         const want = this.P / HOVER_SCALE;
         pos = dist > want ? eye.clone().addScaledVector(dir.normalize(), want) : p.rest.pos.clone().addScaledVector(dir.normalize(), -60);
@@ -730,7 +795,7 @@ class AR {
       this.lastPing = now;
       let i = 0;
       for (const p of this.panels.values()) {
-        if (p.attn && p !== this.focused && p !== this.hovered) setTimeout(() => p.ping(), (i++ % 6) * 140);
+        if (p.attn && p !== this.focused && p !== this.hovered) setTimeout(() => p.ping(), (i++ % 4) * 90);
       }
     }
     if (now - (this.hudAt || 0) > 400) this.hudDirty = true;   // 雷达上的闪点、穿透模式的范围也要慢慢刷
@@ -867,7 +932,9 @@ class AR {
       ['home', t('复位'), 'R'],
       ['layout', layoutName, 'L'],
       ['follow', t('跟随'), 'F', this.follow],
+      ['bg', ({ none: t('透明'), space: t('宇宙'), sky: t('天空'), sea: t('海面'), forest: t('森林'), aurora: t('极光'), video: t('视频') })[this.background] || t('背景'), 'B', this.background !== 'none'],
       ['pass', t('穿透'), 'P', this.passthrough],
+      ['full', this.fullscreen ? t('窗口') : t('全屏'), 'M', this.fullscreen],
       ['hint', t('操作'), 'H'],
     ].map(([cmd, label, key, on]) => `<button data-cmd="${cmd}" class="${on ? 'on' : ''}" title="${esc(label)}（${key}）"><span>${esc(label)}</span><kbd>${key}</kbd></button>`).join('');
   }

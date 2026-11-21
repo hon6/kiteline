@@ -4,7 +4,7 @@
 import { CSS3DObject } from '../vendor/addons/renderers/CSS3DRenderer.js';
 import { t } from './i18n.js';
 
-export const PW = 520, PH = 380;          // 平时的窗口尺寸（CSS 像素 = 场景单位）
+export const PW = 520, PH = 420;          // 平时的窗口尺寸（CSS 像素 = 场景单位）
 const REST_ITEMS = 26, FOCUS_ITEMS = 90;  // 平时 / 打开时最多画几条
 const KEEP_ITEMS = 160;
 
@@ -150,7 +150,8 @@ export class SessionPanel extends Base {
       <form class="pn-input">
         <textarea rows="1" placeholder=""></textarea>
         <button type="submit" class="pn-send" title="${esc(t('发送（回车）'))}">${ICON.send}</button>
-      </form>`;
+      </form>
+      <div class="pn-chips"><span class="ch-model"></span><span class="ch-ctx"></span></div>`;
     this.$ = (sel) => this.inner.querySelector(sel);
     this.body = this.$('.pn-body');
     this.msgs = this.$('.pn-msgs');
@@ -159,8 +160,16 @@ export class SessionPanel extends Base {
       this.pinned = this.body.scrollHeight - this.body.scrollTop - this.body.clientHeight < 40;
     }, { passive: true });
     this.$('.pn-open').addEventListener('click', (e) => { e.stopPropagation(); ar.post({ type: 'open', key }); });
-    this.$('.pn-close').addEventListener('click', (e) => { e.stopPropagation(); ar.unfocus(); });
+    this.$('.pn-close').addEventListener('click', (e) => { e.stopPropagation(); ar.unpin(); });
     const form = this.$('.pn-input'), area = form.querySelector('textarea');
+    // 点进输入框就能打字：窗口飘到眼前、放大、停住（不再飞到中间另开一个会话页）；宿主那边别再把字母当 WASD
+    area.addEventListener('focus', () => { if (ar.pinned !== this) ar.pin(this); ar.post({ type: 'typing', on: true }); });
+    area.addEventListener('blur', () => ar.post({ type: 'typing', on: false }));
+    // 点图看大图
+    this.msgs.addEventListener('click', (e) => {
+      const img = e.target.closest('img');
+      if (img) { e.stopPropagation(); ar.lightbox(img.src); }
+    });
     const grow = () => { area.style.height = 'auto'; area.style.height = Math.min(140, area.scrollHeight) + 'px'; };
     area.addEventListener('input', grow);
     area.addEventListener('keydown', (e) => {
@@ -212,7 +221,16 @@ export class SessionPanel extends Base {
       this.optSig = sig;
       this.$('.pn-opts').innerHTML = opts.slice(0, 4).map(o => `<button data-k="${esc(o.key)}" class="${o.style === 'destructive' ? 'no' : o.style === 'default' || o.style === 'primary' ? 'yes' : ''}">${esc(o.label)}</button>`).join('');
     }
-    this.input.placeholder = this.el.classList.contains('ro') ? t('这个会话只能看，不能回复') : t('对「%@」说', s.title || s.name || '');
+    const agent = s.agent === 'codex' ? 'Codex' : s.agent && s.agent !== 'claude-code' ? s.agent : 'Claude';
+    this.input.placeholder = this.el.classList.contains('ro') ? t('这个会话只能看，不能回复') : t('发消息给 %@', agent);
+    // 输入框下面一排：模型、上下文用了多少（同会话页底下那排）
+    const u = s.usage || {};
+    const model = String(u.model || '').replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/^\w/, (c) => c.toUpperCase());
+    this.$('.ch-model').textContent = model;
+    this.$('.ch-model').hidden = !model;
+    const ctx = u.context && u.window ? Math.round(u.context / u.window * 100) : null;
+    this.$('.ch-ctx').textContent = ctx === null ? '' : ctx + '%';
+    this.$('.ch-ctx').hidden = ctx === null;
     this.input.disabled = this.el.classList.contains('ro');
     // 新消息：最后一次有动静晚于最后一次看过（任何一端），且它停下来等你了（不是在工作中途、也不是别的会话来信引起的）
     const viewed = Math.max(s.viewedAt || 0, this.seenAt || 0);
@@ -246,6 +264,11 @@ export class SessionPanel extends Base {
     let changed = false;
     for (const it of items || []) {
       if (!it || !it.t) continue;
+      // 真的「你说的话」回来了：发送时先放的那条占位（虚线框）去掉，不然同一句显示两遍
+      if (it.t === 'user' && !String(it.id || '').startsWith('local-')) {
+        const text = String(it.text || '').trim();
+        for (const [id, old] of this.items) if (id.startsWith('local-') && String(old.text || '').trim() === text) this.items.delete(id);
+      }
       const id = it.id || `${it.t}:${it.ts}:${(it.text || '').slice(0, 20)}`;
       const was = this.items.get(id);
       this.items.set(id, was ? { ...was, ...it } : it);
@@ -261,28 +284,33 @@ export class SessionPanel extends Base {
   sorted() { return [...this.items.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0)); }
 
   render() {
-    const focus = this.el.classList.contains('focus');
-    const all = this.sorted().filter(it => it.t !== 'thinking' && it.t !== 'event' && !(it.t === 'result' && !(it.images || []).length));
-    const list = all.slice(-(focus ? FOCUS_ITEMS : REST_ITEMS));
+    const big = this.el.classList.contains('focus') || this.el.classList.contains('hover');
+    const all = this.sorted().filter(it => it.t !== 'thinking' && it.t !== 'event' && !(it.t === 'result' && !(it.images || []).length)
+      && !(it.t === 'text' && !String(it.text || '').trim() && !(it.images || []).length));
+    const list = all.slice(-(big ? FOCUS_ITEMS : REST_ITEMS));
+    const results = new Map();
+    for (const it of this.items.values()) if (it.t === 'result' && it.toolId) results.set(it.toolId, it);
+    const time = (ts) => { if (!ts) return ''; const d = new Date(ts); return `<time>${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</time>`; };
     const html = [];
     let tools = [];
     const flushTools = () => {
       if (!tools.length) return;
-      const shown = tools.slice(-3);
-      html.push(`<div class="m t">${tools.length > 3 ? `<s>${esc(t('%@ 次调用', tools.length))}</s>` : ''}${shown.map(x => `<div><i>${esc(x.name)}</i><span>${esc(x.brief)}</span></div>`).join('')}</div>`);
+      const shown = tools.slice(-4);
+      html.push(`<div class="m t">${tools.length > 4 ? `<s>${esc(t('%@ 次调用', tools.length))}</s>` : ''}${shown.map(x =>
+        `<div class="${x.err ? 'err' : 'ok'}"><i></i><b>${esc(x.name)}</b><span>${esc(x.brief)}</span><em>›</em></div>`).join('')}</div>${time(tools[tools.length - 1].ts)}`);
       tools = [];
     };
     for (const it of list) {
       if (it.t === 'tool') {
         const brief = String(it.brief || '').replace(new RegExp('^' + String(it.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[:：]\\s*'), '');
-        tools.push({ name: it.name || t('工具'), brief: brief.slice(0, 120) });
+        tools.push({ name: it.name || t('工具'), brief: brief.slice(0, 140), ts: it.ts, err: results.get(it.toolId || it.id)?.isError });
         continue;
       }
       flushTools();
       const imgs = (it.images || []).filter(x => x && x.ref).slice(0, 4).map(x => `<img loading="lazy" src="${esc(this.ar.mediaUrl(this.key, x.ref))}">`).join('');
-      if (it.t === 'user') html.push(`<div class="m u${it.queued ? ' q' : ''}"><div>${esc(String(it.text || '').slice(0, 1200))}${imgs ? `<p class="im">${imgs}</p>` : ''}</div></div>`);
-      else if (it.t === 'text') html.push(`<div class="m a">${markdown(String(it.text || '').slice(0, focus ? 12000 : 3000))}</div>`);
-      else if (imgs) html.push(`<div class="m a"><p class="im">${imgs}</p></div>`);
+      if (it.t === 'user') html.push(`<div class="m u${it.queued ? ' q' : ''}"><div>${esc(String(it.text || '').slice(0, 1500))}${imgs ? `<p class="im">${imgs}</p>` : ''}</div></div>${time(it.ts).replace('<time>', '<time class="r">')}`);
+      else if (it.t === 'text') html.push(`<div class="m a">${markdown(String(it.text || '').slice(0, big ? 12000 : 3000))}</div>${time(it.ts)}`);
+      else if (imgs) html.push(`<div class="m a"><p class="im">${imgs}</p></div>${time(it.ts)}`);
     }
     flushTools();
     if (!html.length) html.push(`<div class="m e">${esc(this.loaded ? t('暂无消息') : t('正在载入…'))}</div>`);

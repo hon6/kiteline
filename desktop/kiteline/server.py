@@ -502,10 +502,6 @@ class MobileServer:
             if isinstance(result, tuple):
                 return thumb_reply(result[0], result[1], request, "favorite|%s" % request.query.get("ref", ""))
             return Response.json(result, status)
-        if path == "/api/steward" or path.startswith("/api/steward/"):
-            # 总管模式（实验性，见 steward.py）
-            status, result = self.app.steward.handle(method, path, request.json)
-            return Response.json(result, status)
         if path == "/api/groups" or path.startswith("/api/groups/"):
             # 会话群（见 groups.py）：群里的图给缩略图，文件原样
             status, result = self.app.groups.handle(method, path, request.json, request.query)

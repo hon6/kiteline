@@ -188,7 +188,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         tabs.tabStyle = .toolbar
         for tab in SettingsTab.allCases {
             // 每页一样宽：工具栏上 11 个标签都摆得下（窄了后几个会收进「»」里找不到）
-            let hosting = NSHostingController(rootView: AnyView(SettingsWindowController.pane(tab).frame(minWidth: SettingsWindowController.width).tarsLook(wrapButtons: true)))
+            let hosting = NSHostingController(rootView: AnyView(SettingsWindowController.pane(tab).frame(minWidth: SettingsWindowController.width)
+                // 设置里没写样式的按钮也照按钮样式规范（有边框、选中亮主题色；11-21 自测：「更换头像…」等是一行橙字）
+                .buttonStyle(KiteButtonStyle()).tarsLook()))
             hosting.sizingOptions = [.preferredContentSize]
             // 页面视图包一层只贴顶边的容器：它自己的尺寸约束不再直接撑窗口（否则动画中途一次布局就让窗口跳到目标大小），
             // 窗口大小由 SettingsTabsController 按 preferredContentSize 动画调整
@@ -470,8 +472,6 @@ struct GeneralPane: View {
                     .foregroundStyle(.secondary)
             }
             .onAppear { loadSavers() }
-            // 实验性功能：总管模式（打开先弹配置；同手机设置里那组，见 KitelineKit/Views/StewardViews.swift）
-            TarsStewardSection()
             Section {
                 Picker("浏览器运行在", selection: binding(\.mobile.browserOn)) {
                     Text("这台电脑").tag("client")
@@ -969,7 +969,7 @@ struct PhonePane: View {
             }
             .frame(width: 330)
         }
-        .padding(24)
+        .padding(20)   // 设置各页四边一样 20（11-21 统一）
         .onAppear(perform: reload)
     }
 
@@ -1155,7 +1155,7 @@ struct SourcesPane: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(22)
+        .padding(20)   // 设置各页四边一样 20（11-21 统一）
         .frame(width: SettingsWindowController.width, height: 600, alignment: .top)
         .sheetPanel(isPresented: $showHosted) { TarsHostedSetupView() }
     }
@@ -1490,7 +1490,7 @@ struct PermissionsPane: View {
                 .font(.app(size: 11)).foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
-        .padding(22)
+        .padding(20)   // 设置各页四边一样 20（11-21 统一）
         .frame(width: SettingsWindowController.width, height: 480, alignment: .top)
     }
 }
@@ -1613,7 +1613,7 @@ struct AboutPane: View {
             }
             .font(.app(size: 12))
         }
-        .padding(30)
+        .padding(20)   // 设置各页四边一样 20
         .frame(width: 520, height: 390)
     }
 }

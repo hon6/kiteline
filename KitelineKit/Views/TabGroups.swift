@@ -1121,7 +1121,7 @@ private struct TabGroupStrip: View {
         ViewThatFits(in: .horizontal) {
             row
             ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) { row }
+                KiteHScroll { row }
                     // 不指定停靠位置：已经整个看得见就不动（点的那个标签不会从指针底下滑开），看不见的才滚最短的一段进来
                     .onChange(of: groups.active, initial: true) { _, active in
                         if let active { proxy.scrollTo(active) } else { proxy.scrollTo(Self.ungrouped) }
@@ -1198,10 +1198,8 @@ private struct HangingGroupTab: View {
             .padding(.horizontal, 10)
             .frame(height: height - 3)
             .background(color.opacity(active ? 0.24 : (hovering ? 0.14 : 0.07)), in: shape)
-            .overlay(alignment: .top) {
-                // 正显示的那组：顶上一道组色，和窗口顶边连起来
-                if active { Rectangle().fill(color).frame(height: 2) }
-            }
+            // 正显示的那组：整块组色更深、加一圈组色描边（不画单边色条，11-21 用户）
+            .overlay { if active { shape.strokeBorder(color.opacity(0.55), lineWidth: 1) } }
             .clipShape(shape)
             .contentShape(shape)
         }

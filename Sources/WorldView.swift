@@ -384,7 +384,7 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         switch event {
         case "entries" where isAR:
             // AR 窗口里显示完整的回复：文字留长一些，不要工具的输入
-            let fields: Set<String> = ["t", "id", "ts", "text", "name", "images", "queued", "brief", "isError"]
+            let fields: Set<String> = ["t", "id", "ts", "text", "name", "images", "queued", "brief", "isError", "toolId"]
             body["items"] = (payload["items"] as? [[String: Any]] ?? []).suffix(30).map { item in
                 item.filter { fields.contains($0.key) }.mapValues { value -> Any in
                     if let text = value as? String { return String(text.prefix(6000)) }
@@ -482,6 +482,13 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             PeerComputers.shared.noteViewed([key])
         case "rects":
             ARMode.shared.setRects(body["rects"] as? [[Double]] ?? [])
+        case "typing":
+            // AR 里光标在某个漂浮窗口的输入框里：字母照常打进去，不当成 WASD
+            ARMode.shared.webTyping = body["on"] as? Bool ?? false
+        case "detail":
+            // AR 里镜头运到了某个会话：原生会话页浮在那块窗口的位置上（key 为空 = 收起）
+            let key = body["key"] as? String
+            ARMode.shared.showDetail(key?.isEmpty == false ? key : nil, rect: (body["rect"] as? [Double]) ?? [])
         case "prefs":
             ARMode.shared.dock.apply(body)
         default: break

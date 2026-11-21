@@ -491,7 +491,7 @@ struct NewSessionPage: View {
     }
 
     private var attachmentStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             HStack(spacing: 8) {
                 ForEach(attachments) { item in
                     ZStack(alignment: .topTrailing) {

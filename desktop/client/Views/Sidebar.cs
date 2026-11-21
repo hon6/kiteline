@@ -820,9 +820,17 @@ public sealed class SidebarFooter : Panel
         catch { }
     }
 
+    string? built;
+
     void Build()
     {
         var online = model.Sources.Count(s => s.Online);
+        // 显示的内容没变就不重建：来源列表每次状态刷新都会换成新的（会话一直在动时几秒一次），
+        // 整条重建会把正在按的按钮换掉，按下和松开落在两个按钮上，左下角的设置、手机访问常常点不中
+        var screen0 = VirtualScreenState.Shared;
+        var key = string.Join("|", online, model.Sources.Count, model.Connected, phones, screen0.Supported, screen0.On, screen0.Windows, Lang.Current);
+        if (key == built) return;
+        built = key;
         Tap Button(Control label, string tip, Action action) => (Tap)new Tap(label, action, 10) { MinWidth = 32, MinHeight = 32, Padding = new Thickness(8, 0) }.Tip(tip);
         Child = Ui.H(2,
             Button(Ui.H(6, Ui.Dot(8, online > 0 && model.Connected ? "Green" : "Red"), Ui.Text(L("%@/%@ 来源", online, model.Sources.Count), 13, FontWeight.Medium, "Text2")),

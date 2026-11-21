@@ -13,12 +13,14 @@ struct FavoritesView: View {
     var sidebarHeader: AnyView? = nil
     /// 正在改哪一条的文字
     @State private var editing: FavoriteItem?
+    /// 刚点开原消息的那一条：选中样子同会话列表（淡主题色底 + 描边），11-21 反馈：选中状态不明显
+    @State private var current: String?
 
     var body: some View {
         let items = filtered
         List {
             if let sidebarHeader {
-                sidebarHeader
+                sidebarHeader.listRowInsets(EdgeInsets())   // 新版界面里它是空的：别占一行的上下边距（11-21 反馈：收藏标题上面空得出奇）
                 sidebarBar
                 if model.favorites.items.isEmpty {
                     if fetched { sidebarEmpty } else { SkeletonShape(style: .list(3)) }
@@ -40,6 +42,10 @@ struct FavoritesView: View {
                 ContentUnavailableView.search(text: query)
             }
         }
+        #if os(macOS)
+        // 左边栏里不用系统侧栏样式：它把每行的字截成一行（11-21 反馈：收藏里全是省略号，要显示完整内容）
+        .modifier(PlainInSidebar(on: sidebarHeader != nil))
+        #endif
         .animation(.skeletonFade, value: fetched)   // 读回来时骨架淡出、内容淡入
         // 别处（手机、电脑）收藏 / 取消了一条，推过来时行平滑挪动
         .animation(.snappy, value: model.favorites.items.map(\.id))
@@ -62,6 +68,7 @@ struct FavoritesView: View {
     private func rows(_ items: [FavoriteItem]) -> some View {
         ForEach(items) { item in
             FavoriteRow(item: item, edit: model.supportsFavoriteEdit ? { editing = item } : nil) { jump(item) }
+                .listRowBackground(selectedBackground(item.id == current))
                 .contextMenu { menu(item) }
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) { model.removeFavorites([item.id]) } label: { Label("取消收藏", systemImage: "star.slash") }
@@ -69,6 +76,15 @@ struct FavoritesView: View {
                         Button { editing = item } label: { Label("编辑", systemImage: "pencil") }.tint(.gray)
                     }
                 }
+        }
+    }
+
+    @ViewBuilder private func selectedBackground(_ on: Bool) -> some View {
+        if on {
+            let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+            shape.fill(Theme.claude.opacity(0.14))
+                .overlay(shape.strokeBorder(Theme.claude.opacity(0.32), lineWidth: 1))
+                .padding(.horizontal, sidebarHeader != nil ? 4 : 0)
         }
     }
 
@@ -94,7 +110,7 @@ struct FavoritesView: View {
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
-        .padding(.top, 10)
+        .padding(.top, 2)
         .padding(.bottom, 2)
     }
 
@@ -128,6 +144,7 @@ struct FavoritesView: View {
     }
 
     private func jump(_ item: FavoriteItem) {
+        current = item.id
         model.openSource(key: item.key, itemId: item.itemId, open: open)
     }
 
@@ -173,15 +190,25 @@ struct FavoriteRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // 第一行：左边收藏的那条消息的时间（年月日时分秒），右边编辑（11-21）
+            HStack(spacing: 6) {
+                Text(Format.fullTime(item.ts ?? item.at)).monospacedDigit()
+                Spacer(minLength: 8)
+                if let edit {
+                    Button(action: edit) { Image(systemName: "pencil").font(.ui(.caption).weight(.semibold)).frame(width: 22, height: 18).contentShape(Rectangle()) }
+                        .buttonStyle(.steady(.plain))
+                        .help(L("编辑"))
+                        .accessibilityLabel(L("编辑"))
+                }
+            }
+            .font(.ui(.caption))
+            .foregroundStyle(.secondary)
             if !item.images.isEmpty { images }
             if let text = item.text, !text.isEmpty {
                 let long = text.count > Self.previewLength
                 MarkdownView(long && !expanded ? String(text.prefix(Self.previewLength)) + "…" : text)
                     .font(ChatType.body)
                     .lineSpacing(ChatType.lineSpacing)
-                    #if os(macOS)
-                    .textSelection(.enabled)   // Mac：拖着选一段复制
-                    #endif
                 if long {
                     Button(expanded ? L("收起") : L("展开全文")) { withAnimation(.snappy) { expanded.toggle() } }
                         .buttonStyle(.steady(.plain))
@@ -192,10 +219,9 @@ struct FavoriteRow: View {
             footer
         }
         .padding(.vertical, 6)
-        #if os(iOS)
+        // 点这一条就跳回原消息（去掉了单独的「原消息」按钮，11-21 用户）
         .contentShape(Rectangle())
         .onTapGesture { guard TouchTravel.isTap else { return }; jump() }
-        #endif
         #if os(macOS)
         .sheetPanel(item: Binding(get: { viewing.map(FavoriteViewerIndex.init) }, set: { viewing = $0?.index })) { start in
             MacImageViewer(key: "favorites", images: item.images, index: start.index, path: FavoriteItem.mediaPath)
@@ -207,28 +233,13 @@ struct FavoriteRow: View {
         #endif
     }
 
-    /// 谁说的 · 哪个会话 · 什么时候；右边「原消息」跳回去
+    /// 最后一行：谁说的 · 哪个会话（时间在第一行，编辑在右上角；点整条跳回原消息）
     private var footer: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: "star.fill").font(.ui(.caption2)).foregroundStyle(Theme.claude)
-            Text([speaker, item.title, item.ts.map(Format.listTime) ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
-                .lineLimit(1).truncationMode(.middle)
-            Spacer(minLength: 8)
-            // 编辑：收藏下来的内容有错、想补一句时改（11-20 用户；原来只能取消收藏重来）
-            if let edit {
-                Button(action: edit) { Image(systemName: "pencil").font(.ui(.caption).weight(.semibold)).frame(width: 22, height: 18).contentShape(Rectangle()) }
-                    .buttonStyle(.steady(.plain))
-                    .help(L("编辑"))
-                    .accessibilityLabel(L("编辑"))
-            }
-            Button(action: jump) {
-                HStack(spacing: 3) {
-                    Text("原消息")
-                    Image(systemName: "chevron.right").font(.ui(.caption2).weight(.semibold))
-                }
-            }
-            .buttonStyle(.steady(.plain))
-            .help(L("跳转到原消息"))
+            Text([speaker, item.title].filter { !$0.isEmpty }.joined(separator: " · "))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
         .font(.ui(.caption))
         .foregroundStyle(.secondary)
@@ -313,13 +324,15 @@ struct FavoriteEditor: View {
         #if os(macOS)
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("编辑收藏").font(.ui(.title3).weight(.semibold))
-                    Label(sourceText, systemImage: "text.bubble")
-                        .font(.ui(.footnote)).foregroundStyle(.secondary)
+                // 标题「编辑收藏」在面板标题栏正中；这里一行：左边出自哪个会话，右边时间（11-21）
+                HStack(spacing: 8) {
+                    Label(L("出自「%@」", "\(item.title)"), systemImage: "text.bubble")
                         .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Text(Format.fullTime(item.ts ?? item.at)).monospacedDigit()
                 }
-                .padding(.bottom, 14)
+                .font(.ui(.footnote)).foregroundStyle(.secondary)
+                .padding(.bottom, DialogMetric.gap)
                 MacInputField(text: $text, height: $inputHeight, placeholder: L("收藏的内容"), enabled: true, focusToken: focusToken,
                               onSubmit: { save() }, onPasteImages: { _ in },
                               minHeight: 200, maxHeight: 460, returnSubmits: false)
@@ -329,22 +342,23 @@ struct FavoriteEditor: View {
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).hairlineBorder(MacPalette.separator))
                 Text(Self.note).font(.ui(.caption)).foregroundStyle(.tertiary).padding(.top, 8)
             }
-            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 16)
+            .padding(DialogMetric.pad)
             Divider()
             HStack(spacing: 10) {
                 Text(L("⌘↩ %@", L("保存"))).font(.ui(.caption)).foregroundStyle(.tertiary)
                 Spacer(minLength: 8)
-                Button(L("取消"), action: cancel).keyboardShortcut(.cancelAction).buttonStyle(.bordered)
+                Button(L("取消"), action: cancel).keyboardShortcut(.cancelAction).kiteButton()
                 Button(L("保存")) { save() }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .buttonStyle(.borderedProminent).tint(Theme.claude)
+                    .kiteButton(prominent: true)
                     .disabled(!canSave)
             }
             .controlSize(.large)
-            .padding(.horizontal, 20).padding(.vertical, 14)
+            .padding(.horizontal, DialogMetric.pad).padding(.vertical, DialogMetric.barV)
         }
         // 打开时 600 宽、高度跟着内容走；能拖边改大小
         .frame(minWidth: 460, idealWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle(L("编辑收藏"))   // 面板标题栏正中
         .confirmPanel(L("放弃所做的修改？"), isPresented: $confirmDiscard, confirm: L("放弃修改"), destructive: true, cancel: L("继续编辑")) { dismiss() }
         .task { focusToken += 1 }
         #else
@@ -378,3 +392,13 @@ struct FavoriteEditor: View {
         #endif
     }
 }
+
+
+#if os(macOS)
+private struct PlainInSidebar: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on { content.listStyle(.plain).scrollContentBackground(.hidden) } else { content }
+    }
+}
+#endif

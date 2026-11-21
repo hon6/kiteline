@@ -153,7 +153,7 @@ struct DigestCard: View {
                     .foregroundStyle(run.ok == false ? Theme.removed : (run.ok == true ? Theme.added : .secondary))
             }
             if !s.shots.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
+                KiteHScroll {
                     HStack(spacing: 8) {
                         ForEach(s.shots, id: \.ref) { shot in
                             RemoteImage(path: "/api/digest/media", query: ["source": s.sourceId, "sid": s.sessionId, "ref": shot.ref], variant: .thumb)

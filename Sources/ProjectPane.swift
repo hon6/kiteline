@@ -22,28 +22,60 @@ struct SidebarProjects: View {
     @ObservedObject private var projects = ProjectsModel.shared
 
     var body: some View {
-        let shown = projects.groupedShown
+        // 不分筛选页签（11-21）：同下面的会话，分「活动中」「其他项目」两节；活动中 = 有会话在跑或今天动过
+        let all = projects.groupedShown
+        let active = all.filter { group in group.contains { projects.matches($0, "active") } }
+        let rest = all.filter { group in !group.contains { projects.matches($0, "active") } }
         List {
-            header
-            bar.selectionDisabled()
-                .listRowInsets(EdgeInsets(top: 0, leading: SideMetric.pad, bottom: 0, trailing: SideMetric.pad - 2))
-                .listRowSeparator(.hidden)
+            header.listRowInsets(EdgeInsets())
+            if !inPanel {
+                titleRow.padding(.top, 10).padding(.bottom, 4).selectionDisabled()
+                    .listRowInsets(EdgeInsets(top: 0, leading: SideMetric.pad, bottom: 0, trailing: SideMetric.pad - 2))
+                    .listRowSeparator(.hidden)
+            }
             if projects.projects.isEmpty, !projects.loaded {
                 SkeletonShape(style: .list(5)).selectionDisabled()
             }
-            // 同一个项目挂在几台设备上的合成一项（11-20）：会话、用量合在一起，会话上写着是哪台设备的
-            ForEach(shown, id: \.first!.id) { group in
-                let project = group[0]
-                SidebarProjectRow(project: project, members: group, live: projects.live(group: group),
-                                  kind: model.sources.first { $0.id == project.sourceId }?.kind ?? .local)
-                    .modifier(SidebarRowHighlight(selected: model.projectPane == project.id) { model.toggleProject(project.id) })
-                    .contextMenu { menu(project) }
-                    // 行的框离栏边 8、框里 8（侧栏规范 SideMetric；11-20 反馈：项目列表左右边距太大）
-                    .listRowInsets(EdgeInsets(top: 1, leading: Self.inset, bottom: 1, trailing: Self.inset - 2))
-                    .listRowSeparator(.hidden)
+            Section {
+                if active.isEmpty, projects.loaded {
+                    Text("没有活动中的项目").font(.app(size: 11.5)).foregroundStyle(.secondary).padding(.leading, SideMetric.inset - 8)
+                }
+                rows(active)
+            } header: {
+                HStack(spacing: SideMetric.gap) {
+                    PanelSectionTitle(title: L("活动中"), count: active.count)
+                    if projects.loading, projects.loaded { ProgressView().controlSize(.mini) }
+                    Spacer(minLength: 4)
+                    // 打开项目放在这一节标题右边（11-21 用户；同会话的「新会话」）
+                    Button { model.showOpenProject = true } label: { KiteLabel(L("打开项目"), symbol: "folder.badge.plus") }
+                        .kiteButton(prominent: true)
+                        .textCase(nil)
+                        .tourAnchor("openProject")
+                        .help("打开项目：选择文件夹和 Agent，直接打开")
+                }
+                .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.vertical, 6)
             }
-            if shown.isEmpty, projects.loaded {
-                Text(projects.projects.isEmpty ? L("暂无项目。点「打开」选择一个文件夹，用 Claude Code 或其他 Agent 打开。") : L("没有符合条件的项目。"))
+            .listSectionSeparator(.hidden)
+            if !rest.isEmpty {
+                Section {
+                    if collapse.has("projects.rest.open") { rows(rest) }
+                } header: {
+                    Button { withAnimation(.snappy(duration: 0.18)) { collapse.toggle("projects.rest.open") } } label: {
+                        HStack(spacing: 4) {
+                            PanelSectionTitle(title: L("其他项目"), count: rest.count)
+                            Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(collapse.has("projects.rest.open") ? 90 : 0))
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, SideMetric.inset - 8).padding(.vertical, 4)
+                }
+                .listSectionSeparator(.hidden)
+            }
+            if all.isEmpty, projects.loaded {
+                Text(L("暂无项目。点「打开项目」选择一个文件夹，用 Claude Code 或其他 Agent 打开。"))
                     .font(.app(size: 11.5)).foregroundStyle(.secondary)
                     .lineLimit(nil).fixedSize(horizontal: false, vertical: true)
                     .selectionDisabled()
@@ -55,12 +87,29 @@ struct SidebarProjects: View {
         }
         // 不用系统侧栏样式：它每行左右再自带十几点，内容对不齐侧栏的 16 点对齐线（11-21 量过）
         .listStyle(.plain)
+        .onAppear { if projects.filter != "all" { projects.filter = "all" } }   // 筛选页签去掉了：别留着之前选的
         .liveReload(every: 120) { projects.load() }
     }
 
-    /// 格子下面：「项目 12」和「打开」，再一排筛选（全部 / 有活动 / 有改动）
-    private var bar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    @ObservedObject private var collapse = PanelCollapse.shared
+
+    /// 同一个项目挂在几台设备上的合成一项（11-20）：会话、用量合在一起，会话上写着是哪台设备的
+    private func rows(_ groups: [[ProjectItem]]) -> some View {
+        ForEach(groups, id: \.first!.id) { group in
+            let project = group[0]
+            SidebarProjectRow(project: project, members: group, live: projects.live(group: group),
+                              kind: model.sources.first { $0.id == project.sourceId }?.kind ?? .local)
+                .modifier(SidebarRowHighlight(selected: model.projectPane == project.id) { model.toggleProject(project.id) })
+                .contextMenu { menu(project) }
+                // 行的框离栏边 8、框里 8（侧栏规范 SideMetric；11-20 反馈：项目列表左右边距太大）
+                .listRowInsets(EdgeInsets(top: 1, leading: Self.inset, bottom: 1, trailing: Self.inset - 2))
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    @Environment(\.sidebarInPanel) private var inPanel
+
+    private var titleRow: some View {
             HStack(spacing: 6) {
                 Text("项目").font(.app(size: SideMetric.Text.title, weight: .semibold))
                 if !projects.projects.isEmpty {
@@ -68,23 +117,8 @@ struct SidebarProjects: View {
                 }
                 if projects.loading, projects.loaded { ProgressView().controlSize(.mini) }
                 Spacer(minLength: 6)
-                Button { model.showOpenProject = true } label: { SidebarTabButton(symbol: "folder.badge.plus", title: L("打开")) }
-                    .buttonStyle(.plain)
-                    .help("打开项目：选择文件夹和 Agent，直接打开")
+                // 「打开项目」在下面「活动中」那一节的标题右边，这里不重复（11-21）
             }
-            if projects.projects.count > 1 {
-                FilterBar(bleed: 0) {
-                    ForEach([("all", L("全部")), ("active", L("有活动")), ("dirty", L("有改动"))], id: \.0) { option in
-                        FilterChip(title: option.1, count: projects.groups.filter { $0.contains { projects.matches($0, option.0) } }.count, dot: nil,
-                                   selected: projects.filter == option.0) {
-                            withAnimation(.snappy) { projects.filter = option.0 }
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.top, 10)
-        .padding(.bottom, 2)
     }
 
     @ViewBuilder private func menu(_ project: ProjectItem) -> some View {
@@ -238,8 +272,8 @@ struct ProjectPaneView: View {
         let place = place
         let members = projects.members(id)
         // 会话：几台设备上的都列（会话上写着是哪台设备的）
-        let live = members.count > 1 ? projects.live(group: members)
-            : model.sessions.filter { $0.sourceId == place.sourceId && $0.cwd == place.cwd }
+        let live = model.recentFirst(members.count > 1 ? projects.live(group: members)
+            : model.sessions.filter { $0.sourceId == place.sourceId && $0.cwd == place.cwd })
         let key = projects.codeKey(ProjectsModel.id(sourceId: place.sourceId, cwd: place.cwd))
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -444,6 +478,7 @@ struct ProjectSessions: View {
     /// 刚打开的新项目，会话还在启动
     var starting = false
     @ObservedObject private var projects = ProjectsModel.shared
+    @ObservedObject private var collapse = PanelCollapse.shared
 
     var body: some View {
         let place = self.place ?? ProjectsModel.place(id) ?? ("", "")
@@ -456,14 +491,16 @@ struct ProjectSessions: View {
                             Text("正在打开会话，文件和 Git 稍后显示…").font(.app(size: 11.5)).foregroundStyle(.secondary)
                         }
                     } else {
-                        Text("没有运行中的会话").font(.app(size: 11.5)).foregroundStyle(.secondary)
+                        Text("没有运行中的会话").font(.app(size: 11.5)).foregroundStyle(.secondary).padding(.leading, SideMetric.inset - 8)
                     }
                 }
                 ForEach(live) { item in
                     SessionRow(item: item, pinned: model.isPinned(item.id), marked: model.isMarked(item.id),
                                onMark: { withAnimation(.snappy) { model.toggleMark(item.id) } },
-                               onClose: item.canReply && item.can("close") ? { model.close(item.id) } : nil, avatar: false, folder: false)
+                               onClose: item.canReply && item.can("close") ? { model.close(item.id, confirmed: true) } : nil, avatar: false, folder: false)
                         .modifier(SidebarRowHighlight(selected: model.selection == item.id && !model.projectShowsCode) { model.pick(item.id) })
+                        // 第一行和上面的标题条之间空 6（标题条的底色是连着的，内边距加在条里看不出空隙；11-21 用户反复指出）
+                        .padding(.top, item.id == live.first?.id ? 6 : 0)
                         // plain 列表自己左边留 8、右边 10（11-21 量过）：行左 0、右 -2 = 框离栏边 8
                         .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: -2))
                         .listRowSeparator(.hidden)
@@ -479,40 +516,47 @@ struct ProjectSessions: View {
                         let agent = live.first?.agent ?? "claude-code"
                         model.selection = NewDraftKey.make(.init(sourceId: place.0, cwd: place.1, agent: agent))
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus").font(.app(size: 11, weight: .bold))
-                            Text("新会话")
-                        }
-                        .font(.app(size: SideMetric.Text.row, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, SideMetric.pad + 2)
-                        .frame(height: SideMetric.control - 2)
-                        .background(Color.tarsBrand, in: Capsule())
-                        .contentShape(Capsule())
+                        KiteLabel(L("新会话"), symbol: "plus")
                     }
-                    .buttonStyle(.plain)
+                    .kiteButton(prominent: true)
                     .textCase(nil)
                     .help("在此项目中新建会话（在中间新开一个标签页）")
                 }
                 // 标题字对到 16 点对齐线（列表已留 8），按钮右边离栏边 8（列表已留 10）
-                .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2)
+                .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.vertical, 6)
             }
             .listSectionSeparator(.hidden)
             Section {
-                if let past = projects.past[id] {
-                    if past.isEmpty { Text("没有已结束的会话").font(.app(size: 11.5)).foregroundStyle(.secondary) }
+                if !collapse.has("recent.open") {
+                    EmptyView()
+                } else if let past = projects.past[id] {
+                    if past.isEmpty { Text("没有已结束的会话").font(.app(size: 11.5)).foregroundStyle(.secondary).padding(.leading, SideMetric.inset - 8).padding(.top, 4) }
                     ForEach(past.prefix(30)) { item in
                         PastRow(item: item, avatar: false)
                             .modifier(SidebarRowHighlight(selected: model.selection == item.key && !model.projectShowsCode) {
                                 HistoryModel.shared.open(item)
                             })
+                            .padding(.top, item.id == past.first?.id ? 6 : 0)
                             .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: -2))
                             .listRowSeparator(.hidden)
                     }
                 } else {
                     SkeletonShape(style: .list(3))
                 }
-            } header: { PanelSectionTitle(title: L("最近的会话"), count: projects.past[id]?.count ?? 0).padding(.leading, SideMetric.inset - 8) }
+            } header: {
+                // 「最近的会话」能收起，默认收起（11-21）：点标题展开 / 收起，记住
+                Button { withAnimation(.snappy(duration: 0.18)) { collapse.toggle("recent.open") } } label: {
+                    HStack(spacing: 4) {
+                        PanelSectionTitle(title: L("最近的会话"), count: projects.past[id]?.count ?? 0)
+                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(collapse.has("recent.open") ? 90 : 0))
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, SideMetric.inset - 8)
+            }
             .listSectionSeparator(.hidden)
         }
         // 同项目列表：plain 样式，边距全按侧栏规范自己给
@@ -540,8 +584,9 @@ struct ProjectBlock: View {
         if Self.visible(model), let id = model.projectPane {
             let place = projects.fileMember(id).map { ($0.sourceId, $0.cwd) } ?? ProjectsModel.place(id) ?? ("", "")
             let members = projects.members(id)
-            let live = members.count > 1 ? projects.live(group: members)
-                : model.sessions.filter { $0.sourceId == place.0 && $0.cwd == place.1 }
+            // 按最近活动排（行上显示的就是这个时间；11-21 反馈：昨天的排在中间不对），标记、置顶的在前
+            let live = model.recentFirst(members.count > 1 ? projects.live(group: members)
+                : model.sessions.filter { $0.sourceId == place.0 && $0.cwd == place.1 })
             let key = projects.codeKey(ProjectsModel.id(sourceId: place.0, cwd: place.1))
             Group {
                 if block == "sessions" {
@@ -560,6 +605,11 @@ struct ProjectBlock: View {
             .scrollContentBackground(.hidden)
             .modifier(SidebarPanel(title: block == "sessions" ? L("会话") : L("文件")))
             .id(id)
+            // 最近的会话：新版界面里这一块自己去取（原来只有旧的项目二级栏取，这里一直是占位）
+            .task(id: id) {
+                if block == "sessions" { projects.loadPast(id) }
+                if !projects.loaded { projects.load() }
+            }
         }
     }
 }
@@ -658,7 +708,7 @@ struct OpenProjectSheet: View {
                     .disabled(opening || path.isEmpty || source == nil)
             }
         }
-        .padding(20)
+        .padding(DialogMetric.pad)   // 弹窗边距规范
         .frame(minWidth: 460, idealWidth: 520, maxWidth: .infinity, alignment: .top)
         .navigationTitle(L("打开项目"))   // 放进面板的标题栏
         .onAppear {

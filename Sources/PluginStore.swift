@@ -808,7 +808,7 @@ private struct PluginErrorCard: View {
             }
             .padding(.top, 2)
         }
-        .padding(18)
+        .padding(DialogMetric.pad)   // 弹窗边距规范
         .frame(width: 400)
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -886,7 +886,7 @@ struct PluginsPane: View {
                 .font(.app(size: 11.5)).foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(22)
+        .padding(20)   // 设置各页四边一样 20（11-21 统一）
         .frame(width: SettingsWindowController.width, height: 600, alignment: .top)   // 11-05 反馈矮，440 → 600
         .onAppear { store.check() }
     }

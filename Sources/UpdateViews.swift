@@ -202,7 +202,7 @@ private struct UpdateView: View {
             }
             buttons.padding(.top, 4)
         }
-        .padding(.horizontal, 22).padding(.top, 26).padding(.bottom, 20)
+        .padding(DialogMetric.pad)
         .frame(width: 420)
         .animation(.snappy(duration: 0.2), value: updater.phase)
     }
@@ -305,7 +305,7 @@ private struct PhoneUpdateView: View {
                 .keyboardShortcut(.defaultAction)
                 .padding(.top, 4)
         }
-        .padding(.horizontal, 22).padding(.top, 26).padding(.bottom, 20)
+        .padding(DialogMetric.pad)
         .frame(width: 420)
     }
 }

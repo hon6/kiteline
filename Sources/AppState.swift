@@ -494,7 +494,7 @@ final class AppState {
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
             // renameSource = 手机能给设备起别名（/api/sources/rename，记在设备所在的电脑上）
             // editorWindows = 能列出、关掉没有会话在运行的 VS Code 窗口（/api/editor/windows，hosted.closeEditor 是自动关的开关）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit"] + (Steward.available ? ["steward"] : [])
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit"]
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
             "hosted": ["tipOff": config.mobile.hostedTipOff, "closeEditor": config.mobile.hostedCloseEditor],
         ]
@@ -598,8 +598,6 @@ extension AppState: SourceConnectionDelegate {
             Todos.shared.pushToAgents(only: source)
             // 会话群的名单也给一份（group say / info 核对成员）
             Groups.shared.pushToAgents(only: source)
-            // 总管模式：总管那台电脑刚连上，推一份目录
-            DispatchQueue.main.async { Steward.shared.sourceConnected(source) }
         }
     }
 
@@ -672,8 +670,6 @@ extension AppState: SourceConnectionDelegate {
                     Todos.shared.fillSessionMeta()
                     // 会话群：成员开了 / 关了，排着的群消息接着投或改成恢复时补上
                     Groups.shared.sessionsChanged()
-                    // 总管模式：认总管会话、把目录推给总管那台电脑
-                    Steward.shared.sessionsChanged()
                 }
             }
         }
@@ -719,9 +715,6 @@ extension AppState: SourceConnectionDelegate {
             case "group_say":
                 // 发到会话群的（watcher 的 group say）：转给群里其他会话
                 Groups.shared.agentSaid(key: key, item: item)
-            case "steward_op":
-                // 总管模式（watcher 的 steward 子命令）：派活、新开会话、拉群、汇报
-                Steward.shared.agentOp(key: key, item: item)
             default:
                 continue
             }

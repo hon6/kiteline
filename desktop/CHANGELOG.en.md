@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.49 (2026-11-21)
+
+### Bug Fixes
+
+- Fixed sessions that hadn't been used in a long time still showing new messages: installing an update, Claude Code compacting the context while idle, and changing the thinking level are no longer treated as new messages, and projects without new conversations no longer show a newer last-activity time in the project list.
+
 ## 1.0.48 (2026-11-21)
 
 ### New Features

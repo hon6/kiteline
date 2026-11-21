@@ -441,7 +441,8 @@ struct IDELayout: View {
                             .background(muted ? Color.secondary : Theme.claude, in: Capsule()).offset(x: -1, y: 1)
                     }
                 }
-                .overlay(alignment: .bottom) { Capsule().fill(on ? Theme.claude : .clear).frame(width: 16, height: 2) }
+                // 选中：整块淡染主题色（不画下面那道短线，11-21 用户）
+                .background(on ? Theme.claude.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -610,7 +611,7 @@ struct IDELayout: View {
                 Button { ws.openTab(CodeTab(kind: .history(nil))) } label: { Label("提交历史", systemImage: "clock.arrow.circlepath") }
                 Button { ws.activity = .branches } label: { Label("分支与会话", systemImage: "point.3.connected.trianglepath.dotted") }
             }
-            .buttonStyle(.bordered)
+            .kiteButton()
             Text("从左侧选择文件开始编辑；⌘S 保存，⌘F 查找。").font(.ui(.caption)).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -618,7 +619,7 @@ struct IDELayout: View {
     }
 
     private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             HStack(spacing: 0) {
                 ForEach(ws.tabs) { tab in
                     let isActive = tab.id == ws.active
@@ -638,8 +639,8 @@ struct IDELayout: View {
                     }
                     .padding(.leading, 12).padding(.trailing, 6)
                     .frame(height: 34)
-                    .background(isActive ? Theme.chatBackground : Color.clear)
-                    .overlay(alignment: .top) { if isActive { Rectangle().fill(Theme.claude).frame(height: 2) } }
+                    // 当前标签整块淡染主题色（不画顶上一道色条，11-21 反馈：单边色条是 AI 样式）
+                    .background(isActive ? Theme.claude.opacity(0.12) : Color.clear)
                     .overlay(alignment: .trailing) { Rectangle().fill(Color.primary.opacity(0.08)).frame(width: 1) }
                     .contentShape(Rectangle())
                     .onTapGesture { ws.activate(tab.id) }

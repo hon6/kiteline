@@ -1104,7 +1104,13 @@ struct PaneTip: ViewModifier {
                 pending?.cancel()
                 pending = nil
                 if inside {
-                    let work = DispatchWorkItem { KitelineKit.hoverTip(text) }
+                    // 鼠标已经移开了就不出：标签栏在标题栏那一带，移出时的「离开」有时收不到，提示会出现在鼠标移到的远处（11-21 截图）
+                    let start = NSEvent.mouseLocation
+                    let work = DispatchWorkItem {
+                        let now = NSEvent.mouseLocation
+                        guard abs(now.x - start.x) < 30, abs(now.y - start.y) < 30 else { return }
+                        KitelineKit.hoverTip(text)
+                    }
                     pending = work
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
                 } else {
@@ -1924,7 +1930,7 @@ private struct PaneHeader: View {
         .animation(.snappy(duration: 0.2), value: pane.tabs)
         if CGFloat(entries.count) * Self.minTab > room {
             ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) { row }
+                KiteHScroll { row }
                     .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
                     .onChange(of: pane.key) { _, key in withAnimation { proxy.scrollTo(key, anchor: .center) } }
             }
@@ -2099,12 +2105,10 @@ private struct PaneTab: View {
                 Rectangle().fill(MacPalette.separator).frame(width: 1, height: 15).offset(x: -0.5, y: -1)
             }
         }
+        // 几块分屏时当前那块的标签：整个标签淡淡染主题色（不画顶上一道色条，11-21 反馈：单边色条是 AI 样式）
         .overlay {
             if active && focused && several {
-                Rectangle().fill(Theme.claude)
-                    .frame(height: 2)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .clipShape(shape)
+                shape.fill(Theme.claude.opacity(0.12)).allowsHitTesting(false)
             }
         }
         .overlay { if let key { TabFlashRing(key: key, panes: panes, foot: Self.foot) } }

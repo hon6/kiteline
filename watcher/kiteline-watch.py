@@ -127,7 +127,7 @@ from urllib.request import pathname2url
 
 PROTOCOL = 2
 WATCHER_VERSION = "2.38.15"
-FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run", "steward"]
+FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 MESSAGE_MAX_CHARS = 600
@@ -796,6 +796,10 @@ _MODE_RE = re.compile(r'"permissionMode":"(\w+)"')
 
 
 _TURN_FROM = {}   # 对话记录路径 -> 最近一轮是谁发起的（user / peer）：一轮很长时开头会滚出尾部，看到过的要记住
+# 对话记录路径 -> 最后一条真正对话（回复、工具结果、你说的话）的时间（毫秒）。尾部全是压缩附件时用记着的
+_CONTENT_AT = {}
+# 不算对话的「你说的话」：本地斜杠命令（/effort 之类）和它的输出
+_LOCAL_COMMAND_MARKS = ("<command-name>", "<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>")
 # Kiteline 送进会话的群消息：每条一行「【群「群名」· 谁】」，谁是「用户」的才是你在群里说的
 _GROUP_SENDER_RE = re.compile(r"【群「[^」\n]*」· ([^】\n]+)】")
 
@@ -840,6 +844,86 @@ def last_permission_mode(path, size, limit=8 * 1024 * 1024):
     return None
 
 
+def is_conversation(entry, etype, content):
+    """这一条是不是真正的对话：Claude 的回复 / 工具调用、工具结果、你（或别的会话）说的话。
+    压缩摘要、本地斜杠命令及其输出、系统提示、附件、标题等元数据都不算（它们不该让会话显示「新消息」）"""
+    if etype == "assistant":
+        return isinstance(content, list) and any(
+            isinstance(b, dict) and (b.get("type") == "tool_use" or (b.get("type") == "text" and (b.get("text") or "").strip()))
+            for b in content)
+    if etype != "user" or entry.get("isCompactSummary"):
+        return False
+    if isinstance(content, str):
+        text = content.strip()
+        if not text or any(mark in text for mark in _LOCAL_COMMAND_MARKS):
+            return False
+        return not entry.get("isMeta") or bool(peer_origin(entry))
+    if isinstance(content, list):
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_result":
+                return True
+            if b.get("type") == "text" and (not entry.get("isMeta") or bridge_said(entry)):
+                text = (b.get("text") or "").strip()
+                if text and not any(mark in text for mark in _LOCAL_COMMAND_MARKS):
+                    return True
+    return False
+
+
+def last_conversation_at(path, size, limit=8 * 1024 * 1024):
+    """尾部全是附件（闲置压缩会把整份文件当附件塞进来）时，往前找最后一条真正对话的时间（每次读 1MB，最多 limit）"""
+    try:
+        with open(path, "rb") as handle:
+            pos = size
+            carry = b""
+            while pos > 0 and size - pos < limit:
+                step = min(1024 * 1024, pos)
+                pos -= step
+                handle.seek(pos)
+                block = handle.read(step) + carry
+                lines = block.split(b"\n")
+                carry = lines[0] if pos > 0 else b""   # 首行可能被截断，留给下一块拼上
+                for raw in reversed(lines[1:] if pos > 0 else lines):
+                    # 只解析可能是对话的行，跳过大附件
+                    head = raw[:4096].replace(b'": "', b'":"')
+                    if not (raw.startswith(b'{"parentUuid"') or b'"type":"assistant"' in head or b'"type":"user"' in head):
+                        continue
+                    try:
+                        entry = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if not isinstance(entry, dict) or entry.get("isSidechain"):
+                        continue
+                    message = entry.get("message")
+                    if isinstance(message, dict) and is_conversation(entry, entry.get("type"), message.get("content")):
+                        return parse_ts(entry.get("timestamp"))
+    except OSError:
+        pass
+    return None
+
+
+_CONV_AT_CACHE = {}   # 对话记录路径 -> (大小, 修改时间, 最后一条真正对话的时间 秒)
+
+
+def conversation_at(path, mtime=None, size=None):
+    """一份对话记录最后一条真正对话的时间（秒）：项目列表、历史会话的「最后活动」用。
+    找不到对话（往前 8 MB 全是附件）就用文件时间；按大小 + 修改时间缓存，文件不变不重读"""
+    try:
+        if mtime is None or size is None:
+            stat = os.stat(path)
+            mtime, size = stat.st_mtime, stat.st_size
+    except OSError:
+        return mtime or 0
+    hit = _CONV_AT_CACHE.get(path)
+    if hit and hit[0] == size and hit[1] == mtime:
+        return hit[2]
+    found = last_conversation_at(path, size)
+    at = min(mtime, found / 1000.0) if found else mtime
+    _CONV_AT_CACHE[path] = (size, mtime, at)
+    return at
+
+
 def scan_transcript(path):
     """从 transcript 尾部读出「最后一句人话」「待处理的工具调用」和会话标题。
 
@@ -880,6 +964,7 @@ def scan_transcript(path):
     custom_title = None
     last_prompt = None
     turn_from = None    # 这段尾部里最后开始的一轮是谁发起的；没看到开头就用记着的
+    content_at = None   # 最后一条真正对话的时间（毫秒），见 is_conversation
 
     for line in lines:
         line = line.strip()
@@ -915,6 +1000,8 @@ def scan_transcript(path):
         if not isinstance(message, dict):
             continue
         content = message.get("content")
+        if is_conversation(entry, etype, content):
+            content_at = parse_ts(entry.get("timestamp")) or content_at
 
         if etype == "assistant" and isinstance(entry.get("effort"), str) and entry["effort"]:
             # 每条回复都记着这一轮实际用的思考等级：在 VS Code 里直接选的、设置里的默认值都只在这里看得到
@@ -973,6 +1060,12 @@ def scan_transcript(path):
     if turn_from:
         _TURN_FROM[path] = turn_from
     result["turnFrom"] = _TURN_FROM.get(path)
+    if not content_at and path not in _CONTENT_AT:
+        content_at = last_conversation_at(path, size)
+        _CONTENT_AT[path] = None   # 往前翻只翻一次，找不到就退回文件时间
+    if content_at:
+        _CONTENT_AT[path] = max(content_at, _CONTENT_AT.get(path) or 0)
+    result["contentAt"] = _CONTENT_AT.get(path)
     modes = _MODE_RE.findall(text)
     if modes:
         _EFFORT.setdefault(path, {})["mode"] = modes[-1]
@@ -1411,7 +1504,12 @@ def snapshot_session(payload):
             _TMUX_PANES[pid] = find_tmux_pane(pid)
         tmux_pane = _TMUX_PANES[pid]
 
+    # 记录文件的修改时间不等于有新消息：Kiteline mod 重新加载（每次装新版每个会话都写一行）、闲置自动压缩、
+    # /effort 这类本地命令、标题 / 模式元数据都会追加内容，久没用的会话因此冒出「新消息」（11-21）。
+    # 空闲时报最后一条真正对话的时间；干活 / 等确认时仍报文件时间（「可能停滞」要看任何动静）
     updated = scan["mtime"]
+    if activity == "idle" and scan.get("contentAt"):
+        updated = min(updated, scan["contentAt"] / 1000.0) if updated else scan["contentAt"] / 1000.0
     return {
         "pid": pid,
         "sessionId": session_id,
@@ -2357,18 +2455,6 @@ def outbox_item(offset, entry):
             lines.append(entry["note"])
         return {"id": "o%d" % offset, "ts": entry.get("ts"), "t": "agent_key", "title": entry.get("title") or "",
                 "fields": fields, "note": entry.get("note") or "", "text": "\n".join(lines)}
-    if kind == "steward":
-        # 总管模式（steward 子命令）：电脑端照 op 去做（派活、新开会话、拉群、把汇报送给总管）；对话里显示一行说明
-        op = str(entry.get("op") or "")
-        item = {"id": "o%d" % offset, "ts": entry.get("ts"), "t": "steward_op", "op": op, "text": entry.get("text") or ""}
-        for field in ("device", "cwd", "agent"):
-            if entry.get(field):
-                item[field] = str(entry[field])[:1024]
-        if isinstance(entry.get("to"), list):
-            item["to"] = [str(x) for x in entry["to"]][:20]
-        if isinstance(entry.get("images"), list):
-            item["images"] = [str(x) for x in entry["images"]][:6]
-        return item
     if kind == "group":
         # 发到会话群的消息（group say）：电脑端投递给群里其他会话；对话里画成一封发往群的信，不认识的客户端显示 text
         item = {"id": "o%d" % offset, "ts": entry.get("ts"), "t": "group_say", "group": entry.get("group") or "",
@@ -2518,6 +2604,9 @@ def command_send_image(argv):
     with open(outbox_path(session_id), "a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
     print("已发送 %d 张图片到用户手机（会话 %s）" % (len(stored), name or session_id[:8]))
+    # 图存好的位置：要把这张图交给别人（发到会话群）时直接用这个路径
+    for item in stored:
+        print("图片：%s" % item["path"])
     todo_nudge(session_id)
     stage_nudge(session_id)
     return 0
@@ -6239,303 +6328,6 @@ def command_group(argv):
 
 
 # ---------------------------------------------------------------------------
-# 总管模式（实验性，11-20 用户提）：用户在 Kiteline 设置里选一台电脑、一个 agent 当「总管」，以后不用自己找设备、项目、会话，
-#   直接对总管说需求；总管知道有哪些设备、项目、会话（电脑端推来的目录），决定派给已有会话还是新开一个，派出去的会话做完向总管汇报，
-#   总管再向用户汇报。总管就是一个普通会话，工作目录是 ~/.ccpulse/steward（里面的 CLAUDE.md / AGENTS.md 是它的说明书）。
-#   电脑端推来的目录存在 ~/.ccpulse/steward.json（{"cmd":"steward"}），steward 子命令读它；要电脑端做的事写进发图通道（kind=steward）。
-# ---------------------------------------------------------------------------
-
-HOST_STEWARD_FILE = os.path.join(DATA_DIR, "steward.json")
-STEWARD_DIR = os.path.join(DATA_DIR, "steward")
-STEWARD_TEXT_MAX = 8000
-
-
-def save_host_steward(directory):
-    """电脑端推来的总管目录（整份换掉）：{steward:{key,sessionId,deviceId}, devices:[…], sessions:[…], projects:[…]}"""
-    data = dict(directory if isinstance(directory, dict) else {}, at=_now_ms())
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(HOST_STEWARD_FILE + ".tmp", "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(data, ensure_ascii=False))
-    os.replace(HOST_STEWARD_FILE + ".tmp", HOST_STEWARD_FILE)
-    return len(data.get("sessions") or [])
-
-
-def _host_steward():
-    try:
-        with open(HOST_STEWARD_FILE, encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-# 总管的说明书：开启时写进总管工作目录的 CLAUDE.md / AGENTS.md（Mac、Windows / Linux 电脑端共用这一份）。{{CMD}} 换成这台电脑上调本脚本的写法
-STEWARD_BRIEF = """# 你是 Kiteline 总管
-
-用户在 Kiteline 里开启了「总管模式」（实验性功能）。用户不再自己挑设备、项目和会话，而是直接对你说需求——多半是在手机上用语音说的，转出来的文字可能有错字、同音字，按意思理解。
-
-你的工作：弄清需求 → 找到对应的设备、项目、会话 → 派活 → 盯进度 → 验收 → 向用户汇报。你自己不改项目代码，也不去别的项目目录里动文件。
-
-## 回复的写法（手机上会朗读出来）
-
-- 先说结论，一两句口语化的话；不用表格、列表、代码块、链接和特殊符号，少念路径和长数字。
-- 收到需求先用一句话回执（如「收到，我让仪表盘那个会话加上」），再去做。
-- 拿不准是哪个项目、会不会动到用户的数据时，先问一句再派。
-- 用用户说话的语言回复。
-
-## 命令（在终端里运行）
-
-- `{{CMD}} steward state`：设备、项目、运行中的会话（做到哪一步、最近说了什么）。每次派活前先看一遍。
-- `{{CMD}} steward assign --to 会话 "任务"`：派给已有的会话。同一项目、同一模块的优先复用。--to 写会话标题、项目名或会话 id 开头。
-- `{{CMD}} steward new --device 设备 --dir 项目路径 [--agent agent] "任务"`：没有合适的会话时新开一个（项目路径从 steward state 的项目列表里找）。
-- `{{CMD}} steward group --to 会话 --to 会话 "说明"`：一个需求要几个模块配合时拉群，让它们先约定接口、数据表、字段，再各自开工；群里用 `{{CMD}} group say "内容"` 说话。
-- 派出去的会话做完、卡住或要用户决定时，会用 steward report 回报，你会收到以「【汇报」开头的消息；Kiteline 自己的通知以「【Kiteline】」开头。
-- 汇报里带的截图会作为附件路径出现在消息里；要给用户看就 `{{CMD}} send-image 图片路径 --caption "说明"`。
-
-## 任务写法
-
-派活时把用户的原话、你理解的目标、验收标准写清楚；被派的会话看不到你和用户的对话。要求它做完先自测、截图，再回报。
-
-## 模块档案（modules/ 目录）
-
-- 每个项目按功能模块（如人事、财务、预约、仪表盘）对应固定的会话，记在 `modules/<项目名>.md`：模块 → 负责的目录、数据表、接口约定、当前对应的会话、最近做过什么。
-- 派活前先看档案；对应的会话关了或上下文太满，就新开一个，把档案里这个模块的要点写进任务。
-- 每次派活、收到汇报后更新档案。第一次接触一个项目时，可以先派一个会话把项目结构和模块梳理出来，写进档案。
-
-## 进度与验收
-
-- 用户问进度、或长任务每过一阵，用 steward state 看各会话做到哪一步，简短汇报：派给了谁、到哪一步、还要多久。
-- 所有子任务都回报完成后，对照用户的原话检查：让对应会话跑测试、截图；不满足就打回去改。都通过了再做最终汇报：做了什么、在哪能看到、还有什么要用户决定。
-
-## 不要做的
-
-- 不替用户批准危险操作（确认框由用户自己处理）；不碰账号、密码、密钥。
-- 不往外部服务、生产环境发布或部署，除非用户明确说了。
-"""
-
-
-def steward_setup(brief=None):
-    """开启总管时电脑端让总管所在的电脑准备工作目录：写说明书（Claude Code 读 CLAUDE.md，Codex 等读 AGENTS.md），
-    模块档案目录 modules/ 留着不动（总管自己记的）。→ {cwd}"""
-    os.makedirs(os.path.join(STEWARD_DIR, "modules"), exist_ok=True)
-    command = self_command()
-    text = str(brief or STEWARD_BRIEF).replace("{{CMD}}", command)
-    for name in ("CLAUDE.md", "AGENTS.md"):
-        path = os.path.join(STEWARD_DIR, name)
-        with open(path + ".tmp", "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(path + ".tmp", path)
-    steward_permissions(command)
-    return {"cwd": STEWARD_DIR}
-
-
-# 总管整天在跑 Kiteline 的几条命令，每条都要用户在手机上点允许就没法用：在总管自己的工作目录里写 Claude Code 的项目设置，
-# 只放行这几条（Claude Code 自己按前缀匹配，组合命令会拆开逐段核对），模块档案（modules/）可以直接改。别的照常问
-STEWARD_COMMANDS = ("steward", "group", "send-image", "send-page", "stage", "todo", "keyinfo")
-
-
-def steward_permissions(command):
-    folder = os.path.join(STEWARD_DIR, ".claude")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, "settings.json")
-    try:
-        with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
-        if not isinstance(data, dict):
-            data = {}
-    except (OSError, ValueError):
-        data = {}
-    perms = data.setdefault("permissions", {})
-    allow = [rule for rule in perms.get("allow") or [] if isinstance(rule, str)]
-    wanted = ["Bash(%s %s:*)" % (command, name) for name in STEWARD_COMMANDS] + ["Edit(modules/**)", "Write(modules/**)"]
-    for rule in wanted:
-        if rule not in allow:
-            allow.append(rule)
-    perms["allow"] = allow
-    with open(path + ".tmp", "w", encoding="utf-8") as handle:
-        json.dump(data, handle, ensure_ascii=False, indent=2)
-    os.replace(path + ".tmp", path)
-
-
-def _steward_where(row):
-    return " · ".join(x for x in (row.get("device"), row.get("project")) if x)
-
-
-def _steward_match(sessions, ref):
-    """会话写法：会话 key、会话 id 开头、标题（含一部分）、项目名都认；对得上不止一个、一个都没有返回 (None, 候选)"""
-    low = (ref or "").strip().lower()
-    if not low:
-        return None, []
-    exact = [s for s in sessions if low in ((s.get("key") or "").lower(), (s.get("sessionId") or "").lower())]
-    if len(exact) == 1:
-        return exact[0], exact
-    hits = [s for s in sessions if (s.get("sessionId") or "").lower().startswith(low) or low == (s.get("title") or "").lower()]
-    if len(hits) != 1:
-        hits = [s for s in sessions if low in (s.get("title") or "").lower() or low == (s.get("project") or "").lower()]
-    return (hits[0], hits) if len(hits) == 1 else (None, hits)
-
-
-def _steward_print_state(data, me):
-    devices = [d for d in data.get("devices") or [] if isinstance(d, dict)]
-    sessions = [s for s in data.get("sessions") or [] if isinstance(s, dict) and s.get("sessionId") != me]
-    projects = [p for p in data.get("projects") or [] if isinstance(p, dict)]
-    when = time.strftime("%m-%d %H:%M:%S", time.localtime((data.get("at") or 0) / 1000.0))
-    print("Kiteline 目录（电脑端 %s 推来）" % when)
-    print("设备：")
-    for d in devices:
-        print("  · %s（%s）%s" % (d.get("name") or d.get("id"), d.get("id"), "在线" if d.get("online") else "离线"))
-    print("运行中的会话（%d 个）：" % len(sessions))
-    for s in sessions:
-        state = {"busy": "正在工作", "waiting": "等用户确认", "idle": "空闲"}.get(s.get("activity") or "", s.get("activity") or "")
-        stage = (" · " + s["stage"]) if s.get("stage") else ""
-        print("  · 「%s」　%s　%s%s　会话 %s%s" % (s.get("title") or "会话", _steward_where(s), state, stage, (s.get("sessionId") or "")[:8],
-                                          ("　agent " + s["agent"]) if s.get("agent") and s.get("agent") != "claude-code" else ""))
-        if s.get("last"):
-            print("      最近：%s" % re.sub(r"\s+", " ", str(s["last"]))[:160])
-    if projects:
-        print("项目（含最近用过、现在没有会话的）：")
-        for p in projects:
-            print("  · %s　%s:%s%s" % (p.get("name") or "", p.get("device") or p.get("deviceId") or "", p.get("path") or "",
-                                       ("　运行中 %d 个会话" % p["live"]) if p.get("live") else ""))
-
-
-def command_steward(argv):
-    """总管模式（只有用户在 Kiteline 里指定的总管会话用）：
-    steward state                                         有哪些设备、项目、运行中的会话（标题、状态、做到哪一步、最近说了什么）
-    steward assign --to 会话 "任务"                       把任务派给一个已有的会话（--to 写会话标题、项目名或会话 id 开头）
-    steward new --device 设备 --dir 项目路径 [--agent agent] "任务"
-                                                          在某台电脑的某个项目里新开一个会话做这件事（默认 Claude Code）
-    steward group --to 会话 --to 会话 "说明"               把几个会话和你拉进一个会话群，让它们直接约定接口、数据格式
-    steward report "内容" [--image 截图路径]               （被派活的会话用）向总管汇报进展、结果或问题；截图可以带几张，会一起送到总管那里
-    内容写 - 从标准输入读。派出去的会话做完会用 steward report 回报，回报作为一条消息送进总管的会话"""
-    action = argv[0] if argv else "state"
-    rest = argv[1:] if argv else []
-    if action in ("-h", "--help", "help"):
-        print(command_steward.__doc__)
-        return 0
-    text, to, device, folder, agent, session, images = None, [], None, None, None, None, []
-    index = 0
-    while index < len(rest):
-        arg = rest[index]
-        value = rest[index + 1] if index + 1 < len(rest) else None
-        if arg == "--to" and value is not None:
-            to.append(value); index += 2; continue
-        if arg == "--device" and value is not None:
-            device = value; index += 2; continue
-        if arg in ("--dir", "--cwd") and value is not None:
-            folder = value; index += 2; continue
-        if arg == "--agent" and value is not None:
-            agent = value; index += 2; continue
-        if arg == "--image" and value is not None:
-            images.append(value); index += 2; continue
-        if arg == "--session" and value is not None:
-            session = value; index += 2; continue
-        text = arg if text is None else text + " " + arg
-        index += 1
-    if text == "-":
-        text = sys.stdin.read()
-    text = (text or "").strip()
-    session_id, _ = target_session(session)
-    if not session_id:
-        return 3
-    data = _host_steward()
-    steward = data.get("steward") or {}
-    if not data or not steward.get("sessionId"):
-        print("总管模式没有开启（或这台电脑还没收到 Kiteline 推来的目录）：用户在 Kiteline 设置里开启后才能用", file=sys.stderr)
-        return 4
-    me_steward = steward.get("sessionId") == session_id
-    sessions = [s for s in data.get("sessions") or [] if isinstance(s, dict)]
-    if len(text) > STEWARD_TEXT_MAX:
-        print("内容太长（%d 字，上限 %d）：写成文件放在对方读得到的地方，只发路径和要点" % (len(text), STEWARD_TEXT_MAX), file=sys.stderr)
-        return 2
-
-    if action == "report":
-        if me_steward:
-            print("你就是总管：直接回复用户即可，不用 report", file=sys.stderr)
-            return 2
-        if not text:
-            print("没有内容。用法：%s steward report \"做完了什么 / 卡在哪\"" % self_command(), file=sys.stderr)
-            return 2
-        entry = {"kind": "steward", "op": "report", "text": text}
-        paths = []
-        for raw in images[:6]:
-            path = os.path.abspath(os.path.expanduser(raw))
-            if os.path.splitext(path)[1].lower() not in IMAGE_EXTS or not os.path.isfile(path):
-                print("不是图片或不存在：%s" % raw, file=sys.stderr)
-                return 4
-            paths.append(path)
-        if paths:
-            entry["images"] = paths
-        append_outbox(session_id, entry)
-        print("已发给总管%s" % ("（附 %d 张图）" % len(paths) if paths else ""))
-        return 0
-
-    if not me_steward:
-        print("只有总管会话能用这个命令（被派活的会话用 %s steward report \"内容\" 回报）" % self_command(), file=sys.stderr)
-        return 4
-
-    if action in ("state", "status", "list"):
-        _steward_print_state(data, session_id)
-        return 0
-
-    others = [s for s in sessions if s.get("sessionId") != session_id]
-    if action in ("assign", "group"):
-        if not to:
-            print("缺少 --to（派给哪个会话）。运行中的会话见 %s steward state" % self_command(), file=sys.stderr)
-            return 2
-        if not text:
-            print("没有内容", file=sys.stderr)
-            return 2
-        keys, picked = [], []
-        for ref in to:
-            hit, candidates = _steward_match(others, ref)
-            if hit is None:
-                if candidates:
-                    print("「%s」对得上不止一个会话，换个更具体的写法（或写会话 id 开头）：" % ref, file=sys.stderr)
-                    for c in candidates[:8]:
-                        print("  · 「%s」%s　%s" % (c.get("title"), _steward_where(c), (c.get("sessionId") or "")[:8]), file=sys.stderr)
-                else:
-                    print("找不到会话「%s」：运行中的会话见 %s steward state；已经关了的要用 steward new 新开" % (ref, self_command()), file=sys.stderr)
-                return 4
-            keys.append(hit.get("key")); picked.append(hit)
-        if action == "group" and len(keys) < 1:
-            return 2
-        append_outbox(session_id, {"kind": "steward", "op": action, "to": keys, "text": text})
-        names = "、".join("「%s」（%s）" % (p.get("title") or "会话", _steward_where(p)) for p in picked)
-        if action == "assign":
-            print("已派给 %s；它做完或遇到问题会用 steward report 回报，回报会作为消息送到你这里" % names)
-        else:
-            print("已请 Kiteline 把你和 %s 拉进一个会话群；群里用 %s group say 说话" % (names, self_command()))
-        return 0
-
-    if action == "new":
-        devices = [d for d in data.get("devices") or [] if isinstance(d, dict)]
-        if not device or not folder or not text:
-            print("用法：%s steward new --device 设备 --dir 项目路径 [--agent agent] \"任务\"" % self_command(), file=sys.stderr)
-            return 2
-        low = device.strip().lower()
-        hits = [d for d in devices if low in ((d.get("id") or "").lower(), (d.get("name") or "").lower())] or \
-               [d for d in devices if low in (d.get("name") or "").lower()]
-        if len(hits) != 1:
-            print("设备「%s」对不上（%s）。设备：%s" % (device, "不止一个" if hits else "没有",
-                                                  "、".join("%s（%s）" % (d.get("name"), d.get("id")) for d in devices)), file=sys.stderr)
-            return 4
-        if not hits[0].get("online"):
-            print("设备「%s」现在离线，开不了会话" % hits[0].get("name"), file=sys.stderr)
-            return 4
-        entry = {"kind": "steward", "op": "new", "device": hits[0].get("id"), "cwd": folder, "text": text}
-        if agent:
-            entry["agent"] = agent
-        append_outbox(session_id, entry)
-        print("已请 Kiteline 在 %s 的 %s 新开会话（%s）；开好后它会出现在 steward state 里，做完用 steward report 回报"
-              % (hits[0].get("name"), folder, agent or "Claude Code"))
-        return 0
-
-    print("不认识的操作：%s。用法：\n%s" % (action, command_steward.__doc__), file=sys.stderr)
-    return 2
-
-
-# ---------------------------------------------------------------------------
 # 任务阶段：会话列表里「正在工作」前的「2/4 开发中」、对话页上的任务进展
 #   agent 用 stage 子命令自己报（任务阶段技能），记在 ~/.ccpulse/stage/<会话>.json；没报的按这一轮的工具调用推断：
 #   读代码、搜索 → 调研了解；改文件、编译 → 开发中；跑测试、截图核对 → 测试中；发图发报告 → 汇报中，提交推送、安装部署 → 发布中。
@@ -7902,21 +7694,25 @@ def list_projects(limit=60, since=None):
         return []
     for project in projects:
         folder = os.path.join(PROJECTS_DIR, project)
-        newest, newest_mtime, count, recent = None, 0, 0, 0
+        newest, newest_at, recent = None, 0, 0
         try:
-            for name in os.listdir(folder):
-                if name.endswith(".jsonl"):
-                    path = os.path.join(folder, name)
-                    mtime = os.path.getmtime(path)
-                    count += 1
-                    if mtime >= since:
-                        recent += 1
-                    if mtime > newest_mtime:
-                        newest, newest_mtime = path, mtime
+            logs = sorted(((os.path.getmtime(os.path.join(folder, name)), os.path.join(folder, name))
+                           for name in os.listdir(folder) if name.endswith(".jsonl")), reverse=True)
         except OSError:
             continue
+        count = len(logs)
+        # 活动时间按最后一条真正对话算（conversation_at）：mod 重载、闲置压缩、元数据重写不算（11-21 反馈：项目没动时间却更新了）。
+        # 对话时间不晚于文件时间，按文件时间从新到旧看，比当前最新的还旧、又早于今天的就不用再看
+        for mtime, path in logs:
+            if mtime < newest_at and mtime < since:
+                break
+            at = conversation_at(path, mtime)
+            if at >= since:
+                recent += 1
+            if at > newest_at:
+                newest, newest_at = path, at
         if newest:
-            found.append((newest_mtime, newest, count, recent))
+            found.append((newest_at, newest, count, recent))
     found.sort(reverse=True)
     out, seen = [], set()
     for mtime, path, count, recent in found:
@@ -8006,7 +7802,7 @@ def session_meta(path):
         "cwd": transcript_cwd(path),
         "title": tail_title(path, stat.st_size),
         "firstPrompt": first_prompt(path),
-        "lastActive": int(stat.st_mtime * 1000),
+        "lastActive": int(conversation_at(path, stat.st_mtime, stat.st_size) * 1000),
         "size": stat.st_size,
     }
     _META_CACHE[path] = (stat.st_size, stat.st_mtime, meta)
@@ -18668,7 +18464,7 @@ HOSTED_ENV_DROP = {"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_AGENT_SD
                    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_EMIT_STARTUP_TIMING",
                    "CLAUDE_CODE_STARTUP_FAILURE_RESULTS", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT",
                    "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TMUX", "TMUX_PANE", "GIT_ASKPASS"}
-# Kiteline 的内部变量不往后台的 claude 里带，但这几个要带：会话里跑的 Kiteline 命令（todo、group、steward……）要和 watcher 用同一个
+# Kiteline 的内部变量不往后台的 claude 里带，但这几个要带：会话里跑的 Kiteline 命令（todo、group……）要和 watcher 用同一个
 # 数据目录、同一份会话登记，命令写法也要一样。正式使用时不设，测试实例、隔离环境里设了，不带就会去读写正式的 ~/.ccpulse
 HOSTED_ENV_KEEP = {"CCPULSE_DATA_DIR", "CCPULSE_SESSIONS_DIR", "CCPULSE_SELF_COMMAND"}
 if not IS_WINDOWS:
@@ -20568,11 +20364,6 @@ class Watcher:
         if cmd == "groups":
             # 会话群变了（或刚连上）：存一份给 group 子命令核对成员、看最近的群消息
             return {"ok": True, "count": save_host_groups(request.get("items"))}
-        if cmd == "steward":
-            # 总管模式：电脑端推来的目录（设备、项目、会话），给 steward 子命令看；setup = 准备总管的工作目录和说明书
-            if request.get("op") == "setup":
-                return dict(steward_setup(request.get("brief")), ok=True)
-            return {"ok": True, "count": save_host_steward(request.get("directory"))}
         agent = self.agents.get(request.get("sessionId"), "claude-code")
         if cmd == "agent_close":
             # 在后台伪终端里跑的别家 agent：关闭会话 = 结束后台这一份（各家自己的退出命令不一定有，进程收掉最干净）
@@ -21090,6 +20881,14 @@ class Watcher:
     def _answer_slow(self, request):
         """慢查询（见 SLOW_CMDS）：在后台线程里算、算完再回。统计类一次一个，算完归还内存"""
         heavy = request.get("cmd") in HEAVY_CMDS
+        # 只列一个项目的会话（项目栏「最近的会话」）很快（百来毫秒），不排队：电脑端刚启动时一口气要好几样统计、
+        # 慢的 git 也占着慢队列，排在后面要等几十秒、超时后列表是空的（11-21）
+        if request.get("cmd") == "sessions_list" and request.get("cwd"):
+            try:
+                self._answer(request)
+            except Exception:
+                pass
+            return
         with (_HEAVY_GATE if heavy else _SLOW_GATE):
             try:
                 self._answer(request)
@@ -22398,8 +22197,6 @@ if __name__ == "__main__":
         sys.exit(command_browser(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "group":
         sys.exit(command_group(sys.argv[2:]))
-    if len(sys.argv) > 1 and sys.argv[1] == "steward":
-        sys.exit(command_steward(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "lean":
         # 排查用：省 token 两项现在的状态（能不能缩图、用什么命令、省了多少、自动整理窗口设成了多少）
         print(json.dumps(dict(savers_status(), resize=lean_resize_command(os.path.join(claude_config_dir(), "skills", LEAN_MOD_NAME))),

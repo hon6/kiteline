@@ -69,13 +69,47 @@ final class ProjectsModel: ObservableObject {
     @Published var expanded: String?
     private var seq = 0
 
+    // 上次读到的项目、最近的会话记在磁盘上：重启后先显示它，再后台刷新（11-21 反馈：每次重启项目列表都要转好久）
+    private static var cacheFile: URL { AppConfig.directoryURL.appendingPathComponent("projects-cache.json") }
+    private var rawProjects: [[String: Any]] = []
+    private var rawPast: [String: [[String: Any]]] = [:]
+    private var emptyRetries = 0
+
+    private init() {
+        if let data = try? Data(contentsOf: Self.cacheFile),
+           let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            rawProjects = root["projects"] as? [[String: Any]] ?? []
+            rawPast = root["past"] as? [String: [[String: Any]]] ?? [:]
+            projects = rawProjects.compactMap(ProjectItem.init)
+            past = rawPast.mapValues { $0.compactMap(PastItem.init) }
+        }
+    }
+
+    private func saveCache() {
+        let root: [String: Any] = ["projects": rawProjects, "past": rawPast]
+        guard JSONSerialization.isValidJSONObject(root), let data = try? JSONSerialization.data(withJSONObject: root) else { return }
+        try? FileManager.default.createDirectory(at: AppConfig.directoryURL, withIntermediateDirectories: true)
+        try? data.write(to: Self.cacheFile, options: .atomic)
+    }
+
     func load() {
         seq += 1
         let current = seq
         loading = true
         Projects.collect(detail: true) { [weak self] payload in
             guard let self = self, current == self.seq else { return }
-            let found = ((payload["projects"] as? [[String: Any]]) ?? []).compactMap(ProjectItem.init)
+            let rawFound = (payload["projects"] as? [[String: Any]]) ?? []
+            // 一台电脑都还没连上时读回来是空的：别拿空的盖掉缓存
+            if !rawFound.isEmpty { self.rawProjects = rawFound; self.saveCache() }
+            // 电脑还没连上时读回来是空的：留着缓存里的，等连上再刷新
+            // 刚启动时各台电脑还没连好，读回来是空的：留着缓存里的，过几秒再读（11-21 自测：重启后列表被空结果冲掉）
+            if rawFound.isEmpty, !self.projects.isEmpty, self.emptyRetries < 15 {
+                self.emptyRetries += 1
+                self.loading = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.load() }
+                return
+            }
+            let found = rawFound.compactMap(ProjectItem.init)
                 .filter { $0.exists || self.live($0).count > 0 }
             // 「打开项目」刚选的：各台电脑报上来的里面有了就不用再记，还没有的接着排在最前面
             self.adopted.removeAll { item in found.contains { $0.id == item.id } }
@@ -105,7 +139,8 @@ final class ProjectsModel: ObservableObject {
         expanded = expanded == project.id ? nil : project.id
         guard expanded != nil else { return }
         PastSessions.list(sourceId: project.sourceId, cwd: project.cwd) { [weak self] payload in
-            self?.past[project.id] = ((payload["sessions"] as? [[String: Any]]) ?? []).compactMap(PastItem.init).filter { !$0.live }
+            let running = Set(KitelineModel.shared.sessions.map(\.id))
+            self?.past[project.id] = ((payload["sessions"] as? [[String: Any]]) ?? []).compactMap(PastItem.init).filter { !running.contains($0.key) }
         }
     }
 
@@ -151,15 +186,32 @@ final class ProjectsModel: ObservableObject {
     }
 
     /// 项目栏「最近的会话」：合成一项的几台设备上的都拉来，按时间合在一起（键是这一项的 id）
-    func loadPast(_ id: String) {
+    func loadPast(_ id: String, attempt: Int = 0) {
         let places = members(id).map { ($0.sourceId, $0.cwd) }
         let list = places.isEmpty ? [Self.place(id)].compactMap { $0 } : places
         var got: [[PastItem]] = []
+        var rawGot: [[String: Any]] = []
+        var failed = false
         for place in list {
             PastSessions.list(sourceId: place.0, cwd: place.1) { [weak self] payload in
-                got.append(((payload["sessions"] as? [[String: Any]]) ?? []).compactMap(PastItem.init).filter { !$0.live })
+                // 只去掉列表里正显示着的会话：电脑端记着的会话不止在跑的（一天里开过的都在），按「记着」去掉的话，
+                // 当天用得多的项目最近 40 个全被去掉，「最近的会话」是空的（11-21 自测 ccpulse 一直空）
+                let running = Set(KitelineModel.shared.sessions.map(\.id))
+                let raw = ((payload["sessions"] as? [[String: Any]]) ?? []).filter { !running.contains($0["key"] as? String ?? "") }
+                if !((payload["errors"] as? [String]) ?? []).isEmpty { failed = true }
+                rawGot += raw
+                got.append(raw.compactMap(PastItem.init))
                 guard let self, got.count == list.count else { return }
-                self.past[id] = got.flatMap { $0 }.sorted { $0.lastActive > $1.lastActive }
+                let merged = got.flatMap { $0 }.sorted { $0.lastActive > $1.lastActive }
+                // 一台电脑都没连上时读回来是空的：已有缓存就先留着
+                // 有电脑没答上来（刚启动、连接还没好）：别拿空的盖掉，过几秒再取
+                if merged.isEmpty, failed || self.past[id]?.isEmpty == false {
+                    if attempt < 5 { DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.loadPast(id, attempt: attempt + 1) } }
+                    if self.past[id] == nil, attempt >= 5 { self.past[id] = [] }
+                    return
+                }
+                self.rawPast[id] = Array(rawGot.prefix(40)); self.saveCache()
+                self.past[id] = merged
             }
         }
     }
@@ -284,7 +336,7 @@ struct ProjectsView: View {
                 Spacer()
                 if model.loading, model.loaded { ProgressView().controlSize(.small) }
             }
-            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
             if model.projects.isEmpty, !model.loaded {
                 SkeletonPage("正在读取各设备上的项目…", style: .projects(7))
             } else {
@@ -304,13 +356,9 @@ struct ProjectsView: View {
             }
         }
         .animation(.skeletonFade, value: model.loaded)   // 读回来时骨架淡出、内容淡入
-        .navigationTitle("项目")
-        .navigationSubtitle(model.summary)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.load() } label: { Label("刷新", systemImage: "arrow.clockwise") }
-            }
-        }
+        .modifier(PageChrome(title: L("项目"), subtitle: model.summary) {
+            Button { model.load() } label: { Label("刷新", systemImage: "arrow.clockwise") }.help(L("刷新"))
+        })
         .liveReload(every: 120) { model.load() }
     }
 }

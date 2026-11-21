@@ -315,6 +315,34 @@ try:
     with open(eff_path, "w") as handle:   # 记录尾部滚过去了（看不到那几条命令）也记得
         handle.write(json.dumps({"type": "user", "message": {"role": "user", "content": "接着做"}}) + "\n")
     check("命令滚出了记录尾部，思考等级照样记得", W.scan_transcript(eff_path)["effort"] == {"effort": "high", "ultracode": True})
+    # 新消息按最后一条真正对话的时间算：mod 重载提示、/effort、闲置压缩（大附件塞满尾部）、标题元数据都不算
+    ca_path = os.path.join(root, "contentat.jsonl")
+    said_at = W.parse_ts("2026-11-20T01:00:05Z")
+    def ca_line(**entry):
+        return json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
+    with open(ca_path, "w") as handle:
+        handle.write(ca_line(parentUuid=None, type="user", timestamp="2026-11-20T01:00:00Z", message={"role": "user", "content": "你好"}))
+        handle.write(ca_line(parentUuid="a", type="assistant", timestamp="2026-11-20T01:00:05Z",
+                             message={"role": "assistant", "content": [{"type": "text", "text": "好的"}]}))
+        handle.write(ca_line(type="system", subtype="informational", timestamp="2026-11-21T05:00:00Z", content="kiteline: reloaded (7 hooks)"))
+        handle.write(ca_line(parentUuid="b", type="user", timestamp="2026-11-21T05:01:00Z",
+                             message={"role": "user", "content": "<command-name>/effort</command-name>"}))
+        handle.write(ca_line(parentUuid="c", type="user", isCompactSummary=True, timestamp="2026-11-21T05:02:00Z",
+                             message={"role": "user", "content": "summary"}))
+        handle.write(ca_line(parentUuid="d", type="attachment", timestamp="2026-11-21T05:02:00Z",
+                             attachment={"type": "file", "content": "x" * (W.TRANSCRIPT_TAIL_BYTES + 1000)}))
+        handle.write(ca_line(type="ai-title", aiTitle="标题"))
+    check("新消息时间：mod 重载、/effort、闲置压缩、标题都不顶上去（大附件塞满尾部时往前找）",
+          W.scan_transcript(ca_path)["contentAt"] == said_at, str(W.scan_transcript(ca_path)["contentAt"]))
+    with open(ca_path, "a") as handle:
+        handle.write(ca_line(parentUuid="e", type="assistant", timestamp="2026-11-21T06:00:00Z",
+                             message={"role": "assistant", "content": [{"type": "text", "text": "做完了"}]}))
+    check("新消息时间：有了新回复就跟上", W.scan_transcript(ca_path)["contentAt"] == W.parse_ts("2026-11-21T06:00:00Z"))
+    with open(ca_path, "a") as handle:
+        handle.write(ca_line(type="system", subtype="informational", timestamp="2026-11-21T07:00:00Z", content="kiteline: reloaded"))
+        handle.write(ca_line(type="ai-title", aiTitle="标题"))
+    check("项目列表 / 历史会话的最后活动（conversation_at）也不算重载和元数据",
+          int(W.conversation_at(ca_path) * 1000) == W.parse_ts("2026-11-21T06:00:00Z"), str(W.conversation_at(ca_path)))
     # Claude 没起成标题（起标题的请求失败）：VS Code 标签拿用户的话当名字，列表和投递核对标签都要认这个
     nt_path = os.path.join(root, "notitle.jsonl")
     first_words = "订单列表里，清空筛选条件后又重新筛选，现在接口报错了，怎么办\n\n[附图] /tmp/a.jpg"
@@ -539,6 +567,10 @@ try:
     with open(os.path.join(repo, "新文件.md"), "w") as handle:
         handle.write("x\n")
     gone = os.path.join(root, "早就删了")
+    # 「今天动过」按今天有没有真正对话算（conversation_at），夹具里的对话时间是固定日期，补一条今天的回复
+    with open(transcript, "a") as handle:
+        handle.write(json.dumps({"type": "assistant", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+                                 "message": {"role": "assistant", "content": [{"type": "text", "text": "今天的回复"}]}}, ensure_ascii=False) + "\n")
     resp = call({"cmd": "project_overview", "extra": [repo, gone, "相对路径"]})
     listed = {p["cwd"]: p for p in (resp or {}).get("projects", [])}
     mine, extra_repo = listed.get(CWD) or {}, listed.get(repo) or {}
@@ -716,6 +748,21 @@ try:
           str([(s.get("sessionId"), s.get("pid")) for s in (snap or {}).get("sessions", [])]))
     os.remove(twin_file)
     twin.kill()
+
+    print("== 后台运行的环境变量、发图")
+    kept = dict(os.environ)
+    try:
+        os.environ.update({"CCPULSE_DATA_DIR": "/tmp/x-data", "CCPULSE_SESSIONS_DIR": "/tmp/x-sess", "CCPULSE_SKILLS": "1", "VSCODE_PID": "1"})
+        henv = W.hosted_env({})
+        check("后台运行的会话保留数据目录、会话登记目录，别的 Kiteline / VS Code 变量照旧去掉",
+              henv.get("CCPULSE_DATA_DIR") == "/tmp/x-data" and henv.get("CCPULSE_SESSIONS_DIR") == "/tmp/x-sess"
+              and "CCPULSE_SKILLS" not in henv and "VSCODE_PID" not in henv)
+    finally:
+        os.environ.clear()
+        os.environ.update(kept)
+    out = subprocess.run([sys.executable, WATCHER, "send-image", png_path, "--session", SID], env=env,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30).stdout.decode()
+    check("send-image 发完打印图片存在哪（转交给别人时用）", "图片：" in out and os.path.join(DATA, "outbox", "files") in out, out)
 
     print("== 其他")
     resp = call({"cmd": "tmux_send", "pid": fake.pid, "text": "hi", "submit": True})

@@ -264,7 +264,7 @@ struct BragShareSheet: View {
 
     /// 主题：一排胶囊，选中的描主题色边
     private var themePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             HStack(spacing: 8) {
                 ForEach(themes) { item in
                     let on = item == theme
@@ -297,10 +297,10 @@ struct BragShareSheet: View {
             } label: {
                 Label(L("换一句"), systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .kiteButton()
             .disabled(rendered.lineCount < 2)
             Toggle(isOn: $showCost) { Text(L("显示花费")).font(.ui(.subheadline)) }
-                .toggleStyle(.button).buttonStyle(.bordered)
+                .toggleStyle(.button).kiteButton()
         }
         VStack(spacing: 10) {
             Button {
@@ -310,14 +310,14 @@ struct BragShareSheet: View {
             } label: {
                 Label(L("发给微信好友"), systemImage: "square.and.arrow.up").frame(maxWidth: .infinity).padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent).tint(Theme.wechatGreen)
+            .kiteButton(prominent: true)
             Button {
                 noteShare("moments")
                 Task { await saveForMoments(rendered.image) }
             } label: {
                 Label(L("保存图片，发朋友圈"), systemImage: "photo.on.rectangle").frame(maxWidth: .infinity).padding(.vertical, 6)
             }
-            .buttonStyle(.bordered)
+            .kiteButton()
         }
         if sessionKey == nil {
             Toggle(isOn: $morning) {

@@ -28,21 +28,39 @@ final class UsageReportModel: ObservableObject {
         var requests: Double
     }
 
-    @Published var days = 7 { didSet { load() } }
+    @Published var days = 7 {
+        didSet {
+            payload = PageCache.load("usage-\(days)")   // 换范围先显示上次的，再后台统计
+            load()
+        }
+    }
     @Published private(set) var payload: [String: Any]?
     /// 各台电脑的订阅额度（Limits.collect 的 JSON，交给 KitelineKit 画额度条）
     @Published private(set) var limits: Data?
     @Published private(set) var loading = false
     private var seq = 0
 
+    /// 上次统计的结果、额度存在磁盘上（同今日动态）：打开先显示，后台静默重新统计
+    init() {
+        payload = PageCache.load("usage-\(days)")
+        limits = PageCache.load("limits").flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+    }
+
     func load(fresh: Bool = false) {
         seq += 1
         let current = seq
         loading = true
-        Limits.collect(fresh: fresh) { [weak self] payload in self?.limits = try? JSONSerialization.data(withJSONObject: payload) }
+        let name = "usage-\(days)"
+        Limits.collect(fresh: fresh) { [weak self] payload in
+            self?.limits = try? JSONSerialization.data(withJSONObject: payload)
+            if !((payload["devices"] as? [Any]) ?? []).isEmpty { PageCache.save("limits", payload) }
+        }
         UsageReport.collect(days: days, fresh: fresh) { [weak self] payload in
             guard let self = self, current == self.seq else { return }
-            self.payload = payload
+            // 电脑都还没连上时是空的：有上次的就先留着
+            let empty = ((payload["days"] as? [Any]) ?? []).isEmpty && ((payload["models"] as? [Any]) ?? []).isEmpty
+            if !empty || self.payload == nil { self.payload = payload }
+            if !empty { PageCache.save(name, payload) }
             self.loading = false
         }
     }
@@ -126,27 +144,25 @@ struct UsageReportView: View {
                     SkeletonPage("正在统计各机器的用量…", style: limits.isEmpty ? .usage : .usageStats, padded: false)
                 }
             }
-            .padding(.horizontal, 28).padding(.vertical, 22)
-            .frame(maxWidth: 900).frame(maxWidth: .infinity)
+            // 边距同页面顶上那一行（16）；新版界面里是弹窗，内容铺满宽度
+            .padding(16)
+            .frame(maxWidth: KitelineModel.shared.newLayout ? .infinity : 900).frame(maxWidth: .infinity)
         }
         .animation(.skeletonFade, value: model.payload == nil)   // 读回来时骨架淡出、内容淡入
-        .navigationTitle("用量")
-        .navigationSubtitle(model.days == 1 ? "今天" : "最近 \(model.days) 天")
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("范围", selection: $model.days) {
-                    Text("今天").tag(1)
-                    Text("7 天").tag(7)
-                    Text("30 天").tag(30)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
+        .modifier(PageChrome(title: L("用量"), subtitle: model.days == 1 ? L("今天") : L("最近 %@ 天", "\(model.days)")) {
+            Picker("范围", selection: $model.days) {
+                Text("今天").tag(1)
+                Text("7 天").tag(7)
+                Text("30 天").tag(30)
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.load(fresh: true) } label: { Label("刷新", systemImage: "arrow.clockwise") }
-                    .disabled(model.loading)
-            }
-        }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 200)
+        } actions: {
+            Button { model.load(fresh: true) } label: { Label("刷新", systemImage: "arrow.clockwise") }
+                .disabled(model.loading)
+                .help(L("刷新"))
+        })
         .liveReload(every: 120) { model.load() }
     }
 

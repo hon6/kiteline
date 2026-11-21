@@ -39,7 +39,7 @@ struct TodosView: View {
         let isEmpty = state.items.isEmpty && state.suggestions.isEmpty
         List {
             if let sidebarHeader {
-                sidebarHeader
+                sidebarHeader.listRowInsets(EdgeInsets())   // 新版界面里它是空的：别占一行的上下边距
                 sidebarBar(open: pending.count + agentAll.count)
                 if isEmpty {
                     if fetched { sidebarEmpty } else { SkeletonShape(style: .list(4)) }
@@ -169,20 +169,10 @@ struct TodosView: View {
             Text("待办").font(.app(size: 13, weight: .semibold))
             if count > 0 { Text("\(count)").font(.app(size: 12).monospacedDigit()).foregroundStyle(.tertiary) }
             Spacer(minLength: 6)
-            Button { editor = .new } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "plus").font(.app(size: 11, weight: .semibold))
-                    Text("新建").lineLimit(1)
-                }
-                .font(.app(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 9)
-                .frame(height: 26)
-                .background(Color.primary.opacity(0.06), in: Capsule())
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.steady(.plain))
-            .help("新建待办")
+            // 按钮样式规范：同项目栏的「打开」
+            Button { editor = .new } label: { KiteLabel(L("新建"), symbol: "plus").lineLimit(1) }
+                .kiteButton()
+                .help("新建待办")
         }
         .padding(.top, 10)
         .padding(.bottom, 2)
@@ -227,8 +217,10 @@ struct TodosView: View {
                                 .foregroundStyle(Theme.claude)
                                 .padding(.vertical, 2).padding(.leading, 8)
                                 .contentShape(Rectangle())
+                                .fixedSize()   // 窄栏里出处那行让着它，按钮字别被截成「回…」（11-21 自测）
                             }
                             .buttonStyle(.steady(.plain))
+                            .layoutPriority(1)
                         }
                     }
                 }
@@ -434,7 +426,8 @@ struct TodosView: View {
         // 标题和「显示方式」一行；「收起久未更新的」单独放下一行（挤在一行时窄屏会折行、把标题和菜单截掉）
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                sectionTitle(L("agent 的待办 · 它会自己处理")).lineLimit(1)
+                // 窄栏里整句放不下会被截掉：标题只写「agent 的待办」，后半句放到悬停说明里
+                sectionTitle(L("agent 的待办")).lineLimit(1).layoutPriority(1).help(L("agent 的待办 · 它会自己处理"))
                 Spacer(minLength: 8)
                 if all.count > 1 || !isDefaultView { viewMenu(all).fixedSize() }
             }
@@ -959,7 +952,7 @@ struct TodoEditor: View {
 
                 macShots
             }
-            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 20)
+            .padding(DialogMetric.pad)
 
             Divider()
             HStack(spacing: 10) {
@@ -968,14 +961,14 @@ struct TodoEditor: View {
                 }
                 Spacer(minLength: 8)
                 if busy { ProgressView().controlSize(.small) }
-                Button(L("取消"), action: cancel).keyboardShortcut(.cancelAction).buttonStyle(.bordered)
+                Button(L("取消"), action: cancel).keyboardShortcut(.cancelAction).kiteButton()
                 Button(confirmTitle) { save() }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .buttonStyle(.borderedProminent).tint(Theme.wechatGreen)
+                    .kiteButton(prominent: true)
                     .disabled(!canSave)
             }
             .controlSize(.large)
-            .padding(.horizontal, 20).padding(.vertical, 14)
+            .padding(.horizontal, DialogMetric.pad).padding(.vertical, DialogMetric.barV)
         }
         // 打开时 560 宽、高度跟着内容走；能拖边改大小
         .frame(minWidth: 440, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
@@ -1053,7 +1046,7 @@ struct TodoEditor: View {
 
     /// 已经附上的截图：一排正方形，右上角 ✕ 去掉
     private var strip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             HStack(spacing: 8) {
                 ForEach(shots) { shot in
                     shotThumb(shot)

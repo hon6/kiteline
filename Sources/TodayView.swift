@@ -73,20 +73,38 @@ enum DigestRange: String, CaseIterable, Identifiable {
 
 final class TodayModel: ObservableObject {
     static let shared = TodayModel()
-    @Published var range: DigestRange = .today { didSet { load() } }
+    @Published var range: DigestRange = .today {
+        didSet {
+            // 换范围：先显示那个范围上次的结果（没有才是骨架），再后台汇总
+            report = PageCache.load("today-\(range.rawValue)").flatMap(DigestReport.decode)
+            load()
+        }
+    }
     @Published private(set) var report: DigestReport?
     @Published private(set) var loading = false
     @Published var pushMessage: String?
     private var token = 0
+
+    /// 上次汇总的结果存在磁盘上（11-21 反馈：每次打开都要统计一遍太慢）：打开先显示它，后台静默重新汇总，汇总完换上
+    init() {
+        report = PageCache.load("today-\(range.rawValue)").flatMap(DigestReport.decode)
+    }
 
     func load(fresh: Bool = false) {
         token += 1
         let current = token
         loading = true
         let bounds = range.bounds
+        let name = "today-\(range.rawValue)"
         Digest.collect(since: bounds.since, until: bounds.until, fresh: fresh) { [weak self] payload in
             guard let self = self, current == self.token else { return }
-            self.report = DigestReport.decode(payload)
+            if let report = DigestReport.decode(payload) {
+                self.report = report
+                // 电脑都还没连上时汇总出来是空的：别拿空的盖掉上次的
+                if !report.sessions.isEmpty { PageCache.save(name, payload) }
+            } else if self.report == nil {
+                self.report = nil
+            }
             self.loading = false
         }
     }
@@ -130,37 +148,34 @@ struct TodayView: View {
                     SkeletonPage("正在汇总…", style: .today, padded: false)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 22)
-            .frame(maxWidth: 900)
+            // 边距同页面顶上那一行（16）；新版界面里是弹窗，内容铺满宽度（11-21 自测：内容比标题行往里缩了 40 多点）
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .frame(maxWidth: KitelineModel.shared.newLayout ? .infinity : 900)
             .frame(maxWidth: .infinity)
         }
         .animation(.skeletonFade, value: model.report == nil)   // 读回来时骨架淡出、内容淡入
-        .navigationTitle("今日动态")
-        .navigationSubtitle(subtitle)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("范围", selection: $model.range) {
-                    ForEach(DigestRange.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
+        .modifier(PageChrome(title: L("今日动态"), subtitle: subtitle) {
+            Picker("范围", selection: $model.range) {
+                ForEach(DigestRange.allCases) { Text($0.label).tag($0) }
             }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { model.load(fresh: true) } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
-                }
-                .disabled(model.loading)
-                .help("重新汇总")
-                Button { model.pushNow() } label: {
-                    Label("推送日报", systemImage: "paperplane")
-                }
-                .help("立即将今日日报推送到手机")
-                .popover(isPresented: Binding(get: { model.pushMessage != nil }, set: { if !$0 { model.pushMessage = nil } })) {
-                    Text(model.pushMessage ?? "").font(.app(size: 12)).padding(12)
-                }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 220)
+        } actions: {
+            Button { model.load(fresh: true) } label: {
+                Label("刷新", systemImage: "arrow.clockwise")
             }
-        }
+            .disabled(model.loading)
+            .help("重新汇总")
+            Button { model.pushNow() } label: {
+                Label("推送日报", systemImage: "paperplane")
+            }
+            .help("立即将今日日报推送到手机")
+            .popover(isPresented: Binding(get: { model.pushMessage != nil }, set: { if !$0 { model.pushMessage = nil } })) {
+                Text(model.pushMessage ?? "").font(.app(size: 12)).padding(12)
+            }
+        })
         // 切过来、来源连上 / 断开时都重新汇总，开着时每分钟再汇总一次（只在第一次打开时汇总的话，
         // App 刚启动、来源还没连上那一下的「未连接」「没有动态」会一直挂着）
         .liveReload(every: 60) { model.load() }
@@ -336,7 +351,7 @@ struct ShotStrip: View {
     @State private var images: [String: NSImage] = [:]
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             HStack(spacing: 8) {
                 ForEach(session.shots, id: \.self) { shot in
                     Group {
@@ -462,5 +477,22 @@ struct ChipFlow: Layout {
             rows[rows.count - 1] = row
         }
         return rows.filter { !$0.items.isEmpty }
+    }
+}
+
+
+/// 整页数据（今日动态、用量）的磁盘缓存：数据目录下 page-cache/<名字>.json，存汇总接口原样返回的 JSON
+enum PageCache {
+    private static var folder: URL { AppConfig.directoryURL.appendingPathComponent("page-cache", isDirectory: true) }
+
+    static func load(_ name: String) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(name + ".json")) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    static func save(_ name: String, _ payload: [String: Any]) {
+        guard JSONSerialization.isValidJSONObject(payload), let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? data.write(to: folder.appendingPathComponent(name + ".json"), options: .atomic)
     }
 }

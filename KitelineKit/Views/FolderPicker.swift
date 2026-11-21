@@ -151,7 +151,7 @@ struct FolderPicker: View {
         #endif
         .toolbar {
             if let cancel {
-                ToolbarItem(placement: .cancellationAction) { Button("取消", action: cancel).panelToolbarButton() }
+                ToolbarItem(placement: .cancellationAction) { Button("取消", action: cancel).panelToolbarButton() }.panelBare()
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -173,7 +173,7 @@ struct FolderPicker: View {
                 Button("打开") { if let listing { pick(listing.path) } }
                     .disabled(listing == nil || loading)
                     .panelToolbarButton()
-            }
+            }.panelBare()
         }
         .codeAsks(.constant(nil), $nameAsk)
         .task { await load(start) }

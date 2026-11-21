@@ -628,7 +628,7 @@ struct BrowserViewer: View {
             } label: {
                 Label("接管", systemImage: "hand.tap").font(.ui(.footnote).weight(.semibold))
             }
-            .buttonStyle(.bordered).controlSize(.small).tint(Theme.claude)
+            .kiteButton().controlSize(.small).tint(Theme.claude)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
     }
@@ -643,7 +643,7 @@ struct BrowserViewer: View {
             }
             Spacer(minLength: 8)
             Button("开始接管") { beginControl() }
-                .buttonStyle(.borderedProminent).tint(Theme.claude).controlSize(.small)
+                .kiteButton(prominent: true).controlSize(.small)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.claude.opacity(0.06))
@@ -689,7 +689,7 @@ struct BrowserViewer: View {
                     handBackNote = ""
                     Task { await store.handBack(key, note: note) }
                 }
-                .buttonStyle(.borderedProminent).tint(Theme.claude).controlSize(.small)
+                .kiteButton(prominent: true).controlSize(.small)
                 .fixedSize().layoutPriority(1)
             }
         }
@@ -715,7 +715,7 @@ struct BrowserViewer: View {
         Button { model.browsers.input(key, ["type": "key", "key": name]) } label: {
             Image(systemName: icon).frame(minWidth: stretch ? 0 : 26, maxWidth: stretch ? .infinity : 26, minHeight: 24, maxHeight: 24)
         }
-        .buttonStyle(.bordered).controlSize(.small).help(label).accessibilityLabel(label)
+        .kiteButton().controlSize(.small).help(label).accessibilityLabel(label)
     }
 }
 

@@ -246,6 +246,21 @@ struct ChatImage: Codable, Hashable {
     var ref: String
     var mime: String?
     var name: String?
+
+    init(ref: String, mime: String? = nil, name: String? = nil) {
+        self.ref = ref; self.mime = mime; self.name = name
+    }
+
+    /// 容错：个别条目的 images 是一串路径字符串，别因为它让整页历史解码失败、对话区空白
+    init(from decoder: Decoder) throws {
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            self.init(ref: text); return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(ref: try container.decode(String.self, forKey: .ref),
+                  mime: try container.decodeIfPresent(String.self, forKey: .mime),
+                  name: try container.decodeIfPresent(String.self, forKey: .name))
+    }
 }
 
 /// 对话里的一条：user（我说的）/ text（Claude 回复）/ thinking / tool（调用工具）/ result（工具结果）/

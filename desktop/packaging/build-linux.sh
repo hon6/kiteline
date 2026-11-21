@@ -62,4 +62,4 @@ NAME="Kiteline-Linux-$VERSION.tar.gz"
 # 时间戳统一成打包当天、属主清成 0：用户机器的时钟稍慢时 tar 也不会报「时间戳在未来」
 tar --mtime="$(date -u +%Y-%m-%d) 00:00:00 UTC" --owner=0 --group=0 --numeric-owner -C "$WORK" -czf "$OUT/$NAME" Kiteline
 (cd "$OUT" && sha256sum "$NAME" > "$NAME.sha256")
-echo "已打包：$OUT/$NAME（$(du -h "$OUT/$NAME" | cut -f1)）"
+echo "已打包：$OUT/${NAME}（$(du -h "$OUT/$NAME" | cut -f1)）"

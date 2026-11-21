@@ -18,14 +18,18 @@ public struct FilterBar<Content: View>: View {
     public var body: some View {
         let row = HStack(spacing: 6) { content }
             .padding(.leading, bleed).padding(.trailing, trailingBleed)
+        #if os(macOS)
+            .padding(.top, 9).padding(.bottom, 1)   // 上面给角标留地方（横着滚的一排会裁掉超出自己的部分）
+        #else
             .padding(.vertical, 1)
+        #endif
         #if os(macOS)
         // Mac 上筛选条都放在竖着滚的列表里：用自己管手势的横向滚动（见 HorizontalStrip），上下滑不会被它接走
         HorizontalStrip(content: row.fixedSize().lookRoot())   // 按胶囊本来的宽排（不压缩、不截字），放不下就横着划
             .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
             .padding(.leading, -bleed).padding(.trailing, -trailingBleed)
         #else
-        ScrollView(.horizontal, showsIndicators: false) { row }
+        KiteHScroll { row }
             .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)   // 胶囊多了别把一排的总宽往上报，撑宽整页
             .padding(.leading, -bleed).padding(.trailing, -trailingBleed)
         #endif
@@ -43,7 +47,12 @@ private struct HorizontalStrip<Content: View>: NSViewRepresentable {
     func makeNSView(context: Context) -> StripScrollView {
         let scroll = StripScrollView()
         scroll.drawsBackground = false
-        scroll.hasHorizontalScroller = false
+        // 细的悬浮滚动条（滚动、鼠标靠近时才出来）：鼠标没有横向滚轮时能拖着它横着看（11-21）
+        scroll.hasHorizontalScroller = true
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        // 滚动条画在这一排下面的空里，不盖住胶囊上的字（11-21 自测：盖在字上，滚动时看不清）
+        scroll.scrollerInsets = NSEdgeInsets(top: 0, left: 0, bottom: -8, right: 0)
         scroll.hasVerticalScroller = false
         scroll.verticalScrollElasticity = .none
         scroll.automaticallyAdjustsContentInsets = false
@@ -68,6 +77,12 @@ private struct HorizontalStrip<Content: View>: NSViewRepresentable {
 final class StripScrollView: NSScrollView {
     /// 这一次手势归谁：true = 交给外面的列表
     private var passing = false
+
+    /// 一直用悬浮的细滚动条：接了鼠标时系统会换成常驻的粗条，占掉一排的高度、把胶囊裁掉一半（11-21 自测截图）
+    override var scrollerStyle: NSScroller.Style {
+        get { .overlay }
+        set { super.scrollerStyle = .overlay }
+    }
 
     override func scrollWheel(with event: NSEvent) {
         let gesture = !event.phase.isEmpty || !event.momentumPhase.isEmpty
@@ -99,9 +114,11 @@ public struct FilterChip: View {
     let dot: Color?
     var symbol: String? = nil
     let selected: Bool
+    var fill = false
     let action: () -> Void
 
-    public init(title: String, count: Int, dot: Color?, symbol: String? = nil, selected: Bool, action: @escaping () -> Void) {
+    public init(title: String, count: Int, dot: Color?, symbol: String? = nil, selected: Bool, fill: Bool = false, action: @escaping () -> Void) {
+        self.fill = fill
         self.title = title
         self.count = count
         self.dot = dot
@@ -111,6 +128,27 @@ public struct FilterChip: View {
     }
 
     public var body: some View {
+        #if os(macOS)
+        // Mac：按钮样式规范（KiteButtonStyle）：选中 = 主题色亮起，其余灰底描边
+        Button(action: action) {
+            HStack(spacing: KiteMetric.gap) {
+                if let symbol {
+                    Image(systemName: symbol).font(.app(size: 10, weight: .bold)).foregroundStyle(selected ? Color.white : (dot ?? Theme.claude))
+                } else if let dot {
+                    Circle().fill(selected ? .white : dot).frame(width: 6, height: 6)
+                }
+                Text(title).lineLimit(1).fixedSize()
+            }
+        }
+        .buttonStyle(KiteButtonStyle(prominent: selected, expand: fill))
+        // 个数是按钮右上角的角标（圆心压在角上），文字完整显示（11-21）
+        .overlay(alignment: .topTrailing) {
+            if count > 0 { KiteBadge(count).environment(\.kiteProminent, selected).offset(x: 6, y: -8).allowsHitTesting(false) }
+        }
+        .opacity(count == 0 && !selected ? 0.55 : 1)
+        .accessibilityLabel("\(title)，\(count) 个")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        #else
         Button(action: action) {
             HStack(spacing: 5) {
                 if let symbol {
@@ -132,6 +170,7 @@ public struct FilterChip: View {
         .buttonStyle(PressableStyle())
         .accessibilityLabel("\(title)，\(count) 个")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        #endif
     }
 }
 
@@ -146,6 +185,17 @@ public struct SourceTokenChip: View {
     }
 
     public var body: some View {
+        #if os(macOS)
+        Button(action: clear) {
+            HStack(spacing: KiteMetric.gap) {
+                Image(systemName: "desktopcomputer")
+                Text(name).lineLimit(1)
+                Image(systemName: "xmark").font(.app(size: 9, weight: .bold))
+            }
+        }
+        .kiteButton()
+        .accessibilityLabel("仅显示 \(name)，轻点查看全部机器")
+        #else
         Button(action: clear) {
             HStack(spacing: 5) {
                 Image(systemName: "desktopcomputer").font(.app(size: 11, weight: .semibold))
@@ -160,6 +210,7 @@ public struct SourceTokenChip: View {
         }
         .buttonStyle(PressableStyle())
         .accessibilityLabel("仅显示 \(name)，轻点查看全部机器")
+        #endif
     }
 }
 
@@ -227,6 +278,23 @@ public struct ScopeChip: View {
     }
 
     public var body: some View {
+        #if os(macOS)
+        // Mac：同 FilterChip，按钮样式规范（KiteButtonStyle）：选中 = 主题色亮起
+        Button(action: action) {
+            HStack(spacing: KiteMetric.gap) {
+                if let symbol { Image(systemName: symbol) }
+                Text(title.count > 24 ? String(title.prefix(23)) + "…" : title).lineLimit(1)
+            }
+        }
+        .buttonStyle(KiteButtonStyle(prominent: selected))
+        // 个数是右上角的角标（同 FilterChip，11-21 反馈：数字显示成角标）；0 个的不标、按钮淡一点
+        .overlay(alignment: .topTrailing) {
+            if let count, count > 0 { KiteBadge(count).environment(\.kiteProminent, selected).offset(x: 6, y: -8).allowsHitTesting(false) }
+        }
+        .opacity(count == 0 && !selected ? 0.55 : 1)
+        .accessibilityLabel(count.map { "\(title)，\($0) 个" } ?? title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        #else
         Button(action: action) {
             HStack(spacing: 5) {
                 if let symbol { Image(systemName: symbol).font(.app(size: 11, weight: .semibold)) }
@@ -248,6 +316,7 @@ public struct ScopeChip: View {
         .buttonStyle(PressableStyle())
         .accessibilityLabel(count.map { "\(title)，\($0) 个" } ?? title)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        #endif
     }
 }
 
@@ -261,12 +330,16 @@ public struct NewGroupLabel: View {
             Image(systemName: "person.2.badge.plus").font(.app(size: 12, weight: .semibold))
             Text(L("建群")).lineLimit(1)
         }
+        #if os(macOS)
+        .kiteLook()
+        #else
         .font(.ui(.footnote).weight(.medium))
         .foregroundStyle(Color.secondary)
         .padding(.horizontal, 11)
         .frame(height: 30)
         .background(Color.primary.opacity(0.06), in: Capsule())
         .contentShape(Capsule())
+        #endif
         // Mac 侧栏窄：「显示方式」写着「按项目」这类长字时别把「建群」挤成「…」
         .fixedSize()
     }
@@ -283,12 +356,16 @@ public struct TabPlusLabel: View {
             Image(systemName: "plus").font(.app(size: 12, weight: .semibold))
             Text(title).lineLimit(1)
         }
+        #if os(macOS)
+        .kiteLook()
+        #else
         .font(.ui(.footnote).weight(.medium))
         .foregroundStyle(Color.secondary)
         .padding(.horizontal, 11)
         .frame(height: 30)
         .background(Color.primary.opacity(0.06), in: Capsule())
         .contentShape(Capsule())
+        #endif
         .fixedSize()
     }
 }
@@ -296,24 +373,31 @@ public struct TabPlusLabel: View {
 public struct ViewMenuLabel: View {
     let summary: String
     let isDefault: Bool
+    /// 窄栏里只画图标（写着的分组、排序放到悬停说明里）：字被挤成一个竖线（11-21 自测）
+    var compact = false
 
-    public init(summary: String, isDefault: Bool) {
+    public init(summary: String, isDefault: Bool, compact: Bool = false) {
         self.summary = summary
         self.isDefault = isDefault
+        self.compact = compact
     }
 
     public var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "line.3.horizontal.decrease").font(.app(size: 12, weight: .semibold))
-            Text(summary).lineLimit(1)
+            if !compact { Text(summary).lineLimit(1) }
             Image(systemName: "chevron.down").font(.app(size: 9, weight: .bold))
         }
+        #if os(macOS)
+        .kiteLook(prominent: !isDefault)
+        #else
         .font(.ui(.footnote).weight(.medium))
         .foregroundStyle(isDefault ? Color.secondary : Theme.claude)
         .padding(.horizontal, 11)
         .frame(height: 30)
         .background(isDefault ? Color.primary.opacity(0.06) : Theme.tile, in: Capsule())
         .contentShape(Capsule())
+        #endif
     }
 }
 

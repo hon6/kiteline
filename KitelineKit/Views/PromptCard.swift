@@ -40,7 +40,7 @@ struct PromptCard: View {
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).hairlineBorder(MacPalette.separator).allowsHitTesting(false))
             .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
             .frame(maxWidth: 832)
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Bar.spacing)   // 同输入框的左右边距（11-21 反馈：间距一致）
             .frame(maxWidth: .infinity)
             #else
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))

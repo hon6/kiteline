@@ -1,5 +1,44 @@
 # Kiteline Release Notes
 
+## 3.49.44 (2026-11-22)
+
+### Improvements
+
+- **Consistent button style**: Every button now shares one look — a light fill with a border darker than the fill, lit up in the accent color when selected or primary, with the same corner radius, height, padding and spacing, following VS Code. In the Git panel, Pull and Push show text only, with pending counts as badges; the More button and the commit row match the other buttons in height, and the commit message box no longer shows a double border.
+- **AR Mode opens in the app window by default**: Instead of covering the whole screen, AR Mode now appears where your app window was, at the same size. Drag the top edge to move it and the edges to resize it, and press M or ⌃⌘F, or double-click the top edge, to switch to full screen. When you leave, the main window returns to where the AR window was.
+- **Reply right in AR Mode's floating windows**: Each floating session window now looks like the regular session page (your messages, replies, tool calls, and times), with an input box at the bottom plus the model and context usage. Hover over a window and it moves up close and enlarges; click it and it stays that way with the cursor in the input box. Click an image to view it full size; press Esc or click empty space to deselect it.
+- **Sessions in AR Mode have depth**: The session with the most recent activity is closest to you, and older sessions sit progressively further back, smaller and fainter. When a session has new activity, it slowly moves forward.
+- **Choose a background in AR Mode**: Besides Transparent (your desktop shows through), you can choose Space, Sky, Sea, Forest, or Aurora, slowly moving backgrounds that loop seamlessly and turn with the view. You can also use your own video (it loops) or an image. Choose one under Background in the sidebar, or press B to cycle through them.
+- **WASD works in AR Mode with a Chinese input method**: Previously, with a Chinese input method active, pressing WASD started typing pinyin and showed candidates instead of moving. Now, whenever the cursor isn't in an input box, these keys move and control the view directly.
+- **Smoother AR Mode and more noticeable alerts**: Drawing work while the view moves has been reduced, and windows with new messages or waiting for approval now shake quickly for about a second, then again a few seconds later.
+- **Close confirmation appears next to the button**: When you click “×” on a session card in the session list, the confirmation now appears right beside the button instead of in the middle of the screen.
+- **Collapse the sidebar like VS Code** (new layout): The project list and the sessions below it each take half the height; drag the divider and the position is remembered across project switches and restarts. Click the “Projects” or “Sessions” title to collapse that section into a title bar at the bottom while the other fills the column. A project's “Recent Sessions” can be collapsed too and is collapsed by default. The file sidebar has a collapse button on the edge next to the tabs; once collapsed it leaves a narrow strip you can click to expand it again.
+- **Counts shown as badges, full button text**: Counts on the session and project filter buttons now appear as badges at the top-right corner, and the button text is no longer cut off.
+- **Drag horizontal rows with the mouse**: Rows that scroll sideways, such as the filter buttons and the buttons below the input box, now show a thin scroll bar when you scroll or move the pointer near them, so you can drag it to see more. It stays hidden otherwise and never takes up space or covers the buttons.
+- **Today and Usage open in a window** (new layout): Click “Today” or “Usage” in the icon column on the left to open a window you can move and resize, instead of taking over the tab area. Session History no longer has its own entry; each project's “Recent Sessions” shows it instead. The classic layout is unchanged.
+- **Today and Usage open instantly**: They show the last results right away and update in the background, so you no longer wait for a fresh summary each time.
+- **A collapsed file sidebar takes no space** (new layout): Once collapsed it gives up its width entirely, leaving only a round button on the divider that turns into an expand arrow on hover; click it to expand.
+- **Favorites show in full**: Favorites in the sidebar are no longer cut to a single line; the full content and source are shown, and the favorite you opened is clearly highlighted. Each favorite shows its full date and time at the top left and an edit button at the top right; click it to jump back to the original message.
+- **Consistent margins on the session page**: The conversation, the input box, and the bars above it now share the same side margins, leaving more room for content.
+- **Project list shows right after a restart**: The project list and each project's recent sessions show what was there last time and then update in the background, instead of spinning for a long time or showing “No projects”.
+- **Project tabs sorted by recent activity** (new layout): The project tabs at the top of the window are now sorted by recent activity, with the most recently active project first.
+- **Click a project to switch to it** (new layout): Clicking a project in the project list on the left now highlights it in the list and switches the sessions below to that project, instead of opening a separate project page.
+- **No empty strip above middle sidebars** (new layout): A file sidebar or session list placed between two columns now starts at the top of the window, without an empty strip above it.
+
+- **A guide to the new layout**: The classic layout now points out that the new layout is available to try. The first time you open the new layout, a short guide shows where sessions, projects, Open Project, to-dos, favorites, Today, and usage are; you can skip it at any time.
+- **Projects grouped into Active and Other** (new layout): The filter buttons at the top are gone. Like the session list, projects are shown in two groups, with the Open Project button next to Active. The project tabs at the top of the window only show projects you have opened.
+- **Clearer selection**: Selected items in the icon column, project tabs, and file tabs are now highlighted as a whole in the accent color instead of with a thin line.
+- **Handier buttons by the input box**: The button to the right of the input box now shows and hides quick replies, and while quick replies are shown, the row of buttons below wraps so every button is fully visible. Done and Cancel at the top right of windows now match the other buttons, and hover tips appear right next to the button.
+
+### Bug Fixes
+
+- Fixed sessions that hadn't been used in a long time still showing new messages: installing an update, Claude Code compacting the context while idle, and changing the thinking level are no longer treated as new messages, and projects without new conversations no longer show a newer last-activity time in the project list.
+- Fixed the order of a project's Running sessions in the new layout: they are now sorted by most recent activity, newest first.
+- Fixed some sessions opening to a blank page with the message “The data couldn't be read because it isn't in the correct format.”
+- Fixed a project's “Recent Sessions” often being empty in the new layout.
+- Fixed the Files, Git, and other buttons at the top of the file sidebar not responding while the new layout showed a full page such as Session History or Usage, along with the page title overlapping the left sidebar and the layout switch button at the top right being squeezed.
+- Fixed a large empty area at the top of the left sidebar after switching from the classic layout to the new layout.
+
 ## 3.49.43 (2026-11-21)
 
 ### New Features

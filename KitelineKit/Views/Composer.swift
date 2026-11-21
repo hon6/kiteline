@@ -247,7 +247,7 @@ struct Composer: View {
     /// 底部横条一边的那排小按钮（横着滚）
     private func bandRow(_ session: SessionInfo) -> some View {
         let side = band ?? (true, 0)
-        return ScrollView(.horizontal, showsIndicators: false) {
+        return KiteHScroll {
             SessionChips(key: key, session: session, chat: chat, onMode: onMode, onModel: onModel,
                          onCompact: onCompact, onTodos: onTodos, onAgents: onAgents)
                 .environment(\.chipHeight, 22)
@@ -268,7 +268,7 @@ struct Composer: View {
 
     /// 输入框下面一排（同 VS Code 里输入框下面那排）：权限模式、模型和思考等级、上下文、任务清单进度、派过的子 agent
     private func toolbar(_ session: SessionInfo) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             SessionChips(key: key, session: session, chat: chat, onMode: onMode, onModel: onModel,
                          onCompact: onCompact, onTodos: onTodos, onAgents: onAgents)
                 .padding(.horizontal, Bar.edge)
@@ -334,7 +334,7 @@ struct Composer: View {
 
     /// 常用语：输入框空着时一排，点一下直接发
     private var phrases: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             HStack(spacing: 8) {
                 ForEach(model.quickReplies, id: \.self) { phrase in
                     Button {
@@ -358,7 +358,7 @@ struct Composer: View {
     }
 
     private var attachmentStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        KiteHScroll {
             HStack(spacing: 8) {
                 ForEach(attachments) { item in
                     ZStack(alignment: .topTrailing) {
@@ -648,11 +648,10 @@ struct ToolChip: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: symbol).font(.app(size: 11, weight: .semibold))
-                Text(text).font(.ui(.caption)).lineLimit(1)
+                Text(text).font(.chip).lineLimit(1)
             }
             .foregroundStyle(.primary.opacity(0.75))
-            .padding(.horizontal, 9).frame(height: height)
-            .background(Theme.field, in: Capsule())
+            .chipFace(height: height)
         }
         .buttonStyle(PressableStyle())
     }
@@ -671,12 +670,14 @@ struct SessionChips: View {
     let onCompact: () -> Void
     let onTodos: () -> Void
     let onAgents: () -> Void
+    /// 放不下时折行（Mac 上点开常用语时，11-21 反馈：显示不全的按钮也两行排开）；默认一行（外面横着滚）
+    var wrap = false
     #if os(iOS)
     @State private var confirmCompact = false
     #endif
 
     var body: some View {
-        HStack(spacing: Bar.spacing) {
+        AnyLayout(wrap ? AnyLayout(FlowLayout(spacing: Bar.spacing)) : AnyLayout(HStackLayout(spacing: Bar.spacing))) {
             if session.can("mode") || session.can("model") {
                 claudeTune
             } else {
@@ -685,9 +686,8 @@ struct SessionChips: View {
                     AgentGlyph(session.agent, size: 12)
                     Text(session.usage?.model ?? Agents.info(session.agent).name).foregroundStyle(.primary.opacity(0.75))
                 }
-                .font(.ui(.caption)).lineLimit(1)
-                .padding(.horizontal, 9).frame(height: height)
-                .background(Theme.field, in: Capsule())
+                .font(.chip).lineLimit(1)
+                .chipFace(height: height)
             }
             if let percent = session.usage?.percent {
                 // 压缩上下文：电脑端说有才能点（caps）
@@ -700,11 +700,10 @@ struct SessionChips: View {
                 } label: {
                     HStack(spacing: 4) {
                         ContextRing(percent: percent)
-                        Text("\(percent)%").font(.ui(.caption).monospacedDigit())
+                        Text("\(percent)%").font(.chip.monospacedDigit())
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8).frame(height: height)
-                    .background(Theme.field, in: Capsule())
+                    .chipFace(height: height, hPad: 8)
                 }
                 .buttonStyle(PressableStyle())
                 .allowsHitTesting(session.can("compact"))
@@ -740,9 +739,8 @@ struct SessionChips: View {
                     Text(tune.name).foregroundStyle(.primary.opacity(0.75))
                     if let effort = tune.effort { Text(effort).foregroundStyle(.secondary) }
                 }
-                .font(.ui(.caption)).lineLimit(1)
-                .padding(.horizontal, 9).frame(height: height)
-                .background(Theme.field, in: Capsule())
+                .font(.chip).lineLimit(1)
+                .chipFace(height: height)
             }
             .buttonStyle(PressableStyle())
         }

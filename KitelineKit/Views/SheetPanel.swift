@@ -485,10 +485,19 @@ private struct PanelRoot: View {
 
 #if os(macOS)
 /// 面板工具栏里的文字按钮：系统的带边框按钮（macOS 26 上是液态玻璃按钮），字两侧比系统默认多留 4 点，别贴着玻璃底的边
+extension ToolbarContent {
+    /// 面板工具栏上自己画了样式的按钮（panelToolbarButton）：macOS 26 默认再给每个工具栏项套一层玻璃底，
+    /// 成了一个胶囊里套一个带边框的按钮（11-21 截图：「完成」样子怪），去掉那层
+    @ToolbarContentBuilder
+    func panelBare() -> some ToolbarContent {
+        if #available(macOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) } else { self }
+    }
+}
+
 struct PanelTextButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(role: configuration.role, action: configuration.trigger) { configuration.label.padding(.horizontal, 4) }
-            .buttonStyle(.bordered)
+            .kiteButton()
     }
 }
 #endif
@@ -557,6 +566,53 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.onCancel = { [weak self] in self?.userClose() }
     }
 
+    // 标题放在标题栏正中（11-21 反馈：弹窗标题放中间）：统一工具栏样式把标题排在红绿灯旁边，系统的标题藏起来，
+    // 在标题栏里自己放一个居中的标签，跟着窗口标题（面板内容的 navigationTitle）变
+    private var titleLabel: NSTextField?
+    private var titleWatch: NSKeyValueObservation?
+    private var visibilityWatch: NSKeyValueObservation?
+
+    /// 标题栏上有工具栏按钮（看大图的翻页、缩放、分享……）的面板不放居中标题：会压在按钮上（11-21 截图：「4 / 4」叠在分享按钮上）
+    private var hasToolbarItems: Bool { !(panel.toolbar?.items.isEmpty ?? true) }
+
+    private func centerTitle() {
+        if hasToolbarItems {
+            titleLabel?.removeFromSuperview(); titleLabel = nil
+            titleWatch = nil; visibilityWatch = nil
+            if panel.titleVisibility != .visible { panel.titleVisibility = .visible }
+            return
+        }
+        guard titleLabel == nil, let bar = panel.standardWindowButton(.closeButton)?.superview else { return }
+        let label = NSTextField(labelWithString: panel.title)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        label.textColor = .labelColor
+        label.alignment = .center
+        label.lineBreakMode = .byTruncatingMiddle
+        label.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: panel.standardWindowButton(.closeButton)!.centerYAnchor),
+            label.widthAnchor.constraint(lessThanOrEqualTo: bar.widthAnchor, constant: -160),
+        ])
+        titleLabel = label
+        panel.titleVisibility = .hidden
+        titleWatch = panel.observe(\.title, options: [.new]) { [weak label] panel, _ in
+            DispatchQueue.main.async { [weak self] in
+                if self?.hasToolbarItems == true { self?.centerTitle(); return }
+                label?.stringValue = panel.title
+                // SwiftUI 换标题时会把系统标题重新显示出来（11-21 自测：新任务面板左右各一个标题）
+                if panel.titleVisibility != .hidden { panel.titleVisibility = .hidden }
+            }
+        }
+        visibilityWatch = panel.observe(\.titleVisibility, options: [.new]) { [weak self] panel, _ in
+            DispatchQueue.main.async {
+                if self?.hasToolbarItems == true { self?.centerTitle(); return }
+                if panel.titleVisibility != .hidden { panel.titleVisibility = .hidden }
+            }
+        }
+    }
+
     /// 发起的那块会话还在不在（不在了，被回收掉发起视图的面板也该关了）
     var anchorAlive: Bool {
         if closed { return false }
@@ -573,6 +629,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     fileprivate func update(_ content: AnyView, inherited: PanelInherited) {
         guard !closed else { return }
         hosting.rootView = AnyView(PanelRoot(state: state, content: content, inherited: inherited, close: closer))
+        DispatchQueue.main.async { [weak self] in self?.centerTitle() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.centerTitle() }   // 工具栏按钮可能稍后才装上
     }
 
     func present(in window: NSWindow, anchor: PanelAnchor?) {
@@ -781,18 +839,18 @@ private struct ConfirmCard: View {
                 Spacer(minLength: 0)
                 Button(cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                    .buttonStyle(.bordered)
+                    .kiteButton()
                 Button(confirm, role: destructive ? .destructive : nil) {
                     action()   // 先做（有的要读发起处的状态，关掉面板就清了）
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .kiteButton(prominent: true)
                 .tint(destructive ? Theme.removed : Theme.claude)
             }
             .controlSize(.large)
         }
-        .padding(.horizontal, 22).padding(.top, 22).padding(.bottom, 18)
+        .padding(DialogMetric.pad)
         .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.pageBackground)
         .panelDragBackground()
