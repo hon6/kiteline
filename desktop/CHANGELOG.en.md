@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.51 (2026-11-22)
+
+### Improvements
+
+- **Easier to spot an already-open session**: Clicking a session in the list that is already open in a tab now flashes the border of its whole panel in the accent color, not just the tab, so you can see right away where it is.
+
 ## 1.0.50 (2026-11-22)
 
 ### Improvements

@@ -133,47 +133,56 @@ struct NewSessionDraftView: View {
 
     // MARK: 项目、设备、Agent
 
+    /// 项目、设备、Agent 三个下拉：放得下排一行；会话区窄了竖着排；再窄（单个都放不下）就把名字截短。
+    /// 不能一律 fixedSize 排一行：三个加起来四百来点宽，窄的分屏里会把整页撑宽，连输入框一起被裁掉（11-22）
     private func pickers(_ place: NewDraftKey.Place) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { pickerMenus(place, fixed: true) }
+            VStack(spacing: 6) { pickerMenus(place, fixed: true) }
+            VStack(spacing: 6) { pickerMenus(place, fixed: false) }
+        }
+    }
+
+    @ViewBuilder
+    private func pickerMenus(_ place: NewDraftKey.Place, fixed: Bool) -> some View {
         let groups = projects.groupedShown
         let current = projects.groups.first { group in group.contains { $0.sourceId == place.sourceId && $0.cwd == place.cwd } }
         let devices = current ?? []
         let sourceName = model.sources.first { $0.id == place.sourceId }?.name ?? place.sourceId
-        return HStack(spacing: 8) {
-            Menu {
-                ForEach(groups, id: \.first!.id) { group in
-                    Button(group[0].name + (group.count > 1 ? "（" + group.map(\.sourceName).joined(separator: " · ") + "）" : "")) {
-                        // 换项目：设备尽量不变（这个项目在现在这台设备上也有就用它）
-                        let pick = group.first { $0.sourceId == place.sourceId } ?? group[0]
-                        self.place = .init(sourceId: pick.sourceId, cwd: pick.cwd, agent: place.agent)
-                    }
+        Menu {
+            ForEach(groups, id: \.first!.id) { group in
+                Button(group[0].name + (group.count > 1 ? "（" + group.map(\.sourceName).joined(separator: " · ") + "）" : "")) {
+                    // 换项目：设备尽量不变（这个项目在现在这台设备上也有就用它）
+                    let pick = group.first { $0.sourceId == place.sourceId } ?? group[0]
+                    self.place = .init(sourceId: pick.sourceId, cwd: pick.cwd, agent: place.agent)
                 }
-            } label: { chip("folder", (place.cwd as NSString).lastPathComponent) }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            .help(place.cwd)
-            Menu {
-                if devices.count > 1 {
-                    ForEach(devices) { member in
-                        Button(member.sourceName) { self.place = .init(sourceId: member.sourceId, cwd: member.cwd, agent: place.agent) }
-                    }
-                } else {
-                    Text("这个项目只在「\(sourceName)」上")
-                }
-            } label: { chip("desktopcomputer", sourceName) }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            Menu {
-                ForEach(agents(place.sourceId)) { agent in
-                    Button(agent.name) { self.place = .init(sourceId: place.sourceId, cwd: place.cwd, agent: agent.id) }
-                }
-            } label: {
-                HStack(spacing: 5) {
-                    AgentGlyph(place.agent, size: 12)
-                    Text(Agents.info(place.agent).name).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.app(size: 8, weight: .bold)).foregroundStyle(.tertiary)
-                }
-                .modifier(ChipStyle())
             }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        } label: { chip("folder", (place.cwd as NSString).lastPathComponent) }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
+        .help(place.cwd)
+        Menu {
+            if devices.count > 1 {
+                ForEach(devices) { member in
+                    Button(member.sourceName) { self.place = .init(sourceId: member.sourceId, cwd: member.cwd, agent: place.agent) }
+                }
+            } else {
+                Text("这个项目只在「\(sourceName)」上")
+            }
+        } label: { chip("desktopcomputer", sourceName) }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
+        Menu {
+            ForEach(agents(place.sourceId)) { agent in
+                Button(agent.name) { self.place = .init(sourceId: place.sourceId, cwd: place.cwd, agent: agent.id) }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                AgentGlyph(place.agent, size: 12)
+                Text(Agents.info(place.agent).name).lineLimit(1)
+                Image(systemName: "chevron.down").font(.app(size: 8, weight: .bold)).foregroundStyle(.tertiary)
+            }
+            .modifier(ChipStyle())
         }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
     }
 
     private func chip(_ symbol: String, _ title: String) -> some View {

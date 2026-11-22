@@ -12,12 +12,26 @@ final class ProjectStripState: ObservableObject {
     static let shared = ProjectStripState()
     /// 用户打开过的项目（项目的 id），存在偏好里：顶上那排只列这些（11-21 反馈：自己打开的项目才显示，原来列出全部项目）
     @Published private(set) var opened: Set<String> = Set(AppConfig.defaults.stringArray(forKey: "projectStripOpened") ?? [])
+    /// 顶上那排的先后（项目的 id）：同浏览器标签，排好就不动，新打开的排最后（11-22 反馈：顺序不要来回变；原来按最近活动排，
+    /// 哪个项目一有动静就跳到前面，点的时候它还在挪）。头一次没有记录时按当时的最近活动排一次，之后固定
+    @Published private(set) var order: [String] = AppConfig.defaults.stringArray(forKey: "projectStripOrder") ?? []
+
+    /// 这一排里有、但还没排过位置的项目：按传进来的先后接到最后（显示前调；已经排过的不动）
+    func adopt(_ ids: [String]) {
+        let missing = ids.filter { !order.contains($0) }
+        guard !missing.isEmpty else { return }
+        order += missing
+        AppConfig.defaults.set(order, forKey: "projectStripOrder")
+    }
 
     /// 点 × 关掉：不再列
     func close(_ id: String) {
         guard opened.contains(id) else { return }
         opened.remove(id)
         AppConfig.defaults.set(Array(opened), forKey: "projectStripOpened")
+        // 关掉的也从顺序里拿掉：再打开时排到最后（同浏览器重新打开的标签）
+        order.removeAll { $0 == id }
+        AppConfig.defaults.set(order, forKey: "projectStripOrder")
     }
 
     /// 打开了这个项目（项目列表里点它、打开项目、跳到它的会话）：放进顶上那排
@@ -45,24 +59,28 @@ struct ProjectStrip: View {
     @ObservedObject private var model = KitelineModel.shared
     @ObservedObject private var projects = ProjectsModel.shared
     @ObservedObject private var state = ProjectStripState.shared
+    /// 亮着的是哪一格（"@all" = 全部）：点下去马上换、高亮滑过去，真正切项目（整套标签换掉）放到下一帧，
+    /// 不然要等那边换完界面才动，看着像没点上（11-22 反馈：点了反应慢、要点好几次）
+    @State private var lit = "@all"
+    @Namespace private var glide
 
     var body: some View {
-        // 按最近活动排（11-21）：最近有动静的在最前；同时间按名字。关掉的不列，当前项目哪怕关过也列
+        // 固定顺序（同浏览器标签，见 ProjectStripState.order）；关掉的不列，当前项目哪怕关过也列
         let items = ordered()
         ScrollViewReader { proxy in
             KiteHScroll {
                 HStack(alignment: .top, spacing: 3) {
-                    ProjectStripTab(title: L("全部"), symbol: "square.stack", state: .unknown, waiting: 0, active: model.projectPane == nil,
-                                    height: height, closable: false, close: {}) { model.projectPane = nil }
+                    ProjectStripTab(title: L("全部"), symbol: "square.stack", state: .unknown, waiting: 0, active: lit == "@all",
+                                    height: height, closable: false, glide: glide, close: {}) { pick(nil) }
                         .help(L("全部会话（不按项目分）"))
                         .id("@all")
                     ForEach(items, id: \.first!.id) { group in
                         let id = group[0].id
                         let live = projects.live(group: group)
                         ProjectStripTab(title: group[0].name, symbol: nil, state: Self.state(live), waiting: live.filter { $0.activity == .waiting }.count,
-                                        active: model.projectPane == id, height: height, closable: true,
+                                        active: lit == id, height: height, closable: true, glide: glide,
                                         close: { close(id) }) {
-                            model.openProject(id, showList: false)
+                            pick(id)
                         }
                         .help(group.count > 1 ? group[0].name + " · " + group.map(\.sourceName).joined(separator: " · ") : group[0].name + " · " + group[0].sourceName)
                         .contextMenu {
@@ -82,16 +100,37 @@ struct ProjectStrip: View {
                     .help(L("打开项目…"))
                 }
             }
-            .onChange(of: model.projectPane, initial: true) { _, id in proxy.scrollTo(id ?? "@all") }
+            .onChange(of: model.projectPane, initial: true) { _, id in
+                // 别处切的项目（项目列表、跳到别的项目的会话……）：高亮跟过去
+                let target = id ?? "@all"
+                if lit != target { withAnimation(.snappy(duration: 0.28)) { lit = target } }
+                proxy.scrollTo(target)
+            }
+            // 新出现的项目接到最后，排过的位置不再变
+            .onChange(of: items.map { $0[0].id }, initial: true) { _, ids in state.adopt(ids) }
         }
         .frame(height: height, alignment: .top)
         .onAppear { if !projects.loaded { projects.load() } }
     }
 
+    /// 点了一格：高亮先滑过去，下一帧再切（切项目要整套换标签、开对话，同步做完才刷新界面）
+    private func pick(_ id: String?) {
+        let target = id ?? "@all"
+        guard lit != target || id != model.projectPane else { return }
+        withAnimation(.snappy(duration: 0.28)) { lit = target }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            guard lit == target else { return }   // 这期间又点了别的：以最后点的为准
+            if let id { model.openProject(id, showList: false) } else { model.projectPane = nil }
+        }
+    }
+
     private func ordered() -> [[ProjectItem]] {
         let shown = projects.groups.filter { group in group.contains { state.opened.contains($0.id) } || group[0].id == model.projectPane }
-        let keyed: [(group: [ProjectItem], at: Double)] = shown.map { ($0, Self.lastActive($0)) }
+        let rank = Dictionary(state.order.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        // 排过的按记下的先后；还没排过的（头一次、刚打开的）先按最近活动接在后面，随后 adopt 记下来就固定了
+        let keyed: [(group: [ProjectItem], rank: Int, at: Double)] = shown.map { ($0, rank[$0[0].id] ?? Int.max, Self.lastActive($0)) }
         let sorted = keyed.sorted { a, b in
+            if a.rank != b.rank { return a.rank < b.rank }
             if a.at != b.at { return a.at > b.at }
             return a.group[0].name.localizedStandardCompare(b.group[0].name) == .orderedAscending
         }
@@ -138,6 +177,8 @@ private struct ProjectStripTab: View {
     let active: Bool
     let height: CGFloat
     let closable: Bool
+    /// 当前项目那块高亮在各格之间滑动（matchedGeometryEffect）
+    let glide: Namespace.ID
     let close: () -> Void
     let action: () -> Void
     @State private var hovering = false
@@ -175,13 +216,24 @@ private struct ProjectStripTab: View {
         }
         .padding(.leading, SideMetric.pad).padding(.trailing, closable ? 4 : SideMetric.pad)
         .frame(height: height - 3)
-        .background(active ? activeFill : Color.primary.opacity(hovering ? 0.1 : 0.05), in: shape)
-        // 当前项目整块染主题色，不画顶上那一道（11-21 反馈：单边色条是 AI 样式）
-        .overlay { if active { shape.strokeBorder(Color.tarsBrand.opacity(0.5), lineWidth: 1) } }
-        .clipShape(shape)
+        .background(Color.primary.opacity(hovering && !active ? 0.1 : 0.05), in: shape)
+        // 当前项目整块染主题色，不画顶上那一道（11-21 反馈：单边色条是 AI 样式）；点别的项目时这块从原来那格滑过去
+        .background {
+            if active {
+                shape.fill(activeFill)
+                    .overlay { shape.strokeBorder(Color.tarsBrand.opacity(0.5), lineWidth: 1) }
+                    .matchedGeometryEffect(id: "projectStripActive", in: glide)
+            }
+        }
+        // 不裁成格子的形状：高亮滑动时要能画到格子外面（滑的路上）
         .contentShape(shape)
         .onTapGesture(perform: action)
-        .onHover { hovering = $0 }
+        .onHover { on in
+            // 指着时窗口拖不动（同会话标签的 TabWindowLock）：不然按下去先被系统当成拖窗口，要点好几次
+            if hovering != on { TabWindowLock.hold(on) }
+            hovering = on
+        }
+        .onDisappear { if hovering { TabWindowLock.hold(false); hovering = false } }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(title)
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)

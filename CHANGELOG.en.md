@@ -1,5 +1,13 @@
 # Kiteline Release Notes
 
+## 3.49.46 (2026-11-22)
+
+### Improvements
+
+- **Easier to spot an already-open session**: Clicking a session in the list that is already open in a tab now flashes the border of its whole panel in the accent color, not just the tab, so you can see right away where it is.
+- **Project tabs keep their order and switch instantly**: Project tabs at the top no longer reorder by recent activity; newly opened projects go to the end. Clicking a tab moves the highlight immediately with a short slide, and clicks are no longer missed.
+- **New session page fits narrow split panes**: When the panel is narrow, the project, computer and agent pickers stack vertically and the input hint wraps to the available width instead of being cut off.
+
 ## 3.49.45 (2026-11-22)
 
 ### Improvements

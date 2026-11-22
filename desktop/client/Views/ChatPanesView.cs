@@ -264,6 +264,8 @@ public sealed class ChatPanesView : Panel
             dock.Children.Add(header);
             dock.Children.Add(body);
             Children.Add(dock);
+            // 左边栏里再点一个已经开成标签的会话：整块（标签栏 + 对话区）的边框跟标签一起闪主题色（11-22：只闪标签不显眼）
+            if (pane.Key is string flashKey) Children.Add(new PaneFlashRing(flashKey));
             overlay.Res(Border.BackgroundProperty, "AccentFill10").Res(Border.BorderBrushProperty, "AccentEdge40");
             overlay.Child = hint.HAlign(HorizontalAlignment.Center);
             Children.Add(overlay);
@@ -758,9 +760,9 @@ public sealed class PaneTab : Control
     }
 
     // 边框闪主题色（左边栏里再点一个已经开成标签的会话时，ChatPanes.FlashTab）：三下、一秒左右，同 Mac 版 TabFlashRing
-    static readonly double[] FlashLevels = [0, 1, 0.15, 1, 0.15, 1, 0];
+    internal static readonly double[] FlashLevels = [0, 1, 0.15, 1, 0.15, 1, 0];
     /// 每一段多少秒；自测里 KITELINE_TEST_FLASH_STEP 放慢，才截得到闪到一半的样子
-    static readonly double FlashStep = double.TryParse(Environment.GetEnvironmentVariable("KITELINE_TEST_FLASH_STEP"),
+    internal static readonly double FlashStep = double.TryParse(Environment.GetEnvironmentVariable("KITELINE_TEST_FLASH_STEP"),
         System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var slow) && slow > 0 ? slow : 0.16;
     DispatcherTimer? flashTimer;
 
@@ -879,6 +881,63 @@ public sealed class PaneTab : Control
             ctx.EndFigure(!open);
         }
         return g;
+    }
+}
+
+/// 整块的边框闪几下主题色（节奏同标签的 FlashLevels）：标签小、分屏多时光闪标签不容易看到，整块一圈一起闪才明显（同 Mac 版 PaneFlashRing）
+public sealed class PaneFlashRing(string key) : Control
+{
+    DispatcherTimer? timer;
+
+    double Level()
+    {
+        if (ChatPanes.Shared.Flash is not (string flashKey, DateTime at) || flashKey != key) return 0;
+        var levels = PaneTab.FlashLevels;
+        var t = (DateTime.UtcNow - at).TotalSeconds / PaneTab.FlashStep;
+        if (t < 0 || t >= levels.Length - 1) return 0;
+        var i = (int)t;
+        return levels[i] + (levels[i + 1] - levels[i]) * (t - i);
+    }
+
+    void Start()
+    {
+        if (timer is not null || ChatPanes.Shared.Flash is not (string flashKey, DateTime at) || flashKey != key) return;
+        var total = PaneTab.FlashStep * (PaneTab.FlashLevels.Length - 1);
+        if ((DateTime.UtcNow - at).TotalSeconds >= total) return;
+        timer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Render, (_, _) =>
+        {
+            InvalidateVisual();
+            if (ChatPanes.Shared.Flash is not (string k, DateTime started) || k != key || (DateTime.UtcNow - started).TotalSeconds >= total)
+            {
+                timer?.Stop();
+                timer = null;
+                InvalidateVisual();
+            }
+        });
+        timer.Start();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        IsHitTestVisible = false;
+        ChatPanes.Shared.Flashed += Start;
+        Start();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        ChatPanes.Shared.Flashed -= Start;
+        timer?.Stop();
+        timer = null;
+    }
+
+    public override void Render(DrawingContext context)
+    {
+        if (Level() is > 0 and var level)
+            using (context.PushOpacity(level))
+                context.DrawRectangle(null, new Pen(Palette.Get("Accent"), 2.5), new Rect(Bounds.Size).Deflate(1.25));
     }
 }
 

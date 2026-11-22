@@ -449,8 +449,12 @@ final class InputTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, !placeholder.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [.font: font ?? .systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor]
-        let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5), y: textContainerInset.height)
-        (placeholder as NSString).draw(at: origin, withAttributes: attributes)
+        // 按输入框宽度折行（窄的分屏里一行放不下时别伸出框外被裁掉），高度也不超出框，放不下的最后一行末尾加省略号（11-22）
+        let padding = textContainer?.lineFragmentPadding ?? 5
+        let x = textContainerInset.width + padding
+        let rect = NSRect(x: x, y: textContainerInset.height,
+                          width: max(bounds.width - x * 2, 20), height: max(bounds.height - textContainerInset.height * 2, 20))
+        (placeholder as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
     }
 
     /// 剪贴板里能当图贴的格式：系统截图、微信 / QQ 截图、浏览器「拷贝图像」常见的是 PNG、TIFF，也有 JPEG、HEIC、GIF、WebP

@@ -53,7 +53,8 @@ struct SidebarProjects: View {
                         .tourAnchor("openProject")
                         .help("打开项目：选择文件夹和 Agent，直接打开")
                 }
-                .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.vertical, 6)
+                .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.top, 6)
+                .padding(.bottom, 6)
             }
             .listSectionSeparator(.hidden)
             if !rest.isEmpty {
@@ -101,6 +102,8 @@ struct SidebarProjects: View {
                               kind: model.sources.first { $0.id == project.sourceId }?.kind ?? .local)
                 .modifier(SidebarRowHighlight(selected: model.projectPane == project.id) { model.toggleProject(project.id) })
                 .contextMenu { menu(project) }
+                // 每节第一行离标题 6（加在选中框外面：选中时框不贴着标题，11-22 截图；同会话列表）
+                .padding(.top, group[0].id == groups.first?.first?.id ? 6 : 0)
                 // 行的框离栏边 8、框里 8（侧栏规范 SideMetric；11-20 反馈：项目列表左右边距太大）
                 .listRowInsets(EdgeInsets(top: 1, leading: Self.inset, bottom: 1, trailing: Self.inset - 2))
                 .listRowSeparator(.hidden)
@@ -523,7 +526,8 @@ struct ProjectSessions: View {
                     .help("在此项目中新建会话（在中间新开一个标签页）")
                 }
                 // 标题字对到 16 点对齐线（列表已留 8），按钮右边离栏边 8（列表已留 10）
-                .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.vertical, 6)
+                .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.top, 6)
+                .padding(.bottom, 6)
             }
             .listSectionSeparator(.hidden)
             Section {

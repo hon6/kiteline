@@ -1490,6 +1490,8 @@ private struct PaneView<Content: View>: View {
             .mask(Rectangle().ignoresSafeArea())
             #endif
         }
+        // 左边栏里再点一个已经开成标签的会话：整块（标签栏 + 对话区）的边框跟标签一起闪主题色，只闪标签不够显眼（11-22）
+        .overlay { if let key = pane.key { PaneFlashRing(key: key, panes: panes) } }
         .environment(\.chatPane, context)
         // 在这一块里按下去（点消息、点输入框、拖滚动条……）：它就是当前块
         .background(PressWatcher { panes.focus(pane.id) })
@@ -2231,6 +2233,25 @@ private struct TabFlashRing: View {
     }
 }
 
+/// 整块的边框闪几下主题色（同 TabFlashRing 的节奏）：标签小、分屏多时光闪标签不容易看到，整块一圈一起闪才明显
+private struct PaneFlashRing: View {
+    let key: String
+    let panes: ChatPanes
+    @State private var pulse = 0
+
+    var body: some View {
+        Rectangle()
+            .strokeBorder(Theme.claude, lineWidth: 2.5)
+            .phaseAnimator([0.0, 1, 0.15, 1, 0.15, 1, 0], trigger: pulse) { ring, level in
+                ring.opacity(level)
+            } animation: { _ in .easeInOut(duration: 0.16) }
+            .allowsHitTesting(false)
+            .onChange(of: panes.tabFlash) { _, flash in
+                if flash?.key == key { pulse += 1 }
+            }
+    }
+}
+
 /// 会话拖到某个标签上：左半边插到它前面，右半边插到后面
 private struct TabDropDelegate: DropDelegate {
     enum Gap { case before, after }
@@ -2402,11 +2423,12 @@ private struct TabsReport {
 /// 标签就拖不走、窗口跟着动。离开标签就还原，标签栏空白处照旧能拖窗口（WindowDragArea）。
 /// 记着指着的标签数：从一个标签挪到相邻的，「进」和「出」谁先到都不会提前还原
 @MainActor
-enum TabWindowLock {
+public enum TabWindowLock {
     private static var count = 0
     private static weak var window: NSWindow?
 
-    static func hold(_ on: Bool) {
+    /// Mac 主程序顶上那排项目（ProjectStrip）也用：指着项目标签时同样锁住，不然按下去先被当成拖窗口，要点好几次
+    public static func hold(_ on: Bool) {
         count = max(0, count + (on ? 1 : -1))
         if count > 0, window == nil {
             let number = NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0)
