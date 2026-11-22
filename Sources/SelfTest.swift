@@ -695,6 +695,7 @@ extension SelfTest {
             delay = 2
         case "draftfill": NotificationCenter.default.post(name: .draftTestFill, object: nil, userInfo: ["text": arg]); delay = 0.5
         case "draftattach": NotificationCenter.default.post(name: .draftTestFill, object: nil, userInfo: ["image": arg]); delay = 1
+        case "draftopt": NotificationCenter.default.post(name: .draftTestFill, object: nil, userInfo: ["option": arg]); delay = 0.5   // draftopt:mode=auto / model=… / effort=high / goal=…
         case "draftsend": NotificationCenter.default.post(name: .draftTestFill, object: nil, userInfo: ["send": true]); delay = 3
         case "draftadopt":
             // 新会话草稿发出去后接上会话（同 NewSessionDraftView.adopt）：draftadopt:<会话标题> 把开着的草稿标签换成那个会话
@@ -1114,7 +1115,9 @@ extension SelfTest {
         case "open": KitelineKit.show(arg, key: KitelineModel.shared.selection ?? "")
         case "link":
             // 当作点了提示词链接：link:kiteline://new#p=…&project=…（同 AppDelegate 收到网址，只是不把窗口拿到前台）
-            if let url = URL(string: arg), let link = PromptLink.parse(url) { KitelineModel.shared.newTask(link: link) } else { Log.write("[capture] 不是提示词链接：\(arg)") }
+            // 共享扩展发来的 link:kiteline://share?id=…（ShareInbox/<id>/ 和 <id>.json 先放好）：弹「发送到会话」
+            if let url = URL(string: arg), let shared = ShareInbox.parse(url) { KitelineModel.shared.receiveShare(shared) }
+            else if let url = URL(string: arg), let link = PromptLink.parse(url) { KitelineModel.shared.newTask(link: link) } else { Log.write("[capture] 不是提示词链接：\(arg)") }
             delay = 3
         case "type": KitelineKit.setDraft(key: KitelineModel.shared.selection ?? "", arg)
         case "typekeys":

@@ -471,6 +471,29 @@ def queue(action, qid, text, direction, record, source, siblings=0, on=None):
     return Outcome(True, action == "now", "已中断当前这一步，排队的消息马上发送" if action == "now" else "已更新")
 
 
+def _retitle(record, source):
+    """没标题的会话先起个名字再关（同 Mac 版 Delivery.retitle）：别的会话发来的通知、斜杠命令开头的会话，Claude 不起标题，
+    VS Code 标签一直叫「Claude Code」，同项目有别的会话时认不出是哪个、永远关不掉（11-22）。会话加载了 mod、
+    记录里已有对话时经 mod 执行 /rename <列表里显示的名字>，VS Code 标签跟着改名，等快照里出现标题（最多 8 秒）。
+    返回带标题的新记录；做不到返回 None"""
+    snap = record.snap
+    name = " ".join((snap.get("name") or "").split())
+    if not name or not via_bridge(record) or not snap.get("messageUuid") or not LOOKUP:
+        return None
+    result = _bridge({"op": "send", "text": "/rename %s" % name}, record, source)
+    if result != "ok":   # 忙着（later）或没接上：不等
+        log.write("关闭会话：给「%s」起标题没成（%s）" % (name, result or "未接上"))
+        return None
+    log.write("关闭会话：「%s」没有标题，已经 mod 执行 /rename" % name)
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        current = LOOKUP(record.key)
+        if current and (current.snap.get("title") or "").strip():
+            return current
+        time.sleep(0.4)
+    return None
+
+
 def close(record, source, siblings):
     """关闭会话：VS Code 里关掉它的标签页（Ctrl+W = 关闭编辑器，Claude Code 随之结束这个会话）；终端里的 CLI 发 /exit。
     关掉的会话进「历史会话」，之后可以恢复。正在开着的会话越积越多、VS Code 里标签越开越多时用（同 Mac 版 Delivery.close）"""
@@ -490,7 +513,10 @@ def close(record, source, siblings):
         if record.kind == "local" and remote_editor(snap.get("pid")):
             return Outcome(False, False, REMOTE_EDITOR_MESSAGE.replace("无法从这台电脑发送", "无法从这台电脑操作"))
         if not (snap.get("title") or "").strip() and siblings:
-            return Outcome(False, False, UNTITLED_CLOSE % (snap.get("name") or ""))
+            named = _retitle(record, source)
+            if not named:
+                return Outcome(False, False, UNTITLED_CLOSE % (snap.get("name") or ""))
+            record, snap = named, named.snap
         with _FRONT:
             outcome = _backend().press_vscode("ctrl+w", 1, record, siblings)
     else:

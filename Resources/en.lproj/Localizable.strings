@@ -795,6 +795,7 @@
 "下一张" = "Next";
 "下一张（→）" = "Next (→)";
 "下一步" = "Next";
+"下一步选择项目和 Agent（Claude Code 或这台电脑上的其他 Agent），内容会作为新会话的第一条消息发送，也可设为定时任务。" = "Next, choose a project and agent (Claude Code or another agent on that computer). The content is sent as the first message of the new session, and can also be scheduled.";
 "下一步：连接你的电脑。" = "Next: connect your computer.";
 "下次 %@" = "Next %@";
 "下次不再询问" = "Don't ask again";
@@ -1092,6 +1093,7 @@
 "会话已结束或没有工作目录" = "The session has ended or has no working directory";
 "会话已转到后台运行" = "Session moved to background";
 "会话已静音，未推送到锁屏" = "Session is muted and was not pushed to the Lock Screen.";
+"会话开出来后第一句发 /goal，Claude 围绕目标持续工作，确认达成才停。输入框里写的话接着发。" = "Once the session starts, /goal is sent first; Claude keeps working toward the goal and stops only when it is met. Anything in the input box is sent next.";
 "会话开始后可继续发送" = "You can keep sending once the session starts";
 "会话所在的电脑未连接，暂时无法恢复" = "The session's computer is not connected, so it can't be resumed right now";
 "会话所在的电脑没连上" = "The session’s computer isn’t connected";
@@ -1804,6 +1806,7 @@
 "图片尺寸过大（超过 6000 万像素），无法在手机上查看。" = "This image is too large to view on your phone (over 60 megapixels).";
 "图片或文件传输到会话所在机器失败：%@" = "Couldn't transfer images or files to the session's machine: %@";
 "图片或文件传输失败：%@" = "Couldn't transfer images or files: %@";
+"图片或文件传送失败：%@" = "Images or files failed to send: %@";
 "图片或文件保存失败" = "Couldn’t save the image or file";
 "图片或文件数据损坏" = "Image or file data is corrupted";
 "图片所在行已不存在" = "The line containing the image no longer exists";
@@ -1921,6 +1924,7 @@
 "在资源管理器中显示" = "Reveal in Explorer";
 "在这一栏里往上" = "Move up in this column";
 "在这一栏里往下" = "Move down in this column";
+"在这个项目所在的电脑上打开终端，会话开出来后终端仍在这个会话里" = "Open a terminal on the computer where this project lives; it stays with the session once the session starts";
 "在这个项目里新建会话" = "New session in this project";
 "在这台电脑上后台运行 Claude Code：检测出口 IP、开启或关闭" = "Run Claude Code in the background on this computer: check the outbound IP, turn on or off";
 "在这台电脑上找不到项目文件夹" = "The project folder wasn't found on this computer";
@@ -2449,6 +2453,7 @@
 "已订阅" = "Subscribed";
 "已记成这个项目以后的默认流程" = "Saved as this project’s default workflow";
 "已设定目标" = "Goal set";
+"已设目标" = "Goal Set";
 "已设置别名" = "Alias saved";
 "已设置（无需修改请留空）" = "Set (leave blank to keep unchanged)";
 "已贮藏更改" = "Changes stashed";
@@ -2805,6 +2810,7 @@
 "把「%@」硬重置到 %@？之后的提交和所有未提交的更改都会丢失，此操作无法撤销。" = "Hard reset “%@” to %@? Later commits and all uncommitted changes will be lost. This cannot be undone.";
 "把「%@」重置到 %@？之后的提交会被撤出分支，文件改动保留在工作区。" = "Reset “%@” to %@? Later commits will be removed from the branch; their file changes stay in the working tree.";
 "把一个会话拖到另一个会话上，或在会话的菜单里选「拉群协作」，让不同设备、不同项目里的会话互相沟通。" = "Drag one session onto another, or choose Start Group Chat from a session's menu, so sessions on different devices and in different projects can talk to each other.";
+"把从其他应用共享来的内容发给一个会话，或新建会话（可选择项目和 Agent）。" = "Send content shared from another app to a session, or start a new session (you can choose the project and agent).";
 "把几个会话拉到一起互相沟通，建群在这里。" = "Put several sessions together to talk to each other. Create groups here.";
 "把几个会话拉进一个群，它们可以在不同设备、不同项目里互相发消息协作；你在群里能看到全部往来，也能直接发话。" = "Put several sessions in a group so they can message each other across devices and projects. You see every exchange in the group and can post there yourself.";
 "把几个会话拉进一个群，让它们互相沟通" = "Pull several sessions into a group so they can talk to each other";
@@ -3094,6 +3100,7 @@
 "文件夹" = "Folder";
 "文件夹名" = "Folder name";
 "文件夹名称" = "Folder name";
+"文件将传到会话所在的电脑，Agent 会收到文件路径并自行读取。" = "Files will be copied to the computer running the session; the agent receives the file paths and reads them itself.";
 "文件总大小超过 28 MB，请分批发送。" = "The files total more than 28 MB. Send them in smaller batches.";
 "文件数据损坏" = "The file data is corrupted";
 "文件超过 4MB，只读取了前面部分，不能在这里编辑。" = "The file is larger than 4 MB. Only the beginning was loaded, so it can't be edited here.";
@@ -3339,6 +3346,7 @@
 "暂无使用过 Claude Code 的项目。" = "No projects used with Claude Code yet.";
 "暂无动态" = "No Activity Yet";
 "暂无历史会话" = "No History Yet";
+"暂无可发送的会话，请选择「新建会话」" = "No sessions to send to. Choose “New Session”.";
 "暂无可朗读的回复" = "No replies to read aloud.";
 "暂无定时任务" = "No scheduled tasks.";
 "暂无定时任务。例如：每个工作日 9:00 让 Claude 在项目中运行测试并发送结果截图；每天 18:00 总结当天的改动。" = "No scheduled tasks yet. For example: every weekday at 9:00, have Claude run the tests in a project and send a screenshot of the results; every day at 18:00, summarize the day’s changes.";
@@ -3429,6 +3437,7 @@
 "有效期" = "Expires After";
 "有效期只能是 1 小时、24 小时或 7 天" = "The link can last 1 hour, 24 hours or 7 days";
 "有效至 %@" = "Valid until %@";
+"有文件超过 25 MB，无法发送。" = "A file is larger than 25 MB and can't be sent.";
 "有新消息" = "New messages";
 "有新消息：%@" = "New messages: %@";
 "有新版本 %@" = "New Version %@ Available";
@@ -3586,6 +3595,7 @@
 "权限" = "Permissions";
 "权限模式" = "Permission Mode";
 "权限模式…" = "Permission Mode…";
+"权限模式：新会话开出来时用的模式" = "Permission mode used when the new session starts";
 "条指令" = "Prompts";
 "条目" = "Entries";
 "来源" = "Sources";
@@ -3687,6 +3697,7 @@
 "模型和思考等级" = "Model and Thinking Level";
 "模型和思考等级…" = "Model and Reasoning Effort…";
 "模型和思考等级（%@）…" = "Model and Reasoning Effort (%@)…";
+"模型和思考等级：新会话开出来时用的" = "Model and thinking level used when the new session starts";
 "模型在想" = "Model thinking";
 "模型核心" = "Model core";
 "模型调用" = "Model calls";
@@ -4108,6 +4119,7 @@
 "点对点连到电脑" = "Peer-to-peer connection to the computer";
 "点按" = "Tap";
 "点消息下的「翻译」即可把这条消息翻译为所选语言，再点「原文」还原。" = "Click Translate under a message to translate it into the selected language, and click Original to switch back. ";
+"照 Claude Code 的默认设置" = "Use Claude Code Default";
 "照片" = "Photos";
 "父提交" = "Parent";
 "父提交（合并）" = "Parents (Merge)";
@@ -4697,6 +4709,7 @@
 "记录手机与电脑对话页的所有操作：发送消息、确认、新建任务、恢复会话、修改设置、配对。失败的操作以红色标示。" = "Records every action in the phone and computer conversation views: sending messages, approvals, creating tasks, resuming sessions, changing settings and pairing. Failed actions are marked in red.";
 "记录时间" = "Date Added";
 "记忆" = "Memory";
+"设为目标" = "Set Goal";
 "设备" = "Devices";
 "设备不存在" = "Device not found.";
 "设备别名" = "Device Alias";
@@ -5398,6 +5411,8 @@
 "黄色" = "Yellow";
 "默认" = "Default";
 "默认大小" = "Default Size";
+"默认模型" = "Default Model";
+"默认模式" = "Default Mode";
 "鼠标不会进入虚拟屏幕，不影响你正常使用电脑。" = "The mouse never enters the virtual screen, so it does not get in the way of normal use.";
 "（%@ 个全屏窗口未移动，请先退出全屏）" = "(%@ full-screen windows were not moved. Exit full screen first.)";
 "（%@ 个运行中）" = "(%@ running)";

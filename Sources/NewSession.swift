@@ -25,8 +25,10 @@ enum NewSession {
     /// （手机那边的请求只等 12 秒），提交的结果再走 completion；没给的照旧只在最后回 completion
     /// returnFocus：做完把前台还给用户原来在用的程序（开窗口、开标签都会让 VS Code 跳到前台；新标签加载完它还会再抢一次，多守 8 秒）
     /// inEditor：一定在 VS Code 里开（不走后台托管，见 Hosted）
+    /// launch / newSessionId：只在后台运行时用得上（见 Hosted.start）；在 VS Code 里开的没法带，新会话标签等会话出来后再切
     static func start(source: SourceConfig, cwd: String, prompt: String, submit: Bool, sessionId: String? = nil,
                       returnFocus: Bool = true, inEditor: Bool = false,
+                      launch: [String: String]? = nil, newSessionId: String? = nil,
                       accepted: ((Outcome) -> Void)? = nil, completion reply: @escaping (Outcome) -> Void) {
         EditorAlerts.shared.noteOpened(cwd: cwd)   // 接下来 Claude Code 问信任此文件夹的话，替用户答（用户自己选的项目）
         // 远端项目默认不开 VS Code：在那台电脑上后台运行 Claude Code；起不来再照旧开 VS Code
@@ -34,7 +36,8 @@ enum NewSession {
             // 先回过手机的，退回 VS Code 时就别再回第二次
             var early = accepted
             let first: ((Outcome) -> Void)? = accepted == nil ? nil : { outcome in early?(outcome); early = nil }
-            Hosted.start(source: source, cwd: cwd, prompt: prompt, submit: submit, sessionId: sessionId, accepted: first) { result in
+            Hosted.start(source: source, cwd: cwd, prompt: prompt, submit: submit, sessionId: sessionId,
+                         launch: launch, newSessionId: newSessionId, accepted: first) { result in
                 switch result {
                 case .success(let outcome):
                     reply(outcome)

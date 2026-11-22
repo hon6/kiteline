@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.54 (2026-11-22)
+
+### Bug Fixes
+
+- Fixed sessions without a title (for example, ones whose first message came from another session) not closing in VS Code. Closing such a session now gives it a title first, then closes its tab.
+
 ## 1.0.53 (2026-11-22)
 
 ### Bug Fixes

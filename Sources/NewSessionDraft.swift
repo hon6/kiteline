@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import SwiftUI
 import KitelineKit
 
@@ -63,7 +64,7 @@ enum NewDraftKey {
     }
 }
 
-/// 自测用（SelfTest 的 draftfill / draftattach / draftsend 步骤）：把文字、图片、发送送进草稿输入框，走的还是真的输入框和发送逻辑
+/// 自测用（SelfTest 的 draftfill / draftattach / draftopt / draftsend 步骤）：把文字、图片、发送送进草稿输入框，走的还是真的输入框和发送逻辑
 extension Notification.Name {
     static let draftTestFill = Notification.Name("kiteline.draftTestFill")
 }
@@ -79,8 +80,8 @@ struct NewSessionDraftView: View {
     @ObservedObject private var model = KitelineModel.shared
     @ObservedObject private var projects = ProjectsModel.shared
     @State private var place: NewDraftKey.Place?
-    @State private var text = ""
-    @State private var images: [TarsTaskImage] = []
+    /// 整页多高（终端面板最高占到它的八成五，同会话页）
+    @State private var height: CGFloat = 600
     @State private var sending = false
     @State private var waiting = false
     @State private var message: String?
@@ -104,12 +105,11 @@ struct NewSessionDraftView: View {
             .frame(maxWidth: 560)
             .padding(.horizontal, 24)
             Spacer(minLength: 20)
-            // 输入框的边距同会话页的输入区（四边 8），从新会话标签换成会话时输入框不跳（11-21 反馈：会话页边距要一致；原来左右 24、下 18）
-            composer
-                .frame(maxWidth: 760)
-                .padding(8)
+            // 输入区和会话页的是同一套（边距、宽度都一样），从新会话标签换成会话时输入框不跳
+            if let place { composer(place, available: height) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(GeometryReader { proxy in Color.clear.onAppear { height = proxy.size.height }.onChange(of: proxy.size.height) { _, value in height = value } })
         .background(Look.shared.scheme?.editorColor ?? Color(nsColor: .windowBackgroundColor))
         .task(id: key) {
             place = NewDrafts.places[key] ?? NewDraftKey.parse(key)
@@ -122,12 +122,12 @@ struct NewSessionDraftView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .draftTestFill)) { note in
             let info = note.userInfo ?? [:]
-            if let typed = info["text"] as? String { text = typed }
-            if let path = info["image"] as? String, let data = FileManager.default.contents(atPath: path),
-               let image = TarsTaskImage.make(data, name: (path as NSString).lastPathComponent) {
-                images.append(image)
+            if let typed = info["text"] as? String { KitelineKit.testDraft(key, text: typed) }
+            if let path = info["image"] as? String, let data = FileManager.default.contents(atPath: path) { KitelineKit.testDraft(key, image: data) }
+            if let option = info["option"] as? String {
+                if option == "terminal", let place { KitelineKit.testDraftTerminal(place.sourceId + "#" + futureSessionId) } else { KitelineKit.testDraft(key, option: option) }
             }
-            if info["send"] as? Bool == true { send() }
+            if info["send"] as? Bool == true, let launch = KitelineKit.testDraftLaunch(key) { send(launch) }
         }
     }
 
@@ -217,45 +217,53 @@ struct NewSessionDraftView: View {
 
     // MARK: 输入框
 
-    /// 输入框用同新建任务一样的 TarsTaskInput：⌘V 粘贴截图、拖入、选文件、从「照片」选，图片一栏放在文字下面。
-    /// 回车换行，⌘回车或右下角按钮发送（TarsTaskInput 的约定）
-    private var composer: some View {
-        let canSend = !sending && !waiting && place != nil && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
-        return VStack(alignment: .trailing, spacing: 6) {
-            TarsTaskInput(text: $text, images: $images,
-                          placeholder: place.map { L("请描述需要 %@ 在「%@」中完成的任务", Agents.info($0.agent).name, ($0.cwd as NSString).lastPathComponent) } ?? L("先选择项目"),
-                          enabled: !sending && !waiting, submitTitle: L("发送"), onSubmit: send)
-            HStack(spacing: 8) {
-                Spacer()
-                if sending || waiting { ProgressView().controlSize(.small) }
-                Button { send() } label: {
-                    Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
-                        .background(canSend ? Color.tarsBrand : Color.secondary.opacity(0.4), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .help(L("发送"))
-            }
-        }
+    /// 新会话开出来以后的编号：按草稿标签的 key 算出来（重开 App 也是同一个），后台运行 Claude Code 时用它开（watcher 的 newSessionId），
+    /// 草稿里开的终端记在它名下，会话开出来后终端还在
+    private var futureSessionId: String {
+        let digest = Array(SHA256.hash(data: Data(key.utf8)))
+        var bytes = Array(digest.prefix(16))
+        bytes[6] = (bytes[6] & 0x0f) | 0x40   // 版本 4
+        bytes[8] = (bytes[8] & 0x3f) | 0x80   // RFC 4122
+        let hex = bytes.map { String(format: "%02x", $0) }.joined()
+        let parts = [hex.prefix(8), hex.dropFirst(8).prefix(4), hex.dropFirst(12).prefix(4), hex.dropFirst(16).prefix(4), hex.dropFirst(20)]
+        return parts.map(String.init).joined(separator: "-")
+    }
+
+    /// 能不能预先定编号、带着设置起：Claude Code、这台电脑开着后台运行、电脑上的组件认 hosted_opts（在 VS Code 里开的带不了，会话出来后再切）
+    private func preassigned(_ place: NewDraftKey.Place) -> Bool {
+        guard place.agent == Agents.defaultID, let source = AppState.shared.config.sources.first(where: { $0.id == place.sourceId }),
+              Hosted.wanted(source), let connection = AppState.shared.source(withId: place.sourceId) else { return false }
+        return connection.hostFeatures.contains("hosted_opts")
+    }
+
+    /// 输入区和普通会话页一样（KitelineKit.DraftComposer，同 MacComposer）：⌘V 粘贴截图、回车发送，下面一排权限模式、模型和思考等级、目标、终端
+    private func composer(_ place: NewDraftKey.Place, available: CGFloat) -> some View {
+        KitelineKit.DraftComposer(draftKey: key, futureKey: place.sourceId + "#" + futureSessionId, sourceId: place.sourceId, cwd: place.cwd,
+                              agent: place.agent,
+                              placeholder: L("请描述需要 %@ 在「%@」中完成的任务", Agents.info(place.agent).name, (place.cwd as NSString).lastPathComponent),
+                              busy: sending || waiting, terminal: preassigned(place), available: available, onSend: send)
     }
 
     /// 在选的电脑、目录用选的 agent 开会话，第一句话就是输入的（有图先传到那台电脑，路径拼进消息，同新建任务）；
-    /// 开出来以后把这个标签换成那个会话
-    private func send() {
-        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let place, !body.isEmpty || !images.isEmpty, !sending, !waiting else { return }
+    /// 设了目标的第一句是「/goal 目标」，输入框里的话等会话出来再发。开出来以后把这个标签换成那个会话
+    private func send(_ draft: DraftLaunch) {
+        guard let place, !sending, !waiting else { return }
         guard let source = AppState.shared.config.sources.first(where: { $0.id == place.sourceId }) else {
             message = L("这台电脑现在没有连上")
             return
         }
         sending = true
         message = nil
-        let attachments = images.map { Delivery.Attachment(name: $0.name, data: $0.data) }
+        let attachments = draft.images.map { Delivery.Attachment(name: $0.name, data: $0.data) }
         Delivery.stage(attachments, via: AppState.shared.source(withId: place.sourceId)) { staged in
             switch staged {
             case .success(let paths):
-                launch(place: place, source: source, prompt: Delivery.compose(text: body, paths: paths))
+                let body = Delivery.compose(text: draft.text, paths: paths)
+                if let goal = draft.goal {
+                    launch(place: place, source: source, prompt: "/goal " + goal, followUp: body, draft: draft)
+                } else {
+                    launch(place: place, source: source, prompt: body, followUp: nil, draft: draft)
+                }
             case .failure(let error):
                 sending = false
                 message = L("图片传送失败：%@", "\(error.description)")
@@ -263,18 +271,24 @@ struct NewSessionDraftView: View {
         }
     }
 
-    private func launch(place: NewDraftKey.Place, source: SourceConfig, prompt: String) {
+    private func launch(place: NewDraftKey.Place, source: SourceConfig, prompt: String, followUp: String?, draft: DraftLaunch) {
         // 先记下这个目录里已经有的会话：新出现的那个就是这次开的
         let before = Set(model.sessions.filter { $0.sourceId == place.sourceId && $0.cwd == place.cwd }.map(\.id))
         let started = Date()
+        let preId = preassigned(place) ? futureSessionId : nil
         let finish: (NewSession.Outcome) -> Void = { outcome in
             sending = false
             guard outcome.ok else { message = outcome.message; return }
+            KitelineKit.clearDraft(key)
             waiting = true
-            adopt(place: place, before: before, since: started)
+            adopt(place: place, before: before, since: started, preId: preId, followUp: followUp, draft: draft)
         }
-        if place.agent == "claude-code" {
-            NewSession.start(source: source, cwd: place.cwd, prompt: prompt, submit: true, completion: finish)
+        if place.agent == Agents.defaultID {
+            var options: [String: String] = [:]
+            if let mode = draft.mode { options["mode"] = mode }
+            if let model = draft.model { options["model"] = model }
+            if let effort = draft.effort { options["effort"] = effort }
+            NewSession.start(source: source, cwd: place.cwd, prompt: prompt, submit: true, launch: options, newSessionId: preId, completion: finish)
         } else {
             MobileServer.startAgent(source, cwd: place.cwd, prompt: prompt, submit: true, sessionId: nil, agent: place.agent, accepted: { _ in }) { outcome in
                 DispatchQueue.main.async { finish(outcome) }
@@ -282,14 +296,21 @@ struct NewSessionDraftView: View {
         }
     }
 
-    /// 等新会话出现（最多 3 分钟，远端开 VS Code 要一阵），出现了就把这个草稿标签换成它
-    private func adopt(place: NewDraftKey.Place, before: Set<String>, since: Date) {
+    /// 等新会话出现（最多 3 分钟，远端开 VS Code 要一阵），出现了就把这个草稿标签换成它。
+    /// 预先定了编号的认那个编号；启动时没带上设置的（在 VS Code 里开了）在会话里再切，设了目标的再发输入框里的话
+    private func adopt(place: NewDraftKey.Place, before: Set<String>, since: Date, preId: String?, followUp: String?, draft: DraftLaunch) {
+        let expected = preId.map { place.sourceId + "#" + $0 }
         Task { @MainActor in
             for _ in 0..<360 {
-                if let fresh = model.sessions.first(where: { $0.sourceId == place.sourceId && $0.cwd == place.cwd && !before.contains($0.id) }) {
+                let fresh = expected.flatMap { id in model.sessions.first { $0.id == id } }
+                    ?? model.sessions.first(where: { $0.sourceId == place.sourceId && $0.cwd == place.cwd && !before.contains($0.id) })
+                if let fresh {
                     NewDrafts.places[key] = nil
                     KitelineKit.panes.replace(key, with: fresh.id)
                     model.selection = fresh.id
+                    let carried = fresh.id == expected
+                    KitelineKit.afterDraftStart(key: fresh.id, carried: carried, mode: draft.mode, modelId: draft.model,
+                                            effort: draft.effort, followUp: followUp)
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(500))

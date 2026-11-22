@@ -422,6 +422,35 @@ enum Delivery {
     /// 关闭会话：VS Code 里关掉它的标签页（同点标签上的 ×，Claude Code 随之结束这个会话）；终端里的 CLI 发 /exit。
     /// 关掉的会话进「历史会话」，之后可以恢复。正在开着的会话越积越多、VS Code 里标签越开越多时用（10-25）
     static func close(record: SessionRecord, source: SourceConnection?, completion: @escaping (Outcome) -> Void) {
+        if !dryRun, record.kind != .kiteline, !viaAgent(record), record.snapshot.isVSCode, record.snapshot.tabCandidates.isEmpty,
+           siblings(of: record).count > 1, viaBridge(record), record.snapshot.messageUuid != nil {
+            retitle(record, source: source) { named in closeNow(record: named ?? record, source: source, completion: completion) }
+            return
+        }
+        closeNow(record: record, source: source, completion: completion)
+    }
+
+    /// 没标题的会话先起个名字：别的会话发来的通知、斜杠命令开头的会话，Claude 不起标题，VS Code 标签一直叫「Claude Code」，
+    /// 同项目有别的会话时认不出是哪个、永远关不掉（11-22）。会话加载了 mod、记录里已有对话（标签能经链接切过去）时，
+    /// 经 mod 执行 /rename <列表里显示的名字>：VS Code 标签跟着改名，watcher 也读到这个标题。等快照里出现标题（最多 8 秒）再关
+    private static func retitle(_ record: SessionRecord, source: SourceConnection?, then: @escaping (SessionRecord?) -> Void) {
+        let name = record.snapshot.displayTitle.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { then(nil); return }
+        bridgeRequest(["op": "send", "text": "/rename \(name)"], record: record, source: source) { result in
+            // 忙着（later，排到这一轮之后）或没接上：不等
+            guard result == "ok" else { Log.write("关闭会话：给「\(name)」起标题没成（\(result ?? "未接上")）"); then(nil); return }
+            Log.write("关闭会话：「\(name)」没有标题，已经 mod 执行 /rename")
+            let deadline = Date().addingTimeInterval(8)
+            func poll() {
+                if let now = AppState.shared.store.record(withKey: record.key), !now.snapshot.tabCandidates.isEmpty { then(now); return }
+                guard Date() < deadline else { then(nil); return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: poll)
+            }
+            poll()
+        }
+    }
+
+    private static func closeNow(record: SessionRecord, source: SourceConnection?, completion: @escaping (Outcome) -> Void) {
         // 关掉了就取消标记（标记是为了多任务时找得到还开着的会话）
         let completion: (Outcome) -> Void = { outcome in
             if outcome.ok { DispatchQueue.main.async { AppState.shared.setMarked(record.key, false) } }

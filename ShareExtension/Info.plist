@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 系统共享菜单里的「Kiteline」（见 ShareViewController.swift）。版本号打包时由 build.sh 照主程序的改写 -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh-Hans</string>
+    <key>CFBundleDisplayName</key>
+    <string>Kiteline</string>
+    <key>CFBundleName</key>
+    <string>Kiteline</string>
+    <key>CFBundleExecutable</key>
+    <string>KitelineShare</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mrhong.tars.share</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>XPC!</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Kiteline</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.share-services</string>
+        <key>NSExtensionPrincipalClass</key>
+        <string>ShareViewController</string>
+        <key>NSExtensionAttributes</key>
+        <dict>
+            <!-- 文件、图片、文字、网址都收 -->
+            <key>NSExtensionActivationRule</key>
+            <dict>
+                <key>NSExtensionActivationSupportsAttachmentsWithMaxCount</key>
+                <integer>20</integer>
+                <key>NSExtensionActivationSupportsFileWithMaxCount</key>
+                <integer>20</integer>
+                <key>NSExtensionActivationSupportsImageWithMaxCount</key>
+                <integer>20</integer>
+                <key>NSExtensionActivationSupportsMovieWithMaxCount</key>
+                <integer>5</integer>
+                <key>NSExtensionActivationSupportsText</key>
+                <true/>
+                <key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+                <integer>5</integer>
+            </dict>
+        </dict>
+    </dict>
+</dict>
+</plist>

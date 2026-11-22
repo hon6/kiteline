@@ -232,7 +232,10 @@ enum Hosted {
     /// 起来了回 .success；起不来回 .failure（调用方改开 VS Code）。
     /// accepted：要自动提交、6 秒还没起来时先回一声（手机那边的请求只等 12 秒；一般两三秒就好）
     /// agent：别家命令行 agent（插件 id，见 /api/launchable）。它们没有 VS Code 那条路，起不来就直接报原因、不退回 VS Code
+    /// launch：新会话标签里选好的权限模式、模型、思考等级（{mode, model, effort}，watcher 拼成 claude 的启动参数）；
+    /// newSessionId：新开时用这个会话编号（新会话标签预先定好，草稿里开的终端记在它名下）。老版本 watcher（没有 hosted_opts）不认，照常起
     static func start(source: SourceConfig, cwd: String, prompt: String, submit: Bool, sessionId: String?, agent: String? = nil,
+                      launch: [String: String]? = nil, newSessionId: String? = nil,
                       accepted: ((NewSession.Outcome) -> Void)?,
                       completion: @escaping (Result<NewSession.Outcome, RemoteError>) -> Void) {
         guard let connection = AppState.shared.source(withId: source.id), connection.state.isLive else {
@@ -252,6 +255,10 @@ enum Hosted {
                                       "netEnv": netEnv]
         if let sessionId { payload["sessionId"] = sessionId }
         if let agent { payload["agent"] = agent }
+        if agent == nil, sessionId == nil {
+            if let launch, !launch.isEmpty { payload["launch"] = launch }
+            if let newSessionId { payload["newSessionId"] = newSessionId }
+        }
         Log.write("新会话：在 \(source.displayName) 后台运行 \(agent ?? "Claude Code")（\(cwd)）\(sessionId.map { "，恢复 \($0)" } ?? "")")
         var done = false
         if submit, !prompt.isEmpty, let accepted {

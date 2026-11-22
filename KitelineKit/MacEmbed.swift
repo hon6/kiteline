@@ -51,6 +51,12 @@ public enum KitelineKit {
         model.send(key, text: text, images: [])
     }
 
+    /// 系统共享菜单发来的内容发给一个已有会话：和在对话里发一样先挂在对话底下（发送中 / 失败可重发），文件原样传到会话所在的电脑
+    public static func send(key: String, text: String, images: [TarsTaskImage], files: [(name: String, data: Data)]) {
+        guard let model else { return }
+        _ = model.send(key, text: text, images: images.map { ($0.name, $0.data, $0.preview) }, files: files)
+    }
+
     /// 自测用：往输入栏附几张图（同粘贴截图、点「+」选的）
     public static func attach(key: String, _ images: [Data]) {
         guard let model else { return }

@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        ShareInbox.prepare()   // 共享扩展的收件目录（扩展的沙盒只能写这里）；顺手清掉一天前没处理的
         NSApp.mainMenu = Self.makeMainMenu()
         // 设置里换了界面语言：菜单栏是 AppKit 建的，不会跟着 SwiftUI 换，重建一份（右键菜单每次点开现建，不用管）
         NotificationCenter.default.addObserver(forName: Lang.didChange, object: nil, queue: .main) { _ in
@@ -147,7 +148,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// 提示词链接（kiteline://new#p=…，官网 /new 页上的「在 Kiteline 中打开」）：打开主窗口，弹出填好提示词的「新任务」（见 PromptLink.swift）
+    /// 系统共享菜单（kiteline://share?id=…，共享扩展发来的）：打开主窗口，弹「发送到会话」面板（见 ShareInbox.swift）
     func application(_ application: NSApplication, open urls: [URL]) {
+        if let shared = urls.lazy.compactMap(ShareInbox.parse).first {
+            MainWindowController.shared.show()
+            NSApp.activate(ignoringOtherApps: true)
+            KitelineModel.shared.receiveShare(shared)
+            return
+        }
         guard let link = urls.lazy.compactMap(PromptLink.parse).first else { return }
         MainWindowController.shared.show()
         NSApp.activate(ignoringOtherApps: true)

@@ -1871,7 +1871,7 @@ final class MobileServer {
             }
             return
         }
-        withSessionCwd(request, respond: respond) { target, cwd in
+        withSessionCwd(request, fallback: payload["cwd"] as? String, respond: respond) { target, cwd in
             var body = payload
             body["sessionId"] = target.sessionId
             body["cwd"] = cwd
@@ -1913,7 +1913,8 @@ final class MobileServer {
     }
 
     /// 会话的工作目录：在跑的取快照里的，结束的去那台机器查对话记录
-    private func withSessionCwd(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void,
+    /// fallback：还没有这个会话时用的目录（新会话标签里先开的终端：会话编号预先定好，会话还没开出来）
+    private func withSessionCwd(_ request: HTTPRequest, fallback: String? = nil, respond: @escaping (HTTPResponse) -> Void,
                                 run: @escaping ((key: String, sessionId: String, connection: SourceConnection), String) -> Void) {
         guard let target = resolveAny(request) else { respond(.error("会话不存在，或其所在机器离线", status: 404)); return }
         if let record = AppState.shared.store.record(withKey: target.key), !record.snapshot.cwd.isEmpty {
@@ -1921,6 +1922,7 @@ final class MobileServer {
         }
         target.connection.request(["cmd": "session_info", "sessionId": target.sessionId], timeout: 20) { result in
             guard case .success(let response) = result, let cwd = (response["session"] as? [String: Any])?["cwd"] as? String, !cwd.isEmpty else {
+                if let fallback, !fallback.isEmpty { run(target, fallback); return }
                 respond(.error("未找到该会话的工作目录", status: 404)); return
             }
             run(target, cwd)

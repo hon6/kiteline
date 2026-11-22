@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import KitelineKit
+import UniformTypeIdentifiers
 
 /// Mac 上的「新任务」：选项目 + 写要求，在这个项目的 VS Code 窗口里新建一个 Claude Code 会话
 struct NewTaskSheet: View {
@@ -95,6 +96,14 @@ struct NewTaskSheet: View {
         var id: String { source.id }
     }
 
+    /// 系统共享菜单发来、在「发送到会话」里选了「新建会话」的文件（PDF、Excel……）：传到项目所在电脑，消息里写成「[附件] 路径」
+    struct SharedFile: Identifiable {
+        let id = UUID()
+        let name: String
+        let data: Data
+    }
+    @State private var files: [SharedFile] = []
+
     init(attach: [TarsTaskImage] = []) {
         _images = State(initialValue: attach)
     }
@@ -181,6 +190,7 @@ struct NewTaskSheet: View {
                 if let current = selection, !ids.contains(current) { selection = nil }
                 if selection == nil, ids.count == 1 { selection = ids[0] }
             }
+            if !files.isEmpty { fileChips }
             // 多行文字（⌘V 贴截图）、听写、图片一栏（拖进来、粘贴、选文件、从「照片」）：同 Mac 的「加入待办」
             TarsTaskInput(text: $text, images: $images,
                           placeholder: selected.map { project in
@@ -280,7 +290,32 @@ struct NewTaskSheet: View {
 
     /// 选了项目、写了字或附了图（只附图时 Claude 收到「请查看我发来的图片」，同手机）
     private var canStart: Bool {
-        !sending && selected != nil && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
+        !sending && selected != nil && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty || !files.isEmpty)
+    }
+
+    /// 共享来的文件：一排小卡片，能移除
+    private var fileChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(files) { file in
+                    HStack(spacing: 6) {
+                        Image(nsImage: NSWorkspace.shared.icon(for: UTType(filenameExtension: (file.name as NSString).pathExtension) ?? .data))
+                            .resizable().frame(width: 20, height: 20)
+                        Text(file.name).font(.app(size: 12)).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180, alignment: .leading)
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(file.data.count), countStyle: .file))
+                            .font(.app(size: 10.5)).foregroundStyle(.secondary)
+                        Button { files.removeAll { $0.id == file.id } } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("移除")
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.1)))
+                }
+            }
+        }
     }
 
     /// 设备、项目两排胶囊（同侧栏会话列表）：不止一台设备、不止一个项目时才有
@@ -401,6 +436,13 @@ struct NewTaskSheet: View {
         let link = model.newTaskLink
         model.newTaskLink = nil
         if let link, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { text = link.prompt }
+        // 系统共享菜单发来的（「发送到会话」里选了「新建会话」）：文字、图、文件放进来
+        if let share = model.newTaskShare {
+            model.newTaskShare = nil
+            text = share.text
+            images = share.images
+            files = share.files
+        }
         Projects.collect { payload in
             projects = ((payload["projects"] as? [[String: Any]]) ?? []).compactMap(Project.init)
             loading = false
@@ -459,12 +501,13 @@ struct NewTaskSheet: View {
     private func submit(_ project: Project, _ source: SourceConfig) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = images.map { Delivery.Attachment(name: $0.name, data: $0.data) }
+            + files.map { Delivery.Attachment(name: $0.name, data: $0.data, file: true) }
         Delivery.stage(attachments, via: AppState.shared.source(withId: project.sourceId)) { staged in
             switch staged {
-            case .success(let paths): create(project, source, prompt: Delivery.compose(text: text, paths: paths))
+            case .success(let paths): create(project, source, prompt: Delivery.compose(text: text, paths: paths, attachments: attachments))
             case .failure(let error):
                 sending = false
-                message = L("图片传送失败：%@", "\(error.description)")
+                message = files.isEmpty ? L("图片传送失败：%@", "\(error.description)") : L("图片或文件传送失败：%@", "\(error.description)")
             }
         }
     }

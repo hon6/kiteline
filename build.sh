@@ -133,6 +133,25 @@ lipo -create "${BINS[@]}" -output "$APP/Contents/MacOS/$EXEC_NAME"
 
 echo "==> 拷贝资源"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+
+# 共享扩展：系统共享菜单里的「Kiteline」（微信「转发到其他应用 → 选择电脑中的应用」、访达「共享」……），见 ShareExtension/
+echo "==> 编译共享扩展"
+APPEX="$APP/Contents/PlugIns/KitelineShare.appex"
+mkdir -p "$APPEX/Contents/MacOS"
+EXT_BINS=()
+for arch in $ARCHS; do
+  swiftc $OPT -parse-as-library -application-extension -module-name KitelineShare \
+    -target "$arch-apple-macosx14.0" -framework AppKit \
+    -Xlinker -e -Xlinker _NSExtensionMain \
+    -o "$KIT/$arch/KitelineShare" "$ROOT/ShareExtension/ShareViewController.swift"
+  EXT_BINS+=("$KIT/$arch/KitelineShare")
+done
+lipo -create "${EXT_BINS[@]}" -output "$APPEX/Contents/MacOS/KitelineShare"
+cp "$ROOT/ShareExtension/Info.plist" "$APPEX/Contents/Info.plist"
+# 扩展的版本号跟主程序走（系统按它判断扩展有没有更新）
+for key in CFBundleShortVersionString CFBundleVersion; do
+  /usr/libexec/PlistBuddy -c "Set :$key $(/usr/libexec/PlistBuddy -c "Print :$key" "$ROOT/Resources/Info.plist")" "$APPEX/Contents/Info.plist"
+done
 # 强调色（品牌橙）：选中、开关、链接、焦点框、弹出面板默认都用它（系统设置里强调色是「多色」时生效）
 if xcrun --find actool >/dev/null 2>&1; then
   xcrun actool "$ROOT/Resources/Assets.xcassets" --compile "$APP/Contents/Resources" --platform macosx \
@@ -241,14 +260,22 @@ CNF
   return $ok
 }
 
+# 先 --deep 签整个包（里面的动态库），再单独给共享扩展签上它自己的标识和沙盒权限（--deep 会把它签成主程序的标识、丢掉权限），
+# 最后重签外层把扩展的新签名封进去
+sign_app() {
+  codesign --force --deep "$@" --identifier "$BUNDLE_ID" "$APP" \
+  && codesign --force --options runtime "$@" --identifier com.mrhong.tars.share \
+       --entitlements "$ROOT/ShareExtension/KitelineShare.entitlements" "$APPEX" \
+  && codesign --force "$@" --identifier "$BUNDLE_ID" "$APP"
+}
 echo "==> 签名"
 if ensure_signing_identity \
    && security unlock-keychain -p "$(cat "$SIGN_DIR/keychain-password")" "$SIGN_KC" \
-   && codesign --force --deep --keychain "$SIGN_KC" --sign "$SIGN_ID" --identifier "$BUNDLE_ID" "$APP" >/dev/null 2>&1; then
+   && sign_app --keychain "$SIGN_KC" --sign "$SIGN_ID" >/dev/null 2>&1; then
   echo "    固定本机签名：$(codesign -dr - "$APP" 2>&1 | grep -o 'H"[0-9a-f]*"' | head -1)（授权跨版本保留）"
 else
   echo "    固定签名不可用，退回 ad-hoc（每次更新后要重新给辅助功能 / 语音识别授权）"
-  codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP" 2>&1 | sed 's/^/    /'
+  sign_app --sign - 2>&1 | sed 's/^/    /'
 fi
 
 echo "==> 完成：$APP"

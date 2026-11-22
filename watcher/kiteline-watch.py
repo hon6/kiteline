@@ -32,7 +32,8 @@ ccpulse-watch — Claude Code 会话观察器 + 会话内容通道
   media     {sessionId, ref}                 取一张图片（base64）
   put_file  {name, data}                     把手机发来的图片落到本机，返回路径
   tmux_send {pid, text?, keys?, submit?}     终端里的 CLI 会话：经 tmux 投递（托管会话写进它的伪终端）
-  hosted_start {cwd, prompt?, submit?, sessionId?, takeOver?, netEnv?}  不开 VS Code，后台起一个 claude（sessionId = 恢复这段对话；
+  hosted_start {cwd, prompt?, submit?, sessionId?, takeOver?, netEnv?, launch?, newSessionId?}  不开 VS Code，后台起一个 claude（sessionId = 恢复这段对话；
+                                             launch = {mode, model, effort} 启动参数；newSessionId = 新开时用这个编号；
                                              takeOver = 它正在 VS Code 里开着，等那边关掉再接着），网络设置和 VS Code 里的 Claude Code 一致
                                              （netEnv：Kiteline 读的 VS Code 设置里给 Claude Code 配的网络变量），
                                              等它起来、第一句发出去再回 {sessionId, hosted, pid, submitted, network}
@@ -126,7 +127,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.15"
+WATCHER_VERSION = "2.38.16"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -18485,6 +18486,7 @@ HOSTED_ENV_KEEP = {"CCPULSE_DATA_DIR", "CCPULSE_SESSIONS_DIR", "CCPULSE_SELF_COM
 if not IS_WINDOWS:
     FEATURES.append("hosted")
     FEATURES.append("hosted_agents")   # hosted_start 认 agent：别家命令行 agent 也能在后台伪终端里起（配方见 AgentPlugin.launch）
+    FEATURES.append("hosted_opts")     # hosted_start 认 launch {mode, model, effort} 和 newSessionId（电脑端新会话标签带着设置开、预先定好会话编号）
 
 _SCREEN_CODES = re.compile(rb"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -18724,6 +18726,50 @@ class VTScreen:
                     self.grid, self.x, self.y = self.main
                     self.main = None
                 self.top, self.bottom = 0, self.rows - 1
+
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_CLAUDE_HELP = {}   # claude 路径 -> (修改时间, --help 的输出)
+
+
+def claude_help(claude):
+    """这个 claude 的 --help（看它认哪些启动参数、权限模式有哪几档）；按路径和修改时间记着，升级了重新读"""
+    try:
+        stamp = os.path.getmtime(claude)
+    except OSError:
+        stamp = 0
+    hit = _CLAUDE_HELP.get(claude)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    try:
+        out = subprocess.run([claude, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                             timeout=15).stdout.decode("utf-8", "replace")
+    except Exception:
+        out = ""
+    _CLAUDE_HELP[claude] = (stamp, out)
+    return out
+
+
+def hosted_launch_flags(claude, launch):
+    """电脑端新会话标签里选好的权限模式、模型、思考等级 → claude 的启动参数（同在终端里 claude --permission-mode auto --model …）。
+    这个版本的 claude 不认的参数、不认的权限模式不带（带了它会直接报错退出）；电脑端按会话实际的模式、模型显示，没带上的它再切"""
+    if not isinstance(launch, dict) or not claude:
+        return []
+    text = claude_help(claude)
+    args = []
+    mode = launch.get("mode")
+    if isinstance(mode, str) and mode in ("default", "acceptEdits", "plan", "auto") and "--permission-mode" in text:
+        choices = re.search(r"--permission-mode[\s\S]{0,400}?\(choices:\s*([^)]*)\)", text)
+        # 「default」是老名字（新版改叫 manual，仍然认）；列着可选值的按它核对
+        if mode == "default" or not choices or ('"%s"' % mode) in choices.group(1):
+            args += ["--permission-mode", mode]
+    model = launch.get("model")
+    if isinstance(model, str) and re.match(r"^[A-Za-z0-9._\-\[\]]{1,80}$", model) and "--model" in text:
+        args += ["--model", model]
+    effort = launch.get("effort")
+    if isinstance(effort, str) and effort in ("low", "medium", "high", "xhigh", "max") and "--effort" in text:
+        args += ["--effort", effort]
+    return args
 
 
 def claude_command():
@@ -19895,6 +19941,10 @@ class HostedSessions:
             if is_live(running):
                 raise RuntimeError("VS Code 中的这个会话没有关闭，未转到后台运行")
         session_id = resume or ("" if recipe else str(uuid.uuid4()))   # 别家 agent 的会话编号由它自己定，这里不知道
+        # 电脑端新会话标签预先定好的编号（草稿里开的终端记在它名下，开出来就是这个会话的）；已经有这段对话的不用，免得 claude 报编号被占用
+        fresh = request.get("newSessionId")
+        if not resume and not recipe and isinstance(fresh, str) and _UUID_RE.match(fresh) and not find_transcript(fresh):
+            session_id = fresh
         hid = uuid.uuid4().hex[:10]
         if resume:
             with self.starting_lock:
@@ -19908,7 +19958,8 @@ class HostedSessions:
         # 恢复的会话还没有对话记录（VS Code 里刚开、一句没发的标签转到后台）：--resume 会报找不到，用同一个编号新开
         flag = "--resume" if resume and find_transcript(resume) else "--session-id"
         spec = {"id": hid, "sessionId": session_id, "cwd": cwd,
-                "argv": [str(part) for part in recipe["argv"]] if recipe else [claude, flag, session_id], "recipe": recipe,
+                "argv": [str(part) for part in recipe["argv"]] if recipe else [claude, flag, session_id] + hosted_launch_flags(claude, request.get("launch")),
+                "recipe": recipe,
                 "prompt": request.get("prompt") or "", "submit": bool(request.get("submit")), "sessionsDir": SESSIONS_DIR,
                 "dir": HOSTED_DIR, "sock": hosted_sock_path(hid), "cols": request.get("cols") or 120, "rows": request.get("rows") or 40}
         spec_path = os.path.join(HOSTED_DIR, hid + ".spec")

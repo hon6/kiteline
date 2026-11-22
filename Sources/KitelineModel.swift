@@ -447,6 +447,27 @@ applyLayoutToPanes()
 
     /// 从提示词链接来的：提示词先填好、链接里的项目对得上就选中（NewTaskSheet 打开时取走）
     var newTaskLink: PromptLink?
+    /// 从「发送到会话」面板选了「新建会话」来的：文字、图、文件先放进去（NewTaskSheet 打开时取走）
+    var newTaskShare: (text: String, images: [TarsTaskImage], files: [NewTaskSheet.SharedFile])?
+
+    /// 系统共享菜单发来的、还没被「发送到会话」面板取走的（见 ShareInbox.swift）
+    @Published var sharedPayload: SharedPayload?
+    @Published var showShare = false
+
+    func receiveShare(_ payload: SharedPayload) {
+        sharedPayload = payload
+        showShare = true
+    }
+
+    func newTask(share: (text: String, images: [TarsTaskImage], files: [NewTaskSheet.SharedFile])) {
+        newTaskPreset = nil
+        newTaskLink = nil
+        newTaskShare = share
+        // 先收起「发送到会话」面板，再弹「新任务」（两个面板同时弹会叠在一起）
+        showShare = false
+        if showNewTask { showNewTask = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.showNewTask = true }
+    }
 
     func newTask(link: PromptLink) {
         newTaskPreset = nil

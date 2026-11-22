@@ -77,6 +77,15 @@ final class TerminalStore {
     private(set) var devices: [String: String] = [:]
 
     @ObservationIgnored weak var model: AppModel?
+    /// 还没开出来的会话（Mac 新会话标签：会话编号预先定好）→ 终端开在哪个目录：电脑端查不到这个会话时按它开
+    @ObservationIgnored var pendingCwd: [String: String] = [:]
+
+    private func withCwd(_ key: String, _ body: [String: Any]) -> [String: Any] {
+        guard let cwd = pendingCwd[key] else { return body }
+        var body = body
+        body["cwd"] = cwd
+        return body
+    }
     @ObservationIgnored private var feeds: [String: Feed] = [:]
     @ObservationIgnored private var outbox: [String: (key: String, bytes: [UInt8])] = [:]
     @ObservationIgnored private var sending: Set<String> = []
@@ -100,7 +109,7 @@ final class TerminalStore {
     func refresh(_ key: String) async {
         guard let api = model?.api else { return }
         do {
-            let reply = try await api.post("/api/term", ["key": key], body: ["op": "list"])
+            let reply = try await api.post("/api/term", ["key": key], body: withCwd(key, ["op": "list"]))
             let terms = (reply["terms"] as? [Any] ?? []).compactMap(TermInfo.init)
             lists[key] = terms
             if let device = reply["device"] as? String ?? reply["host"] as? String, !device.isEmpty { devices[key] = device }
@@ -116,7 +125,7 @@ final class TerminalStore {
         opening.insert(key)
         defer { opening.remove(key) }
         do {
-            let reply = try await api.post("/api/term", ["key": key], body: ["op": "open", "cols": cols, "rows": rows])
+            let reply = try await api.post("/api/term", ["key": key], body: withCwd(key, ["op": "open", "cols": cols, "rows": rows]))
             guard let term = TermInfo(reply["term"]) else { return nil }
             var list = lists[key] ?? []
             if !list.contains(where: { $0.id == term.id }) { list.append(term) }
@@ -183,7 +192,7 @@ final class TerminalStore {
     func split(_ key: String, _ id: String, cols: Int, rows: Int) async {
         guard let api = model?.api else { return }
         do {
-            let reply = try await api.post("/api/term", ["key": key], body: ["op": "split", "term": id, "cols": cols, "rows": rows])
+            let reply = try await api.post("/api/term", ["key": key], body: withCwd(key, ["op": "split", "term": id, "cols": cols, "rows": rows]))
             guard let term = TermInfo(reply["term"]) else { return }
             upsert(key, term)
             selected[key] = term.id

@@ -1,5 +1,19 @@
 # Kiteline Release Notes
 
+## 3.49.49 (2026-11-22)
+
+### New Features
+
+- **Send content from other apps straight to an agent**: Kiteline now appears in the system Share menu, including WeChat’s “Forward to Other Apps → Choose an App on This Computer”, Finder’s Share and browser share menus. Send files, images, text and links to an existing session, or start a new session and choose the project and agent (Claude Code or another agent), or schedule it. Files are copied to the computer running the session, and the agent reads them from there.
+
+### Improvements
+
+- **New-session tabs now work like regular sessions**: the input box matches the session page, and screenshots pasted with ⌘V appear right above it. Below the input box you get the same permission mode (such as Auto), model and thinking level, goal and terminal controls. The chosen permission mode and model take effect as soon as the session starts; if you set a goal, it is set first and then your message is sent. You can open a terminal before sending, and it stays with the session once the session starts.
+
+### Bug Fixes
+
+- Fixed sessions without a title (for example, ones whose first message came from another session) not closing in VS Code. Closing such a session now gives it a title first, then closes its tab.
+
 ## 3.49.48 (2026-11-22)
 
 ### Bug Fixes

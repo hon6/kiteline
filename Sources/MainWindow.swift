@@ -152,6 +152,7 @@ struct MainChrome: ViewModifier {
         .background { TranslateAppleHost() }
         .frame(minWidth: 820, minHeight: 520)
         .sheetPanel(isPresented: $model.showNewTask) { NewTaskSheet() }
+        .sheetPanel(isPresented: $model.showShare) { ShareSheet() }   // 系统共享菜单发来的：发送到会话（ShareInbox.swift）
         .sheetPanel(isPresented: $model.showBatchRestart) { KitelineKit.BatchRestartView() }   // 能拖动、改大小的面板，在窗口正中
         .sheetPanel(isPresented: $model.showOpenProject) { OpenProjectSheet() }
         .sheetPanel(isPresented: $model.showLayoutSetup) { LayoutSetupSheet() }
