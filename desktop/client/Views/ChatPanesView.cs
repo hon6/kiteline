@@ -264,8 +264,10 @@ public sealed class ChatPanesView : Panel
             dock.Children.Add(header);
             dock.Children.Add(body);
             Children.Add(dock);
-            // 左边栏里再点一个已经开成标签的会话：整块（标签栏 + 对话区）的边框跟标签一起闪主题色（11-22：只闪标签不显眼）
-            if (pane.Key is string flashKey) Children.Add(new PaneFlashRing(flashKey));
+            // 左边栏里再点一个已经开成标签的会话：标签和下面的对话区外框一起闪主题色（11-22：只闪标签不显眼）
+            // 只框下面的对话区、不框标签栏那一行（标签自己闪，两段连成一体；同 Mac，11-22 截图）
+            if (pane.Key is string flashKey)
+                Children.Add(new PaneFlashRing(flashKey, header) { Margin = new Thickness(0, header.Height, 0, 0) });
             overlay.Res(Border.BackgroundProperty, "AccentFill10").Res(Border.BorderBrushProperty, "AccentEdge40");
             overlay.Child = hint.HAlign(HorizontalAlignment.Center);
             Children.Add(overlay);
@@ -649,6 +651,8 @@ public sealed class PaneTab : Control
 {
     const double Foot = 7;
     readonly string? key;
+    /// 这个标签放的是哪个会话（对话区外框闪烁时找标签的位置用，见 PaneFlashRing）
+    public string? Key => key;
     readonly ChatPanes.Pane pane;
     readonly bool focused, several, divider, active, closable, showClose;
     readonly Flex row;
@@ -884,10 +888,19 @@ public sealed class PaneTab : Control
     }
 }
 
-/// 整块的边框闪几下主题色（节奏同标签的 FlashLevels）：标签小、分屏多时光闪标签不容易看到，整块一圈一起闪才明显（同 Mac 版 PaneFlashRing）
-public sealed class PaneFlashRing(string key) : Control
+/// 对话区的外框闪几下主题色（节奏同标签的 FlashLevels）：标签小、分屏多时光闪标签不容易看到，连下面的对话区一圈一起闪才明显。
+/// 只框对话区：上沿是标签栏底边，在这个标签那一段断开、两头接上标签自己闪烁边的两只脚；标签栏那一行不画（同 Mac 版 PaneFlashRing，11-22 截图）
+public sealed class PaneFlashRing(string key, Control header) : Control
 {
     DispatcherTimer? timer;
+    /// 标签在这一层里的左右（每次画时量：开始闪的那一刻标签栏常常刚重建、还没排好，量不到；找不到就整条上沿都画）
+    (double Left, double Right)? Gap()
+    {
+        if (header.GetVisualDescendants().OfType<PaneTab>().FirstOrDefault(t => t.Key == key) is PaneTab tab
+            && tab.TranslatePoint(new Point(0, 0), this) is Point origin && tab.Bounds.Width > 0)
+            return (origin.X, origin.X + tab.Bounds.Width);
+        return null;
+    }
 
     double Level()
     {
@@ -935,9 +948,25 @@ public sealed class PaneFlashRing(string key) : Control
 
     public override void Render(DrawingContext context)
     {
-        if (Level() is > 0 and var level)
-            using (context.PushOpacity(level))
-                context.DrawRectangle(null, new Pen(Palette.Get("Accent"), 2.5), new Rect(Bounds.Size).Deflate(1.25));
+        if (Level() is not (> 0 and var level)) return;
+        // 左右下往里收半个线宽；上沿不收：和标签两只脚的底同一高度（标签栏底边），两段才接得上（11-22 截图：接口错开）
+        // 标签的脚比对话区顶边高 2 像素：上沿往上提 2（这一层不裁，PaneView 裁的是整块，画得出来）
+        var r = new Rect(1.25, -2, Bounds.Width - 2.5, Bounds.Height + 0.75);
+        var pen = new Pen(Palette.Get("Accent"), 2.5) { LineJoin = PenLineJoin.Round };
+        using (context.PushOpacity(level))
+        {
+            if (Gap() is not var (left, right) || right <= r.Left || left >= r.Right) { context.DrawRectangle(null, pen, r); return; }
+            var g = new StreamGeometry();
+            using (var ctx = g.Open())
+            {
+                ctx.BeginFigure(new Point(Math.Min(r.Right, right), r.Top), false);
+                // 上沿在标签那一段断开：左边从左竖线接到标签左脚，右边从标签右脚接出去；标签底下不画
+                ctx.LineTo(r.TopRight); ctx.LineTo(r.BottomRight); ctx.LineTo(r.BottomLeft); ctx.LineTo(r.TopLeft);
+                ctx.LineTo(new Point(Math.Max(r.Left, left), r.Top));
+                ctx.EndFigure(false);
+            }
+            context.DrawGeometry(null, pen, g);
+        }
     }
 }
 

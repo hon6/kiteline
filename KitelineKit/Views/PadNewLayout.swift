@@ -13,6 +13,22 @@ extension EnvironmentValues {
     @Entry var rowAvatar = true
 }
 
+/// 新版左栏的边距（同 Mac 的 SideMetric，和项目里的文件列表一致）：选中框离栏边 8、框里 8，字离栏边 16
+enum PadSide {
+    static let frame: CGFloat = 8
+    static let inner: CGFloat = 8
+    static let text: CGFloat = 16
+}
+
+/// 左栏里一节的小标题（会话 7、活动中……），字对齐 16
+struct PadSectionTitle: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.ui(.subheadline).weight(.semibold)).foregroundStyle(.secondary)
+            .padding(.horizontal, PadSide.text).padding(.top, 10).padding(.bottom, 6)
+    }
+}
+
 enum PadLayout {
     static let key = "padNewLayout"
     /// 只在 iPad 上有新版界面
@@ -27,6 +43,7 @@ struct PadNewSidebar: View {
     @AppStorage(PadLayout.key) private var newLayout = false
     @State private var world: SessionListView.WorldCover?
     @State private var settings = false
+    @State private var overview = false
     /// 项目栏里打开着的项目（id = 设备 + 目录）
     @AppStorage("padProject") private var projectID = ""
 
@@ -40,6 +57,23 @@ struct PadNewSidebar: View {
         .environment(\.rowAvatar, false)
         .fullScreenCover(item: $world) { cover in WorldScreen(page: cover.id).environment(model) }
         .sheet(isPresented: $settings) { SettingsView().environment(model) }
+        .sheet(isPresented: $overview) {
+            NavigationStack {
+                OverviewPage()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button { overview = false } label: { Image(systemName: "xmark") }.accessibilityLabel("关闭")
+                        }
+                    }
+            }
+            // 概览里点了会话、项目……：关掉弹窗，照常在右边打开
+            .environment(\.openRoute, OpenRoute { route in
+                overview = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { open(route) }
+            })
+            .environment(model)
+            .presentationSizing(.page)
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -62,7 +96,8 @@ struct PadNewSidebar: View {
             RailIcon(symbol: "checklist", title: L("待办"), on: rail == "todos", badge: todoBadge) { rail = "todos" }
             RailIcon(symbol: "star", title: L("收藏"), on: rail == "favorites") { rail = "favorites" }
             Spacer(minLength: 12)
-            RailIcon(symbol: "square.grid.2x2", title: L("概览"), on: false) { open(.overview) }
+            // 概览弹窗显示（11-22），不占右边的标签页
+            RailIcon(symbol: "square.grid.2x2", title: L("概览"), on: overview) { overview = true }
             RailIcon(symbol: "globe.asia.australia", title: L("世界"), on: false) { world = .init(id: "world") }
             RailIcon(symbol: "point.3.connected.trianglepath.dotted", title: L("数据流"), on: false) { world = .init(id: "flow") }
             RailIcon(symbol: "cube.transparent", title: L("AR 模式"), on: false) { world = .init(id: "ar") }
@@ -149,29 +184,39 @@ private struct PadProjectList: View {
         let all = model.home.projects.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }
         let active = all.filter { !lives($0).isEmpty }
         let rest = all.filter { lives($0).isEmpty }
-        List {
-            Section {
-                ForEach(active) { row($0) }
-                if active.isEmpty {
-                    Text("暂无活动中的项目").font(.ui(.footnote)).foregroundStyle(.secondary)
-                }
-            } header: {
+        // 边距同项目里的会话、文件列表（PadSide）：不用系统侧栏列表，它每行左右自带十几点
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text("活动中").textCase(nil)
+                    Text("活动中 \(active.count)").font(.ui(.subheadline).weight(.semibold)).foregroundStyle(.secondary)
                     Spacer()
                     Button { open(.newTask(NewTaskSeed())) } label: {
                         Label("打开项目", systemImage: "folder.badge.plus").font(.ui(.footnote).weight(.medium))
                     }
                     .buttonStyle(.borderedProminent).controlSize(.small)
                 }
+                .padding(.leading, PadSide.text).padding(.trailing, PadSide.frame).padding(.top, 8).padding(.bottom, 8)
+                ForEach(active) { row($0) }
+                if active.isEmpty {
+                    Text("暂无活动中的项目").font(.ui(.footnote)).foregroundStyle(.secondary).padding(.horizontal, PadSide.text).padding(.vertical, 6)
+                }
+                if !rest.isEmpty {
+                    Button { withAnimation(.snappy(duration: 0.18)) { restOpen.toggle() } } label: {
+                        HStack(spacing: 4) {
+                            Text("其他项目 \(rest.count)")
+                            Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).rotationEffect(.degrees(restOpen ? 90 : 0))
+                            Spacer(minLength: 0)
+                        }
+                        .font(.ui(.subheadline).weight(.semibold)).foregroundStyle(.secondary)
+                        .padding(.horizontal, PadSide.text).padding(.top, 14).padding(.bottom, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if restOpen { ForEach(rest) { row($0) } }
+                }
             }
-            Section(isExpanded: $restOpen) {
-                ForEach(rest) { row($0) }
-            } header: {
-                Text("其他项目 \(rest.count)").textCase(nil)
-            }
+            .padding(.bottom, 8)
         }
-        .listStyle(.sidebar)
         .navigationTitle("项目")
         .refreshable { await model.home.refresh(model.api, force: true) }
         .overlay {
@@ -203,9 +248,11 @@ private struct PadProjectList: View {
                         .fixedSize()
                 }
             }
+            .padding(.horizontal, PadSide.inner).padding(.vertical, 7)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, PadSide.frame)
     }
 }
 
@@ -273,50 +320,63 @@ private struct PadProjectPane: View {
             .foregroundStyle(Theme.claude)
             .accessibilityLabel("在这个项目里新建会话")
         }
-        .padding(.horizontal, 10)
+        // 返回箭头、右边按钮的图标对齐 16 点（同下面列表的字）
+        .padding(.horizontal, PadSide.text - 12)
         .frame(height: 59)
     }
 
+    /// 会话和最近的会话：不用系统列表（侧栏样式每行左右自带十几点，和下面文件列表对不齐，11-22 截图），
+    /// 边距全按 PadSide：选中框离栏边 8、字离栏边 16，同下面的文件列表
     private func sessions(_ lives: [SessionInfo]) -> some View {
-        List {
-            Section {
+        let live = Set(lives.map(\.key))
+        let recent = (PadRecent.shared.past[project.id] ?? []).filter { !live.contains($0.key) }
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                PadSectionTitle(text: L("会话 %lld", count: lives.count))
                 ForEach(lives) { s in
-                    Button { open(.chat(s.key)) } label: { SessionRow(session: s) }
+                    Button { open(.chat(s.key)) } label: { SessionRow(session: s).padding(.horizontal, PadSide.inner) }
                         .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
-                        // 右边分屏正看着的：整行淡主题色底（同会话列表的选中）
-                        .listRowBackground(selection.key == s.key ? RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.claude.opacity(0.14)).padding(.horizontal, 6) : nil)
+                        .background(selection.key == s.key ? Theme.claude.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, PadSide.frame)
                 }
                 if lives.isEmpty {
-                    Text("没有开着的会话").font(.ui(.footnote)).foregroundStyle(.secondary)
+                    Text("没有开着的会话").font(.ui(.footnote)).foregroundStyle(.secondary).padding(.horizontal, PadSide.text).padding(.vertical, 6)
                 }
-            } header: {
-                Text("会话 \(lives.count)").textCase(nil)
-            }
-            let live = Set(lives.map(\.key))
-            let recent = (PadRecent.shared.past[project.id] ?? []).filter { !live.contains($0.key) }
-            if !recent.isEmpty {
-                Section(isExpanded: $recentOpen) {
-                    ForEach(recent.prefix(40)) { item in
-                        Button {
-                            model.rememberPast(item)
-                            open(.chat(item.key))
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title).font(.ui(.subheadline)).lineLimit(1)
-                                Text(item.lastActive.map { Format.listTime($0) } ?? "").font(.ui(.caption)).foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+                if !recent.isEmpty {
+                    Button { withAnimation(.snappy(duration: 0.18)) { recentOpen.toggle() } } label: {
+                        HStack(spacing: 4) {
+                            Text(L("最近的会话 %lld", count: recent.count))
+                            Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                                .rotationEffect(.degrees(recentOpen ? 90 : 0))
+                            Spacer(minLength: 0)
                         }
-                        .buttonStyle(.plain)
+                        .font(.ui(.subheadline).weight(.semibold)).foregroundStyle(.secondary)
+                        .padding(.horizontal, PadSide.text).padding(.top, 14).padding(.bottom, 6)
+                        .contentShape(Rectangle())
                     }
-                } header: {
-                    Text("最近的会话 \(recent.count)").textCase(nil)
+                    .buttonStyle(.plain)
+                    if recentOpen {
+                        ForEach(recent.prefix(40)) { item in
+                            Button {
+                                model.rememberPast(item)
+                                open(.chat(item.key))
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title).font(.ui(.subheadline)).lineLimit(1)
+                                    Text(item.lastActive.map { Format.listTime($0) } ?? "").font(.ui(.caption)).foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, PadSide.inner).padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, PadSide.frame)
+                        }
+                    }
                 }
             }
+            .padding(.bottom, 8)
         }
-        .listStyle(.sidebar)
         // 最近的会话：这个项目（这台电脑上这个目录）里关掉的；老版本电脑不认 cwd 时按目录再筛一遍
         .onAppear { PadRecent.shared.load(project, api: model.api) }
     }

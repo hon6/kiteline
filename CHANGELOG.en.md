@@ -1,5 +1,11 @@
 # Kiteline Release Notes
 
+## 3.49.47 (2026-11-22)
+
+### Bug Fixes
+
+- Fixed the flashing border shown when clicking an already-open session extending past the session panel to the top of the window; the tab and the conversation below it now flash together as a single outline.
+
 ## 3.49.46 (2026-11-22)
 
 ### Improvements

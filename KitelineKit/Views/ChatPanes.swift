@@ -1467,6 +1467,9 @@ private struct PaneView<Content: View>: View {
             #if os(macOS)
             // 别让内容画到别的块上，也别伸进左边栏底下（Mac 窗口底下没有要延伸过去的地方）
             .clipped()
+            // 左边栏里再点一个已经开成标签的会话：标签闪（TabFlashRing），下面的对话区外框一起闪，两段连成一体（11-22：只闪标签不显眼）。
+            // 只框对话区、不框标签栏那一行（11-22 截图：框画到标签栏、顶上项目那一排去了）
+            .overlay { if let key = pane.key { PaneFlashRing(key: key, pane: pane.id, panes: panes) } }
             // 拖标签、拖会话的落点都在对话区里算（同 VS Code：标签栏上是插到第几个，对话区是中间 / 四边），高亮也只盖对话区
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.contentFrames[pane.id] = $0 }
             .overlay {
@@ -1490,8 +1493,6 @@ private struct PaneView<Content: View>: View {
             .mask(Rectangle().ignoresSafeArea())
             #endif
         }
-        // 左边栏里再点一个已经开成标签的会话：整块（标签栏 + 对话区）的边框跟标签一起闪主题色，只闪标签不够显眼（11-22）
-        .overlay { if let key = pane.key { PaneFlashRing(key: key, panes: panes) } }
         .environment(\.chatPane, context)
         // 在这一块里按下去（点消息、点输入框、拖滚动条……）：它就是当前块
         .background(PressWatcher { panes.focus(pane.id) })
@@ -2233,22 +2234,57 @@ private struct TabFlashRing: View {
     }
 }
 
-/// 整块的边框闪几下主题色（同 TabFlashRing 的节奏）：标签小、分屏多时光闪标签不容易看到，整块一圈一起闪才明显
+/// 对话区的外框闪几下主题色（同 TabFlashRing 的节奏）：标签小、分屏多时光闪标签不容易看到，连下面的对话区一圈一起闪才明显。
+/// 只框对话区：上沿就是标签栏底边，在这个标签那一段断开、两头接上标签自己闪烁边的两只脚，合起来是「标签 + 对话区」一个整体轮廓；
+/// 标签栏那一行（连同铺进标题栏、顶上项目那一排）不画（11-22 截图：顶上左右上边不要，从标签到右边就可以）
 private struct PaneFlashRing: View {
     let key: String
+    let pane: UUID
     let panes: ChatPanes
     @State private var pulse = 0
+    /// 标签在对话区里的左右（开始闪的时候量一次；标签不在这一块的标签栏里时整条上沿都画）
+    @State private var gap: ClosedRange<CGFloat>?
 
     var body: some View {
-        Rectangle()
-            .strokeBorder(Theme.claude, lineWidth: 2.5)
+        OpenTopFrame(gap: gap)
+            .stroke(Theme.claude, style: StrokeStyle(lineWidth: 2.5, lineJoin: .round))
             .phaseAnimator([0.0, 1, 0.15, 1, 0.15, 1, 0], trigger: pulse) { ring, level in
                 ring.opacity(level)
             } animation: { _ in .easeInOut(duration: 0.16) }
             .allowsHitTesting(false)
             .onChange(of: panes.tabFlash) { _, flash in
-                if flash?.key == key { pulse += 1 }
+                guard flash?.key == key else { return }
+                if let tab = panes.tabFrames[pane]?[key], let body = panes.bodyFrames[pane], tab.width > 0 {
+                    gap = (tab.minX - body.minX)...(tab.maxX - body.minX)
+                } else {
+                    gap = nil
+                }
+                pulse += 1
             }
+    }
+}
+
+/// 一个矩形框，上沿在 gap（标签）那一段断开
+private struct OpenTopFrame: Shape {
+    var gap: ClosedRange<CGFloat>?
+
+    func path(in rect: CGRect) -> Path {
+        // 左右下往里收半个线宽；上沿不收：和标签两只脚的底同一高度（标签栏底边），两段才接得上（11-22 截图：接口错开）
+        // 标签的脚比对话区顶边高 1 点（标签栏底下那道分隔线）：上沿再往上提 1 点（overlay 不裁，画得出来）
+        let r = CGRect(x: rect.minX + 1.25, y: rect.minY - 1, width: rect.width - 2.5, height: rect.height - 0.25)
+        var path = Path()
+        guard let gap, gap.lowerBound < r.maxX, gap.upperBound > r.minX else {
+            path.addRect(r)
+            return path
+        }
+        // 上沿在标签那一段断开：左边从左竖线接到标签左脚，右边从标签右脚接出去；标签底下不画
+        path.move(to: CGPoint(x: min(r.maxX, gap.upperBound), y: r.minY))
+        path.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        path.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+        path.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        path.addLine(to: CGPoint(x: r.minX, y: r.minY))
+        path.addLine(to: CGPoint(x: max(r.minX, gap.lowerBound), y: r.minY))
+        return path
     }
 }
 

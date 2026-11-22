@@ -59,9 +59,20 @@ final class ExplorerStore {
             if folder.isEmpty { rootName = (list.root as NSString).lastPathComponent }
             errors[folder] = nil
         } catch {
+            // 被取消（打开项目时视图重建）不算失败：稍后自己再读一次（原来显示「加载失败 · 已取消」，11-22 iPad 实测）
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                guard !retried.contains(folder) else { return }
+                retried.insert(folder)
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    await self?.load(folder)
+                }
+                return
+            }
             errors[folder] = error.localizedDescription
         }
     }
+    private var retried: Set<String> = []
 
     func toggle(_ folder: String) {
         if expanded.contains(folder) {
@@ -244,6 +255,9 @@ struct ExplorerTree: View {
         #else
         .listStyle(.plain)
         .environment(\.defaultMinListRowHeight, 38)
+        // 顶上别留空（11-22 反馈：iPad 新版项目栏里文件页签和「ccpulse」之间空一截）
+        .contentMargins(.top, 0, for: .scrollContent)
+        .listSectionSpacing(.compact)
         #endif
         .panelSearch($explorer.query, prompt: L("按文件名搜索"))
         .task(id: explorer.query) {
