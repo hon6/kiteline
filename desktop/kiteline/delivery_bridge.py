@@ -426,7 +426,7 @@ def launch(cwd, prompt, submit, session_id, started=None, wait=24, outcome=None)
     wait：最多等窗口多少秒（远端窗口第一次连要装服务端，调用方给得长些）"""
     window = None
     for _ in range(max(1, int(wait / 2))):
-        window = bridge.window_for_cwd(cwd, only_match=True)
+        window = bridge.window_for_cwd(cwd, only_match=True, exact=bool(session_id))
         if window:
             break
         time.sleep(2)

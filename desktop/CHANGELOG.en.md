@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.53 (2026-11-22)
+
+### Bug Fixes
+
+- Fixed messages sent to a past session starting a brand-new session instead of continuing the original one when the computer had a VS Code window open on a parent folder of the project; the project's own window is now opened and the original conversation continues.
+
 ## 1.0.52 (2026-11-22)
 
 ### Bug Fixes

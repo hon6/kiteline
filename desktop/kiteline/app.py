@@ -37,7 +37,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.52"
+VERSION = "1.0.53"
 
 
 class App:
@@ -1802,7 +1802,8 @@ def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="�
             # 项目窗口已经开着（配套扩展认得出来）：不再跑 code 命令，直接经扩展新开会话。
             # GNOME Wayland 下 code 命令会让 VS Code 之后不认外部切过来的焦点，新任务就没法自动提交（10-24 实测）
             from . import bridge
-            if bridge.installed() and bridge.window_for_cwd(cwd, only_match=True):
+            # 恢复会话只认文件夹就是 cwd 的窗口：上级目录的窗口里扩展找不到这段对话，会新开一个会话（同 Mac 版 11-22）
+            if bridge.installed() and bridge.window_for_cwd(cwd, only_match=True, exact=bool(session_id)):
                 return None
         args = [code, "--skip-welcome", cwd]
         if remote:

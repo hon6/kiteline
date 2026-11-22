@@ -113,7 +113,9 @@ enum NewSession {
         var target: URL?
         /// 窗口标题里的项目名（工作区根目录名）：提交时先在这个项目的窗口里找新标签
         var project = (cwd as NSString).lastPathComponent
-        if let folder = WindowLocator.openFolder(cwd: cwd, kind: source.kind, host: host, port: source.sshPort, scheme: scheme) {
+        // 恢复会话只认项目目录正好是 cwd 的窗口（上级目录的窗口里扩展找不到这段对话，会新开一个会话）
+        if let folder = WindowLocator.openFolder(cwd: cwd, kind: source.kind, host: host, port: source.sshPort, scheme: scheme,
+                                                 exact: sessionId != nil) {
             target = WindowLocator.link(folder, scheme: scheme)
             project = (folder.path as NSString).lastPathComponent
         } else {

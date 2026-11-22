@@ -63,11 +63,17 @@ enum WindowLocator {
         return link(best, scheme: scheme)
     }
 
-    /// 工作区根目录包含 cwd 的已打开窗口（取最深的那个）
-    static func openFolder(cwd: String, kind: SourceKind, host: String?, port: Int? = nil, scheme: String) -> OpenFolder? {
+    /// 工作区根目录包含 cwd 的已打开窗口（取最深的那个）。
+    /// exact：只认根目录就是 cwd 的窗口。恢复历史会话要这样：Claude Code 扩展只在工作区目录对应的记录里找这段对话，
+    /// 上级目录的窗口里找不到，会新开一个空会话把内容发进去（11-22 实测：历史会话里连发两句，在上级目录的窗口里开出了两个新会话）
+    static func openFolder(cwd: String, kind: SourceKind, host: String?, port: Int? = nil, scheme: String,
+                           exact: Bool = false) -> OpenFolder? {
         guard !cwd.isEmpty else { return nil }
+        let trimmed = cwd.count > 1 && cwd.hasSuffix("/") ? String(cwd.dropLast()) : cwd
         let candidates = openFolders(scheme: scheme).filter { folder in
-            guard cwd == folder.path || cwd.hasPrefix(folder.path.hasSuffix("/") ? folder.path : folder.path + "/") else { return false }
+            let root = folder.path.count > 1 && folder.path.hasSuffix("/") ? String(folder.path.dropLast()) : folder.path
+            if exact { guard trimmed == root else { return false } }
+            guard cwd == folder.path || cwd.hasPrefix(folder.path.hasSuffix("/") ? folder.path : folder.path + "/") || trimmed == root else { return false }
             return matches(folder, kind: kind, host: host, port: port)
         }
         return candidates.max(by: { $0.path.count < $1.path.count })

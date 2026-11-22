@@ -231,16 +231,17 @@ def window_for(record):
     return window_for_cwd(record.snap.get("cwd") or "")
 
 
-def window_for_cwd(cwd, only_match=False):
-    """打开的文件夹包含 cwd 的窗口（取最深的）；only_match=False 时只开了一个窗口也算"""
+def window_for_cwd(cwd, only_match=False, exact=False):
+    """打开的文件夹包含 cwd 的窗口（取最深的）；only_match=False 时只开了一个窗口也算。
+    exact：只认文件夹就是 cwd 的窗口（恢复历史会话用：上级目录的窗口里 Claude Code 扩展找不到这段对话，会新开一个会话，同 Mac 版 11-22）"""
     cwd = cwd.rstrip("/")
     found = windows()
     best, depth = None, -1
     for window in found:
         for folder in window.state.get("folders") or []:
             folder = folder.rstrip("/")
-            if folder and (cwd == folder or cwd.startswith(folder + "/")) and len(folder) > depth:
+            if folder and (cwd == folder or (not exact and cwd.startswith(folder + "/"))) and len(folder) > depth:
                 best, depth = window, len(folder)
-    if best or only_match:
+    if best or only_match or exact:
         return best
     return found[0] if len(found) == 1 else None
