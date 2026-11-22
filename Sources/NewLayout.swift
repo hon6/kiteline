@@ -1299,8 +1299,17 @@ struct KeepTitlebarTransparent: NSViewRepresentable {
         /// 显示出来的标题文字整条横在上面，右上角「新版界面」、标签的 × 都被它接走点不动（11-21 自测）
         private static var savedVisibility: NSWindow.TitleVisibility?
 
+        /// 窗口上挂着几个（换布局、换模式时整块按 layoutEpoch 重建：新的先挂上、旧的后拆）：最后一个拆掉才还原标题，
+        /// 不然旧的拆掉时把新的刚藏起来的标题又放出来，标题栏上横着一条鼠标指过的标签名（11-22 截图）
+        private static var live = 0
+        private var counted = false
+
         override func viewWillMove(toWindow newWindow: NSWindow?) {
-            if newWindow == nil, let window, let saved = Self.savedVisibility { window.titleVisibility = saved }
+            if newWindow == nil, counted {
+                counted = false
+                Self.live -= 1
+                if Self.live == 0, let window, let saved = Self.savedVisibility { window.titleVisibility = saved; Self.savedVisibility = nil }
+            }
             super.viewWillMove(toWindow: newWindow)
         }
 
@@ -1308,6 +1317,7 @@ struct KeepTitlebarTransparent: NSViewRepresentable {
             super.viewDidMoveToWindow()
             watch = nil
             guard let window else { return }
+            if !counted { counted = true; Self.live += 1 }
             window.titlebarAppearsTransparent = true
             // 窗口标题（当前会话名）不画：标题栏透明后它压在左边几栏顶上（11-21 截图：用量页时「QQ_….png 会话内容空白」叠在文件栏上）
             if Self.savedVisibility == nil { Self.savedVisibility = window.titleVisibility }

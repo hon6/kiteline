@@ -673,13 +673,16 @@ public struct KiteHScroll<Content: View>: View {
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
 
     public var body: some View {
+        #if os(macOS)
+        // 滚动条画在按钮下面多出来的 10 点里，再把这 10 点从外面收回去：不占这一排的高度，也不盖在按钮的字上
+        //（11-21 自测：粗滚动条横穿输入框下面那排按钮的正中间）
         ScrollView(.horizontal, showsIndicators: kiteScrollIndicators) {
-            #if os(macOS)
-            content.background(OverlayScrollerHook())
-            #else
-            content
-            #endif
+            content.padding(.bottom, 10).background(OverlayScrollerHook())
         }
+        .padding(.bottom, -10)
+        #else
+        ScrollView(.horizontal, showsIndicators: kiteScrollIndicators) { content }
+        #endif
     }
 }
 
@@ -724,8 +727,7 @@ struct OverlayScrollerHook: NSViewRepresentable {
         private static func force(_ scroll: NSScrollView) {
             if scroll.scrollerStyle != .overlay { scroll.scrollerStyle = .overlay }
             scroll.autohidesScrollers = true
-            // 滚动条画在这一排下面的空里，不盖住按钮上的字
-            scroll.scrollerInsets = NSEdgeInsets(top: 0, left: 0, bottom: -8, right: 0)
+            scroll.horizontalScroller?.controlSize = .small   // 细一点
             if scroll.hasVerticalScroller { scroll.hasVerticalScroller = false }
         }
     }

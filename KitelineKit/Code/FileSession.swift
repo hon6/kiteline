@@ -82,9 +82,21 @@ final class FileSession {
                 editor.setBaseline(diff.original ?? "")
             }
         } catch {
+            // 被取消（打开时视图重建、切走又切回）不算失败：等一下自己再读一次（原来直接显示「加载失败 · 已取消」，11-22 iPad 实测）
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                guard !retriedCancel else { return }
+                retriedCancel = true
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    await self?.load(into: editor, id: id, readOnly: readOnly, options: options, line: line, reveal: reveal)
+                }
+                return
+            }
             self.error = error.localizedDescription
         }
     }
+
+    private var retriedCancel = false
 
     /// 保存；电脑上的文件在打开后又被改过就停下来问（force 覆盖）
     @discardableResult

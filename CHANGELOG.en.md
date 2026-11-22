@@ -1,5 +1,19 @@
 # Kiteline Release Notes
 
+## 3.49.45 (2026-11-22)
+
+### Improvements
+
+- **Jump back to the bottom of a conversation in one tap** (computer): when you scroll up to read earlier messages, a “Back to Bottom” button now appears even if no new messages have arrived. Tap it to return to the latest message; new content then keeps scrolling into view automatically.
+- **Reply by voice in AR mode's floating windows**: a microphone button now sits to the left of the input box. Switch to it, then hold “Hold to Talk” and speak; when you let go, your words are turned into text and sent to that session. Tap again to switch back to the keyboard.
+
+### Bug Fixes
+
+- Fixed the New Session tab not accepting pasted images: like New Task, it now lets you paste a screenshot with ⌘V, drop in images, or choose files, and the images are sent along with your message.
+- Fixed nothing happening when choosing Session Info, Permission Mode, and similar items from the right-click menu of a session that isn't open; the session now opens first.
+- Fixed the scroll bar covering the button labels when scrolling the row of buttons below the input box; it is now a thin bar shown below the buttons.
+- Fixed some projects in the project list always showing “Timed out reading Git status”: when reading is slow, it now finishes in the background and shows correctly on the next refresh.
+
 ## 3.49.44 (2026-11-22)
 
 ### Improvements

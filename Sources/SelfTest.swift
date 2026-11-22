@@ -688,6 +688,14 @@ extension SelfTest {
             case let raw where raw.hasPrefix("cols="): KitelineModel.shared.layoutColumns = KitelineModel.parseColumns(String(raw.dropFirst(5)))   // layout:cols=nav,sessions|tabs|files
             default: KitelineModel.shared.newLayout = arg == "new"
             }   // 两套界面：layout:new 新版（图标栏 + 状态栏）/ layout:classic 经典版
+        case "newdraft":
+            // 把当前标签换成新会话草稿（同「+」里的「新建会话」）
+            if let make = KitelineKit.newSessionDraft, let draft = make(nil) { KitelineKit.panes.show(draft) }
+            else { Log.write("[capture] 没法开新会话草稿") }
+            delay = 2
+        case "draftfill": NotificationCenter.default.post(name: .draftTestFill, object: nil, userInfo: ["text": arg]); delay = 0.5
+        case "draftattach": NotificationCenter.default.post(name: .draftTestFill, object: nil, userInfo: ["image": arg]); delay = 1
+        case "draftsend": NotificationCenter.default.post(name: .draftTestFill, object: nil, userInfo: ["send": true]); delay = 3
         case "draftadopt":
             // 新会话草稿发出去后接上会话（同 NewSessionDraftView.adopt）：draftadopt:<会话标题> 把开着的草稿标签换成那个会话
             if let draft = KitelineKit.panes.keys.first(where: { $0.hasPrefix("@new:") }), let item = KitelineModel.shared.sessions.first(where: { $0.title == arg }) {

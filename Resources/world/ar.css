@@ -289,3 +289,27 @@ body.windowed .ar-tools { bottom: 156px; }
 .ar-lightbox { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0, 0, 0, .78); pointer-events: auto; cursor: zoom-out; }
 .ar-lightbox[hidden] { display: none; }
 .ar-lightbox img { max-width: 92%; max-height: 90%; border-radius: 10px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }
+
+/* iPad（触摸）：空白处单指拖动转向、双指捏合前后，不让浏览器自己滚动缩放；窗口里的对话照常上下滑。工具按钮不显示快捷键 */
+body.touch #ar-stage { touch-action: none; }
+body.touch .pn-body { touch-action: pan-y; }
+body.touch .ar-tools kbd { display: none; }
+body.touch .ar-tools button { height: 36px; padding: 0 14px; }
+
+/* 窗口输入栏：左边切语音 / 键盘；语音时中间一条「按住 说话」（手机、iPad 默认），按住时主题色 */
+.pn-mode { flex: none; width: 30px; height: 30px; border-radius: 9px; border: 0; background: transparent; color: var(--dim, rgba(255,255,255,.6)); display: grid; place-items: center; cursor: pointer; padding: 0; margin-left: -6px; }
+.pn-mode svg { width: 17px; height: 17px; }
+.pn-talk { display: none; flex: 1; height: 36px; border-radius: 10px; border: 0; background: rgba(255, 255, 255, .08); color: var(--text); font: 600 14px var(--sans); cursor: pointer; touch-action: none; -webkit-user-select: none; user-select: none; }
+.pn-talk.on { background: var(--brand); color: #fff; }
+.pn-input.voice textarea, .pn-input.voice .pn-send { display: none; }
+.pn-input.voice .pn-talk { display: block; }
+
+/* 手机竖屏：操作说明、右下工具按钮、雷达缩小，别挤掉中间 */
+@media (max-width: 600px) {
+  .ar-hint { max-width: calc(100vw - 24px); bottom: auto; top: 96px; font-size: 12px; gap: 4px 10px; }
+  .ar-door { left: 16px; margin-left: 0; top: max(36px, env(safe-area-inset-top)); }
+  .ar-stats { top: max(36px, env(safe-area-inset-top)); right: 12px; gap: 10px; padding: 6px 10px; }
+  .ar-tools { right: 10px; bottom: 150px; }
+  body.touch .ar-tools button { height: 32px; padding: 0 10px; font-size: 12px; }
+  .ar-radar { transform: scale(.7); transform-origin: right bottom; }
+}

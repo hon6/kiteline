@@ -69,9 +69,8 @@ public sealed class FolderPicker
         }.Res(Border.BackgroundProperty, "Surface").Res(Border.BorderBrushProperty, "Separator");
 
         var openLabel = Ui.Text(L("打开"), 13, FontWeight.SemiBold, "White").HAlign(HorizontalAlignment.Center);
-        openButton = new Tap(openLabel.Pad(18, 0), () => Finish(path), 7) { Height = 30, MinWidth = 88 }.Keys("Action", "Action");
-        var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), () => window!.Close(), 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
-            .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
+        openButton = Kite.Style(new Tap(openLabel.Pad(16, 0), () => Finish(path)) { MinWidth = 88 }, true);   // 按钮样式规范
+        var cancel = Kite.Style(new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(16, 0), () => window!.Close()) { MinWidth = 72 }, false);
         var footer = Ui.H(10, hint.Shrink(), new Spacer(), cancel, openButton);
 
         var dock = new DockPanel();

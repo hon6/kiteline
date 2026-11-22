@@ -485,15 +485,6 @@ private struct PanelRoot: View {
 
 #if os(macOS)
 /// 面板工具栏里的文字按钮：系统的带边框按钮（macOS 26 上是液态玻璃按钮），字两侧比系统默认多留 4 点，别贴着玻璃底的边
-extension ToolbarContent {
-    /// 面板工具栏上自己画了样式的按钮（panelToolbarButton）：macOS 26 默认再给每个工具栏项套一层玻璃底，
-    /// 成了一个胶囊里套一个带边框的按钮（11-21 截图：「完成」样子怪），去掉那层
-    @ToolbarContentBuilder
-    func panelBare() -> some ToolbarContent {
-        if #available(macOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) } else { self }
-    }
-}
-
 struct PanelTextButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(role: configuration.role, action: configuration.trigger) { configuration.label.padding(.horizontal, 4) }
@@ -877,3 +868,17 @@ extension KitelineKit {
 }
 #endif
 #endif
+
+extension ToolbarContent {
+    /// 面板工具栏上自己画了样式的按钮（panelToolbarButton）：macOS 26 默认再给每个工具栏项套一层玻璃底，
+    /// 成了一个胶囊里套一个带边框的按钮（11-21 截图：「完成」样子怪），去掉那层
+    @ToolbarContentBuilder
+    func panelBare() -> some ToolbarContent {
+        #if os(macOS)
+        if #available(macOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) } else { self }
+        #else
+        self   // iPhone / iPad 用系统的样子
+        #endif
+    }
+}
+

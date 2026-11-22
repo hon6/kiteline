@@ -148,6 +148,21 @@ public static class Ui
 }
 
 /// plain 按钮：鼠标移上去有浅底、按下更深，点了执行（同 Mac 版 FooterButton、SidebarRowHighlight 这一类）
+/// 按钮样式规范（同 Mac 的 KiteButtonStyle，见 docs/platforms/mac-app.md「按钮样式规范」）：圆角 6、1 点描边；
+/// 普通 = 淡底（6% / 悬停 10% / 按下 15%）+ 比底色重的描边，主按钮 = 主题色底白字。高：紧凑 26、标准 32
+public static class Kite
+{
+    public static T Style<T>(T tap, bool prominent, double height = 32) where T : Tap
+    {
+        tap.CornerRadius = new CornerRadius(6);
+        tap.Height = height;
+        tap.BorderThickness = new Thickness(1);
+        if (prominent) { tap.Keys("Accent", "Accent"); tap.Res(Border.BorderBrushProperty, "KiteProminentEdge"); }
+        else { tap.Keys("Fill06", "Fill10", "Fill15"); tap.Res(Border.BorderBrushProperty, "KiteEdge"); }
+        return tap;
+    }
+}
+
 public class Tap : Border
 {
     public string Normal { get; set; } = "Transparent";

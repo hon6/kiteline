@@ -63,6 +63,11 @@ enum NewDraftKey {
     }
 }
 
+/// 自测用（SelfTest 的 draftfill / draftattach / draftsend 步骤）：把文字、图片、发送送进草稿输入框，走的还是真的输入框和发送逻辑
+extension Notification.Name {
+    static let draftTestFill = Notification.Name("kiteline.draftTestFill")
+}
+
 /// 草稿标签里改过的项目 / 设备 / agent（key 里的是开的时候带的；改了记在这里，标签切走再回来还在）
 @MainActor
 final class NewDrafts {
@@ -75,12 +80,12 @@ struct NewSessionDraftView: View {
     @ObservedObject private var projects = ProjectsModel.shared
     @State private var place: NewDraftKey.Place?
     @State private var text = ""
+    @State private var images: [TarsTaskImage] = []
     @State private var sending = false
     @State private var waiting = false
     @State private var message: String?
     /// 每台电脑上除了 Claude Code 还能后台运行哪几家（问过的记着）
     @State private var launchable: [String: [NewTaskSheet.LaunchAgent]] = [:]
-    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -110,11 +115,19 @@ struct NewSessionDraftView: View {
             place = NewDrafts.places[key] ?? NewDraftKey.parse(key)
             if !projects.loaded { projects.load() }
             askAgents()
-            focused = true
         }
         .onChange(of: place) { _, value in
             if let value { NewDrafts.places[key] = value }
             askAgents()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .draftTestFill)) { note in
+            let info = note.userInfo ?? [:]
+            if let typed = info["text"] as? String { text = typed }
+            if let path = info["image"] as? String, let data = FileManager.default.contents(atPath: path),
+               let image = TarsTaskImage.make(data, name: (path as NSString).lastPathComponent) {
+                images.append(image)
+            }
+            if info["send"] as? Bool == true { send() }
         }
     }
 
@@ -195,22 +208,15 @@ struct NewSessionDraftView: View {
 
     // MARK: 输入框
 
+    /// 输入框用同新建任务一样的 TarsTaskInput：⌘V 粘贴截图、拖入、选文件、从「照片」选，图片一栏放在文字下面。
+    /// 回车换行，⌘回车或右下角按钮发送（TarsTaskInput 的约定）
     private var composer: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        let canSend = !sending && !waiting && place != nil && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let canSend = !sending && !waiting && place != nil && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
         return VStack(alignment: .trailing, spacing: 6) {
-            TextField(place.map { L("请描述需要 %@ 在「%@」中完成的任务", Agents.info($0.agent).name, ($0.cwd as NSString).lastPathComponent) } ?? L("先选择项目"),
-                      text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.app(size: 14))
-                .lineLimit(3...12)
-                .focused($focused)
-                // 回车直接交给 send() 判断（它自己查有没有字、在不在发）：别用这里算好的 canSend——一口气敲完字马上回车时，
-                // 这次界面还没刷新，闭包里的 canSend 还是敲字前的 false，回车没反应（11-21 用自测敲字测出）
-                .onSubmit { send() }
-                .disabled(sending || waiting)
+            TarsTaskInput(text: $text, images: $images,
+                          placeholder: place.map { L("请描述需要 %@ 在「%@」中完成的任务", Agents.info($0.agent).name, ($0.cwd as NSString).lastPathComponent) } ?? L("先选择项目"),
+                          enabled: !sending && !waiting, submitTitle: L("发送"), onSubmit: send)
             HStack(spacing: 8) {
-                Text("回车发送，Option + 回车换行").font(.app(size: 11)).foregroundStyle(.tertiary)
                 Spacer()
                 if sending || waiting { ProgressView().controlSize(.small) }
                 Button { send() } label: {
@@ -223,21 +229,32 @@ struct NewSessionDraftView: View {
                 .help(L("发送"))
             }
         }
-        .padding(12)
-        .background(Color.primary.opacity(0.05), in: shape)
-        .overlay { shape.strokeBorder(focused ? Color.tarsBrand.opacity(0.6) : Color.primary.opacity(0.12), lineWidth: 1) }
     }
 
-    /// 在选的电脑、目录用选的 agent 开会话，第一句话就是输入的；开出来以后把这个标签换成那个会话
+    /// 在选的电脑、目录用选的 agent 开会话，第一句话就是输入的（有图先传到那台电脑，路径拼进消息，同新建任务）；
+    /// 开出来以后把这个标签换成那个会话
     private func send() {
-        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let place, !prompt.isEmpty, !sending, !waiting,
-              let source = AppState.shared.config.sources.first(where: { $0.id == place.sourceId }) else {
-            if place != nil { message = L("这台电脑现在没有连上") }
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let place, !body.isEmpty || !images.isEmpty, !sending, !waiting else { return }
+        guard let source = AppState.shared.config.sources.first(where: { $0.id == place.sourceId }) else {
+            message = L("这台电脑现在没有连上")
             return
         }
         sending = true
         message = nil
+        let attachments = images.map { Delivery.Attachment(name: $0.name, data: $0.data) }
+        Delivery.stage(attachments, via: AppState.shared.source(withId: place.sourceId)) { staged in
+            switch staged {
+            case .success(let paths):
+                launch(place: place, source: source, prompt: Delivery.compose(text: body, paths: paths))
+            case .failure(let error):
+                sending = false
+                message = L("图片传送失败：%@", "\(error.description)")
+            }
+        }
+    }
+
+    private func launch(place: NewDraftKey.Place, source: SourceConfig, prompt: String) {
         // 先记下这个目录里已经有的会话：新出现的那个就是这次开的
         let before = Set(model.sessions.filter { $0.sourceId == place.sourceId && $0.cwd == place.cwd }.map(\.id))
         let started = Date()

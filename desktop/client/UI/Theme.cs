@@ -174,6 +174,9 @@ public static class Palette
         ("Fill10", 0x000000, 0.10, 0xFFFFFF, 0.10),
         ("Fill12", 0x000000, 0.12, 0xFFFFFF, 0.12),
         ("Fill15", 0x000000, 0.15, 0xFFFFFF, 0.15),
+        // 按钮样式规范（同 Mac 的 KiteButtonStyle）：普通按钮的描边比底色重（底 6%、描边 28%）；主按钮主题色底上一圈白 30%
+        ("KiteEdge", 0x000000, 0.28, 0xFFFFFF, 0.28),
+        ("KiteProminentEdge", 0xFFFFFF, 0.30, 0xFFFFFF, 0.30),
         // 窗口、对话区的底色（同 NSColor.windowBackgroundColor）
         ("Window", 0xF5F5F5, 1, 0x1E1E1E, 1),
         ("ChatBackground", 0xF5F5F5, 1, 0x1E1E1E, 1),

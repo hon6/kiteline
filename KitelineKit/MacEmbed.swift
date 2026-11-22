@@ -92,6 +92,13 @@ public enum KitelineKit {
         case .terminal: .terminal
         case .group: .group
         }
+        // 对话页没显示着（右键菜单里点了一个没开的会话的「会话信息」「权限模式」……）：先在分屏里开出来，对话页出来后再交给它，
+        // 不然这一下没人接、什么也不发生（11-21 自测：会话列表右键「会话信息」点了没反应）
+        if !panes.shownKeys.contains(key) {
+            panes.show(key)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { model.externalAction = (key, mapped, UUID()) }
+            return
+        }
         model.externalAction = (key, mapped, UUID())
     }
 

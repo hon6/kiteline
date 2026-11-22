@@ -192,10 +192,9 @@ public sealed class FavoriteEditor
         var note = Ui.Text(L("只修改收藏中保存的这一份，原对话不受影响；图片保持不变。"), 11.5, color: "Text3").Wrap().Margin(0, 8, 0, 0);
         var top = new StackPanel { Children = { header, field, note } }.Pad(20, 18, 20, 16);
 
-        confirm = new Tap(Ui.Text(L("保存"), 13, FontWeight.SemiBold, "White").HAlign(HorizontalAlignment.Center).Pad(18, 0), Save, 7) { Height = 30, MinWidth = 72 }
-            .Keys("Accent", "Accent");
-        var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), Cancel, 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
-            .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
+        // 按钮样式规范（同 Mac）：主按钮主题色、取消淡底描边
+        confirm = Kite.Style(new Tap(Ui.Text(L("保存"), 13, FontWeight.SemiBold, "White").HAlign(HorizontalAlignment.Center).Pad(16, 0), Save) { MinWidth = 72 }, true);
+        var cancel = Kite.Style(new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(16, 0), Cancel) { MinWidth = 72 }, false);
         var footer = Ui.H(10, Ui.Text(L("Ctrl+Enter %@", L("保存")), 11.5, color: "Text3"), new Spacer(), cancel, confirm).Pad(20, 14);
         var root = new DockPanel();
         DockPanel.SetDock(footer, Dock.Bottom);

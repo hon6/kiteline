@@ -215,6 +215,8 @@ public final class ChatPanes {
     public var keys: [String] { panes.flatMap(\.tabs) }
     /// 当前块的会话（当前块还没选会话时是空的）
     public var focused: String? { panes.first { $0.id == focusID }?.key }
+    /// 正显示着（某一块的当前标签）的会话：只有这些的对话页在，能接 externalAction
+    public var shownKeys: Set<String> { Set(panes.compactMap(\.key)) }
     /// 什么都还没开：只有一块，而且是空的
     public var isPristine: Bool { count == 1 && panes.first?.key == nil && panes.first?.tabs.isEmpty == true }
 
@@ -1704,7 +1706,7 @@ private struct PaneHeader: View {
         let several = panes.count > 1
         HStack(spacing: 7) {
             if let barless, atTop, panes.panes.first?.id == pane.id {
-                SidebarHandle(action: barless.showList).padding(.trailing, 2)
+                SidebarHandle(action: barless.showList).padding(.trailing, 2).accessibilityLabel("显示会话列表")
             }
             PaneMark(key: pane.key, size: 6)
             Text(title(session))
@@ -1730,11 +1732,11 @@ private struct PaneHeader: View {
         // 块被挤得比这一条还窄时：不往外撑，多出来的按钮裁掉（拖宽就回来）
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
+        // 当前块：整条淡主题色底（不用底边色条，11-21：单边色条是 AI 样式）
+        .background(focused && several ? Theme.claude.opacity(0.12) : .clear)
         .background(Theme.chatBackground, ignoresSafeAreaEdges: [])
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(focused && several ? Theme.claude : Color.primary.opacity(0.1))
-                .frame(height: focused && several ? 2 : 0.5)
+            Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 0.5)
         }
         // 只裁左右（多出来的按钮），上下不裁：左上角侧栏按钮的阴影、提示的外圈要露出来
         .mask(Rectangle().padding(.vertical, -12))

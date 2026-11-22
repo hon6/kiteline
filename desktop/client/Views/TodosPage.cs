@@ -767,10 +767,9 @@ public sealed class TodoEditor
         DragDrop.SetAllowDrop(shotArea, true);
 
         var top = new StackPanel { Children = { header, field, shotsHead, shotArea } }.Pad(20, 18, 20, 20);
-        confirm = new Tap(Ui.Text(confirmTitle, 13, FontWeight.SemiBold, "White").HAlign(HorizontalAlignment.Center).Pad(18, 0), Save, 7) { Height = 30, MinWidth = 72 }
-            .Keys("WechatGreen", "GreenHover", "GreenPressed");
-        var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), Cancel, 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
-            .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
+        // 按钮样式规范（同 Mac）：主按钮主题色、取消淡底描边
+        confirm = Kite.Style(new Tap(Ui.Text(confirmTitle, 13, FontWeight.SemiBold, "White").HAlign(HorizontalAlignment.Center).Pad(16, 0), Save) { MinWidth = 72 }, true);
+        var cancel = Kite.Style(new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(16, 0), Cancel) { MinWidth = 72 }, false);
         var note = target.Request is not null && SourceText is not null ? Ui.Text(L("加入后点击即可跳转到原消息"), 11.5, color: "Text2") : null;
         var footer = Ui.H(10, note, new Spacer(), cancel, confirm).Pad(20, 14);
         var root = new DockPanel();

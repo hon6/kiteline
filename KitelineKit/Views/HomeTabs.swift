@@ -263,6 +263,13 @@ struct DashboardView: View {
                         }
                     }
                     .buttonStyle(PressableStyle())
+                    // AR 模式（11-22：手机上也要，也用摄像头）：摄像头画面做背景，会话漂在周围，转动手机环顾
+                    Button { cover = Cover(id: "ar") } label: {
+                        SceneCard(title: L("AR 模式"), detail: L("用摄像头看周围，会话漂在空中")) {
+                            Image(systemName: "cube.transparent").font(.app(size: 20)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(PressableStyle())
                 }
             }
             .padding(.horizontal, 16)

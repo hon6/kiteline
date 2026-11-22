@@ -37,7 +37,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.49"
+VERSION = "1.0.50"
 
 
 class App:

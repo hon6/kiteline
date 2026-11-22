@@ -147,8 +147,10 @@ export class SessionPanel extends Base {
       </header>
       <div class="pn-body"><div class="pn-msgs"></div></div>
       <footer class="pn-ft"><span class="pn-act"></span><div class="pn-opts"></div></footer>
-      <form class="pn-input">
+      <form class="pn-input${ar.touch ? ' voice' : ''}">
+        <button type="button" class="pn-mode" title="${esc(t('切换语音 / 键盘'))}">${ar.touch ? ICON.keyboard : ICON.mic}</button>
         <textarea rows="1" placeholder=""></textarea>
+        <button type="button" class="pn-talk">${esc(t('按住 说话'))}</button>
         <button type="submit" class="pn-send" title="${esc(t('发送（回车）'))}">${ICON.send}</button>
       </form>
       <div class="pn-chips"><span class="ch-model"></span><span class="ch-ctx"></span></div>`;
@@ -175,6 +177,24 @@ export class SessionPanel extends Base {
     area.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); form.requestSubmit(); }
     });
+    // 手机、iPad 上默认「按住 说话」（11-22：现在没人打字了），左边按钮切到键盘；松开转成文字发给这个会话
+    const mode = this.$('.pn-mode'), talk = this.$('.pn-talk');
+    mode.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const voice = !form.classList.contains('voice');
+      form.classList.toggle('voice', voice);
+      mode.innerHTML = voice ? ICON.keyboard : ICON.mic;
+      if (!voice) area.focus({ preventScroll: true });
+    });
+    const down = (e) => {
+      e.stopPropagation(); e.preventDefault();
+      if (ar.pinned !== this) ar.pin(this);
+      talk.setPointerCapture?.(e.pointerId);
+      ar.talkStart(key, talk);
+    };
+    talk.addEventListener('pointerdown', down);
+    talk.addEventListener('pointerup', (e) => { e.stopPropagation(); ar.talkStop(false); });
+    talk.addEventListener('pointercancel', (e) => { e.stopPropagation(); ar.talkStop(true); });
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = area.value.trim();
@@ -192,6 +212,8 @@ export class SessionPanel extends Base {
   }
 
   get input() { return this.$('.pn-input textarea'); }
+  /// 输入栏在「按住 说话」（手机、iPad 默认）：打开窗口时别把光标放进输入框（会弹键盘）
+  get voice() { return this.$('.pn-input').classList.contains('voice'); }
 
   setSession(s) {
     this.session = s;
@@ -383,4 +405,6 @@ export const ICON = {
   open: '<svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.3 2.7 7.5 8.5M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   close: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   send: '<svg viewBox="0 0 16 16"><path d="M8 13V3.5M3.8 7.6 8 3.4l4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  mic: '<svg viewBox="0 0 16 16"><rect x="5.5" y="1.8" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.3 7.6a4.7 4.7 0 0 0 9.4 0M8 12.4v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  keyboard: '<svg viewBox="0 0 16 16"><rect x="1.5" y="3.5" width="13" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4 6.5h.01M6.7 6.5h.01M9.3 6.5h.01M12 6.5h.01M4.8 9.6h6.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
 };

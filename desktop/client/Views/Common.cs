@@ -325,8 +325,7 @@ public sealed class GlassButton : Tap
         // 按钮被拉宽（铺满一行的主操作）时字居中；按内容宽的按钮不受影响
         Child = Ui.H(height < 26 ? 4 : 6, symbol is null ? null : Ui.Sym(symbol, size - 1, color), Ui.Text(title, size, FontWeight.Medium, color))
             .HAlign(HorizontalAlignment.Center);
-        if (prominent) Keys("Action", "Action"); else Keys("Glass", "Fill12");
-        if (!prominent) { BorderThickness = new Thickness(0.5); this.Res(BorderBrushProperty, "GlassEdge"); }
+        Kite.Style(this, prominent, height);   // 按钮样式规范：圆角 6、描边，主按钮主题色
     }
 }
 

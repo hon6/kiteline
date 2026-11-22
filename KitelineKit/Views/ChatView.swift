@@ -47,6 +47,9 @@ struct ChatView: View {
     @State private var showNewTask = false
     /// 往上翻着看的时候来了新消息：底部冒一个「新消息 ↓」（同网页版、微信）
     @State private var newPill = false
+    /// 往上翻远了（离底部超过 farUpDistance）：没有新消息也冒「回到底部 ↓」，点了贴底、之后跟着新内容滚（11-22 用户要的）
+    @State private var farUp = false
+    static let farUpDistance: CGFloat = 400
     /// 搜索结果点了哪条：滚过去（还没加载到就往前翻页找）
     @State private var jumpTarget: String?
     @State private var flashRow: String?
@@ -179,7 +182,7 @@ struct ChatView: View {
             #if os(iOS)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             #endif
-            .modifier(ChatScrollFollow(scroll: scroll, window: window, freeze: freeze, newPill: $newPill, proxy: proxy) { thaw += 1 })
+            .modifier(ChatScrollFollow(scroll: scroll, window: window, freeze: freeze, newPill: $newPill, farUp: $farUp, proxy: proxy) { thaw += 1 })
             .onChange(of: rows.map(\.id), initial: true) { _, ids in window.setOrder(ids) }
             .onChange(of: PaneResize.shared.active) { _, on in
                 if on {
@@ -286,6 +289,7 @@ struct ChatView: View {
             .onChange(of: bottomRequest) { _, _ in
                 scroll.stick = true
                 newPill = false
+                farUp = false
                 withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .overlay(alignment: .top) {
@@ -314,9 +318,9 @@ struct ChatView: View {
                 .animation(.snappy, value: model.net.quality)
             }
             .overlay(alignment: .bottom) {
-                if newPill {
+                if newPill || farUp {
                     Button { bottomRequest += 1 } label: {
-                        Label("新消息", systemImage: "arrow.down").font(.ui(.footnote).weight(.semibold))
+                        Label(newPill ? L("新消息") : L("回到底部"), systemImage: "arrow.down").font(.ui(.footnote).weight(.semibold))
                             .padding(.horizontal, 14).padding(.vertical, 8)
                             .floatingPill()
                     }
@@ -327,6 +331,7 @@ struct ChatView: View {
                 }
             }
             .animation(.snappy, value: newPill)
+            .animation(.snappy, value: farUp)
             .task {
                 // 先画的那一截上屏以后，每轮补 16 行更早的（见 revealed）
                 while revealed < limit {
@@ -463,7 +468,8 @@ struct ChatView: View {
         .sheetPanel(isPresented: $showModel) { ModelSheet(key: key) }
         .sheetPanel(isPresented: goalSheet) { GoalSheet(key: key) }
         .sheetPanel(isPresented: $showAgents) { AgentMapSheet(key: key) }
-        .sheetPanel(isPresented: $showInfo) { SessionReader(slot: slot) { session in if let session { SessionInfoView(session: session) } } }
+        // 按 key 现取（面板在单独的窗口里，slot 的变化传不过去时会画成空的，11-21 自测：会话信息面板一片空白）
+        .sheetPanel(isPresented: $showInfo) { SessionInfoPanel(key: key) }
         .sheetPanel(isPresented: $showAgentInfo) { AgentInfoSheet(key: key, agent: slot.agent) }
         .sheetPanel(isPresented: $showShare) { GuestShareSheet(key: key).environment(model) }
         .sheetPanel(isPresented: $showBrag) { BragShareSheet(sessionKey: key).environment(model) }
@@ -560,6 +566,8 @@ struct ChatView: View {
             }
             scroll.stick = distance < 160
             if scroll.stick, newPill { newPill = false }
+            let far = !scroll.stick && distance > Self.farUpDistance
+            if far != farUp { farUp = far }
         }
     }
     #endif
@@ -1208,6 +1216,22 @@ enum StatusColor {
     }
 }
 
+/// 会话信息面板：按 key 从模型里取会话（取不到时说一声，不画成空白）
+struct SessionInfoPanel: View {
+    @Environment(AppModel.self) private var model
+    let key: String
+
+    var body: some View {
+        if let session = model.session(key) {
+            SessionInfoView(session: session)
+        } else {
+            FitSheet(title: L("会话信息")) {
+                Text(L("这个会话已结束，暂时读不到它的信息。")).font(.ui(.footnote)).foregroundStyle(.secondary).padding(14)
+            }
+        }
+    }
+}
+
 struct SessionInfoView: View {
     let session: SessionInfo
 
@@ -1260,6 +1284,7 @@ private struct ChatScrollFollow: ViewModifier {
     let window: RowWindow
     let freeze: RowFreeze
     @Binding var newPill: Bool
+    @Binding var farUp: Bool
     let proxy: ScrollViewProxy
     /// 滑动停下：冻住期间来的新内容这时候放进来
     let thaw: () -> Void
@@ -1344,6 +1369,8 @@ private struct ChatScrollFollow: ViewModifier {
                         // 手指在滑：滑回底部附近就继续贴底，往上翻走了就不贴
                         scroll.stick = new.distance < 160
                         if scroll.stick, newPill { newPill = false }
+                        let far = !scroll.stick && new.distance > ChatView.farUpDistance
+                        if far != farUp { farUp = far }
                     } else if scroll.stick, new.distance > 40, new.content != old.content {
                         // 兜底：贴着底却离底部远了（系统贴底没接住，比如一下子来了很多内容）才手动滚一次；
                         // 键盘动画里的每一帧交给上面的 .sizeChanges，别在这里逐帧追

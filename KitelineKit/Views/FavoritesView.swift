@@ -307,9 +307,6 @@ struct FavoriteEditor: View {
     private var dirty: Bool { trimmed != (item.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
     /// 没有图的收藏不能改成空的（那就是取消收藏了）
     private var canSave: Bool { dirty && (!trimmed.isEmpty || !item.images.isEmpty) }
-    private var sourceText: String {
-        L("出自「%@」", "\(item.title)") + (item.ts.map { " · " + Format.listTime($0) } ?? "")
-    }
     private static var note: String { L("只修改收藏中保存的这一份，原对话不受影响；图片保持不变。") }
 
     private func cancel() { if dirty { confirmDiscard = true } else { dismiss() } }
@@ -368,7 +365,13 @@ struct FavoriteEditor: View {
                     TextField("收藏的内容", text: $text, axis: .vertical)
                         .lineLimit(6...24)
                 } header: {
-                    Text(sourceText).textCase(nil)
+                    // 和电脑一样：左边出自哪个会话，右边完整时间
+                    HStack(spacing: 8) {
+                        Text(L("出自「%@」", "\(item.title)")).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Text(Format.fullTime(item.ts ?? item.at)).monospacedDigit().layoutPriority(1)
+                    }
+                    .textCase(nil)
                 } footer: {
                     Text(Self.note).font(.ui(.footnote))
                 }

@@ -8526,19 +8526,21 @@ def brag_session(path):
 # ---------------------------------------------------------------------------
 
 _QUICK_GIT = {}   # cwd -> (过期时间, 概况)
+_QUICK_GIT_SLOW = set()   # 前台超时后正在后台慢慢读的目录
 QUICK_GIT_TIMEOUT = 3
 
 
-def quick_git(cwd):
+def quick_git(cwd, timeout=None, background=True):
     """项目总览用的 git 概况：分支、未提交改动个数、领先 / 落后、最近一次提交。不算行数，求快；20 秒内复用。
     超时的（大仓库、网络盘，或 macOS 在等用户授权访问「文稿」/ 网络卷——这时 git 会一直卡着）记 10 分钟，别每次都等"""
-    hit = _QUICK_GIT.get(cwd)
-    if hit and time.time() < hit[0]:
-        return hit[1]
+    if timeout is None:
+        hit = _QUICK_GIT.get(cwd)
+        if hit and time.time() < hit[0]:
+            return hit[1]
     info, ttl = None, 20
     if shutil.which("git") and isinstance(cwd, str) and os.path.isdir(cwd):
         try:
-            porcelain = run_git(cwd, ["status", "--porcelain=v1", "-b", "--untracked-files=normal"], timeout=QUICK_GIT_TIMEOUT)
+            porcelain = run_git(cwd, ["status", "--porcelain=v1", "-b", "--untracked-files=normal"], timeout=timeout or QUICK_GIT_TIMEOUT)
             branch, upstream, ahead, behind, changed, untracked = None, None, 0, 0, 0, 0
             for line in porcelain.splitlines():
                 if line.startswith("## "):
@@ -8561,7 +8563,7 @@ def quick_git(cwd):
                     changed += 1
             last = None
             try:
-                parts = run_git(cwd, ["log", "-1", "--pretty=format:%h%x09%ct%x09%s"], timeout=QUICK_GIT_TIMEOUT).split("\t", 2)
+                parts = run_git(cwd, ["log", "-1", "--pretty=format:%h%x09%ct%x09%s"], timeout=timeout or QUICK_GIT_TIMEOUT).split("\t", 2)
                 if len(parts) == 3 and parts[1].isdigit():
                     last = {"hash": parts[0], "ts": int(parts[1]) * 1000, "subject": parts[2][:200]}
             except Exception:
@@ -8570,8 +8572,21 @@ def quick_git(cwd):
                     "changed": changed, "untracked": untracked, "last": last}
         except subprocess.TimeoutExpired:
             info, ttl = {"timeout": True}, 600
+            # 冷缓存的网络盘第一次常要 5 秒多（再读不到 1 秒）：后台放宽到 30 秒读完填进缓存，下次刷新就有了；
+            # 真卡住（等授权）的仍记 10 分钟超时，不反复等
+            if background and cwd not in _QUICK_GIT_SLOW:
+                _QUICK_GIT_SLOW.add(cwd)
+
+                def finish(path=cwd):
+                    try:
+                        quick_git(path, timeout=30, background=False)
+                    finally:
+                        _QUICK_GIT_SLOW.discard(path)
+                threading.Thread(target=finish, daemon=True).start()
         except Exception:
             info = None   # 不是 git 仓库
+    if timeout and info and info.get("timeout"):
+        return info   # 后台放宽了还超时：留着前台记的那条
     _QUICK_GIT[cwd] = (time.time() + ttl, info)
     return info
 

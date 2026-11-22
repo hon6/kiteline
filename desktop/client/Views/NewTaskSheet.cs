@@ -143,9 +143,9 @@ public sealed class NewTaskSheet
         // 定时任务的时间单独一行（和五段的时机选择挤在一行时窄窗口放不下）
         whenRow = Ui.H(8, datePicker, timePicker, untilLabel, untilPicker, everyBox, new Spacer());   // 独立分支单独一行，挤在一起窄窗口放不下
 
-        startButton = new Tap(startLabel.Pad(18, 0), Start, 7) { Height = 30, MinWidth = 88 }.Keys("Action", "Action");
-        var cancel = new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(18, 0), () => window!.Close(), 7) { Height = 30, MinWidth = 72, BorderThickness = new Thickness(0.5) }
-            .Keys("Fill10", "Fill15").Res(Border.BorderBrushProperty, "Fill12");
+        // 按钮样式规范（同 Mac）：主按钮主题色、取消淡底描边，高 32、圆角 6
+        startButton = Kite.Style(new Tap(startLabel.Pad(16, 0), Start) { MinWidth = 88 }, true);
+        var cancel = Kite.Style(new Tap(Ui.Text(L("取消"), 13).HAlign(HorizontalAlignment.Center).Pad(16, 0), () => window!.Close()) { MinWidth = 72 }, false);
         var footer = Ui.H(10, warning, status.Shrink(), new Spacer(), cancel, startButton);
 
         var stack = new StackPanel { Spacing = 12, Children = { header, scopes, listBox, field, options, whenRow, isolated, footer } };

@@ -91,6 +91,8 @@ class AR {
         if (msg.brand) document.documentElement.style.setProperty('--brand', msg.brand);
         this.marks = msg.marks || this.marks;
         if (msg.mediaBase) this.mediaBase = msg.mediaBase;
+        // iPad：触摸操作、背后是摄像头画面（宿主在下面放），转动设备 = 转头（陀螺仪，宿主发 pose）
+        if (msg.touch) { this.touch = true; document.body.classList.add('touch'); }
         if (msg.prefs) this.applyPrefs(msg.prefs);
         $('ar-door').hidden = !msg.door;
         this.localize();
@@ -103,6 +105,8 @@ class AR {
       case 'active': this.visible = msg.visible !== false; if (this.visible) { this.last = performance.now(); this.dirty = true; } this.watchBrowsers(); break;
       case 'prefs': this.applyPrefs(msg); break;
       case 'cmd': this.command(msg.name); break;
+      case 'pose': this.onPose(msg); break;
+      case 'dictation': this.onDictation(msg); break;
       case 'insets': break;
     }
   }
@@ -115,6 +119,7 @@ class AR {
       this.rectSig = '';
     }
     if (typeof p.follow === 'boolean') this.follow = p.follow;
+    if (typeof p.gyro === 'boolean') { this.gyro = p.gyro; this.poseLast = null; this.poseF = null; }
     if (typeof p.background === 'string') this.background = p.background;
     // 穿透时要看得见桌面：背景先藏起来
     this.backdrop.set(this.passthrough ? 'none' : this.background);
@@ -132,9 +137,77 @@ class AR {
     }
   }
 
+  /// 窗口里「按住 说话」：按下开始录（宿主的听写），松开转成文字直接发给这个会话；滑走 / 被打断就不发
+  talkStart(key, button) {
+    if (this.talk) return;
+    this.talk = { key, button, cancel: false };
+    button.classList.add('on');
+    button.textContent = t('松开 发送');
+    this.post({ type: 'dictate', action: 'start' });
+  }
+
+  talkStop(cancel) {
+    const talk = this.talk;
+    if (!talk || talk.stopping) return;
+    talk.stopping = true;
+    talk.cancel = cancel;
+    talk.button.classList.remove('on');
+    talk.button.textContent = cancel ? t('按住 说话') : t('正在识别…');
+    this.post({ type: 'dictate', action: cancel ? 'cancel' : 'stop' });
+  }
+
+  onDictation(m) {
+    const talk = this.talk;
+    if (!talk) return;
+    if (m.state === 'recording' || m.state === 'level' || m.state === 'converting') return;
+    this.talk = null;
+    talk.button.classList.remove('on');
+    talk.button.textContent = t('按住 说话');
+    if (m.state === 'failed') { this.toast(m.text || t('录音未能开始，请重试')); return; }
+    const text = (m.text || '').trim();
+    if (talk.cancel) return;
+    if (!text) { this.toast(m.note || t('未能识别，请重新说一遍')); return; }
+    this.send(talk.key, text);
+  }
+
+  /// 陀螺仪（iPad）：宿主每帧发设备朝向（yaw 水平转角、pitch 俯仰，弧度、绝对值），这里只取变化量加到镜头上，
+  /// 和手指拖动叠加（拖过之后再转设备，接着拖过的方向转）
+  onPose(m) {
+    if (!this.gyro || typeof m.yaw !== 'number') return;
+    // 防抖（11-22：手机、iPad 抖得厉害）：① 读数先低通平滑；② 手抖这种很小的变化（约 0.15°）不算，攒够了才动；
+    // ③ 只改镜头目标，由每帧的阻尼慢慢追上（不再直接改当前值，那样每一点抖动都原样上屏）
+    // 设备往前推 / 往后拉（ARKit 测的位移，米，沿镜头方向）= 往前走 / 往后退：低通后 1 厘米以下的晃动不算
+    // 只认明显的推拉（约每秒 25 厘米以上）：慢慢的漂移（镜头看不清东西时 ARKit 会漂，平放在桌上实测 2 秒漂 0.4 米，
+    // 镜头一路飘走、窗口全不见了）不算；手机平放 / 对着天花板（俯仰超过约 65°）时也不算
+    if (typeof m.push === 'number' && !this.focused && Math.abs(m.pitch) < 1.15) {
+      this.pushF = (this.pushF || 0) * 0.4 + m.push * 0.6;
+      // 胳膊伸直 / 收回约 20 厘米 ≈ 走近 / 退开 1800 单位（窗口离你约 2000）：放大缩小要一眼看得出、跟手（11-22 反馈：不明显、再灵敏些）
+      if (Math.abs(this.pushF) > 0.0035) {
+        this.cam.pos.addScaledVector(this.forward(), clamp(this.pushF * 9000, -280, 280));
+        this.dirty = true;
+      }
+    }
+    const f = this.poseF;
+    if (!f) { this.poseF = { yaw: m.yaw, pitch: m.pitch }; this.poseLast = { yaw: m.yaw, pitch: m.pitch }; return; }
+    f.yaw += wrapAngle(m.yaw - f.yaw) * 0.22;
+    f.pitch += (m.pitch - f.pitch) * 0.22;
+    const last = this.poseLast;
+    const dy = wrapAngle(f.yaw - last.yaw), dp = f.pitch - last.pitch;
+    if (Math.abs(dy) < 0.0026 && Math.abs(dp) < 0.0026) return;
+    this.poseLast = { yaw: f.yaw, pitch: f.pitch };
+    if (this.focused) return;
+    this.cam.yaw += dy;
+    this.cam.pitch = clamp(this.cam.pitch + dp, -1.15, 1.15);
+    this.lastInput = performance.now();
+    this.dirty = true;
+  }
+
   localize() {
     $('ar-door').textContent = t('离开');
-    this.hintHTML = [
+    this.hintHTML = this.touch ? [
+      [t('转动设备'), t('环顾四周')], [t('往前推 / 往后拉'), t('放大 / 缩小')], [t('单指拖动'), t('转向')], [t('双指捏合'), t('前后')], [t('轻点窗口'), t('打开')],
+      [t('双击空白处'), t('复位')],
+    ].map(([k, v]) => `<span><kbd>${esc(k)}</kbd>${esc(v)}</span>`).join('') : [
       ['WASD', t('移动')], ['Q / E', t('升降')], [t('拖动空白处'), t('转向')], [t('滚轮'), t('前后')], [t('悬停'), t('放大')],
       [t('点击'), t('打开')], ['Tab', t('下一个待处理')], ['B', t('换背景')], ['M', t('全屏')], ['Esc', t('返回')],
     ].map(([k, v]) => `<span><kbd>${esc(k)}</kbd>${esc(v)}</span>`).join('');
@@ -291,7 +364,8 @@ class AR {
     // 窗口多大、几行：先试大的，整面墙放不进视野就一档档缩小（字仍看得清：1 倍屏最小 0.74 ≈ 10px，视网膜屏 0.66 也清楚），
     // 最小还放不下就让它往两边延伸（转头看，边上有方向标）
     const vh = innerHeight;
-    const range = (devicePixelRatio || 1) >= 2 ? [0.66, 0.86] : REST_SCALE;
+    // 手机竖着（三四百宽）：平时窗口缩得更小，一屏多看几个；轻点打开时放大到屏幕宽
+    const range = innerWidth < 600 ? [0.42, 0.56] : (devicePixelRatio || 1) >= 2 ? [0.66, 0.86] : REST_SCALE;
     const hfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.aspect);
     let s, rows, D, k, widths, total, Ra;
     const measure = (scale, R) => {
@@ -438,7 +512,7 @@ class AR {
       this.watchBrowsers();
       this.stats();
     }
-    if (p instanceof SessionPanel && !p.input.disabled && document.activeElement !== p.input) p.input.focus({ preventScroll: true });
+    if (p instanceof SessionPanel && !p.voice && !p.input.disabled && document.activeElement !== p.input) p.input.focus({ preventScroll: true });
   }
 
   unpin() {
@@ -513,7 +587,20 @@ class AR {
     const stage = $('ar-stage');
     const isPanel = (e) => e.target.closest?.('.pn');
     stage.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 双指捏合（iPad）= 前后移动：两根手指都按着时不转头，按两指距离的变化往前 / 往后走
+    const touches = new Map();
+    const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
     stage.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          if (this.look) { stage.releasePointerCapture?.(this.look.id); this.look = null; document.body.classList.remove('looking'); }
+          this.press = null;
+          this.pinch = { d: spread() };
+          e.preventDefault();
+          return;
+        }
+      }
       this.lastInput = performance.now();
       const pn = isPanel(e);
       if (e.button === 2 || e.button === 1 || (e.button === 0 && !pn)) {
@@ -529,6 +616,16 @@ class AR {
       }
     });
     stage.addEventListener('pointermove', (e) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pinch && touches.size === 2) {
+        const d = spread();
+        if (this.focused) this.unfocus(true);
+        this.cam.pos.addScaledVector(this.forward(), clamp((d - this.pinch.d) * 4, -900, 900));
+        this.pinch.d = d;
+        this.flying = 0; this.lastInput = performance.now(); this.dirty = true;
+        return;
+      }
+      if (e.pointerType === 'touch' && this.pinch) return;
       this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.mouse.inside = true;
       if (this.look) {
         const dx = e.clientX - this.look.x, dy = e.clientY - this.look.y;
@@ -546,6 +643,8 @@ class AR {
       this.wantHover(pn ? this.panels.get(pn.dataset.id) : null);
     });
     const end = (e) => {
+      touches.delete(e.pointerId);
+      if (this.pinch) { if (touches.size === 0) this.pinch = null; return; }
       if (this.look) {
         const click = this.look.moved < 5 && this.look.empty && e.button === 0;
         stage.releasePointerCapture?.(this.look.id);
@@ -633,6 +732,7 @@ class AR {
       else if (cmd === 'bg') { const list = BACKDROPS, i = list.indexOf(this.background); this.post({ type: 'prefs', background: list[(i + 1) % list.length] }); }
       else if (cmd === 'full') this.post({ type: 'prefs', fullscreen: !this.fullscreen });
       else if (cmd === 'follow') { this.follow = !this.follow; this.post({ type: 'prefs', follow: this.follow }); this.hudButtons(); }
+      else if (cmd === 'gyro') { this.gyro = !this.gyro; this.poseLast = null; this.poseF = null; this.post({ type: 'prefs', gyro: this.gyro }); this.toast(this.gyro ? t('转动设备环顾：已打开') : t('转动设备环顾：已关闭')); this.hudButtons(); }
       else this.command(cmd);
     });
     $('ar-edges').addEventListener('click', (e) => {
@@ -666,7 +766,7 @@ class AR {
     if (p) {
       p.el.classList.add('hover');
       // 窗口本身也放大（多显示几行），再飞到接近 1:1 的位置：看起来大一圈，字仍然清楚（只靠拉近会糊）
-      p.setSize(HOVER_W, Math.min(HOVER_H, Math.round(innerHeight * 0.72)));
+      p.setSize(Math.min(HOVER_W, innerWidth - 24), Math.min(HOVER_H, Math.round(innerHeight * 0.72)));   // 手机竖着只有三百多宽，别超出屏幕
       if (p instanceof SessionPanel) { p.render(); clearTimeout(this.seenTimer); this.seenTimer = setTimeout(() => { if (this.hovered === p) { p.seen(); this.stats(); } }, 1200); }
       this.peeked = null;
     }
@@ -928,15 +1028,24 @@ class AR {
     const tools = $('ar-tools');
     if (!tools) return;
     const layoutName = { arc: t('弧形'), ring: t('环绕'), flat: t('平面') }[this.layoutMode] || t('弧形');
-    tools.innerHTML = [
+    const bgName = ({ none: this.touch ? t('相机') : t('透明'), space: t('宇宙'), sky: t('天空'), sea: t('海面'), forest: t('森林'), aurora: t('极光'), video: t('视频') })[this.background] || t('背景');
+    // iPad 上没有「穿透」「全屏」（整屏本来就是 AR），多一个「陀螺仪」
+    tools.innerHTML = (this.touch ? [
       ['home', t('复位'), 'R'],
       ['layout', layoutName, 'L'],
       ['follow', t('跟随'), 'F', this.follow],
-      ['bg', ({ none: t('透明'), space: t('宇宙'), sky: t('天空'), sea: t('海面'), forest: t('森林'), aurora: t('极光'), video: t('视频') })[this.background] || t('背景'), 'B', this.background !== 'none'],
+      ['gyro', t('陀螺仪'), 'G', this.gyro],
+      ['bg', bgName, 'B', this.background !== 'none'],
+      ['hint', t('操作'), 'H'],
+    ] : [
+      ['home', t('复位'), 'R'],
+      ['layout', layoutName, 'L'],
+      ['follow', t('跟随'), 'F', this.follow],
+      ['bg', bgName, 'B', this.background !== 'none'],
       ['pass', t('穿透'), 'P', this.passthrough],
       ['full', this.fullscreen ? t('窗口') : t('全屏'), 'M', this.fullscreen],
       ['hint', t('操作'), 'H'],
-    ].map(([cmd, label, key, on]) => `<button data-cmd="${cmd}" class="${on ? 'on' : ''}" title="${esc(label)}（${key}）"><span>${esc(label)}</span><kbd>${key}</kbd></button>`).join('');
+    ]).map(([cmd, label, key, on]) => `<button data-cmd="${cmd}" class="${on ? 'on' : ''}" title="${esc(label)}（${key}）"><span>${esc(label)}</span><kbd>${key}</kbd></button>`).join('');
   }
 
   hint(force) {

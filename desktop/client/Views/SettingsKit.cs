@@ -61,8 +61,7 @@ public static class Form
         {
             Height = 26, MinWidth = 60,
         };
-        if (prominent) tap.Keys("Action", "Action"); else tap.Keys("Fill10", "Fill15");
-        return tap;
+        return Kite.Style(tap, prominent, 26);   // 按钮样式规范
     }
 
     /// 文字框（同 Mac 表单的 TextField：右对齐的灰底框）

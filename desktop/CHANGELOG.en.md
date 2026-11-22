@@ -1,6 +1,16 @@
 # Kiteline for Windows and Linux — Release Notes
 
-## 1.0.49 (2026-11-21)
+## 1.0.50 (2026-11-22)
+
+### Improvements
+
+- **Consistent button style**: Buttons in dialogs and Settings now match the Mac version: a light fill with a border, primary actions in the accent color, with the same corner radius and height.
+
+### Bug Fixes
+
+- Fixed some projects in the project list always showing “Timed out reading Git status”: when reading is slow, it now finishes in the background and shows correctly on the next refresh.
+
+## 1.0.49 (2026-11-22)
 
 ### Bug Fixes
 
