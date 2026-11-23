@@ -102,6 +102,8 @@ irm https://tars.betac.cn/install.ps1 | iex
 | **目标** | 在手机上给 Claude Code 或 Codex 会话设一个目标（`/goal`），Agent 一轮轮做下去，达成才停。会话列表显示第几轮，对话页显示最近一次检查说还差什么，达成、做不到或中途停下时推送提醒。 |
 | **待办** | Agent 需要*你*亲自处理的事项从对话中自动识别并持续跟踪，直到完成。 |
 | **会话群** | 不同电脑、不同项目的会话经 Kiteline 互相协作。 |
+| **新版界面与 AR 模式** | 电脑端可切到像 VS Code 的布局：图标栏、项目标签、对话旁边的文件和 Git、状态栏。AR 模式把会话变成空间里的悬浮窗：最近有动静的离你最近，有新消息的窗口会抖动，直接在窗口里回复或语音。 |
+| **从其他应用发给 Agent** | 在微信「转发到其他应用」、访达「共享」、浏览器分享菜单里选 Kiteline，把文件、图片、文字或链接发给会话，或新建会话。 |
 | **世界模式** | 像素风办公室，每个会话是工位上的一个小人，整个团队一眼看全。 |
 | **数据流大屏** | 所有会话一块屏：每个会话读了什么、做了什么、产出去了哪。每次工具调用是一根线，调用发生时一串光点沿线流过。 |
 | **锁屏实时活动** | Agent 工作或等你确认时，iPhone 锁屏和灵动岛实时显示每个会话的状态：等你确认的排在最前，工作中的标出第几步，全部做完显示「全部完成」。轻点直接进入会话；由电脑经推送更新，App 不用开着。 |
@@ -225,32 +227,6 @@ flowchart LR
 
 ## 截图
 
-<table>
-<tr>
-<td><img src="assets/images/iphone/01-sessions.jpg" alt="会话列表"></td>
-<td><img src="assets/images/iphone/02-approve.jpg" alt="确认请求"></td>
-<td><img src="assets/images/iphone/03-plan.jpg" alt="批准计划"></td>
-<td><img src="assets/images/iphone/04-question.jpg" alt="回答提问"></td>
-<td><img src="assets/images/iphone/05-voice.jpg" alt="按住说话"></td>
-</tr>
-<tr>
-<td><img src="assets/images/iphone/06-codex.jpg" alt="Codex"></td>
-<td><img src="assets/images/iphone/07-overview.jpg" alt="概览：额度、战绩与今日动态"></td>
-<td><img src="assets/images/iphone/08-projects.jpg" alt="项目"></td>
-<td><img src="assets/images/iphone/09-group.jpg" alt="会话群"></td>
-<td><img src="assets/images/iphone/10-world.jpg" alt="世界模式"></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="25%"><img src="assets/images/watch/1-now.jpg" alt="手表：确认"></td>
-<td width="25%"><img src="assets/images/watch/3-question.jpg" alt="手表：回答"></td>
-<td width="25%"><img src="assets/images/watch/4-plan.jpg" alt="手表：计划"></td>
-<td width="25%"><img src="assets/images/watch/5-usage.jpg" alt="手表：用量"></td>
-</tr>
-</table>
-
 ![Mac 端：顶部是会话组，两个会话并排，一个计划等批准，两个会话在互发消息](assets/images/mac-main.jpg)
 
 <table>
@@ -268,10 +244,259 @@ flowchart LR
 
 <table>
 <tr>
-<td width="62%"><img src="assets/images/ipad-split.jpg" alt="iPad 分栏"></td>
-<td width="38%"><img src="assets/images/mac-g-pick-panel.jpg" alt="拉群协作"></td>
+<td><img src="assets/images/mac-g-pick-panel.jpg" alt="拉群协作"></td>
 </tr>
 </table>
+
+<!-- gallery:start -->
+
+## 每个功能，都有截图
+
+截图按设备套了外框：iPhone、iPad、Apple Watch、电脑窗口。画面都是真实 App 加演示数据拍的。
+
+### 动起来看
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/link-approve.webp" width="360" alt="手表批准计划，手机上同步"><br><sub>手表批准计划，手机上同步</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/ipad-browser.webp" width="400" alt="iPad 多列：边上的会话里，Agent 的浏览器实时在测"><br><sub>iPad 多列：边上的会话里，Agent 的浏览器实时在测</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/iphone-approve.webp" width="230" alt="点一下允许，Agent 接着干"><br><sub>点一下允许，Agent 接着干</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/iphone-plan.webp" width="230" alt="审阅计划，批准执行"><br><sub>审阅计划，批准执行</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/iphone-question.webp" width="230" alt="回答 Agent 的提问"><br><sub>回答 Agent 的提问</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/iphone-browser.webp" width="230" alt="Agent 在浏览器里测，画面实时回传"><br><sub>Agent 在浏览器里测，画面实时回传</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/iphone-tabs.webp" width="230" alt="项目、待办、概览，底部标签一点就到"><br><sub>项目、待办、概览，底部标签一点就到</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/mac-ar.webp" width="500" alt="AR 模式：点一个窗口，它飘到眼前，直接回复"><br><sub>AR 模式：点一个窗口，它飘到眼前，直接回复</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/zh/iphone-world.webp" width="230" alt="世界模式：镜头在园区里穿行"><br><sub>世界模式：镜头在园区里穿行</sub></td>
+</tr></table>
+
+### 会话列表
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-home.webp" width="220" alt="所有会话一个列表，等你确认的置顶"><br><sub>所有会话一个列表，等你确认的置顶</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-home-agent.webp" width="220" alt="按 Agent 分组"><br><sub>按 Agent 分组</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-home-source.webp" width="220" alt="按电脑分组，几台电脑一起看"><br><sub>按电脑分组，几台电脑一起看</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-menu.webp" width="220" alt="会话里的工具菜单：搜索、文件、改动、测试"><br><sub>会话里的工具菜单：搜索、文件、改动、测试</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-agentinfo.webp" width="220" alt="Agent 信息：类型、版本、插件、能做什么"><br><sub>Agent 信息：类型、版本、插件、能做什么</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-machine.webp" width="220" alt="电脑信息：系统、内存、磁盘、正在运行的会话"><br><sub>电脑信息：系统、内存、磁盘、正在运行的会话</sub></td>
+</tr></table>
+
+### 审批、计划与提问
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-perm.webp" width="220" alt="确认命令的完整内容，再点允许或拒绝"><br><sub>确认命令的完整内容，再点允许或拒绝</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-plan.webp" width="220" alt="审阅 Agent 拟定的计划，批准或继续规划"><br><sub>审阅 Agent 拟定的计划，批准或继续规划</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-question.webp" width="220" alt="回答 Agent 的提问"><br><sub>回答 Agent 的提问</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-voice.webp" width="220" alt="按住说话，像发语音消息"><br><sub>按住说话，像发语音消息</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-working.webp" width="220" alt="实时看每一步：思考、命令、改动"><br><sub>实时看每一步：思考、命令、改动</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-panel.webp" width="220" alt="相册、文件、常用语、请求截图"><br><sub>相册、文件、常用语、请求截图</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-mode.webp" width="220" alt="权限模式：手动、自动编辑、计划、自动"><br><sub>权限模式：手动、自动编辑、计划、自动</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-model.webp" width="220" alt="换模型和思考等级，即时生效"><br><sub>换模型和思考等级，即时生效</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-share.webp" width="220" alt="生成只读链接，让同事看会话"><br><sub>生成只读链接，让同事看会话</sub></td>
+</tr></table>
+
+### 多种 Agent
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-codex.webp" width="220" alt="Codex：同样的审批和进度"><br><sub>Codex：同样的审批和进度</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-opencode.webp" width="220" alt="OpenCode：和 Claude Code 在同一个列表"><br><sub>OpenCode：和 Claude Code 在同一个列表</sub></td>
+</tr></table>
+
+### 做完发截图，测过有报告
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-cart.webp" width="220" alt="Agent 自己用浏览器测，把截图发回来"><br><sub>Agent 自己用浏览器测，把截图发回来</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-tasks.webp" width="220" alt="任务清单：Agent 一项项勾掉"><br><sub>任务清单：Agent 一项项勾掉</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-deploy.webp" width="220" alt="只有你能做的事，记成待办和关键信息"><br><sub>只有你能做的事，记成待办和关键信息</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-bench.webp" width="220" alt="压测等长任务的进展"><br><sub>压测等长任务的进展</sub></td>
+</tr></table>
+
+### 概览与用量
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-overview.webp" width="220" alt="概览：额度、统计、今日动态"><br><sub>概览：额度、统计、今日动态</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-today.webp" width="220" alt="今日动态：做了什么、花了多少"><br><sub>今日动态：做了什么、花了多少</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-usage.webp" width="220" alt="用量：按模型、按项目、按天"><br><sub>用量：按模型、按项目、按天</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-me.webp" width="220" alt="设置：外观、语言、翻译"><br><sub>设置：外观、语言、翻译</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-widgets.webp" width="220" alt="主屏小组件：会话和额度"><br><sub>主屏小组件：会话和额度</sub></td>
+</tr></table>
+
+### 项目与代码
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-projects.webp" width="220" alt="项目：统筹所有项目"><br><sub>项目：统筹所有项目</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-files.webp" width="220" alt="浏览项目文件"><br><sub>浏览项目文件</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-changes.webp" width="220" alt="改动列表，直接提交"><br><sub>改动列表，直接提交</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-codediff.webp" width="220" alt="代码改动对比"><br><sub>代码改动对比</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-gitlog.webp" width="220" alt="提交历史"><br><sub>提交历史</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-history.webp" width="220" alt="历史会话：按项目、按 Agent 找"><br><sub>历史会话：按项目、按 Agent 找</sub></td>
+</tr></table>
+
+### 待办、新任务与协作
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-todos.webp" width="220" alt="待办：我的和 Agent 的分开"><br><sub>待办：我的和 Agent 的分开</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-newtask.webp" width="220" alt="新建任务：选项目、电脑、Agent"><br><sub>新建任务：选项目、电脑、Agent</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-schedules.webp" width="220" alt="定时任务：按小时、每天、每周"><br><sub>定时任务：按小时、每天、每周</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-inbox.webp" width="220" alt="通知记录"><br><sub>通知记录</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-group.webp" width="220" alt="会话群：让会话之间直接商量"><br><sub>会话群：让会话之间直接商量</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-world.webp" width="220" alt="世界模式：所有会话化作一座像素园区"><br><sub>世界模式：所有会话化作一座像素园区</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-settings.webp" width="220" alt="设置"><br><sub>设置</sub></td>
+</tr></table>
+
+### iPad
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-columns.webp" width="440" alt="两个会话并排分屏"><br><sub>两个会话并排分屏</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-perm.webp" width="440" alt="确认命令"><br><sub>确认命令</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-codex.webp" width="440" alt="Codex 会话"><br><sub>Codex 会话</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-question.webp" width="440" alt="回答提问"><br><sub>回答提问</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-working.webp" width="440" alt="实时进度"><br><sub>实时进度</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-today.webp" width="440" alt="今日动态"><br><sub>今日动态</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-todos.webp" width="440" alt="待办"><br><sub>待办</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-world.webp" width="440" alt="世界模式"><br><sub>世界模式</sub></td>
+</tr></table>
+
+### Apple Watch
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/w-now.webp" width="160" alt="抬腕批准或拒绝"><br><sub>抬腕批准或拒绝</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/w-plan.webp" width="160" alt="审阅计划"><br><sub>审阅计划</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/w-question.webp" width="160" alt="回答提问"><br><sub>回答提问</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/w-list.webp" width="160" alt="会话列表"><br><sub>会话列表</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/w-usage.webp" width="160" alt="额度用量"><br><sub>额度用量</sub></td>
+</tr></table>
+
+### 电脑端新版界面
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-main.webp" width="900" alt="项目、会话、文件，像 VS Code 一样排布"><br><sub>项目、会话、文件，像 VS Code 一样排布</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-sessions.webp" width="900" alt="会话列表：筛选、分组、状态一目了然"><br><sub>会话列表：筛选、分组、状态一目了然</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-files.webp" width="900" alt="项目里直接看文件、改代码"><br><sub>项目里直接看文件、改代码</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-git.webp" width="900" alt="Git：改动、提交、分支"><br><sub>Git：改动、提交、分支</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-projsess.webp" width="900" alt="项目栏里看这个项目的会话"><br><sub>项目栏里看这个项目的会话</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-favorites.webp" width="900" alt="收藏：好回复一点跳回原消息"><br><sub>收藏：好回复一点跳回原消息</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-todos.webp" width="900" alt="待办"><br><sub>待办</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-today.webp" width="900" alt="今日动态弹窗"><br><sub>今日动态弹窗</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-usage.webp" width="900" alt="用量弹窗：额度、花费、按模型"><br><sub>用量弹窗：额度、花费、按模型</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-layout.webp" width="900" alt="自由调整界面布局"><br><sub>自由调整界面布局</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-newtab.webp" width="900" alt="标签页里直接新建会话"><br><sub>标签页里直接新建会话</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-n-light.webp" width="900" alt="仿 VS Code 的配色方案，深浅都有"><br><sub>仿 VS Code 的配色方案，深浅都有</sub></td>
+</tr></table>
+
+### 电脑端
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-main.webp" width="900" alt="会话组、分屏、会话之间互发消息"><br><sub>会话组、分屏、会话之间互发消息</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-trace.webp" width="900" alt="执行过程：时间线、统计、出错定位"><br><sub>执行过程：时间线、统计、出错定位</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-terminal.webp" width="900" alt="会话终端：命令在标着设备名的标签里跑"><br><sub>会话终端：命令在标着设备名的标签里跑</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-browser.webp" width="900" alt="Agent 浏览器：实时画面，可放大、可接管"><br><sub>Agent 浏览器：实时画面，可放大、可接管</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-world.webp" width="900" alt="世界模式"><br><sub>世界模式</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-flow.webp" width="900" alt="数据流大屏"><br><sub>数据流大屏</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-group.webp" width="900" alt="一键建会话群"><br><sub>一键建会话群</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/mac-plugins.webp" width="900" alt="插件：每家 Agent 一个签名插件"><br><sub>插件：每家 Agent 一个签名插件</sub></td>
+</tr></table>
+
+### AR 模式
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ar-space.webp" width="900" alt="会话悬浮在空间里，近的是最近有动静的"><br><sub>会话悬浮在空间里，近的是最近有动静的</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ar-sea.webp" width="900" alt="五种流动背景，也可用自己的视频"><br><sub>五种流动背景，也可用自己的视频</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ar-aurora.webp" width="900" alt="悬浮窗里直接回复，也能语音"><br><sub>悬浮窗里直接回复，也能语音</sub></td>
+</tr></table>
+
+<!-- gallery:end -->
 
 ## 关于开源与订阅
 

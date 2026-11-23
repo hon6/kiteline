@@ -102,6 +102,8 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 | **Goals** | Give a Claude Code or Codex session a goal (`/goal`) from your phone and the agent keeps working, round after round, until it is met. The session list shows which round it is on, the chat shows what the last check said is still missing, and you get a notification when the goal is met, can't be met or stops. |
 | **To-dos** | Anything the agent needs *you* to do is picked up from the conversation and tracked until it's done. |
 | **Group chats** | Sessions on different computers and projects coordinate with each other through Kiteline. |
+| **New layout and AR mode** | On the computer, switch to a layout like VS Code: an icon bar, project tabs, files and Git beside the conversation, a status bar. AR mode turns sessions into floating windows in space: the most active sit nearest, a window shakes when it has news, and you can reply or talk to it right there. |
+| **Send from other apps** | Pick Kiteline in WeChat's "Open with other app", Finder's Share or a browser's share menu to hand a file, image, text or link to a session, or start a new one. |
 | **World mode** | A voxel office where every session is a worker at a desk, so you can see the whole team at a glance. |
 | **Flow Board** | Every session on one screen: what each one reads, what it does and where the output goes. Each tool call is a line, and a trail of light runs along it the moment the call happens. |
 | **Live Activities** | While agents work or wait for you, the iPhone Lock Screen and Dynamic Island show every session’s status: waiting ones first, running ones with their current step, and All done when everything stops. Tap to jump into the session; your computer updates it through push, so the app does not need to be open. |
@@ -225,32 +227,6 @@ flowchart LR
 
 ## Screenshots
 
-<table>
-<tr>
-<td><img src="assets/images/iphone-en/01-sessions.jpg" alt="Session list"></td>
-<td><img src="assets/images/iphone-en/02-approve.jpg" alt="Approve"></td>
-<td><img src="assets/images/iphone-en/03-plan.jpg" alt="Plan approval"></td>
-<td><img src="assets/images/iphone-en/04-question.jpg" alt="Answer a question"></td>
-<td><img src="assets/images/iphone-en/05-voice.jpg" alt="Hold to talk"></td>
-</tr>
-<tr>
-<td><img src="assets/images/iphone-en/06-codex.jpg" alt="Codex"></td>
-<td><img src="assets/images/iphone-en/07-overview.jpg" alt="Overview: limits, stats and today's activity"></td>
-<td><img src="assets/images/iphone-en/08-projects.jpg" alt="Projects"></td>
-<td><img src="assets/images/iphone-en/09-group.jpg" alt="Group chat"></td>
-<td><img src="assets/images/iphone-en/10-world.jpg" alt="World mode"></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="25%"><img src="assets/images/watch-en/1-now.jpg" alt="Watch: approve"></td>
-<td width="25%"><img src="assets/images/watch-en/3-question.jpg" alt="Watch: answer"></td>
-<td width="25%"><img src="assets/images/watch-en/4-plan.jpg" alt="Watch: plan"></td>
-<td width="25%"><img src="assets/images/watch-en/5-usage.jpg" alt="Watch: usage"></td>
-</tr>
-</table>
-
 ![Mac app: session groups along the top, two sessions side by side, a plan waiting for approval and two sessions messaging each other](assets/images/mac-main-en.jpg)
 
 <table>
@@ -268,12 +244,261 @@ flowchart LR
 
 <table>
 <tr>
-<td width="62%"><img src="assets/images/ipad-split-en.jpg" alt="iPad split view"></td>
-<td width="38%"><img src="assets/images/mac-g-pick-panel-en.jpg" alt="Start a group chat"></td>
+<td><img src="assets/images/mac-g-pick-panel-en.jpg" alt="Start a group chat"></td>
 </tr>
 </table>
 
 <sub>Every app is available in English and Simplified Chinese, and follows your system language by default.</sub>
+
+<!-- gallery:start -->
+
+## Every screen, every feature
+
+Screens are framed by device: iPhone, iPad, Apple Watch and the desktop window. All shots come from the real app with demo data.
+
+### In motion
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/link-approve.webp" width="360" alt="Approve a plan on the watch, the phone follows"><br><sub>Approve a plan on the watch, the phone follows</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/ipad-browser.webp" width="400" alt="iPad columns: the agent&#x27;s browser testing live beside the conversation"><br><sub>iPad columns: the agent&#x27;s browser testing live beside the conversation</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/iphone-approve.webp" width="230" alt="One tap to allow, the agent carries on"><br><sub>One tap to allow, the agent carries on</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/iphone-plan.webp" width="230" alt="Review the plan, approve it"><br><sub>Review the plan, approve it</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/iphone-question.webp" width="230" alt="Answer the agent&#x27;s question"><br><sub>Answer the agent&#x27;s question</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/iphone-browser.webp" width="230" alt="The agent tests in a browser, live view comes back"><br><sub>The agent tests in a browser, live view comes back</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/iphone-tabs.webp" width="230" alt="Projects, to-dos, overview, one tap away"><br><sub>Projects, to-dos, overview, one tap away</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/mac-ar.webp" width="500" alt="AR mode: click a window, it floats to you, reply right there"><br><sub>AR mode: click a window, it floats to you, reply right there</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/anim/en/iphone-world.webp" width="230" alt="World mode: the camera moves through the campus"><br><sub>World mode: the camera moves through the campus</sub></td>
+</tr></table>
+
+### Sessions
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-home.webp" width="220" alt="Every session in one list, the ones waiting for you on top"><br><sub>Every session in one list, the ones waiting for you on top</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-home-agent.webp" width="220" alt="Grouped by agent"><br><sub>Grouped by agent</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-home-source.webp" width="220" alt="Grouped by computer, several computers at once"><br><sub>Grouped by computer, several computers at once</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-menu.webp" width="220" alt="The session tools: search, files, changes, tests"><br><sub>The session tools: search, files, changes, tests</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-agentinfo.webp" width="220" alt="Agent details: type, version, plugin, what it can do"><br><sub>Agent details: type, version, plugin, what it can do</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-machine.webp" width="220" alt="Computer details: system, memory, disk, running sessions"><br><sub>Computer details: system, memory, disk, running sessions</sub></td>
+</tr></table>
+
+### Approvals, plans and questions
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-perm.webp" width="220" alt="Read the full command, then allow or deny"><br><sub>Read the full command, then allow or deny</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-plan.webp" width="220" alt="Review the plan an agent drew up, approve or keep planning"><br><sub>Review the plan an agent drew up, approve or keep planning</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-question.webp" width="220" alt="Answer the agent&#x27;s question"><br><sub>Answer the agent&#x27;s question</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-voice.webp" width="220" alt="Hold to talk, like a voice message"><br><sub>Hold to talk, like a voice message</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-working.webp" width="220" alt="Follow every step: thinking, commands, edits"><br><sub>Follow every step: thinking, commands, edits</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-panel.webp" width="220" alt="Photos, files, quick replies, ask for a screenshot"><br><sub>Photos, files, quick replies, ask for a screenshot</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-mode.webp" width="220" alt="Permission modes: manual, auto-edit, plan, auto"><br><sub>Permission modes: manual, auto-edit, plan, auto</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-model.webp" width="220" alt="Switch model and thinking level, takes effect at once"><br><sub>Switch model and thinking level, takes effect at once</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-share.webp" width="220" alt="A read-only link so a teammate can watch a session"><br><sub>A read-only link so a teammate can watch a session</sub></td>
+</tr></table>
+
+### More than one agent
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-codex.webp" width="220" alt="Codex: the same approvals and progress"><br><sub>Codex: the same approvals and progress</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-opencode.webp" width="220" alt="OpenCode: in the same list as Claude Code"><br><sub>OpenCode: in the same list as Claude Code</sub></td>
+</tr></table>
+
+### Screenshots when done, reports when tested
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-cart.webp" width="220" alt="The agent tests in a browser and sends screenshots back"><br><sub>The agent tests in a browser and sends screenshots back</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-tasks.webp" width="220" alt="A task list the agent ticks off"><br><sub>A task list the agent ticks off</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-deploy.webp" width="220" alt="What only you can do, kept as to-dos and key info"><br><sub>What only you can do, kept as to-dos and key info</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-bench.webp" width="220" alt="Progress of long runs such as load tests"><br><sub>Progress of long runs such as load tests</sub></td>
+</tr></table>
+
+### Overview and usage
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-overview.webp" width="220" alt="Overview: limits, stats, today"><br><sub>Overview: limits, stats, today</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-today.webp" width="220" alt="Today: what got done, what it cost"><br><sub>Today: what got done, what it cost</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-usage.webp" width="220" alt="Usage by model, project and day"><br><sub>Usage by model, project and day</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-me.webp" width="220" alt="Settings: appearance, language, translation"><br><sub>Settings: appearance, language, translation</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-widgets.webp" width="220" alt="Home Screen widgets: sessions and limits"><br><sub>Home Screen widgets: sessions and limits</sub></td>
+</tr></table>
+
+### Projects and code
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-projects.webp" width="220" alt="Projects: oversee every project"><br><sub>Projects: oversee every project</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-files.webp" width="220" alt="Browse project files"><br><sub>Browse project files</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-changes.webp" width="220" alt="Changed files, commit right here"><br><sub>Changed files, commit right here</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-codediff.webp" width="220" alt="Code diff"><br><sub>Code diff</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-gitlog.webp" width="220" alt="Commit history"><br><sub>Commit history</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-history.webp" width="220" alt="Past sessions, by project or agent"><br><sub>Past sessions, by project or agent</sub></td>
+</tr></table>
+
+### To-dos, new tasks and collaboration
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-todos.webp" width="220" alt="To-dos: yours and the agent&#x27;s, kept apart"><br><sub>To-dos: yours and the agent&#x27;s, kept apart</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-newtask.webp" width="220" alt="New task: pick project, computer and agent"><br><sub>New task: pick project, computer and agent</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-schedules.webp" width="220" alt="Scheduled tasks: hourly, daily, weekly"><br><sub>Scheduled tasks: hourly, daily, weekly</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-inbox.webp" width="220" alt="Notification history"><br><sub>Notification history</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-group.webp" width="220" alt="Group chat: let sessions talk to each other"><br><sub>Group chat: let sessions talk to each other</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-world.webp" width="220" alt="World mode: every session in one pixel campus"><br><sub>World mode: every session in one pixel campus</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-settings.webp" width="220" alt="Settings"><br><sub>Settings</sub></td>
+</tr></table>
+
+### iPad
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-columns.webp" width="440" alt="Two sessions side by side"><br><sub>Two sessions side by side</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-perm.webp" width="440" alt="Approve a command"><br><sub>Approve a command</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-codex.webp" width="440" alt="A Codex session"><br><sub>A Codex session</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-question.webp" width="440" alt="Answer a question"><br><sub>Answer a question</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-working.webp" width="440" alt="Live progress"><br><sub>Live progress</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-today.webp" width="440" alt="Today"><br><sub>Today</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-todos.webp" width="440" alt="To-dos"><br><sub>To-dos</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-world.webp" width="440" alt="World mode"><br><sub>World mode</sub></td>
+</tr></table>
+
+### Apple Watch
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/w-now.webp" width="160" alt="Approve or deny from your wrist"><br><sub>Approve or deny from your wrist</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/w-plan.webp" width="160" alt="Review a plan"><br><sub>Review a plan</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/w-question.webp" width="160" alt="Answer a question"><br><sub>Answer a question</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/w-list.webp" width="160" alt="Session list"><br><sub>Session list</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/w-usage.webp" width="160" alt="Usage and limits"><br><sub>Usage and limits</sub></td>
+</tr></table>
+
+### Desktop: the new layout
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-main.webp" width="900" alt="Projects, sessions and files laid out like VS Code"><br><sub>Projects, sessions and files laid out like VS Code</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-sessions.webp" width="900" alt="Session list: filters, groups, status at a glance"><br><sub>Session list: filters, groups, status at a glance</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-files.webp" width="900" alt="Browse and edit project files"><br><sub>Browse and edit project files</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-git.webp" width="900" alt="Git: changes, commits, branches"><br><sub>Git: changes, commits, branches</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-projsess.webp" width="900" alt="Each project&#x27;s sessions in its own panel"><br><sub>Each project&#x27;s sessions in its own panel</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-favorites.webp" width="900" alt="Favorites: jump back to the original message"><br><sub>Favorites: jump back to the original message</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-todos.webp" width="900" alt="To-dos"><br><sub>To-dos</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-today.webp" width="900" alt="Today, in a floating window"><br><sub>Today, in a floating window</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-usage.webp" width="900" alt="Usage: limits, cost, by model"><br><sub>Usage: limits, cost, by model</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-layout.webp" width="900" alt="Arrange the layout your way"><br><sub>Arrange the layout your way</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-newtab.webp" width="900" alt="Start a session right in a tab"><br><sub>Start a session right in a tab</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-n-light.webp" width="900" alt="VS Code style color schemes, dark and light"><br><sub>VS Code style color schemes, dark and light</sub></td>
+</tr></table>
+
+### Desktop
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-main.webp" width="900" alt="Session groups, split view, sessions messaging each other"><br><sub>Session groups, split view, sessions messaging each other</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-trace.webp" width="900" alt="Execution trace: timeline, stats, jump to the error"><br><sub>Execution trace: timeline, stats, jump to the error</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-terminal.webp" width="900" alt="Session terminal: commands run in a tab named for the device"><br><sub>Session terminal: commands run in a tab named for the device</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-browser.webp" width="900" alt="Agent browser: live view, enlarge or take over"><br><sub>Agent browser: live view, enlarge or take over</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-world.webp" width="900" alt="World mode"><br><sub>World mode</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-flow.webp" width="900" alt="Flow board"><br><sub>Flow board</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-group.webp" width="900" alt="One-click group chat"><br><sub>One-click group chat</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/mac-plugins.webp" width="900" alt="Plugins: one signed plugin per agent"><br><sub>Plugins: one signed plugin per agent</sub></td>
+</tr></table>
+
+### AR mode
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ar-space.webp" width="900" alt="Sessions float in space, the most active nearest"><br><sub>Sessions float in space, the most active nearest</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ar-sea.webp" width="900" alt="Five flowing backgrounds, or your own video"><br><sub>Five flowing backgrounds, or your own video</sub></td>
+</tr></table>
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ar-aurora.webp" width="900" alt="Reply right in a floating window, by voice too"><br><sub>Reply right in a floating window, by voice too</sub></td>
+</tr></table>
+
+<!-- gallery:end -->
 
 ## Open source and subscription
 
