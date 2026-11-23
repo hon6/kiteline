@@ -127,7 +127,7 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.16"
+WATCHER_VERSION = "2.38.17"
 FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
@@ -12704,6 +12704,23 @@ def _codex_processes():
     return found
 
 
+def codex_rollout_turn_state(path):
+    """rollout 尾部最后一轮的状态：open 还没结束（不看多久没写）/ aborted 被中断了 / done 正常结束 / None 读不到"""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            handle.seek(max(0, size - 256 * 1024))
+            data = handle.read()
+    except OSError:
+        return None
+    started = max(data.rfind(b'"type":"task_started"'), data.rfind(b'"type": "task_started"'))
+    done = max(data.rfind(b'"type":"task_complete"'), data.rfind(b'"type": "task_complete"'))
+    aborted = max(data.rfind(b'"type":"turn_aborted"'), data.rfind(b'"type": "turn_aborted"'))
+    if started > max(done, aborted):
+        return "open"
+    return "aborted" if aborted > done else "done"
+
+
 def codex_rollout_activity(path):
     """rollout 尾部 → "busy" / "idle"：最后一个 task_started 之后没有 task_complete / turn_aborted，且最近 10 分钟还在写"""
     try:
@@ -12728,6 +12745,7 @@ def codex_fallback_snapshots(listed):
     if not (procs["desktop"] or procs["vscode"] or procs["cli"]):
         return []
     since = int(time.time()) - CODEX_FALLBACK_HOURS * 3600
+    queueable = bool(codex_queue_db())
     try:
         db = sqlite3.connect("file:%s?mode=ro" % pathname2url(path), uri=True, timeout=2)
         try:
@@ -12770,9 +12788,97 @@ def codex_fallback_snapshots(listed):
         if not snap:
             continue
         snap["entrypoint"] = {"desktop": "codex-desktop", "vscode": "codex-vscode"}.get(kind, "codex")
-        snap["readOnly"], snap["readOnlyReason"], snap["readOnlyReasonEn"] = True, CODEX_READ_ONLY[kind][0], CODEX_READ_ONLY[kind][1]
+        if kind in CODEX_QUEUE_KINDS and queueable:
+            # 能经排队消息发过去（见 codex_queue_send）：可以回复，确认、中断仍要在 Codex 里
+            snap["queueSend"] = True
+        else:
+            snap["readOnly"], snap["readOnlyReason"], snap["readOnlyReasonEn"] = True, CODEX_READ_ONLY[kind][0], CODEX_READ_ONLY[kind][1]
         out.append(snap)
     return out
+
+
+# 新版 Codex（0.17x / 桌面版 26.11 起）有「排队消息」：每个会话待发的话存在 CODEX_HOME 的 queue_N.sqlite（queued_items 表，
+# 触发器把改动记进 queued_thread_revisions），各个 app-server 进程用 PRAGMA data_version + revision 盯着这张表，
+# 别的进程加进来的也会收到（它们自己的 thread/queue/add 就是写这张表）。持有会话的那个进程空闲时马上取走发出，忙时等这一轮完了再发。
+# 桌面版、VS Code 扩展的私有进程不再开放跟随协议，但会话照样认这张表 → 从手机发消息就往这里加一条（11-23 用户邮件，Mac 上
+# 真实桌面版 26.1117 + 假模型实测：空闲时几秒内发出、忙时排队、图片也行、后台服务开不开都一样）。
+# 库里一行的 payload_json 是 Codex 内部的格式（和它自己 thread/queue/add 写进去的逐字段一致）：
+#   {"UserInput": {"content": [{"type": "text", "text", "text_elements": []}, {"type": "image", "image_url": "data:…"}], "client_id"}}
+CODEX_QUEUE_KINDS = ("desktop", "cli")
+# 只有载入了这个会话的进程才取它的排队消息（桌面版切到别的页面也照取；这次启动后没打开过的会话没人取）。空闲时等 CODEX_QUEUE_WAIT 秒
+# 没取走就撤回这条、如实报「在 Codex 中打开这个会话一次」。没用深链接 codex://threads/<会话> 自动载入：11-23 实测它把 Codex 切到前台
+# （open -g 也拦不住），装着多份 Codex 时还会交给系统默认的那份打开。Windows 实测 26.1111 载入后 9 秒内取走
+CODEX_QUEUE_WAIT = 12
+
+
+def codex_queue_db():
+    found = []
+    for path in globlib.glob(os.path.join(CODEX_HOME, "queue_*.sqlite")):
+        match = re.search(r"queue_(\d+)\.sqlite$", path)
+        if match:
+            found.append((int(match.group(1)), path))
+    if not found:
+        return None
+    path = max(found)[1]
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % pathname2url(path), uri=True, timeout=2)
+        try:
+            columns = {row[1] for row in db.execute("pragma table_info(queued_items)")}
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    need = {"id", "thread_id", "payload_json", "queue_order", "created_at_ms", "updated_at_ms"}
+    return path if need <= columns else None
+
+
+def codex_queue_content(text, images):
+    content = [{"type": "text", "text": text, "text_elements": []}] if text else []
+    for path in images or []:
+        mime = mimetypes.guess_type(path)[0] or "image/png"
+        with open(path, "rb") as handle:
+            data = base64.b64encode(handle.read()).decode("ascii")
+        content.append({"type": "image", "image_url": "data:%s;base64,%s" % (mime, data)})
+    return content
+
+
+def codex_queue_send(thread_id, text, images, busy, rollout=None):
+    """往会话的排队消息里加一条，让持有它的 Codex 程序自己发出。→ 给用户看的一句话；没人接收就撤回并抛错"""
+    path = codex_queue_db()
+    if not path:
+        raise RuntimeError("这一版 Codex 不支持从其他应用发送消息，请在 Codex 中回复")
+    content = codex_queue_content(text, images)
+    if not content:
+        raise RuntimeError("内容为空")
+    row_id, now = str(uuid.uuid4()), int(time.time() * 1000)
+    payload = json.dumps({"UserInput": {"content": content, "client_id": "kiteline-" + row_id}}, ensure_ascii=False)
+    db = sqlite3.connect(path, timeout=5)
+    try:
+        with db:
+            db.execute("insert into queued_items (id, thread_id, payload_json, queue_order, created_at_ms, updated_at_ms) values "
+                       "(?, ?, ?, coalesce((select max(queue_order) from queued_items where thread_id = ?), -1) + 1, ?, ?)",
+                       (row_id, thread_id, payload, thread_id, now, now))
+        if busy:
+            return "Codex 正在工作，已排队，这一轮结束后发送"
+        deadline = time.time() + CODEX_QUEUE_WAIT
+        while time.time() < deadline:
+            time.sleep(0.5)
+            if not db.execute("select 1 from queued_items where id = ?", (row_id,)).fetchone():
+                return "已发送"
+        state = codex_rollout_turn_state(rollout) if rollout else None
+        if state == "open":
+            # 这一轮还没结束（跑得久、10 分钟没写记录就被当成空闲了）：留在队里，这一轮完了它自己发
+            return "Codex 正在工作，已排队，这一轮结束后发送"
+        if state == "aborted":
+            # 上一轮被中断后 Codex 暂停排队（界面上出「Resume」），要用户在 Codex 里继续或再发一句才接着发：留在队里如实说（11-23 Mac 实测）
+            return "Codex 上一轮被中断，排队已暂停：已加入排队，在 Codex 中点「继续」或发送消息后会接着发出"
+        with db:
+            gone = db.execute("delete from queued_items where id = ?", (row_id,)).rowcount == 0
+        if gone:
+            return "已发送"
+    finally:
+        db.close()
+    raise RuntimeError("Codex 没有接收这条消息：请在 Codex 中打开这个会话一次，之后就能从手机发送")
 
 
 # Codex 的目标（/goal，0.128 起）存在 CODEX_HOME 的 goals_N.sqlite（早几版在 state_N.sqlite）的 thread_goals 表里：
@@ -15330,6 +15436,7 @@ class CodexPlugin(AgentPlugin):
         self.daemon = CodexLink()
         self.ipc = CodexIpcLink()
         self.view_only = {}   # 只读兜底列出的会话 → 只读的原因（codex_fallback_snapshots）：别交给后台服务去附着
+        self.queued = {}      # 兜底列出、能经排队消息发过去的会话（新版桌面版、--no-daemon 终端）→ 快照
 
     def normalizer_for(self, path):
         return codex_dedup_normalizer(path)
@@ -15367,7 +15474,8 @@ class CodexPlugin(AgentPlugin):
             log("CodexIpcLink 快照出错：%r" % exc)
         try:
             fallback = codex_fallback_snapshots(daemon_ids | {snap.get("sessionId") for snap in out})
-            self.view_only = {snap["sessionId"]: snap["readOnlyReason"] for snap in fallback}
+            self.view_only = {snap["sessionId"]: snap["readOnlyReason"] for snap in fallback if snap.get("readOnly")}
+            self.queued = {snap["sessionId"]: snap for snap in fallback if snap.get("queueSend")}
             out.extend(fallback)
         except Exception as exc:
             log("Codex 只读兜底出错：%r" % exc)
@@ -15392,13 +15500,21 @@ class CodexPlugin(AgentPlugin):
                 return False
         return self.ipc.owns(sid)
 
-    def _writable(self, sid):
+    def _writable(self, sid, action=False):
         reason = getattr(self, "view_only", {}).get(sid)
         if reason:
             raise RuntimeError(reason)
+        if action and sid in getattr(self, "queued", {}):
+            raise RuntimeError("这个 Codex 会话可以从手机发消息，确认、回答、中断请在 Codex 中操作")
 
     def send(self, sid, text, images):
         self._writable(sid)
+        queued = getattr(self, "queued", {}).get(sid)
+        if queued:
+            # 新版桌面版、--no-daemon 终端的会话：经 Codex 的排队消息发过去（codex_queue_send）。/goal 是命令不是话，排队消息里不认
+            if not images and goal_command(text):
+                raise RuntimeError("这个 Codex 会话请在 Codex 中设定目标")
+            return codex_queue_send(sid, text, images, queued.get("activity") == "busy", queued.get("transcriptPath"))
         command = None if images else goal_command(text)
         if command:
             # /goal 不是发给模型的话：交给后台服务设定目标（Codex 终端里的 /goal 也是这样，不进对话）
@@ -15410,15 +15526,15 @@ class CodexPlugin(AgentPlugin):
         return self.daemon.send(sid, text, images)
 
     def key(self, sid, key):
-        self._writable(sid)
+        self._writable(sid, True)
         return (self.ipc if self.via_ipc(sid) else self.daemon).key(sid, key)
 
     def answer(self, sid, answers):
-        self._writable(sid)
+        self._writable(sid, True)
         return (self.ipc if self.via_ipc(sid) else self.daemon).answer(sid, answers)
 
     def close(self, sid):
-        self._writable(sid)
+        self._writable(sid, True)
         if self.via_ipc(sid):
             raise RuntimeError("Codex 桌面版、VS Code 扩展中的会话请在 Codex 中归档")
         return self.daemon.close(sid)
@@ -15426,7 +15542,7 @@ class CodexPlugin(AgentPlugin):
     def closable(self, snap):
         # 桌面版、VS Code 扩展的会话在它们自己的私有进程里，IPC 总线没有归档的请求，从外面改它的会话文件不安全：不给
         sid = snap.get("sessionId") or ""
-        return sid not in getattr(self, "view_only", {}) and not self.via_ipc(sid)
+        return sid not in getattr(self, "view_only", {}) and sid not in getattr(self, "queued", {}) and not self.via_ipc(sid)
 
     def media(self, sid, ref, path):
         if ref.startswith(("f:", "o")):   # 手机发来的图、Kiteline 发的图：中台取

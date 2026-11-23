@@ -1,5 +1,11 @@
 # Kiteline Release Notes
 
+## 3.49.52 (2026-11-23)
+
+### New Features
+
+- **Send messages to the new Codex desktop app from your phone**: Starting with version 26.11, the Codex desktop app no longer supports the way Kiteline used to operate its sessions, so they were view-only on your phone. You can now reply from your phone to sessions in the new Codex desktop app, and to Codex sessions running in the terminal with --no-daemon. Messages are sent right away when Codex is idle, or queued and sent when the current turn ends; after you interrupt Codex, they're sent once you resume or send another message there. The session needs to have been opened in Codex; approvals, answering questions, and interrupting still happen in Codex.
+
 ## 3.49.51 (2026-11-23)
 
 ### Fixes

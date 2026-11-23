@@ -30,22 +30,25 @@ public sealed class SidebarView : Panel
     bool pending;
 
     public static readonly double Width0 = 300;
+    /// 新版界面图标栏旁边那一栏里（同 Mac 的 SidebarView(embedded: true)）：不带顶上标题栏那一带、入口格子、提示卡和底栏，其余筛选、分组、页签原样
+    readonly bool embedded;
 
-    public SidebarView()
+    public SidebarView(bool embedded = false)
     {
+        this.embedded = embedded;
         // 底色由 MainWindow 里垫在下面的 SidebarGlass 画（玻璃 / 模糊壁纸 / 不透明）
         search = SearchField();
         scroll = new ScrollViewer
         {
-            Content = content.Pad(16, 4, 16, 64),
+            Content = embedded ? content.Pad(SideMetric.Edge, 0, SideMetric.Edge, 16) : content.Pad(16, 4, 16, 64),
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
-        var top = new Border { Height = 52, Background = Brushes.Transparent };   // 标题栏那一带（新任务按钮在 MainWindow 里放），空白处拖窗口
+        var top = new Border { Height = embedded ? 0 : 52, Background = Brushes.Transparent };   // 标题栏那一带（新任务按钮在 MainWindow 里放），空白处拖窗口
         top.PointerPressed += WindowChrome.DragWindow;
         var column = new DockPanel();
         DockPanel.SetDock(top, Dock.Top);
-        var searchBox = search.Margin(10, 0, 10, 8);
+        var searchBox = embedded ? search.Margin(SideMetric.Edge, 0, SideMetric.Edge, 6) : search.Margin(10, 0, 10, 8);
         DockPanel.SetDock(searchBox, Dock.Top);
         column.Children.Add(top);
         column.Children.Add(searchBox);
@@ -54,12 +57,11 @@ public sealed class SidebarView : Panel
         // 会话之间的消息：头像两侧滚动的虚线、纸鸢传信（盖在列表上，在底栏下面）
         peers.Viewport = scroll;
         peers.Rows = () => rows.Where(kv => kv.Value.IsVisible && kv.Value.Parent is not null && kv.Value.Avatar is not null).Select(kv => (kv.Key, kv.Value.Avatar!));
-        var chip = new PeerChipHost(peers) { Margin = new Thickness(0, 0, 0, 72) };   // 在底栏上面
+        var chip = new PeerChipHost(peers) { Margin = new Thickness(0, 0, 0, embedded ? 8 : 72) };   // 在底栏上面
         scroll.ScrollChanged += (_, _) => { peers.InvalidateVisual(); chip.Update(); };
         Children.Add(peers);
         Children.Add(chip);
-        var footer = new SidebarFooter(model) { VerticalAlignment = VerticalAlignment.Bottom };
-        Children.Add(footer);
+        if (!embedded) Children.Add(new SidebarFooter(model) { VerticalAlignment = VerticalAlignment.Bottom });
 
         model.PropertyChanged += Changed;
         main.PropertyChanged += Changed;
@@ -160,9 +162,9 @@ public sealed class SidebarView : Panel
         var baseList = sorted.Where(s => (sourceId is null || s.SourceId == sourceId) && (project is null || s.Folder == project)).ToList();
         var shown = baseList.Where(s => Matches(s, Status)).ToList();
         content.Children.Clear();
-        if (TipVisible) content.Children.Add(TipCard().Margin(0, 12, 0, 0));
-        if (!searching) content.Children.Add(Tiles().Margin(0, TipVisible ? 10 : 15, 0, 0));
-        content.Children.Add(TabRow(tab, searching, shown.Count).Margin(0, 12, 0, 0));
+        if (TipVisible && !embedded) content.Children.Add(TipCard().Margin(0, 12, 0, 0));
+        if (!searching && !embedded) content.Children.Add(Tiles().Margin(0, TipVisible ? 10 : 15, 0, 0));
+        content.Children.Add(TabRow(tab, searching, shown.Count).Margin(0, embedded ? 4 : 12, 0, 0));
         if (tab == "groups")
         {
             GroupsTab();

@@ -24,6 +24,7 @@ public sealed class ChatPanesView : Panel
     {
         this.Res(BackgroundProperty, "ChatBackground");
         panes.Changed += Schedule;
+        CodeTabs.Changed += Schedule;
         AppModel.Shared.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(AppModel.Sessions) or nameof(AppModel.PastMeta) or nameof(AppModel.Marked)) Schedule(); };
         // 群：标签上的群名、成员数，标签栏上成员按钮的实心空心
         GroupState.Shared.PropertyChanged += GroupsChanged;
@@ -31,6 +32,7 @@ public sealed class ChatPanesView : Panel
         DetachedFromVisualTree += (_, _) =>
         {
             panes.Changed -= Schedule;
+            CodeTabs.Changed -= Schedule;
             GroupState.Shared.PropertyChanged -= GroupsChanged;
             GroupChatPage.DrawerChanged -= Schedule;
             foreach (var chat in chats.Values.OfType<ChatView>()) chat.Closed();
@@ -66,6 +68,7 @@ public sealed class ChatPanesView : Panel
         {
             (chats[gone] as ChatView)?.Closed();
             chats.Remove(gone);
+            if (CodeTabs.Is(gone)) CodeTabs.Forget(gone);
         }
         // 焦点在某个对话页里（正在输入框里打字）：摘下再挂回去时 Avalonia 会清掉焦点，会话列表一更新（Claude 状态变了、
         // 排队的消息少了一条）接着打字、按回车就没反应（11-13 空输入框回车发排队消息时测出）。排好后还回去
@@ -74,7 +77,8 @@ public sealed class ChatPanesView : Panel
         // 对话页先从老的父级上摘下来，再挂到新排的树上
         foreach (var chat in chats.Values) if (chat.Parent is Panel p) p.Children.Remove(chat); else if (chat.Parent is Decorator d) d.Child = null; else if (chat.Parent is ContentControl c) c.Content = null;
         Children.Clear();
-        Children.Add(Node(panes.Root, atTop: true, atRight: true));
+        // 新版界面上面还有一排项目（ProjectStrip 占着标题栏那一带）：标签栏不用往上长、也不用给窗口按钮让位
+        Children.Add(Node(panes.Root, atTop: !Model.Layout.New, atRight: !Model.Layout.New));
         // 分屏时同一封信的两张信件用绳子连起来（盖在最上面，只有贴着绳子的地方接鼠标）
         if (panes.Count > 1) Children.Add(ropes);
         if (focused is not null && focused.IsAttachedToVisualTree() && focused.IsEffectivelyVisible && focused.IsEffectivelyEnabled) focused.Focus();
@@ -85,7 +89,9 @@ public sealed class ChatPanesView : Panel
     public Control Chat(string key, Guid pane)
     {
         // 群同会话一样开成一个标签：内容是群聊页
-        if (!chats.TryGetValue(key, out var chat)) chats[key] = chat = MainModel.GroupIdOf(key) is string id ? new GroupChatPage(id) : new ChatView(key);
+        // 文件标签（新版界面项目栏里点开的文件、改动、提交历史，同 Mac 的 @code:…）：内容是编辑区
+        if (!chats.TryGetValue(key, out var chat))
+            chats[key] = chat = CodeTabs.Is(key) ? CodeTabs.View(key) : MainModel.GroupIdOf(key) is string id ? new GroupChatPage(id) : new ChatView(key);
         if (chat is ChatView view) view.Pane = pane;
         return chat;
     }
@@ -396,7 +402,7 @@ public sealed class PaneHeader : Panel
         drag.PointerPressed += WindowDrag;
         Children.Add(drag);
 
-        var caption = atTop && atRight ? MainWindow.CaptionWidth : 0;
+        var caption = atTop && atRight ? MainWindow.CaptionWidth + MainWindow.CornerReserve : 0;
         var entries = Entries;
         var count = Math.Max(1, entries.Count);
         // 群在块窄时还多留一个成员按钮
@@ -460,7 +466,7 @@ public sealed class PaneHeader : Panel
         var panes = ChatPanes.Shared;
         var color = focused || !several ? "Text2" : "Text3";
         var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        if (level == 2 && pane.Key is string key)
+        if (level == 2 && pane.Key is string key && !CodeTabs.Is(key))
         {
             foreach (var b in MainModel.GroupIdOf(key) is string gid ? GroupButtons(gid, color) : SessionButtons(key, color)) row.Children.Add(b);
             row.Children.Add(new Border { Width = 8 });
@@ -482,7 +488,7 @@ public sealed class PaneHeader : Panel
             var menu = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight };
             if (MainModel.GroupIdOf(pane.Key) is string gid)
                 foreach (var item in GroupChatPage.MenuItems(gid, level < 2)) menu.Items.Add(item);
-            else if (pane.Key is string k)
+            else if (pane.Key is string k && !CodeTabs.Is(k))
             {
                 if (level < 2) foreach (var item in FoldedItems(k)) menu.Items.Add(item);
                 foreach (var item in SessionMenu.Items(model, MainModel.Shared, k)) menu.Items.Add(item);
@@ -677,16 +683,18 @@ public sealed class PaneTab : Control
         VerticalAlignment = VerticalAlignment.Bottom;
         var group = MainModel.GroupIdOf(key) is string gid ? GroupState.Shared.Group(gid) : null;
         var title = key is null ? L("选择会话") : Title(key);
+        var codeTab = CodeTabs.Is(key);
         var text = Ui.Text(title, 13, lit ? FontWeight.SemiBold : FontWeight.Medium, lit ? "Text" : "Text2").Shrink();
         // 会话是状态点；群是双人图标（成员有在工作的就是强调色）
-        Control dot = MainModel.GroupIdOf(key) is null ? (Control)Ui.Dot(7, session is null ? "Text4" : StatusColorKey(session))
+        Control dot = codeTab ? Ui.Sym(CodeTabs.Symbol(key!), 11, CodeTabs.IsDirty(key!) ? "Accent" : "Text2")
+            : MainModel.GroupIdOf(key) is null ? (Control)Ui.Dot(7, session is null ? "Text4" : StatusColorKey(session))
             : Ui.Sym("person.2.fill", 10, group?.Members.Any(m => model.Session(m.Key)?.IsBusy == true) == true ? "Accent" : "Text2");
         if (showClose)
         {
             var x = Ui.Sym("xmark", 9, "Text2");
             x.FontWeight = FontWeight.Bold;
             x.HorizontalAlignment = HorizontalAlignment.Center;
-            close = new Tap(x, () => ChatPanes.Shared.CloseTab(pane.Id, key), 9) { Width = 18, Height = 18 }.Keys("Fill08", "Fill15");
+            close = new Tap(x, () => { if (codeTab) CodeTabs.Close(pane.Id, key!); else ChatPanes.Shared.CloseTab(pane.Id, key); }, 9) { Width = 18, Height = 18 }.Keys("Fill08", "Fill15");
             close.Tip(L("关闭标签页"));
             close.Opacity = active ? 1 : 0;
         }
@@ -695,7 +703,7 @@ public sealed class PaneTab : Control
         VisualChildren.Add(row);
         LogicalChildren.Add(row);
         Cursor = new Cursor(StandardCursorType.Arrow);
-        ToolTip.SetTip(this, group is not null ? Help(group) : Help(session, title));
+        ToolTip.SetTip(this, codeTab ? CodeTabs.Tip(key!) : group is not null ? Help(group) : Help(session, title));
         this.Menu(Menu);
     }
 
@@ -704,6 +712,7 @@ public sealed class PaneTab : Control
     {
         var model = AppModel.Shared;
         if (MainModel.GroupIdOf(key) is string id) return GroupState.Shared.Group(id)?.Name ?? L("群已解散");
+        if (CodeTabs.Is(key)) return CodeTabs.Title(key) + (CodeTabs.IsDirty(key) ? " ●" : "");
         return model.Session(key)?.Title ?? (model.PastMeta.TryGetValue(key, out var p) ? p.Title : L("会话已结束"));
     }
 
@@ -727,7 +736,7 @@ public sealed class PaneTab : Control
         var panes = ChatPanes.Shared;
         if (key is string k)
         {
-            yield return Ui.Item(L("关闭标签页"), () => panes.CloseTab(pane.Id, k));
+            yield return Ui.Item(L("关闭标签页"), () => { if (CodeTabs.Is(k)) CodeTabs.Close(pane.Id, k); else panes.CloseTab(pane.Id, k); });
             if (pane.Tabs.Count > 1)
             {
                 yield return Ui.Item(L("关闭其他标签页"), () => panes.CloseOtherTabs(pane.Id, k));

@@ -71,6 +71,8 @@ public sealed partial class MainModel : ObservableObject
         if (WorldMode && newValue is not null && newValue.StartsWith('@')) WorldMode = false;
         // 会话、群（同会话一样开成一个标签）：右边分屏里已经开着就切过去，没开着放进当前块
         if (newValue is null || (newValue.StartsWith('@') && GroupIdOf(newValue) is null) || newValue == oldValue) return;
+        // 新版界面正看着某个项目的一套标签时，点了别的项目的会话：先切到那个项目（同 Mac：A 项目下别冒出 B 项目的会话）
+        ProjectSpaces.Follow(newValue);
         ChatPanes.Shared.Show(newValue);
         if (WorldMode && GroupIdOf(newValue) is null) Views.World.Focus(newValue);
     }

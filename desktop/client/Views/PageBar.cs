@@ -11,18 +11,22 @@ namespace Kiteline.Views;
 /// 左边标题 + 小字，中间可放分段切换，右边一组玻璃按钮；铺在标题栏那一带，空白处能拖窗口，Windows 上右边让给窗口按钮
 public sealed class PageBar : Grid
 {
+    /// 新版界面左边那一栏里（待办、收藏）：栏名已在栏顶，这一条只放按钮、矮一点，不给窗口按钮让位
+    [ThreadStatic] public static bool InColumn;
     readonly TextBlock title;
     readonly TextBlock subtitle;
 
     public PageBar(string titleText, string? subtitleText = null, Control? center = null, IEnumerable<Control>? actions = null)
     {
-        Height = MainWindow.TitlebarHeight;
+        var inColumn = InColumn;
+        Height = inColumn ? 34 : MainWindow.TitlebarHeight;
         ColumnDefinitions = new ColumnDefinitions("*,Auto,*");
         Background = Brushes.Transparent;
         title = Ui.Text(titleText, 14, FontWeight.SemiBold).Trim();
         subtitle = Ui.Text(subtitleText ?? "", 11, color: "Text2").Trim();
         var left = Ui.VFill(0, title, subtitle).Margin(20, 0, 8, 0);
         left.VerticalAlignment = VerticalAlignment.Center;
+        left.IsVisible = !inColumn;
         SetColumn(left, 0);
         Children.Add(left);
         if (center is not null)
@@ -39,7 +43,7 @@ public sealed class PageBar : Grid
                 CornerRadius = new CornerRadius(18), Padding = new Thickness(4, 2), BorderThickness = new Thickness(0.5),
                 Child = Ui.Stack(Avalonia.Layout.Orientation.Horizontal, 2, Align.Center, list),
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(8, 0, 16 + MainWindow.CaptionWidth, 0),
+                Margin = inColumn ? new Thickness(8, 0, 8, 0) : new Thickness(8, 0, 16 + MainWindow.CaptionWidth + MainWindow.CornerReserve, 0),
             };
             group.Res(Border.BackgroundProperty, "Glass").Res(Border.BorderBrushProperty, "GlassEdge");
             SetColumn(group, 2);

@@ -552,4 +552,30 @@ public static class Dialogs
         Dialog.Show(window, modal: true);
         return done.Task;
     }
+
+    /// 三选一（同 Mac 关有改动的文件时的 NSAlert）：→ 1 = primary（保存）、2 = secondary（不保存，红字）、0 = 取消
+    public static Task<int> Choose(string message, string primary, string secondary)
+    {
+        var done = new TaskCompletionSource<int>();
+        Window? window = null;
+        void Pick(int n) { done.TrySetResult(n); window?.Close(); }
+        var buttons = new Grid { ColumnDefinitions = new ColumnDefinitions("*,10,*,10,*") };
+        var no = PromptCard.CardButton(secondary, false, () => Pick(2), "Removed");
+        var cancel = PromptCard.CardButton(L("取消"), false, () => Pick(0));
+        var ok = PromptCard.CardButton(primary, true, () => Pick(1));
+        Grid.SetColumn(no, 0); Grid.SetColumn(cancel, 2); Grid.SetColumn(ok, 4);
+        buttons.Children.Add(no); buttons.Children.Add(cancel); buttons.Children.Add(ok);
+        var stack = new StackPanel { Spacing = 16, Children = { Ui.Text(message, 13, lines: 0).Wrap(), buttons } };
+        window = new Window
+        {
+            Width = 460, SizeToContent = SizeToContent.Height, CanResize = true, MinWidth = 360, MinHeight = 120, ShowInTaskbar = false, Title = "",
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, FontFamily = Look.Family,
+        };
+        window.Content = Dialog.WithTitleBar(window, stack.Pad(20, 4, 20, 20));
+        window.Res(Window.BackgroundProperty, "Sheet");
+        Dialog.Chromeless(window, titleBar: true);
+        window.Closed += (_, _) => done.TrySetResult(0);
+        Dialog.Show(window, modal: true);
+        return done.Task;
+    }
 }

@@ -21,6 +21,8 @@ public sealed class MainWindow : Window
     public const double TitlebarHeight = 52;
     /// 右上角窗口按钮占的宽度（Windows 是系统的三个按钮，Linux 是自己画的）
     public static double CaptionWidth => WindowChrome.CaptionWidth;
+    /// 窗口按钮左边再让给「新版界面 / 经典界面」切换按钮的宽度（LayoutSwitch，同 Mac 的 reserveTitlebarTrailing）
+    public static double CornerReserve { get; private set; } = 112;
 
     readonly AppModel model = AppModel.Shared;
     readonly MainModel main = MainModel.Shared;
@@ -28,9 +30,10 @@ public sealed class MainWindow : Window
     ColumnDefinition sidebarColumn = new();
     /// 左边栏和它右边的细线、拖宽度的把手：世界模式里收起会话列表时一起藏起来
     Control? sidebarPanel, sidebarSplitter;
-    /// 侧栏那一列的宽度、最小宽度（面板宽 + 两边空隙）
-    static double SidebarColumnWidth => (Prefs.Number("sidebarWidth") ?? SidebarView.Width0) + SidebarGlass.Gap * 2;
-    static double SidebarMin => 260 + SidebarGlass.Gap * 2;
+    /// 侧栏那一列的宽度、最小宽度（经典：面板宽 + 两边空隙；新版：图标栏 + 一栏内容）
+    static double SidebarColumnWidth => Layout.New ? SideMetric.Rail + (Prefs.Number("railSideWidth") ?? 300) : (Prefs.Number("sidebarWidth") ?? SidebarView.Width0) + SidebarGlass.Gap * 2;
+    static double SidebarMin => Layout.New ? SideMetric.Rail + 220 : 260 + SidebarGlass.Gap * 2;
+    static double SidebarMax => Layout.New ? SideMetric.Rail + 640 : 400 + SidebarGlass.Gap * 2;
     /// 侧栏顶上的世界入口（进了世界底下一道主题色）
     WorldGlobe? globe;
     Icon? flowIcon;
@@ -121,6 +124,12 @@ public sealed class MainWindow : Window
             Build();
             UpdateGlass();
         };
+        // 换了经典 / 新版界面：整个窗口重搭（右边的会话分屏是同一份数据，不重开会话）
+        Layout.Changed += () =>
+        {
+            Build();
+            UpdateGlass();
+        };
         KeyDown += OnKey;
         // 切到别的程序再切回来（投递把 VS Code 切到前台又还回来、Alt+Tab）：Avalonia 不会把键盘焦点还给原来的输入框，
         // 回来接着打字没反应（10-25 Windows 实测）。记下最后获得焦点的控件，窗口重新激活时焦点没了就还回去（同 Mac 版）
@@ -140,12 +149,16 @@ public sealed class MainWindow : Window
         };
     }
 
-    /// 搭窗口里的内容（第一次、换语言时）
+    /// 搭窗口里的内容（第一次、换语言、换界面时）
     void Build()
     {
+        var corner = new LayoutSwitch();
+        corner.Margin = new Thickness(0, (TitlebarHeight - 26) / 2, CaptionWidth + 10, 0);
+        CornerReserve = corner.Reserve;
+        if (Layout.New) { BuildNew(corner); return; }
         var grid = new Grid();
         // 侧栏是浮动面板（四边离开 Gap、圆角、柔和投影）：那一列 = 面板宽 + 两边空隙；存的 sidebarWidth 仍是面板宽（同以前的列宽，升级后宽度不变）
-        sidebarColumn = new ColumnDefinition(new GridLength(SidebarColumnWidth)) { MinWidth = SidebarMin, MaxWidth = 400 + SidebarGlass.Gap * 2 };
+        sidebarColumn = new ColumnDefinition(new GridLength(SidebarColumnWidth)) { MinWidth = SidebarMin, MaxWidth = SidebarMax };
         grid.ColumnDefinitions.Add(sidebarColumn);
         grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
         glass = new SidebarGlass { Margin = new Thickness(SidebarGlass.Gap) };
@@ -184,7 +197,63 @@ public sealed class MainWindow : Window
         grid.Children.Add(splitter);
         toast = new ToastLayer();
         // 会话浏览器放到「整个应用 / 全屏」：盖满整个窗口（见 BrowserViews.cs）
-        var body = new Panel { Children = { grid, BrowserLayer.Shared, toast } };
+        if (BrowserLayer.Shared.Parent is Panel oldLayer) oldLayer.Children.Remove(BrowserLayer.Shared);
+        var body = new Panel { Children = { grid, corner, BrowserLayer.Shared, toast } };
+        Frame(body);
+    }
+
+    /// 新版界面（同 Mac 版 11-20 起的新版）：最左图标栏 + 一栏内容（会话 / 项目 / 待办 / 收藏），右边上面一排项目、下面会话分屏，最底下状态栏
+    void BuildNew(LayoutSwitch corner)
+    {
+        var grid = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+        sidebarColumn = new ColumnDefinition(new GridLength(SidebarColumnWidth)) { MinWidth = SidebarMin, MaxWidth = SidebarMax };
+        grid.ColumnDefinitions.Add(sidebarColumn);
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        var side = new RailSidebar();
+        sidebarPanel = side;
+        Grid.SetColumn(side, 0);
+        KiteOverlay.Attach(this, side);
+        var splitter = new GridSplitter
+        {
+            Width = 5, MinWidth = 0, Margin = new Thickness(-3, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = Brushes.Transparent,
+            ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndCurrent,
+        };
+        splitter.DragCompleted += (_, _) => Prefs.Set("railSideWidth", sidebarColumn.ActualWidth - SideMetric.Rail);
+        Grid.SetColumn(splitter, 1);
+        sidebarSplitter = splitter;
+        detail = new ContentControl();
+        shownKind = null;
+        var detailLayers = new Panel { Children = { detail } };
+        if (World.Embedded)
+        {
+            var world = WorldPanel.Shared;
+            if (world.Parent is Panel old) old.Children.Remove(world);
+            detailLayers.Children.Add(world);
+        }
+        var strip = new ProjectStrip(SidebarTopBar(inRail: true));
+        var right = new DockPanel();
+        DockPanel.SetDock(strip, Dock.Top);
+        right.Children.Add(strip);
+        right.Children.Add(detailLayers);
+        var detailBox = new Border { Child = right, BorderThickness = new Thickness(0.5, 0, 0, 0) }.Res(Border.BackgroundProperty, "Window").Res(Border.BorderBrushProperty, "Separator");
+        Grid.SetColumn(detailBox, 1);
+        var status = new StatusBar();
+        Grid.SetRow(status, 1);
+        Grid.SetColumnSpan(status, 2);
+        grid.Children.Add(side);
+        grid.Children.Add(detailBox);
+        grid.Children.Add(splitter);
+        grid.Children.Add(status);
+        toast = new ToastLayer();
+        if (BrowserLayer.Shared.Parent is Panel oldLayer) oldLayer.Children.Remove(BrowserLayer.Shared);
+        var body = new Panel { Children = { grid, corner, BrowserLayer.Shared, toast } }.Res(Panel.BackgroundProperty, "Window");
+        ProjectList.Start();
+        Frame(body);
+    }
+
+    /// 外框（Linux 自己画的阴影、圆角、细边、窗口按钮），两套界面共用
+    void Frame(Panel body)
+    {
         if (WindowChrome.Custom)
         {
             var buttons = new CaptionButtons(this, WindowChrome.Buttons)
@@ -212,8 +281,9 @@ public sealed class MainWindow : Window
         AddHandler(PointerPressedEvent, (_, _) => Dialog.Anchor = null, Avalonia.Interactivity.RoutingStrategies.Tunnel);
     }
 
-    /// 侧栏顶上（标题栏那一带）：新任务按钮（Mac 上在红绿灯右边，这里没有红绿灯，靠左放）
-    Control SidebarTopBar()
+    /// 侧栏顶上（标题栏那一带）：新任务按钮（Mac 上在红绿灯右边，这里没有红绿灯，靠左放）；
+    /// 新版界面里放在那一栏标题右边（inRail），小一号
+    Control SidebarTopBar(bool inRail = false)
     {
         var compose = new Tap(Ui.Sym("square.and.pencil", 15, "Text"), () => main.NewTask(), 18)
         {
@@ -236,6 +306,9 @@ public sealed class MainWindow : Window
         flow.Res(Border.BorderBrushProperty, "GlassEdge");
         flow.Tip(L("数据流大屏：所有会话读了什么、做了什么、产出去了哪，连成一块屏（Ctrl+Shift+D）"));
         UpdateWorldButtons();
+        if (inRail)
+            foreach (var b in new Control[] { compose, world, flow }) { b.Width = 30; b.Height = 30; }
+        if (inRail) return Ui.H(4, compose, world, flow).Margin(0, 0, SideMetric.Edge, 0);
         var bar = Ui.H(8, compose, world, flow).Margin(SidebarGlass.Gap + 12 + WindowChrome.CaptionLeftWidth, SidebarGlass.Gap + 8, 16, 0);
         bar.VerticalAlignment = VerticalAlignment.Top;
         bar.HorizontalAlignment = HorizontalAlignment.Left;
@@ -380,6 +453,22 @@ public sealed class MainWindow : Window
     void UpdateDetail(bool force = false)
     {
         var selection = main.Selection;
+        if (Layout.New && selection is MainModel.TodayId or MainModel.UsageId or MainModel.TodosId or MainModel.FavoritesId or MainModel.ProjectsId or MainModel.HistoryId)
+        {
+            var picked = selection;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                switch (picked)
+                {
+                    case MainModel.TodayId or MainModel.UsageId: PagePopup.Show(picked); break;
+                    case MainModel.TodosId: Layout.SideTab = "todos"; break;
+                    case MainModel.FavoritesId: Layout.SideTab = "favorites"; break;
+                    default: Layout.SideTab = "projects"; break;   // 历史会话在新版里不单独成页：项目栏里每个项目有「最近的会话」（同 Mac）
+                }
+                if (main.Selection == picked) main.Selection = ChatPanes.Shared.Focused;
+            });
+            return;
+        }
         var kind = selection switch
         {
             MainModel.TodayId => "today",
@@ -418,7 +507,10 @@ public sealed class MainWindow : Window
         if (ctrl && e.Key == Key.T) { panes.NewTab(panes.FocusId); main.Selection = null; e.Handled = true; }
         else if (ctrl && e.Key == Key.W && !shift)
         {
-            if (panes.PaneById(panes.FocusId) is { } pane) panes.CloseTab(pane.Id, pane.Key);
+            if (panes.PaneById(panes.FocusId) is { } pane)
+            {
+                if (CodeTabs.Is(pane.Key)) CodeTabs.Close(pane.Id, pane.Key!); else panes.CloseTab(pane.Id, pane.Key);
+            }
             e.Handled = true;
         }
         else if (ctrl && e.Key == Key.Tab && panes.PaneById(panes.FocusId) is { Tabs.Count: > 1 } p)

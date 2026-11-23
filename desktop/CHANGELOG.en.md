@@ -1,5 +1,16 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.57 (2026-11-23)
+
+### New Features
+
+- **New layout** (Windows, Linux): the same new layout as the Mac app. The classic layout stays the default, and you can switch anytime with the button in the top-right corner of the window. An icon bar on the far left switches between sessions, projects, to-dos, and favorites; Today and Usage open in windows you can move and resize. Select a project in the Projects sidebar to see its running and recent sessions, plus files, source control, branches and sessions, and commit history. A row across the top holds the projects you've opened, and switching projects switches the session tabs with them. Files, changes, and commit history open as tabs alongside sessions and can be split side by side or top and bottom. A status bar at the bottom shows sources, phones, Kiteline's CPU and memory, session counts, today's tokens, and plan limits for each computer. When you close a file with unsaved changes, you can save, discard, or cancel.
+- **Send messages to the new Codex desktop app from your phone**: Starting with version 26.11, the Codex desktop app no longer supports the way Kiteline used to operate its sessions, so they were view-only on your phone. You can now reply from your phone to sessions in the new Codex desktop app, and to Codex sessions running in the terminal with --no-daemon. Messages are sent right away when Codex is idle, or queued and sent when the current turn ends; after you interrupt Codex, they're sent once you resume or send another message there. The session needs to have been opened in Codex; approvals, answering questions, and interrupting still happen in Codex.
+
+### Bug Fixes
+
+- When browsing files, if the project folder no longer exists or the computer isn't connected, the reason is shown instead of an endless loading state.
+
 ## 1.0.56 (2026-11-23)
 
 ### Fixes

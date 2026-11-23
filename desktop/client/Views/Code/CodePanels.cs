@@ -17,15 +17,23 @@ public sealed partial class CodeWindow
 {
     // MARK: 资源管理器
 
+    /// 根目录读不到的原因（显示在资源管理器里）
+    string? rootError;
+
     async Task LoadFolder(string folder)
     {
+        if (folder.Length == 0) rootError = null;
         try
         {
             var list = await CodeApi.List(key, folder);
             listings[folder] = list.Arr("entries").Items().ToList();
             if (folder.Length == 0) rootName = CodePaths.Name((list.Str("root") ?? "").Replace('\\', '/').TrimEnd('/'));
         }
-        catch (Exception e) { if (folder.Length == 0) AppModel.Shared.Flash(e.Message); }
+        catch (Exception e)
+        {
+            // 根目录读不到（文件夹已删除、电脑没连上）：在列表的位置写明原因，别一直停在骨架上
+            if (folder.Length == 0) rootError = e.Message;
+        }
         if (activity == "explorer") DrawSidebar();
     }
 
@@ -62,7 +70,9 @@ public sealed partial class CodeWindow
             }
         }
         Walk("", 0);
-        if (!listings.ContainsKey("")) rows.Children.Add(new SkeletonView(SkeletonKind.IconRows, 8).Margin(8, 8, 8, 0));
+        if (!listings.ContainsKey("") && rootError is string failed)
+            rows.Children.Add(Ui.H(6, Ui.Sym("exclamationmark.triangle", 11.5, "Orange"), Ui.Text(failed, 12, color: "Text2", lines: 0).Wrap().Shrink()).Margin(12, 10, 12, 0));
+        else if (!listings.ContainsKey("")) rows.Children.Add(new SkeletonView(SkeletonKind.IconRows, 8).Margin(8, 8, 8, 0));
         var head = Ui.H(4, Ui.Text((rootName.Length > 0 ? rootName : L("项目")).ToUpperInvariant(), 11.5, FontWeight.SemiBold, "Text2").Trim().Shrink(), new Spacer(),
             IconButton("doc.badge.plus", L("新建文件"), () => NewItem("", false)),
             IconButton("folder", L("新建文件夹"), () => NewItem("", true)),
@@ -277,7 +287,7 @@ public sealed partial class CodeWindow
 
     async Task Upload(string folder)
     {
-        var picked = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = true, Title = L("上传文件到这里…") });
+        var picked = await Host.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = true, Title = L("上传文件到这里…") });
         var count = 0;
         foreach (var file in picked)
         {

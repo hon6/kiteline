@@ -41,6 +41,47 @@ public sealed partial class CodeWindow
     public static CodeWindow? Last { get; private set; }
     public Window Window => window;
 
+    /// 三种用法：Window = 独立的代码窗口（经典界面、会话里的「文件」「改动」）；
+    /// Side = 新版界面项目栏里的文件侧栏（顶上一排图标页签切资源管理器 / 源代码管理 / 分支与会话 / 提交历史，同 Mac 的 TarsProjectSide）；
+    /// Tab = 主窗口分屏里的一个文件标签（@code:…，见 CodeTabs）：只有编辑区，没有自己的标签栏
+    public enum CodeMode { Window, Side, Tab }
+    /// 按哪个会话找电脑和目录
+    public string SessionKey => key;
+    readonly CodeMode mode;
+    /// Side / Tab 用法里要挂到主窗口上的那一块
+    public Control? View { get; private set; }
+    /// 弹选文件框、剪贴板用：自己的窗口，嵌在主窗口里时是主窗口
+    TopLevel Host => mode == CodeMode.Window ? window : (View is not null ? TopLevel.GetTopLevel(View) : null) ?? (TopLevel?)MainWindow.Current ?? window;
+
+    /// 嵌在主窗口里的文件侧栏（新版界面项目栏下半块）
+    public static CodeWindow Side(string key, string activity = "explorer")
+    {
+        var w = new CodeWindow(key, CodeMode.Side) { activity = activity };
+        w.DrawSidebar();
+        w.DrawActivityBar();
+        _ = w.Begin();
+        return w;
+    }
+
+    /// 主窗口分屏里的一个文件 / 改动 / 历史 / 提交标签
+    public static CodeWindow ForTab(string key, string kind, string path, string? mode, string? commit, string? oldPath)
+    {
+        var w = new CodeWindow(key, CodeMode.Tab);
+        w.OpenTab(new Tab(kind, path, mode, commit, oldPath));
+        _ = w.Begin();
+        return w;
+    }
+
+    /// 这个标签（Tab 用法）有没保存的修改
+    public bool Dirty => tabs.Any(t => code.IsDirty(t.Id));
+
+    /// 标签上写的字（同独立窗口里的标签）
+    public static string TabTitle(string kind, string path, string? mode, string? commit) => new Tab(kind, path, mode, commit).Title;
+    public static string TabSymbol(string kind) => new Tab(kind).Symbol;
+
+    /// Tab 用法：保存（关标签前问「保存」时用）
+    public Task<bool> SaveAll() => tabs.FirstOrDefault(t => t.Kind == "file") is { } t ? Save(t) : Task.FromResult(true);
+
     sealed record Tab(string Kind, string Path = "", string? Mode = null, string? Commit = null, string? OldPath = null)
     {
         public string Id => Kind switch
@@ -97,9 +138,10 @@ public sealed partial class CodeWindow
     readonly ContentControl titleBranch = new();
     const double TitleHeight = 44;
 
-    CodeWindow(string key)
+    CodeWindow(string key, CodeMode mode = CodeMode.Window)
     {
         this.key = key;
+        this.mode = mode;
         Last = this;
         repo = RepoStates.Get(key);
         diff = new DiffView(code);
@@ -143,6 +185,34 @@ public sealed partial class CodeWindow
         grid.Children.Add(splitter);
         grid.Children.Add(main);
         splitter.DragDelta += (_, e) => sideColumn.Width = Math.Clamp(sideColumn.Width + e.Vector.X, 200, 560);
+        if (mode != CodeMode.Window)
+        {
+            // 嵌在主窗口里：不要自己的窗口（留一个不显示的占位，别处的 window.Title 之类照常写）
+            window = new Window();
+            grid.Children.Clear();
+            sideColumn.Child = null;
+            bar.Child = null;
+            if (mode == CodeMode.Side)
+            {
+                activityBar.Orientation = Orientation.Horizontal;
+                activityBar.Spacing = 2;
+                activityBar.Margin = new Thickness(8, 4, 8, 2);
+                var side = new DockPanel();
+                DockPanel.SetDock(activityBar, Dock.Top);
+                side.Children.Add(activityBar);
+                side.Children.Add(sidebar);
+                View = side;
+            }
+            else
+            {
+                tabRow.IsVisible = false;
+                main.Children.Remove(tabRow);
+                View = main.Res(DockPanel.BackgroundProperty, "Window");
+            }
+            code.DirtyChanged += (_, _) => Dispatcher.UIThread.Post(CodeTabs.NotifyChanged);
+            DrawActivityBar(); DrawTabs(); DrawHeader(); DrawNative(); DrawStatus(); DrawTitle();
+            return;
+        }
         var root = new DockPanel();
         DockPanel.SetDock(titleBar, Dock.Top);
         root.Children.Add(titleBar);
@@ -195,7 +265,7 @@ public sealed partial class CodeWindow
         await Task.WhenAll(repo.Refresh(), LoadFolder(""));
         titleText.Text = repo.Overview?.Name is { Length: > 0 } name ? name : rootName;
         window.Title = titleText.Text;
-        DrawSidebar();
+        if (mode != CodeMode.Tab) DrawSidebar();
     }
 
     void ToggleMaximize() => window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
@@ -219,14 +289,18 @@ public sealed partial class CodeWindow
         Control Button(string id, string symbol, string tip, int badge = 0, bool muted = false, Action? action = null)
         {
             var on = id == activity || (id == "history" && ActiveTab?.Kind == "history");
-            var icon = Ui.Sym(symbol, 18, on ? "Text" : "Text3");
-            var cell = new Panel { Width = 46, Height = 40, Children = { icon.HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center) } };
-            if (on && id != "history") cell.Children.Add(new Border { Width = 2.5, Height = 22, CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left }.Res(Border.BackgroundProperty, "Accent"));
+            var across = mode == CodeMode.Side;
+            var icon = Ui.Sym(symbol, across ? 15 : 18, on ? "Text" : "Text3");
+            var cell = new Panel { Width = across ? 40 : 46, Height = across ? 30 : 40, Children = { icon.HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center) } };
+            if (on && id != "history")
+                cell.Children.Add(across
+                    ? new Border { Height = 2, Width = 18, CornerRadius = new CornerRadius(1), VerticalAlignment = VerticalAlignment.Bottom }.Res(Border.BackgroundProperty, "Accent")
+                    : new Border { Width = 2.5, Height = 22, CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left }.Res(Border.BackgroundProperty, "Accent"));
             if (badge > 0)
                 cell.Children.Add(new Border
                 {
                     MinWidth = 16, Height = 16, CornerRadius = new CornerRadius(8), Padding = new Thickness(4, 0), HorizontalAlignment = HorizontalAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 6, 4),
+                    VerticalAlignment = across ? VerticalAlignment.Top : VerticalAlignment.Bottom, Margin = across ? new Thickness(0, 1, 2, 0) : new Thickness(0, 0, 6, 4),
                     Child = Ui.Text(Math.Min(badge, 99).ToString(), 9.5, FontWeight.Bold, "White").HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center),
                 }.Res(Border.BackgroundProperty, muted ? "Text3" : "Accent"));
             return new Tap(cell, action ?? (() => { activity = id; DrawActivityBar(); DrawSidebar(); }), 6).Keys("Transparent", "Fill08").Tip(tip);
@@ -252,6 +326,12 @@ public sealed partial class CodeWindow
 
     void OpenTab(Tab tab)
     {
+        // 文件侧栏、文件标签里再点开的文件 / 改动 / 历史：在主窗口的分屏里开成标签（同 Mac 新版界面：和会话标签混排、随便分屏）
+        if (mode == CodeMode.Side || (mode == CodeMode.Tab && tabs.Count > 0 && tabs.All(t => t.Id != tab.Id)))
+        {
+            CodeTabs.Open(key, tab.Kind, tab.Path, tab.Mode, tab.Commit, tab.OldPath);
+            return;
+        }
         if (tabs.All(t => t.Id != tab.Id))
         {
             var index = tabs.FindIndex(t => t.Id == active);
@@ -554,7 +634,7 @@ public sealed partial class CodeWindow
     static Tap IconButton(string symbol, string tip, Action action) =>
         (Tap)new Tap(Ui.Sym(symbol, 12, "Text2").HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center).Size(24, 22), action, 5).Keys("Transparent", "Fill08").Tip(tip);
 
-    void Copy(string text) { _ = window.Clipboard?.SetTextAsync(text); AppModel.Shared.Flash(L("已拷贝")); }
+    void Copy(string text) { _ = Host.Clipboard?.SetTextAsync(text); AppModel.Shared.Flash(L("已拷贝")); }
 
     void Quote(string path)
     {

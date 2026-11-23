@@ -2811,6 +2811,74 @@ for pid, (command, flag) in expect.items():
 check("没给配方的插件（zcode、cursor）launch 返回 None", all(recipes[i].launch("/tmp", None) is None
                                                          for i in ("zcode", "cursor") if i in recipes))
 
+# Codex 排队消息发送（新版桌面版、--no-daemon 终端，见 agent-integration.md（内部文档） 第八节）：往 queue_N.sqlite 加一行，
+# 持有会话的 Codex 取走就算发出。这里用一个线程冒充 Codex 取走
+print("== Codex 排队消息发送")
+os.makedirs(W.CODEX_HOME, exist_ok=True)
+qpath = os.path.join(W.CODEX_HOME, "queue_1.sqlite")
+qdb = sqlite3.connect(qpath)
+qdb.execute("create table queued_items (id text primary key not null, thread_id text not null, payload_json text not null, "
+            "queue_order integer not null, created_at_ms integer not null, updated_at_ms integer not null)")
+qdb.commit()
+qdb.close()
+W.CODEX_QUEUE_WAIT = 3
+check("排队库认得出（表和列都对）", W.codex_queue_db() == qpath)
+taken = []
+
+
+def codex_takes(after):
+    time.sleep(after)
+    db = sqlite3.connect(qpath)
+    for row in db.execute("select id, thread_id, payload_json, queue_order from queued_items").fetchall():
+        taken.append(row)
+        db.execute("delete from queued_items where id = ?", (row[0],))
+    db.commit()
+    db.close()
+
+
+threading.Thread(target=codex_takes, args=(1,), daemon=True).start()
+msg = W.codex_queue_send("t-1", "你好", [], False)
+check("空闲时被取走 → 已发送", msg == "已发送", msg)
+payload = json.loads(taken[0][2]) if taken else {}
+check("写进去的格式同 Codex 自己的（UserInput.content 里 text + text_elements，client_id）",
+      taken and taken[0][1] == "t-1" and payload.get("UserInput", {}).get("content") == [{"type": "text", "text": "你好", "text_elements": []}]
+      and payload["UserInput"].get("client_id", "").startswith("kiteline-"), taken)
+img = os.path.join(ROOT, "q.png")
+with open(img, "wb") as handle:
+    handle.write(b"\x89PNG\r\n\x1a\nfake")
+content = W.codex_queue_content("看图", [img])
+check("图片转成 data: 地址（同 Codex 把 localImage 存进队列的样子）",
+      content[1]["type"] == "image" and content[1]["image_url"].startswith("data:image/png;base64,"), content)
+msg = W.codex_queue_send("t-2", "忙时发的", [], True)
+left = sqlite3.connect(qpath).execute("select count(*) from queued_items where thread_id = 't-2'").fetchone()[0]
+check("忙时不等，留在队里回「已排队」", "已排队" in msg and left == 1, (msg, left))
+rollout = os.path.join(ROOT, "rollout-q.jsonl")
+with open(rollout, "w") as handle:
+    handle.write('{"type":"event_msg","payload":{"type":"task_started"}}\n{"type":"event_msg","payload":{"type":"turn_aborted"}}\n')
+msg = W.codex_queue_send("t-3", "中断后发的", [], False, rollout)
+left = sqlite3.connect(qpath).execute("select count(*) from queued_items where thread_id = 't-3'").fetchone()[0]
+check("上一轮被中断（排队暂停）：不撤回，如实说排队已暂停", "暂停" in msg and left == 1, (msg, left))
+with open(rollout, "w") as handle:
+    handle.write('{"type":"event_msg","payload":{"type":"task_complete"}}\n{"type":"event_msg","payload":{"type":"task_started"}}\n')
+check("一轮还没结束（不看多久没写）→ open", W.codex_rollout_turn_state(rollout) == "open")
+with open(rollout, "w") as handle:
+    handle.write('{"type":"event_msg","payload":{"type":"task_started"}}\n{"type":"event_msg","payload":{"type":"task_complete"}}\n')
+try:
+    W.codex_queue_send("t-4", "没人收", [], False, rollout)
+    check("没人取走（会话没在 Codex 里打开）→ 报错", False)
+except RuntimeError as exc:
+    left = sqlite3.connect(qpath).execute("select count(*) from queued_items where thread_id = 't-4'").fetchone()[0]
+    check("没人取走（会话没在 Codex 里打开）→ 撤回这条、提示在 Codex 中打开一次", "打开这个会话" in str(exc) and left == 0, (exc, left))
+plugin = W.CodexPlugin()
+plugin.queued = {"t-5": {"activity": "idle", "transcriptPath": None}}
+for name, call in (("按键（中断）", lambda: plugin.key("t-5", "esc")), ("回答提问", lambda: plugin.answer("t-5", [])),
+                   ("关闭", lambda: plugin.close("t-5")), ("/goal", lambda: plugin.send("t-5", "/goal 做完", []))):
+    try:
+        call()
+        check("排队发送的会话：%s 如实拒绝" % name, False)
+    except RuntimeError as exc:
+        check("排队发送的会话：%s 如实拒绝" % name, "Codex 中" in str(exc), str(exc))
+
 shutil.rmtree(ROOT, ignore_errors=True)
 if os.path.exists("/tmp/kl-agents-%d.sock" % os.getpid()):
     os.remove("/tmp/kl-agents-%d.sock" % os.getpid())

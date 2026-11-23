@@ -48,6 +48,20 @@ static class SelfTest
             {
                 case "wait": Pump(double.Parse(arg)); break;
                 case "select": main.Selection = arg.Length == 0 ? null : arg; break;
+                // 新版界面（同 Mac 的自测步骤）：layout:new|classic、sidetab:<sessions|projects|todos|favorites>、
+                // project:<项目名>（项目栏里选中它、分屏切到它那一套）/ project:off / project:file:<相对路径>（在分屏里开成文件标签）、popup:today|usage
+                case "layout": Model.Layout.Set(arg != "classic"); break;
+                case "sidetab": Model.Layout.SideTab = arg; break;
+                case "project" when arg == "off": Model.Layout.OpenProject = ""; Model.ProjectSpaces.Switch(""); break;
+                case "project" when arg.StartsWith("file:"):
+                    if (Model.ProjectList.Get(Model.Layout.OpenProject) is { } fp && Model.ProjectList.CodeKey(fp) is string ck) Model.CodeTabs.Open(ck, "file", arg[5..]);
+                    else Console.WriteLine("project:file：还没选项目或项目没有会话");
+                    break;
+                case "project":
+                    if (Model.ProjectList.Items.FirstOrDefault(x => x.Name == arg) is { } chosen) { Model.Layout.OpenProject = chosen.Id; Model.ProjectSpaces.Switch(chosen.Id); }
+                    else Console.WriteLine("project：没有项目 " + arg + "（有 " + string.Join("、", Model.ProjectList.Items.Select(x => x.Name)) + "）");
+                    break;
+                case "popup": Views.PagePopup.Show(arg == "usage" ? Model.MainModel.UsageId : Model.MainModel.TodayId); break;
                 case "tab": main.ListTab = arg; break;                                                          // 左边栏页签：sessions / groups / tabgroups
                 case "tabgroup": if (TabGroupState.Shared.Items.FirstOrDefault(x => x.Name == arg) is { } tg) TabGroupState.Shared.Activate(tg.Id); break;   // 切到这组（按名字）
                 case "tabcolor": { var parts2 = arg.Split(':'); if (TabGroupState.Shared.Items.FirstOrDefault(x => x.Name == parts2[0]) is { } tc) TabGroupState.Shared.Update(tc.Id, tc.Name, parts2[1]); break; }   // 改组的颜色（组名:颜色id）
