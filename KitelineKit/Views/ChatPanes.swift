@@ -785,6 +785,26 @@ public final class ChatPanes {
     /// 现在的分屏（怎么分、每块开着哪些标签、比例、当前块）存成一份：切到别的标签组前存下
     func layout() -> Data? { try? JSONEncoder().encode(Saved(root: Self.stored(root), focus: focusID)) }
 
+    /// 存着的一份分屏里把标签 old 换成 new（位置不动）；这份里没有 old 就返回 nil。
+    /// 新会话草稿发出后切到了别的项目：那个项目的一套已经存起来了，会话要接到存着的那套里
+    static func layout(_ data: Data, replacing old: String, with new: String) -> Data? {
+        guard var saved = try? JSONDecoder().decode(Saved.self, from: data) else { return nil }
+        var found = false
+        func walk(_ item: inout Stored) {
+            if item.tabs?.contains(old) == true || item.key == old {
+                found = true
+                item.tabs = item.tabs?.map { $0 == old ? new : $0 }
+                if item.key == old { item.key = new }
+            }
+            if var children = item.items {
+                for index in children.indices { walk(&children[index]) }
+                item.items = children
+            }
+        }
+        walk(&saved.root)
+        return found ? try? JSONEncoder().encode(saved) : nil
+    }
+
     /// 整套换成另一份（nil、存坏了 = 一块空白）。各块按存着的 id 认：切回来时 SwiftUI 认得出是同一批块。
     /// 量过的位置、大小都是旧那套的，清掉（标签多、组多时别越攒越多）
     func load(_ data: Data?) {
@@ -2685,7 +2705,7 @@ private struct PanePicker: View {
         let open = Set(panes.keys)
         let others = model.sortedSessions(sorting).filter { !open.contains($0.key) && keeps($0.key) }
         // 群同会话一样能开在这里（进行中的在前，历史群也能开：在里面发话会恢复成员）
-        let groups = model.supportsGroups ? model.groups.items.filter { !open.contains(GroupKey.make($0.id)) }
+        let groups = model.supportsGroups ? model.groups.items.filter { !open.contains(GroupKey.make($0.id)) && keeps(GroupKey.make($0.id)) }
             .sorted { model.isLive($0) && !model.isLive($1) } : []
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {

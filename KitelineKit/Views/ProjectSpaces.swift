@@ -64,6 +64,21 @@ public final class ProjectSpaces {
         if let focused = panes.focused { KitelineKit.openSession(focused) }
     }
 
+    /// 把某个标签换成另一个 key：先看正显示的那套，没有再找存着的别的项目的那几套（新会话草稿发出后切走了项目，
+    /// 会话开出来要接回它原来的项目，不能显示到现在切到的项目里）。返回是不是换成了
+    @discardableResult
+    public func replaceTab(_ old: String, with new: String) -> Bool {
+        if panes.pane(holding: old) != nil { panes.replace(old, with: new); return true }
+        for (project, data) in layouts {
+            if let changed = ChatPanes.layout(data, replacing: old, with: new) {
+                layouts[project] = changed
+                save()
+                return true
+            }
+        }
+        return false
+    }
+
     /// 这个项目有没有存着的一套
     public func hasLayout(_ project: String) -> Bool { layouts[project] != nil || project == active }
 

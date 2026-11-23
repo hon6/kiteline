@@ -71,8 +71,43 @@ extension Notification.Name {
 
 /// 草稿标签里改过的项目 / 设备 / agent（key 里的是开的时候带的；改了记在这里，标签切走再回来还在）
 @MainActor
-final class NewDrafts {
+final class NewDrafts: ObservableObject {
+    static let shared = NewDrafts()
     static var places: [String: NewDraftKey.Place] = [:]
+    /// 发送中 / 等会话开出来 / 出错提示：记在这里而不是视图的 @State。发送期间切到别的项目再切回来，标签视图会重建，
+    /// 状态留在视图里就丢了（回来是个空草稿、发出去的会话没接到这个标签上，11-23 反馈）；等会话出现的任务也不跟视图走
+    @Published var sending: Set<String> = []
+    @Published var waiting: Set<String> = []
+    @Published var messages: [String: String] = [:]
+
+    /// 等新会话出现（最多 3 分钟，远端开 VS Code 要一阵），出现了就把这个草稿标签换成它。不依赖标签视图还在不在
+    @MainActor
+    static func adopt(key: String, place: NewDraftKey.Place, before: Set<String>, preId: String?, followUp: String?, draft: DraftLaunch) {
+        let model = KitelineModel.shared
+        let drafts = NewDrafts.shared
+        let expected = preId.map { place.sourceId + "#" + $0 }
+        Task { @MainActor in
+            for _ in 0..<360 {
+                let fresh = expected.flatMap { id in model.sessions.first { $0.id == id } }
+                    ?? model.sessions.first(where: { $0.sourceId == place.sourceId && $0.cwd == place.cwd && !before.contains($0.id) })
+                if let fresh {
+                    NewDrafts.places[key] = nil
+                    // 发送期间切到了别的项目：草稿标签在存起来的那套里，会话接到那里去。绝不能显示到现在这个项目的标签下（11-23）；
+                    // 找不到草稿标签（用户自己关了）就不显示，会话在项目里、会话列表里都有
+                    KitelineKit.projectSpaces.replaceTab(key, with: fresh.id)
+                    drafts.waiting.remove(key)
+                    if KitelineKit.panes.focused == fresh.id { model.selection = fresh.id }
+                    let carried = fresh.id == expected
+                    KitelineKit.afterDraftStart(key: fresh.id, carried: carried, mode: draft.mode, modelId: draft.model,
+                                            effort: draft.effort, followUp: followUp)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            drafts.waiting.remove(key)
+            drafts.messages[key] = L("消息已发出，但新会话还没有出现在列表中。可以在左侧会话列表中查看，或稍后再试。")
+        }
+    }
 }
 
 struct NewSessionDraftView: View {
@@ -82,9 +117,16 @@ struct NewSessionDraftView: View {
     @State private var place: NewDraftKey.Place?
     /// 整页多高（终端面板最高占到它的八成五，同会话页）
     @State private var height: CGFloat = 600
-    @State private var sending = false
-    @State private var waiting = false
-    @State private var message: String?
+    @ObservedObject private var drafts = NewDrafts.shared
+    private var sending: Bool {
+        get { drafts.sending.contains(key) }
+        nonmutating set { if newValue { drafts.sending.insert(key) } else { drafts.sending.remove(key) } }
+    }
+    private var waiting: Bool { drafts.waiting.contains(key) }
+    private var message: String? {
+        get { drafts.messages[key] }
+        nonmutating set { drafts.messages[key] = newValue }
+    }
     /// 每台电脑上除了 Claude Code 还能后台运行哪几家（问过的记着）
     @State private var launchable: [String: [NewTaskSheet.LaunchAgent]] = [:]
 
@@ -274,14 +316,13 @@ struct NewSessionDraftView: View {
     private func launch(place: NewDraftKey.Place, source: SourceConfig, prompt: String, followUp: String?, draft: DraftLaunch) {
         // 先记下这个目录里已经有的会话：新出现的那个就是这次开的
         let before = Set(model.sessions.filter { $0.sourceId == place.sourceId && $0.cwd == place.cwd }.map(\.id))
-        let started = Date()
         let preId = preassigned(place) ? futureSessionId : nil
         let finish: (NewSession.Outcome) -> Void = { outcome in
             sending = false
             guard outcome.ok else { message = outcome.message; return }
             KitelineKit.clearDraft(key)
-            waiting = true
-            adopt(place: place, before: before, since: started, preId: preId, followUp: followUp, draft: draft)
+            NewDrafts.shared.waiting.insert(key)
+            NewDrafts.adopt(key: key, place: place, before: before, preId: preId, followUp: followUp, draft: draft)
         }
         if place.agent == Agents.defaultID {
             var options: [String: String] = [:]
@@ -293,30 +334,6 @@ struct NewSessionDraftView: View {
             MobileServer.startAgent(source, cwd: place.cwd, prompt: prompt, submit: true, sessionId: nil, agent: place.agent, accepted: { _ in }) { outcome in
                 DispatchQueue.main.async { finish(outcome) }
             }
-        }
-    }
-
-    /// 等新会话出现（最多 3 分钟，远端开 VS Code 要一阵），出现了就把这个草稿标签换成它。
-    /// 预先定了编号的认那个编号；启动时没带上设置的（在 VS Code 里开了）在会话里再切，设了目标的再发输入框里的话
-    private func adopt(place: NewDraftKey.Place, before: Set<String>, since: Date, preId: String?, followUp: String?, draft: DraftLaunch) {
-        let expected = preId.map { place.sourceId + "#" + $0 }
-        Task { @MainActor in
-            for _ in 0..<360 {
-                let fresh = expected.flatMap { id in model.sessions.first { $0.id == id } }
-                    ?? model.sessions.first(where: { $0.sourceId == place.sourceId && $0.cwd == place.cwd && !before.contains($0.id) })
-                if let fresh {
-                    NewDrafts.places[key] = nil
-                    KitelineKit.panes.replace(key, with: fresh.id)
-                    model.selection = fresh.id
-                    let carried = fresh.id == expected
-                    KitelineKit.afterDraftStart(key: fresh.id, carried: carried, mode: draft.mode, modelId: draft.model,
-                                            effort: draft.effort, followUp: followUp)
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(500))
-            }
-            waiting = false
-            message = L("消息已发出，但新会话还没有出现在列表中。可以在左侧会话列表中查看，或稍后再试。")
         }
     }
 }

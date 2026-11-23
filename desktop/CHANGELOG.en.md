@@ -1,5 +1,11 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.56 (2026-11-23)
+
+### Fixes
+
+- Editing a queued message: Return now saves (Shift+Return for a new line).
+
 ## 1.0.55 (2026-11-23)
 
 ### Improvements

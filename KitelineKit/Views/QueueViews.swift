@@ -149,6 +149,10 @@ struct QueueStrip: View {
                 .font(.ui(.subheadline))
                 .lineLimit(1...6)
                 .focused($focused)
+                // 输入框是点了编辑才出现的，同一刻设 focused 不生效：出现后再聚焦，光标放进去直接改（11-23 反馈：还要我点一下输入框）
+                .task { try? await Task.sleep(nanoseconds: 60_000_000); focused = true }
+                // 回车直接保存（Mac；换行用 ⌥回车）；iPhone 的回车仍是换行，点「保存」
+                .onSubmit { save(row) }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -159,11 +163,7 @@ struct QueueStrip: View {
                 }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                Button(L("保存")) {
-                    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    editing = nil
-                    if !text.isEmpty, text != row.text { act(row, "edit", text: text) } else { act(row, "release") }
-                }
+                Button(L("保存")) { save(row) }
                 .buttonStyle(.plain)
                 .fontWeight(.semibold)
                 .foregroundStyle(Theme.claude)
@@ -173,6 +173,13 @@ struct QueueStrip: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private func save(_ row: ChatStore.QueueRow) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        editing = nil
+        if text != row.text { act(row, "edit", text: text) } else { act(row, "release") }
     }
 
     /// 斜杠命令：「/」后面紧跟命令名，再是空白或结尾（开头是路径的「/Users/…」不算）

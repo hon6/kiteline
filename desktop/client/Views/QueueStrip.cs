@@ -99,7 +99,7 @@ public sealed class QueueStrip : Panel
         return new Border { Child = line, Padding = new Thickness(12, 0, 8, 0), MinHeight = 36 };
     }
 
-    /// 编辑：多行输入框 + 取消 / 保存（Ctrl+Enter 保存、Esc 取消）
+    /// 编辑：多行输入框 + 取消 / 保存（Enter 保存（Shift+Enter 换行）、Esc 取消）
     Control Editor(ChatStore.QueueRow row)
     {
         var input = new TextBox
@@ -120,7 +120,7 @@ public sealed class QueueStrip : Panel
         // Ctrl+回车保存不了、只多出一行（11-20 真窗口点测发现）。同 Composer 的写法
         input.AddHandler(InputElement.KeyDownEvent, (_, e) =>
         {
-            if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { Save(); e.Handled = true; }
+            if (e.Key == Key.Enter && !e.KeyModifiers.HasFlag(KeyModifiers.Shift)) { Save(); e.Handled = true; }
             else if (e.Key == Key.Escape) { editing = null; Act(row, "release"); Refresh(); e.Handled = true; }
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         var buttons = Ui.H(8,

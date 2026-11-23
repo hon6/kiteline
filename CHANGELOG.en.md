@@ -1,5 +1,19 @@
 # Kiteline Release Notes
 
+## 3.49.51 (2026-11-23)
+
+### Fixes
+
+- Editing a queued message now focuses the input automatically; Return saves (Option+Return for a new line).
+- If you switch projects while a new session is being sent, the new session now attaches to its original tab instead of appearing in the project you switched to.
+- The session picker for a split now lists only the selected project's sessions, without session groups.
+
+### Fixes
+
+- Editing a queued message now focuses the input automatically; Return saves (Option+Return for a new line).
+- If you switch projects while a new session is being sent, the new session now attaches to its original tab instead of appearing in the project you switched to.
+- The session picker for a split now lists only the selected project's sessions, without session groups.
+
 ## 3.49.50 (2026-11-23)
 
 ### Improvements
@@ -13,7 +27,7 @@
 - Fixed sessions from the new Codex desktop app (26.11 and later), and Codex terminal sessions running without the background server, not appearing in the list. The new Codex desktop app no longer lets other apps operate its sessions, so these sessions are now shown view-only: you can follow their status and full conversation, and reply in Codex.
 - Fixed messages that DeepSeek Harness sessions sent in session groups, and images, pages and to-dos they sent to your phone, not being delivered.
 - Fixed the data flow board freezing with blank gauges after switching layouts in the new interface.
-- Fixed the left sidebar changing width when entering or leaving the data flow board or World, or opening a project, in the new interface. The width you set now stays the same everywhere.
+- Fixed the left sidebar changing width in the new interface when entering or leaving the data flow board or World, opening a project, or resizing the window. The width you set now stays the same.
 - Fixed the left sidebar not collapsing on the data flow board and in World in the new interface.
 
 ## 3.49.49 (2026-11-22)
