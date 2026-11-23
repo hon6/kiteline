@@ -407,7 +407,8 @@ struct SidebarView: View {
         let projects = projectOptions
         let sources = sourceOptions
         let bySource = sources.count > 1 || activeSource != nil
-        let byProject = projects.count > 1 || activeProject != nil
+        // 项目那排看全部会话有没有不止一个项目，不看选了哪台设备：那台只有一个项目时也照样显示（11-23 反馈：选了设备项目筛选就没了）
+        let byProject = Set(model.sessions.map(\.folder).filter { !$0.isEmpty }).count > 1 || activeProject != nil
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 if model.query.isEmpty {
@@ -462,7 +463,7 @@ struct SidebarView: View {
                     if scopeOpen {
                         if bySource {
                             ScopeBar(symbol: "desktopcomputer", allTitle: L("全部设备"), options: sources,
-                                     selection: Binding(get: { activeSource?.id ?? "" }, set: { sourceFilter = $0; collapseScope() }), bleed: 0)
+                                     selection: Binding(get: { activeSource?.id ?? "" }, set: { sourceFilter = $0; if !byProject { collapseScope() } }), bleed: 0)
                         }
                         if byProject {
                             ScopeBar(symbol: "folder", allTitle: L("全部项目"), options: projects,

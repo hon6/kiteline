@@ -341,6 +341,44 @@ try:
     with open(ca_path, "a") as handle:
         handle.write(ca_line(type="system", subtype="informational", timestamp="2026-11-21T07:00:00Z", content="kiteline: reloaded"))
         handle.write(ca_line(type="ai-title", aiTitle="标题"))
+    pe_path = os.path.join(root, "peerturn.jsonl")
+    with open(pe_path, "w") as handle:
+        handle.write(ca_line(parentUuid=None, type="user", timestamp="2026-11-22T01:00:00Z", message={"role": "user", "content": "修个 bug"}))
+        handle.write(ca_line(parentUuid="a", uuid="pa", type="assistant", timestamp="2026-11-22T01:00:05Z",
+                             message={"role": "assistant", "content": [{"type": "text", "text": "修好了"}]}))
+        handle.write(ca_line(parentUuid="b", type="user", isMeta=True, origin={"kind": "peer"}, timestamp="2026-11-23T01:35:00Z",
+                             message={"role": "user", "content": "发版完成了"}))
+        handle.write(ca_line(parentUuid="c", uuid="pb", type="assistant", timestamp="2026-11-23T01:35:05Z",
+                             message={"role": "assistant", "content": [{"type": "text", "text": "收到，我这边没在改"}]}))
+    pe_scan = W.scan_transcript(pe_path)
+    check("别的会话来信那一轮不算活动：时间和列表预览停在你那一轮（11-23 发版通知把列表全顶上来）",
+          pe_scan["contentAt"] == W.parse_ts("2026-11-22T01:00:05Z") and pe_scan["message"] == "修好了" and pe_scan["turnFrom"] == "peer", str(pe_scan)[:300])
+    W._CONV_AT_CACHE.pop(pe_path, None)
+    check("项目列表 / 历史会话往前翻时也跳过来信那一轮", int(W.conversation_at(pe_path) * 1000) == W.parse_ts("2026-11-22T01:00:05Z"))
+    # peers-active：发版群发只给还在进行中的会话（正在工作 / 规划了阶段没报完成），已报完成的空闲会话不列
+    import contextlib, io
+    saved = (W.SESSIONS_DIR, W.LIVE_SESSIONS_FILE, W.STAGE_DIR)
+    pa = os.path.join(root, "peers-active")
+    W.SESSIONS_DIR, W.LIVE_SESSIONS_FILE, W.STAGE_DIR = os.path.join(pa, "sessions"), os.path.join(pa, "live.json"), os.path.join(pa, "stage")
+    os.makedirs(W.SESSIONS_DIR); os.makedirs(W.STAGE_DIR)
+    now_ms = int(time.time() * 1000)
+    for i, (label, activity, stage) in enumerate((("kl-busy", "busy", None), ("kl-plan", "idle", {"steps": ["改", "测"], "plan": now_ms, "marks": [], "doneAt": None}),
+                                                  ("kl-done", "idle", {"steps": ["改"], "plan": None, "doneAt": now_ms}), ("kl-wait", "waiting", None))):
+        sid = "pa%d-0000-0000-0000-000000000000" % i
+        with open(os.path.join(W.SESSIONS_DIR, "%d.json" % i), "w") as handle:
+            json.dump({"pid": os.getpid(), "sessionId": sid, "cwd": CWD, "name": label}, handle)
+        if stage:
+            with open(os.path.join(W.STAGE_DIR, sid + ".json"), "w") as handle:
+                json.dump(stage, handle)
+        live_rows = (W._read_json(W.LIVE_SESSIONS_FILE, {}).get("sessions") or []) + [{"sessionId": sid, "activity": activity, "busy": activity == "busy", "name": label}]
+        with open(W.LIVE_SESSIONS_FILE, "w") as handle:
+            json.dump({"sessions": live_rows}, handle)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        W.command_peers_active(["--cwd", CWD])
+    listed = [line.split("\t")[0] for line in out.getvalue().splitlines()]
+    W.SESSIONS_DIR, W.LIVE_SESSIONS_FILE, W.STAGE_DIR = saved
+    check("peers-active：正在工作、等确认、规划了没报完成的列出来，已报完成的空闲会话不列", sorted(listed) == ["kl-busy", "kl-plan", "kl-wait"], out.getvalue())
     check("项目列表 / 历史会话的最后活动（conversation_at）也不算重载和元数据",
           int(W.conversation_at(ca_path) * 1000) == W.parse_ts("2026-11-21T06:00:00Z"), str(W.conversation_at(ca_path)))
     # Claude 没起成标题（起标题的请求失败）：VS Code 标签拿用户的话当名字，列表和投递核对标签都要认这个

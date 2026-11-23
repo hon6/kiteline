@@ -352,12 +352,13 @@ public sealed class SidebarView : Panel
         var sources = model.Sources.Where(src => busy.Contains(src.Id) || src.Id == sourceId)
             .Select(src => (src.Id, src.Name, inProject.Count(s => s.SourceId == src.Id))).ToList();
         var bySource = sources.Count > 1 || sourceId is not null;
-        var byProject = projects.Count > 1 || project is not null;
+        // 项目那排看全部会话有没有不止一个项目，不看选了哪台设备：那台只有一个项目时也照样显示（11-23 反馈：选了设备项目筛选就没了）
+        var byProject = model.Sessions.Select(s => s.Folder).Where(f => f.Length > 0).Distinct().Count() > 1 || project is not null;
         var showsView = model.Sessions.Count > 1 || !IsDefaultView;
         if (bySource || byProject || showsView)
             stack.Children.Add(Ui.H(6, bySource || byProject ? ScopeSummary(bySource, byProject) : null, new Border().Grow(), showsView ? ViewMenu() : null));
         if (scopeOpen && bySource)
-            stack.Children.Add(ScopeBar.Build("desktopcomputer", L("全部设备"), sources, sourceId ?? "", id => { scopeOpen = false; main.SourceFilter = id; }));
+            stack.Children.Add(ScopeBar.Build("desktopcomputer", L("全部设备"), sources, sourceId ?? "", id => { if (!byProject) scopeOpen = false; main.SourceFilter = id; }));
         if (scopeOpen && byProject)
             stack.Children.Add(ScopeBar.Build("folder", L("全部项目"), projects, project ?? "", name => { scopeOpen = false; main.ProjectFilter = name; }));
         return stack.Margin(0, 10, 0, 2);

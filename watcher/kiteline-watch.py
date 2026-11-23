@@ -799,6 +799,8 @@ _MODE_RE = re.compile(r'"permissionMode":"(\w+)"')
 _TURN_FROM = {}   # 对话记录路径 -> 最近一轮是谁发起的（user / peer）：一轮很长时开头会滚出尾部，看到过的要记住
 # 对话记录路径 -> 最后一条真正对话（回复、工具结果、你说的话）的时间（毫秒）。尾部全是压缩附件时用记着的
 _CONTENT_AT = {}
+# 对话记录路径 -> (最后一句你参与的那一轮里的回复, uuid)：列表预览不显示会话之间往来的话（11-23 反馈：整个列表都是它们互发的）
+_OWN_MESSAGE = {}
 # 不算对话的「你说的话」：本地斜杠命令（/effort 之类）和它的输出
 _LOCAL_COMMAND_MARKS = ("<command-name>", "<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>")
 # Kiteline 送进会话的群消息：每条一行「【群「群名」· 谁】」，谁是「用户」的才是你在群里说的
@@ -872,8 +874,35 @@ def is_conversation(entry, etype, content):
     return False
 
 
+def turn_origin(entry, etype, content):
+    """这一条是不是一轮的开头、由谁发起：user（你说的话，含手机经 mod 送进来的）/ peer（别的会话来信、只有别的会话发言的群消息）/ None（不是开头）"""
+    if etype != "user" or entry.get("isCompactSummary"):
+        return None
+    if isinstance(content, str):
+        text = content.strip()
+        if entry.get("isMeta"):
+            return "peer" if peer_origin(entry) else None
+        return turn_from_prompt(text) if text and not any(mark in text for mark in _LOCAL_COMMAND_MARKS) else None
+    if isinstance(content, list):
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "text" and (not entry.get("isMeta") or bridge_said(entry)):
+                text = (b.get("text") or "").strip()
+                if text and not any(mark in text for mark in _LOCAL_COMMAND_MARKS):
+                    return turn_from_prompt(text)
+    return None
+
+
 def last_conversation_at(path, size, limit=8 * 1024 * 1024):
-    """尾部全是附件（闲置压缩会把整份文件当附件塞进来）时，往前找最后一条真正对话的时间（每次读 1MB，最多 limit）"""
+    """尾部全是附件（闲置压缩会把整份文件当附件塞进来）时，往前找最后一条真正对话的时间（每次读 1MB，最多 limit）。
+    别的会话来信引起的那一轮不算（见 scan_transcript）；没看到一轮的开头就算数"""
+    return last_own_turn(path, size, limit)[0]
+
+
+def last_own_turn(path, size, limit=8 * 1024 * 1024):
+    """往前找最后一轮不是别的会话来信引起的对话 → (最后一条的时间 毫秒, 最后一句回复, 它的 uuid, 最近一轮是谁发起的)，找不到的项是 None"""
+    latest = None
+    reply = None
+    first = None   # 往前看到的第一个开头 = 最近这一轮是谁发起的
     try:
         with open(path, "rb") as handle:
             pos = size
@@ -897,11 +926,26 @@ def last_conversation_at(path, size, limit=8 * 1024 * 1024):
                     if not isinstance(entry, dict) or entry.get("isSidechain"):
                         continue
                     message = entry.get("message")
-                    if isinstance(message, dict) and is_conversation(entry, entry.get("type"), message.get("content")):
-                        return parse_ts(entry.get("timestamp"))
+                    if not isinstance(message, dict) or not is_conversation(entry, entry.get("type"), message.get("content")):
+                        continue
+                    at = parse_ts(entry.get("timestamp"))
+                    origin = turn_origin(entry, entry.get("type"), message.get("content"))
+                    if origin and first is None:
+                        first = origin
+                    if origin == "peer":
+                        latest, reply = None, None   # 这一轮是别的会话来信引起的，整轮不算，接着往前找
+                        continue
+                    if origin == "user":
+                        return (latest or at, reply[0] if reply else None, reply[1] if reply else None, first)
+                    if latest is None:
+                        latest = at     # 回复、工具结果：先记着，看到这一轮的开头再定算不算
+                    if reply is None and entry.get("type") == "assistant" and isinstance(message.get("content"), list):
+                        text = message_from_blocks(message["content"])
+                        if text:
+                            reply = (text, entry.get("uuid"))
     except OSError:
         pass
-    return None
+    return (latest, reply[0] if reply else None, reply[1] if reply else None, first)
 
 
 _CONV_AT_CACHE = {}   # 对话记录路径 -> (大小, 修改时间, 最后一条真正对话的时间 秒)
@@ -966,6 +1010,8 @@ def scan_transcript(path):
     last_prompt = None
     turn_from = None    # 这段尾部里最后开始的一轮是谁发起的；没看到开头就用记着的
     content_at = None   # 最后一条真正对话的时间（毫秒），见 is_conversation
+    own_message = None  # 不是别的会话来信引起的那一轮里，最后一句回复
+    head_from = _TURN_FROM.get(path)   # 尾部开头那截（看不到这一轮开头）属于谁发起的一轮：上次扫描记住的
 
     for line in lines:
         line = line.strip()
@@ -1001,8 +1047,7 @@ def scan_transcript(path):
         if not isinstance(message, dict):
             continue
         content = message.get("content")
-        if is_conversation(entry, etype, content):
-            content_at = parse_ts(entry.get("timestamp")) or content_at
+        talk = is_conversation(entry, etype, content)
 
         if etype == "assistant" and isinstance(entry.get("effort"), str) and entry["effort"]:
             # 每条回复都记着这一轮实际用的思考等级：在 VS Code 里直接选的、设置里的默认值都只在这里看得到
@@ -1020,6 +1065,8 @@ def scan_transcript(path):
             if text_value:
                 last_message = text_value
                 last_uuid = entry.get("uuid")
+                if (turn_from or head_from) not in (None, "peer"):
+                    own_message = (text_value, entry.get("uuid"))
                 last_error = api_error_info(text_value, parse_ts(entry.get("timestamp"))) if entry.get("isApiErrorMessage") else None
         elif etype == "user" and isinstance(content, str):
             if "<command-name>/effort" in content:
@@ -1041,6 +1088,11 @@ def scan_transcript(path):
                 elif isinstance(block, dict) and block.get("type") == "text" and (not entry.get("isMeta") or bridge_said(entry)):
                     last_error = None   # 你又说话了（比如「继续」），之前的错误就过去了
                     turn_from = turn_from_prompt((block.get("text") or "").strip())
+        # 别的会话来信引起的一轮（来信本身和它的回复）不算活动：会话之间的往来你不用知道，
+        # 发版通知一次发给好多会话时不能把它们全顶到列表最前（11-23）。
+        # 尾部开头那截看不到这一轮的开头：沿用上次扫描记住的（head_from）；watcher 刚起、还不知道的先不算，交给 last_own_turn 往前翻
+        if talk and (turn_from or head_from) not in (None, "peer"):
+            content_at = parse_ts(entry.get("timestamp")) or content_at
 
     for tool_id in list(pending.keys()):
         if tool_id in resolved:
@@ -1052,8 +1104,6 @@ def scan_transcript(path):
         result["pendingBrief"] = brief
         break
 
-    result["message"] = last_error["text"] if last_error else clean_message(last_message)
-    result["messageUuid"] = last_uuid
     result["title"] = title
     result["customTitle"] = custom_title
     result["lastPrompt"] = last_prompt
@@ -1061,9 +1111,23 @@ def scan_transcript(path):
     if turn_from:
         _TURN_FROM[path] = turn_from
     result["turnFrom"] = _TURN_FROM.get(path)
-    if not content_at and path not in _CONTENT_AT:
-        content_at = last_conversation_at(path, size)
-        _CONTENT_AT[path] = None   # 往前翻只翻一次，找不到就退回文件时间
+    if (not content_at and path not in _CONTENT_AT) or (not own_message and path not in _OWN_MESSAGE):
+        # 尾部里没有你那一轮（全是附件，或全是会话之间的往来）：往前翻一次，找不到就退回文件时间、最后一句
+        back_at, back_text, back_uuid, back_from = last_own_turn(path, size)
+        if back_from and not turn_from and path not in _TURN_FROM:
+            _TURN_FROM[path] = back_from   # 尾部里看不到开头的这一轮是谁发起的，下次扫描沿用
+        if not content_at and path not in _CONTENT_AT:
+            content_at = back_at
+            _CONTENT_AT[path] = None
+        if not own_message and back_text:
+            own_message = (back_text, back_uuid)
+        _OWN_MESSAGE.setdefault(path, None)
+    if own_message:
+        _OWN_MESSAGE[path] = own_message
+    if not last_error and _OWN_MESSAGE.get(path):
+        last_message, last_uuid = _OWN_MESSAGE[path]
+    result["message"] = last_error["text"] if last_error else clean_message(last_message)
+    result["messageUuid"] = last_uuid
     if content_at:
         _CONTENT_AT[path] = max(content_at, _CONTENT_AT.get(path) or 0)
     result["contentAt"] = _CONTENT_AT.get(path)
@@ -5755,7 +5819,8 @@ def write_live_sessions(snapshots, last=[None]):
     """有变化才写（内容和上次一样就不动文件）"""
     rows = [{"sessionId": s.get("sessionId"), "agent": s.get("agent") or "claude-code", "pid": s.get("pid"),
              "cwd": s.get("cwd"), "name": s.get("title") or s.get("name"),
-             "busy": (s.get("activity") in _BUSY) or (s.get("status") in _BUSY), "updatedAt": s.get("updatedAt")}
+             "busy": (s.get("activity") in _BUSY) or (s.get("status") in _BUSY), "activity": s.get("activity"),
+             "updatedAt": s.get("updatedAt")}
             for s in snapshots if s.get("sessionId")]
     if rows == last[0]:
         return
@@ -7074,6 +7139,62 @@ def command_term(argv):
                 _remove_quiet(base + ext)
     print("[Kiteline] 结束，退出码 %d" % code, file=sys.stderr)
     return code if 0 <= code < 256 else 1
+
+
+def command_peers_active(argv):
+    """peers-active [--cwd 目录] [--all]：这台机器上还在进行中的 Claude Code 会话（名字就是 ListAgents 里的名字）。
+    进行中 = 正在工作 / 等确认，或者规划了任务阶段还没报 stage done（中途停下等你回话的也算）；
+    空闲且报过 stage done（或没规划、规划已过期）的算阶段性完成：发版通知这类群发消息不发给它们（11-23）。
+    --all 连已完成的一起列（标「已完成」）"""
+    cwd = None
+    if "--cwd" in argv:
+        index = argv.index("--cwd")
+        cwd = os.path.realpath(argv[index + 1]) if index + 1 < len(argv) else None
+    try:
+        me = target_session(None)[0]   # 调这个命令的会话自己不列
+    except Exception:  # noqa
+        me = None
+    live = {row.get("sessionId"): row for row in (_read_json(LIVE_SESSIONS_FILE, {}).get("sessions") or []) if isinstance(row, dict)}
+    now = int(time.time() * 1000)
+    rows = []
+    try:
+        names = os.listdir(SESSIONS_DIR)
+    except OSError:
+        names = []
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        reg = _read_json(os.path.join(SESSIONS_DIR, name), {})
+        sid, pid = reg.get("sessionId"), reg.get("pid")
+        if not sid or sid == me or not isinstance(pid, int) or not pid_alive(pid):
+            continue
+        if cwd and os.path.realpath(reg.get("cwd") or "") != cwd:
+            continue
+        row = live.get(sid) or {}
+        activity = row.get("activity") or ("busy" if row.get("busy") else "idle")
+        state = _read_json(os.path.join(STAGE_DIR, "%s.json" % sid), {})
+        planned = stage_plan_active(state, now)
+        working = activity in ("busy", "waiting", "working", "running")
+        if working:
+            why = "等确认" if activity == "waiting" else "正在工作"
+        elif planned:
+            why = "任务没报完成"
+        else:
+            why = "已完成" if state.get("doneAt") else "空闲，没规划任务阶段"
+        if planned:
+            steps = state.get("steps") or []
+            marks = state.get("marks") or []
+            step = marks[-1].get("step") if marks and isinstance(marks[-1], dict) else None
+            if isinstance(step, int) and 1 <= step <= len(steps):
+                why += "，第 %d/%d 步 %s" % (step, len(steps), steps[step - 1])
+        active = working or planned
+        if active or "--all" in argv:
+            rows.append((0 if active else 1, reg.get("name") or sid[:8], "进行中" if active else "已完成", why, row.get("name") or ""))
+    for _, label, kind, why, title in sorted(rows):
+        print("%s\t%s\t%s" % (label, kind if why == kind else "%s（%s）" % (kind, why), title))
+    if not rows:
+        print("没有还在进行中的会话")
+    return 0
 
 
 def command_stage(argv):
@@ -22749,6 +22870,8 @@ if __name__ == "__main__":
         sys.exit(command_keyinfo(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "stage":
         sys.exit(command_stage(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "peers-active":
+        sys.exit(command_peers_active(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "term":
         sys.exit(command_term(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "browser":

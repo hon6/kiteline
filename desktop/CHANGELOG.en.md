@@ -1,5 +1,12 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.58 (2026-11-24)
+
+### Bug Fixes
+
+- Fixed the session list getting reshuffled by messages between sessions: exchanges between sessions (such as a notice sent to several sessions at once) no longer update a session's last-activity time or appear in the list's message preview, so the list's times, order, and previews reflect only the conversations you take part in.
+- Fixed the project filter disappearing and the filter bar collapsing right after you choose a device in the session filters: after choosing a device you can go on to choose a project, and the bar collapses once a project is chosen. The project filter also stays visible when that device has only one project.
+
 ## 1.0.57 (2026-11-23)
 
 ### New Features
