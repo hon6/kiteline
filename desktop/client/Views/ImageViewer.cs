@@ -92,7 +92,8 @@ public static class ImageViewer
             ToolGroup(ToolIcon("doc.on.doc", () => Copy(window, Original), L("拷贝图片（Ctrl+C）")),
                       ToolIcon("square.and.arrow.down", () => SaveAs(window, Original, name), L("存储为文件")),
                       ToolIcon("arrow.up.forward.app", () => OpenExternally(Original), L("用默认应用打开（可标注、另存）"))),
-            new GlassButton(L("完成"), null, () => window?.Close(), height: 32)).Pad(14, 10);
+            // 「完成」和左边几组一样放进一块玻璃胶囊（同 Mac 版，11-23 反馈：看大图窗口的按钮风格要统一），不用别的弹窗那种圆角 6 带边框的按钮
+            ToolGroup(ToolText(L("完成"), () => window?.Close()))).Pad(14, 10);
         zoom.Swipe += delta => Step(delta);
         zoom.Changed += () =>
         {
@@ -142,6 +143,11 @@ public static class ImageViewer
     static Tap ToolIcon(string symbol, Action action, string tip) =>
         (Tap)new Tap(Ui.Sym(symbol, 16).HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center), action, 14) { Width = 34, Height = 30 }
             .Keys("Transparent", "Fill10").Tip(tip);
+
+    /// 工具栏里的文字按钮（完成）：和图标按钮一样高，左右留 12（两头再加玻璃的 2，离玻璃边和上下差不多）
+    static Tap ToolText(string text, Action action) =>
+        (Tap)new Tap(Ui.Text(text, 13, FontWeight.Medium, "Text").HAlign(HorizontalAlignment.Center).VAlign(VerticalAlignment.Center), action, 14)
+            { Height = 30, Padding = new Thickness(12, 0) }.Keys("Transparent", "Fill10");
 
     /// 一组按钮放在一块玻璃上（同 Mac 版工具栏的分组）
     static Border ToolGroup(params Control?[] items) =>

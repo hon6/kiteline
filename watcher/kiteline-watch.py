@@ -5822,8 +5822,27 @@ def target_session(session_id):
 def append_outbox(session_id, entry):
     os.makedirs(OUTBOX_DIR, exist_ok=True)
     entry = dict(entry, ts=int(time.time() * 1000))
-    with open(outbox_path(session_id), "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    line = json.dumps(entry, ensure_ascii=False) + "\n"
+    path = outbox_path(session_id)
+    # Windows 上 watcher 正读着这个文件时，追加偶尔报 PermissionError(13)：退避重试约 4.5 秒（GitHub issue #4 反馈者提到的）；
+    # 写了一半失败就截回原长度，免得留下半行
+    for attempt in range(10):
+        size = None
+        try:
+            with open(path, "a", encoding="utf-8") as handle:
+                size = handle.tell()
+                handle.write(line)
+            return
+        except PermissionError:
+            if size is not None:
+                try:
+                    with open(path, "r+b") as handle:
+                        handle.truncate(size)
+                except OSError:
+                    pass
+            if attempt == 9:
+                raise
+            time.sleep(0.45)
 
 
 _TODO_STATUS = {"pending": "待处理", "doing": "进行中", "done": "已完成"}
@@ -11514,6 +11533,216 @@ def codex_goal_event(text):
     return None
 
 
+def _codex_texts(value):
+    """item_completed 里各种写法的文字（字符串 / [{"type": "text"|"Text", "text"}] / [字符串]）→ 一段"""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for part in value:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        return "\n\n".join(p for p in parts if p)
+    return ""
+
+
+def codex_completed_items(item, base, items):
+    """Codex 0.166 起 rollout 里的 event_msg/item_completed（GitHub issue #3）：有的版本、形态只记这种，不记 response_item。
+    和 response_item 重复的那份由 codex_dedup_normalizer 按「文件里先出现的为准」去掉"""
+    kind = item.get("type")
+    if kind == "UserMessage":
+        text, attached = split_attachments(_codex_texts(item.get("content")).strip())
+        if not text and not attached:
+            return []
+        text, truncated = clip(text, USER_TEXT_MAX)
+        out = dict(base(), t="user", text=text)
+        if attached:
+            out["images"] = attached
+        if truncated:
+            out["truncated"] = True
+        items.append(out)
+    elif kind == "AgentMessage":
+        text = (_codex_texts(item.get("content")) or _codex_texts(item.get("text"))).strip()
+        if text:
+            text, truncated = clip(text, ASSISTANT_TEXT_MAX)
+            out = dict(base(), t="text", text=text)
+            if truncated:
+                out["truncated"] = True
+            items.append(out)
+    elif kind == "Reasoning":
+        thought = (_codex_texts(item.get("summary_text")) or _codex_texts(item.get("summary"))
+                   or _codex_texts(item.get("raw_content")) or _codex_texts(item.get("content"))).strip()
+        items.append(dict(base(), t="thinking", text=clip(thought, ASSISTANT_TEXT_MAX)[0]))
+    elif kind == "CommandExecution":
+        tool, tool_input = codex_tool("exec_command", {"cmd": item.get("command")})
+        if isinstance(item.get("cwd"), str):
+            tool_input.setdefault("cwd", re.sub(r"^file://", "", item["cwd"]))
+        call = item.get("id")
+        items.append(dict(base(), t="tool", toolId=call, name=tool, brief=tool_brief(tool, tool_input),
+                          input=shrink(tool_input), **stage_hint(tool, tool_input)))
+        output = item.get("aggregated_output") if isinstance(item.get("aggregated_output"), str) else ""
+        code = item.get("exit_code")
+        failed = (isinstance(code, int) and code != 0) or item.get("status") in ("failed", "declined")
+        full = len(output)
+        text, truncated = clip(output.rstrip("\n"), TOOL_RESULT_MAX)
+        result = dict(base(), t="result", toolId=call, text=text, isError=bool(failed))
+        if truncated:
+            result["truncated"], result["fullLength"] = True, full
+        items.append(result)
+    elif kind == "McpToolCall":
+        name = "mcp__%s__%s" % (item.get("server") or "mcp", item.get("tool") or "tool")
+        args = item.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {"input": args}
+        tool_input = args if isinstance(args, dict) else ({"input": args} if args not in (None, "") else {})
+        call = item.get("id")
+        items.append(dict(base(), t="tool", toolId=call, name=name, brief=tool_brief(name, tool_input), input=shrink(tool_input)))
+        res = item.get("result")
+        error = item.get("error")
+        if res is not None or error:
+            if isinstance(res, dict) and isinstance(res.get("content"), list):
+                text = _codex_texts(res["content"])
+            elif isinstance(res, str):
+                text = res
+            else:
+                text = json.dumps(res if res is not None else error, ensure_ascii=False)
+            full = len(text)
+            text, truncated = clip(text, TOOL_RESULT_MAX)
+            result = dict(base(), t="result", toolId=call, text=text, isError=bool(error) or item.get("status") == "failed")
+            if truncated:
+                result["truncated"], result["fullLength"] = True, full
+            items.append(result)
+    return items
+
+
+def codex_line_keys(entry):
+    """一行 rollout 代表的是哪几项（去重用）：同一条消息 / 同一次工具调用在 response_item 和 item_completed 里各记一份，
+    两边的 id 对得上（AgentMessage = 消息 id，CommandExecution = call_id）；用户的话两边 id 不同，按「这一轮 + 文字」认"""
+    if not isinstance(entry, dict):
+        return ()
+    payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+    ptype = payload.get("type")
+    if entry.get("type") == "event_msg" and ptype == "item_completed":
+        item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
+        kind, iid = item.get("type"), item.get("id")
+        if kind == "UserMessage":
+            return (("u", payload.get("turn_id"), _codex_texts(item.get("content")).strip()[:300]),)
+        if kind == "AgentMessage" and iid:
+            return (("m", iid),)
+        if kind == "Reasoning" and iid:
+            return (("k", iid),)
+        if kind in ("CommandExecution", "McpToolCall") and iid:
+            return (("t", iid), ("r", iid))
+        return ()
+    if entry.get("type") != "response_item":
+        return ()
+    if ptype == "message":
+        if payload.get("role") == "assistant" and payload.get("id"):
+            return (("m", payload["id"]),)
+        if payload.get("role") == "user":
+            meta = payload.get("internal_chat_message_metadata_passthrough")
+            turn = meta.get("turn_id") if isinstance(meta, dict) else None
+            texts = [b.get("text").strip() for b in (payload.get("content") or [])
+                     if isinstance(b, dict) and b.get("type") == "input_text" and isinstance(b.get("text"), str)]
+            texts = [t for t in texts if t and not _codex_context_text(t)]
+            if turn and texts:
+                return (("u", turn, "\n\n".join(texts)[:300]),)
+        return ()
+    if ptype == "reasoning" and payload.get("id"):
+        return (("k", payload["id"]),)
+    if ptype in ("function_call", "custom_tool_call", "local_shell_call"):
+        return (("t", payload.get("call_id") or payload.get("id")),)
+    if ptype in ("function_call_output", "custom_tool_call_output"):
+        return (("r", payload.get("call_id")),)
+    return ()
+
+
+def _codex_context_text(text):
+    """Codex 塞进用户消息里的上下文（不是用户说的话），规则同 normalize_codex_line"""
+    tag = re.match(r"^<([A-Za-z_ ]+)>", text)
+    return bool((tag and tag.group(1) in CODEX_CONTEXT_TAGS) or text.startswith("<codex_internal_context")
+                or text.startswith("<turn_aborted>") or text.startswith("# AGENTS.md instructions"))
+
+
+class CodexDedup:
+    """按文件记每一项第一次出现在哪一行（行偏移），增量往后读；文件变短（重写）就重建。只解析可能有关的行"""
+
+    def __init__(self, path):
+        self.path, self.scanned, self.first, self.lock = path, 0, {}, threading.Lock()
+
+    def first_offset(self, key, upto):
+        with self.lock:
+            if upto >= self.scanned:
+                self._scan()
+            return self.first.get(key)
+
+    def _scan(self):
+        try:
+            size = os.path.getsize(self.path)
+        except OSError:
+            return
+        if size < self.scanned:
+            self.scanned, self.first = 0, {}
+        try:
+            with open(self.path, "rb") as handle:
+                handle.seek(self.scanned)
+                data = handle.read(size - self.scanned)
+        except OSError:
+            return
+        end = data.rfind(b"\n")
+        if end < 0:
+            return
+        cursor = self.scanned
+        for raw in data[:end].split(b"\n"):
+            offset = cursor
+            cursor += len(raw) + 1
+            if b'"item_completed"' not in raw and not (b'"response_item"' in raw and (
+                    b'"message"' in raw[:400] or b'call' in raw[:400] or b'"reasoning"' in raw[:400])):
+                continue
+            for key in codex_line_keys(parse_line(raw)):
+                self.first.setdefault(key, offset)
+        self.scanned = cursor
+
+
+_CODEX_DEDUP = {}
+_CODEX_DEDUP_LOCK = threading.Lock()
+
+
+def codex_dedup_normalizer(path):
+    """这份 rollout 的规整函数：同一项 response_item 和 item_completed 都记了时，只留文件里先出现的那份"""
+    if not path:
+        return normalize_codex_line
+    with _CODEX_DEDUP_LOCK:
+        dedup = _CODEX_DEDUP.get(path)
+        if dedup is None:
+            if len(_CODEX_DEDUP) > 100:
+                _CODEX_DEDUP.pop(next(iter(_CODEX_DEDUP)))
+            dedup = _CODEX_DEDUP[path] = CodexDedup(path)
+
+    def normalize(offset, entry):
+        items = normalize_codex_line(offset, entry)
+        if not items:
+            return items
+        keys = codex_line_keys(entry)
+        if not keys:
+            return items
+        firsts = {key: dedup.first_offset(key, offset) for key in keys}
+        if all(first is not None and first < offset for first in firsts.values()):
+            return []
+        if any(first is not None and first < offset for first in firsts.values()):
+            # 只有一部分是重复的（比如工具调用已有、结果没有）：去掉重复的那部分
+            dup_tool = firsts.get(("t", keys[0][1])) is not None and firsts.get(("t", keys[0][1])) < offset
+            dup_result = firsts.get(("r", keys[0][1])) is not None and firsts.get(("r", keys[0][1])) < offset
+            items = [it for it in items if not ((it["t"] == "tool" and dup_tool) or (it["t"] == "result" and dup_result))]
+        return items
+    return normalize
+
+
 def normalize_codex_line(offset, entry):
     """Codex rollout 的一行 → 若干对话项（id 规则同 Claude：「行偏移.序号」）。认不出的行返回空"""
     if not isinstance(entry, dict):
@@ -11534,6 +11763,8 @@ def normalize_codex_line(offset, entry):
             return [dict(base(), t="event", level="error", text="出错：%s" % payload["message"])]
         if ptype == "turn_aborted":
             return [dict(base(), t="event", text="已中断")]
+        if ptype == "item_completed" and isinstance(payload.get("item"), dict):
+            return codex_completed_items(payload["item"], base, items)
         return []
     if etype != "response_item":
         return []
@@ -12423,6 +12654,125 @@ def codex_state_db():
         if match:
             found.append((int(match.group(1)), path))
     return max(found)[1] if found else None
+
+
+# 只读兜底（GitHub issue #7）：Codex 桌面版 26.11 起删掉了 IPC 总线上的「跟随」协议（thread-owner-discovery、
+# thread-stream-state-changed、thread-follower-* 都没了，问所有者只回 no-client-found），终端版在后台服务设置不兼容时
+# 也可以选「Run without daemon this time」在自己进程里跑——这两种会话上面两条路都看不到。
+# 这里从 Codex 自己的状态库 + rollout 记录把它们按只读列出：对应的程序开着、6 小时内动过、还没被列出的。
+CODEX_FALLBACK_HOURS = 6
+CODEX_READ_ONLY = {
+    "desktop": ("新版 Codex 桌面版不再向其他应用开放会话操作，只能查看；请在 Codex 中回复",
+                "The new Codex desktop app no longer lets other apps operate its sessions, so it's view-only. Reply in Codex."),
+    "vscode": ("这一版 VS Code 中的 Codex 不再向其他应用开放会话操作，只能查看；请在 VS Code 中回复",
+               "This version of Codex in VS Code no longer lets other apps operate its sessions, so it's view-only. Reply in VS Code."),
+    "cli": ("这个 Codex 终端会话没有使用后台服务，只能查看；启动 Codex 时不加 --no-daemon（或不选「Run without daemon」），就可以从手机回复",
+            "This Codex terminal session isn't using the background server, so it's view-only. Start Codex without --no-daemon "
+            "(or don't choose \"Run without daemon\") to reply from your phone."),
+}
+
+
+def _codex_kind(originator, source):
+    text = ("%s %s" % (originator or "", source or "")).lower()
+    if "desktop" in text:
+        return "desktop"
+    if "vscode" in text:
+        return "vscode"
+    if "exec" in text or "mcp" in text or "subagent" in text:
+        return None   # codex exec、MCP 调用、子 agent：不是开着的交互会话
+    return "cli"
+
+
+def _codex_processes():
+    """开着的 Codex 程序：{"desktop": bool, "vscode": bool, "cli": [(pid, 启动时间)]}"""
+    found = {"desktop": False, "vscode": False, "cli": []}
+    for proc in process_list():
+        cmd = proc["cmd"]
+        low = cmd.lower().replace("\\", "/")
+        if ("chatgpt.app/contents/macos/" in low or "openai.codex_" in low or "/codex.app/contents/macos/" in low) and "--type=" not in low:
+            found["desktop"] = True
+        elif "openai.chatgpt" in low and "app-server" in low:   # VS Code 扩展起的私有 codex
+            found["vscode"] = True
+        else:
+            exe = os.path.basename(cmd.split()[0].strip('"')) if cmd.split() else ""
+            args = cmd.split()[1:]
+            if exe.lower() in ("codex", "codex.exe") and not any(a in ("app-server", "exec", "mcp", "mcp-server", "proxy") for a in args[:3]):
+                found["cli"].append((proc["pid"], proc.get("start")))
+            elif exe.lower() in ("node", "node.exe") and any(a.replace("\\", "/").endswith("/bin/codex.js") for a in args[:1]) \
+                    and not any(a in ("app-server", "exec", "mcp") for a in args[1:3]):
+                found["cli"].append((proc["pid"], proc.get("start")))
+    return found
+
+
+def codex_rollout_activity(path):
+    """rollout 尾部 → "busy" / "idle"：最后一个 task_started 之后没有 task_complete / turn_aborted，且最近 10 分钟还在写"""
+    try:
+        size, mtime = os.path.getsize(path), os.path.getmtime(path)
+        with open(path, "rb") as handle:
+            handle.seek(max(0, size - 256 * 1024))
+            data = handle.read()
+    except OSError:
+        return "idle"
+    started = max(data.rfind(b'"type":"task_started"'), data.rfind(b'"type": "task_started"'))
+    ended = max(data.rfind(b'"type":"task_complete"'), data.rfind(b'"type": "task_complete"'),
+                data.rfind(b'"type":"turn_aborted"'), data.rfind(b'"type": "turn_aborted"'))
+    return "busy" if started > ended and time.time() - mtime < 600 else "idle"
+
+
+def codex_fallback_snapshots(listed):
+    """状态库里该列却没被列出的 Codex 会话（见上面的说明）→ 只读快照"""
+    path = codex_state_db()
+    if not path:
+        return []
+    procs = _codex_processes()
+    if not (procs["desktop"] or procs["vscode"] or procs["cli"]):
+        return []
+    since = int(time.time()) - CODEX_FALLBACK_HOURS * 3600
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % pathname2url(path), uri=True, timeout=2)
+        try:
+            db.row_factory = sqlite3.Row
+            columns = {row[1] for row in db.execute("pragma table_info(threads)")}
+            pick = [c for c in ("id", "rollout_path", "created_at", "updated_at", "source", "cwd", "title", "cli_version",
+                                "first_user_message", "originator", "model", "reasoning_effort", "agent_path",
+                                "attached_thread_parent_id", "thread_source") if c in columns]
+            rows = db.execute("select %s from threads where archived = 0 and updated_at > ? order by updated_at desc limit 20"
+                              % ", ".join(pick), (since,)).fetchall()
+        finally:
+            db.close()
+    except Exception as exc:
+        log("Codex 只读兜底读状态库失败：%r" % exc)
+        return []
+    out = []
+    for row in rows:
+        row = dict(row)
+        tid = row.get("id")
+        if not tid or tid in listed or row.get("agent_path") or row.get("attached_thread_parent_id"):
+            continue
+        if (row.get("thread_source") or "user") not in ("user", ""):
+            continue
+        kind = _codex_kind(row.get("originator"), row.get("source"))
+        rollout = row.get("rollout_path")
+        if not kind or not rollout or not os.path.isfile(rollout):
+            continue
+        if kind == "cli":
+            # 终端会话：要有一个在这之前启动的 codex 终端进程开着（Windows 拿不到工作目录，只看时间）
+            if not any(not start or start - 5 <= (row.get("updated_at") or 0) for _, start in procs["cli"]):
+                continue
+        elif not procs[kind]:
+            continue
+        activity = codex_rollout_activity(rollout)
+        thread = {"id": tid, "cwd": row.get("cwd") or "", "path": rollout, "name": (row.get("title") or "").strip() or None,
+                  "preview": row.get("first_user_message"), "status": {"type": "active" if activity == "busy" else "idle"},
+                  "model": row.get("model"), "reasoningEffort": row.get("reasoning_effort"), "source": row.get("source"),
+                  "createdAt": row.get("created_at"), "updatedAt": row.get("updated_at"), "cliVersion": row.get("cli_version")}
+        snap = CodexLink._snapshot(thread, [], None, None, 0)
+        if not snap:
+            continue
+        snap["entrypoint"] = {"desktop": "codex-desktop", "vscode": "codex-vscode"}.get(kind, "codex")
+        snap["readOnly"], snap["readOnlyReason"], snap["readOnlyReasonEn"] = True, CODEX_READ_ONLY[kind][0], CODEX_READ_ONLY[kind][1]
+        out.append(snap)
+    return out
 
 
 # Codex 的目标（/goal，0.128 起）存在 CODEX_HOME 的 goals_N.sqlite（早几版在 state_N.sqlite）的 thread_goals 表里：
@@ -14979,6 +15329,10 @@ class CodexPlugin(AgentPlugin):
     def __init__(self):
         self.daemon = CodexLink()
         self.ipc = CodexIpcLink()
+        self.view_only = {}   # 只读兜底列出的会话 → 只读的原因（codex_fallback_snapshots）：别交给后台服务去附着
+
+    def normalizer_for(self, path):
+        return codex_dedup_normalizer(path)
 
     def usage(self, since_ms):
         """token 用量：Codex 自己的记录（rollout 里的 token_count）；它不记花费，报表里按「无费率」只算 token"""
@@ -15012,6 +15366,12 @@ class CodexPlugin(AgentPlugin):
         except Exception as exc:
             log("CodexIpcLink 快照出错：%r" % exc)
         try:
+            fallback = codex_fallback_snapshots(daemon_ids | {snap.get("sessionId") for snap in out})
+            self.view_only = {snap["sessionId"]: snap["readOnlyReason"] for snap in fallback}
+            out.extend(fallback)
+        except Exception as exc:
+            log("Codex 只读兜底出错：%r" % exc)
+        try:
             goals = codex_goals()
         except Exception as exc:
             log("Codex 目标出错：%r" % exc)
@@ -15032,7 +15392,13 @@ class CodexPlugin(AgentPlugin):
                 return False
         return self.ipc.owns(sid)
 
+    def _writable(self, sid):
+        reason = getattr(self, "view_only", {}).get(sid)
+        if reason:
+            raise RuntimeError(reason)
+
     def send(self, sid, text, images):
+        self._writable(sid)
         command = None if images else goal_command(text)
         if command:
             # /goal 不是发给模型的话：交给后台服务设定目标（Codex 终端里的 /goal 也是这样，不进对话）
@@ -15044,19 +15410,23 @@ class CodexPlugin(AgentPlugin):
         return self.daemon.send(sid, text, images)
 
     def key(self, sid, key):
+        self._writable(sid)
         return (self.ipc if self.via_ipc(sid) else self.daemon).key(sid, key)
 
     def answer(self, sid, answers):
+        self._writable(sid)
         return (self.ipc if self.via_ipc(sid) else self.daemon).answer(sid, answers)
 
     def close(self, sid):
+        self._writable(sid)
         if self.via_ipc(sid):
             raise RuntimeError("Codex 桌面版、VS Code 扩展中的会话请在 Codex 中归档")
         return self.daemon.close(sid)
 
     def closable(self, snap):
         # 桌面版、VS Code 扩展的会话在它们自己的私有进程里，IPC 总线没有归档的请求，从外面改它的会话文件不安全：不给
-        return not self.via_ipc(snap.get("sessionId") or "")
+        sid = snap.get("sessionId") or ""
+        return sid not in getattr(self, "view_only", {}) and not self.via_ipc(sid)
 
     def media(self, sid, ref, path):
         if ref.startswith(("f:", "o")):   # 手机发来的图、Kiteline 发的图：中台取
@@ -20342,8 +20712,10 @@ class Watcher:
         for sid in list(self.tailers.keys()):
             if sid not in live:
                 del self.tailers[sid]
-                self.outboxes.pop(sid, None)
                 _GOALS.pop(sid, None)
+        for sid in list(self.outboxes.keys()):
+            if sid not in live:
+                del self.outboxes[sid]
 
     def normalizer(self, session_id):
         plugin = self.plugins.get(self.agents.get(session_id))
@@ -20352,9 +20724,13 @@ class Watcher:
         return (plugin and plugin.normalizer_for(path)) or normalize_line
 
     def pump(self):
-        for sid, tailer in list(self.tailers.items()):
+        # 没有对话文件可跟的会话（DeepSeek Harness 等订阅推过来的，transcriptPath 为空）也要轮询发件箱，
+        # 否则它们的 group say / send-image / todo 永远发不出去（GitHub issue #4）
+        sids = list(self.tailers.keys()) + [s for s in list(self.outboxes.keys()) if s not in self.tailers]
+        for sid in sids:
+            tailer = self.tailers.get(sid)
             claude = self.agents.get(sid, "claude-code") == "claude-code"
-            lines, was_reset = tailer.poll()
+            lines, was_reset = tailer.poll() if tailer is not None else ([], False)
             if was_reset:
                 emit({"event": "reset", "sessionId": sid})
                 if claude:

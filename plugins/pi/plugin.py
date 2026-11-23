@@ -340,8 +340,9 @@ def create(kl):
         exe = cmd.split()[0] if cmd.split() else ""
         if os.path.basename(exe) in ("pi", "pi.exe"):
             return True
-        # Windows 上 process.title 只改控制台标题：命令行还是 node …\pi-coding-agent\dist\cli.js
-        return "pi-coding-agent" in cmd and "cli.js" in cmd
+        # Windows 上 process.title 只改控制台标题：命令行还是 node …\pi-coding-agent\dist\cli.js。
+        # oh-my-pi（pi 的分支）的包也叫 @oh-my-pi/pi-coding-agent，那是它自己的插件的事：不认，免得列出一个空的「新会话」
+        return "pi-coding-agent" in cmd and "cli.js" in cmd and "oh-my-pi" not in cmd
 
     def pi_processes():
         """本机的 pi 进程 → (工作目录, 启动时间)"""

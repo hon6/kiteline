@@ -30,11 +30,12 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 | **Kimi Code** <br><sub>[plugin](plugins/kimi-code)</sub> | CLI | Full <sup>18</sup> | View only <sup>9</sup> | Full ✓ <sup>18</sup> |
 |  | Desktop app | View only <sup>19</sup> | — | — |
 | **Muse Code** <br><sub>[plugin](plugins/muse-code)</sub> | CLI | View · Reply · Interrupt <sup>20</sup> | View only <sup>9</sup> | View · Reply · Interrupt ✓ <sup>20</sup> |
-| **pi** <br><sub>[plugin](plugins/pi)</sub> | CLI | View · Reply · Interrupt ✓ <sup>21</sup> | View · Reply · Interrupt ✓ <sup>22</sup> | View · Reply · Interrupt ✓ <sup>21</sup> |
-| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>23</sup> | View only <sup>24</sup> | View · Reply · Approve · Interrupt ✓ <sup>23</sup> |
-| **trae-agent** <br><sub>[plugin](plugins/trae-agent)</sub> | CLI | View · Reply <sup>25</sup> | View only <sup>9</sup> | View · Reply ✓ <sup>25</sup> |
-| **ZCode** <br><sub>[plugin](plugins/zcode)</sub> | Desktop app | Full ✓ <sup>26</sup> | Full ✓ <sup>26</sup> | Full ✓ <sup>26</sup> |
-|  | CLI | Full ✓ <sup>26</sup> | Full ✓ <sup>26</sup> | Full ✓ <sup>26</sup> |
+| **oh-my-pi** <br><sub>[plugin](plugins/oh-my-pi)</sub> | CLI | View · Reply · Answer · Interrupt ✓ <sup>21</sup> | View · Reply · Answer · Interrupt ✓ <sup>22</sup> | View · Reply · Answer · Interrupt ✓ <sup>21</sup> |
+| **pi** <br><sub>[plugin](plugins/pi)</sub> | CLI | View · Reply · Interrupt ✓ <sup>23</sup> | View · Reply · Interrupt ✓ <sup>24</sup> | View · Reply · Interrupt ✓ <sup>23</sup> |
+| **Qwen Code** <br><sub>[plugin](plugins/qwen-code)</sub> | CLI | View · Reply · Approve · Interrupt <sup>25</sup> | View only <sup>26</sup> | View · Reply · Approve · Interrupt ✓ <sup>25</sup> |
+| **trae-agent** <br><sub>[plugin](plugins/trae-agent)</sub> | CLI | View · Reply <sup>27</sup> | View only <sup>9</sup> | View · Reply ✓ <sup>27</sup> |
+| **ZCode** <br><sub>[plugin](plugins/zcode)</sub> | Desktop app | Full ✓ <sup>28</sup> | Full ✓ <sup>28</sup> | Full ✓ <sup>28</sup> |
+|  | CLI | Full ✓ <sup>28</sup> | Full ✓ <sup>28</sup> | Full ✓ <sup>28</sup> |
 
 1. CLI sessions need to run in tmux
 2. Codex has no desktop app for Linux
@@ -56,9 +57,11 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 18. Replying and approving need Kimi Code running in tmux, or picked when starting a task in Kiteline (runs in the background)
 19. Desktop app sessions are view-only
 20. Replying needs Muse Code running in tmux, or picked when starting a task in Kiteline (runs in the background); approving commands from your phone isn't available yet
-21. Replying and interrupting need pi running in tmux, or picked when starting a task in Kiteline (runs in the background)
-22. Reply and interrupt when it runs in a terminal window
-23. Replying and approving need Qwen Code running in tmux, or picked when starting a task in Kiteline (runs in the background)
-24. Windows has no tmux, so it's view-only
-25. Sending tasks needs trae-agent running in tmux, or picked when starting a task in Kiteline (runs in the background)
-26. Controllable from your phone with models added using an API key; models from your account sign-in are view-only; confirm turns started on your computer there
+21. Replying, answering and interrupting need omp running in tmux, or choosing it when creating a task in Kiteline (it runs in the background)
+22. Reply, answer questions and interrupt when it runs in a terminal window
+23. Replying and interrupting need pi running in tmux, or picked when starting a task in Kiteline (runs in the background)
+24. Reply and interrupt when it runs in a terminal window
+25. Replying and approving need Qwen Code running in tmux, or picked when starting a task in Kiteline (runs in the background)
+26. Windows has no tmux, so it's view-only
+27. Sending tasks needs trae-agent running in tmux, or picked when starting a task in Kiteline (runs in the background)
+28. Controllable from your phone with models added using an API key; models from your account sign-in are view-only; confirm turns started on your computer there

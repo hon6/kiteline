@@ -1,5 +1,21 @@
 # Kiteline Release Notes
 
+## 3.49.50 (2026-11-23)
+
+### Improvements
+
+- **Redesigned data flow board**: the camera now moves between close-ups, a full overview and an angled view, with motion blur during transitions. The card being worked on lights up and its connections glow in color; an operation in progress keeps its path lit and flowing until the result comes back. The four gauges at the bottom are redesigned and scroll in real time with each call.
+- The buttons at the top of the image viewer now share one style: Done uses the same rounded glass look as the zoom and copy buttons, and each button group has even spacing on all sides so it no longer looks cramped.
+
+### Bug Fixes
+
+- Fixed sessions from newer versions of Codex (0.166 and later) showing only your own messages, without Codex's replies, the commands it ran or its reasoning.
+- Fixed sessions from the new Codex desktop app (26.11 and later), and Codex terminal sessions running without the background server, not appearing in the list. The new Codex desktop app no longer lets other apps operate its sessions, so these sessions are now shown view-only: you can follow their status and full conversation, and reply in Codex.
+- Fixed messages that DeepSeek Harness sessions sent in session groups, and images, pages and to-dos they sent to your phone, not being delivered.
+- Fixed the data flow board freezing with blank gauges after switching layouts in the new interface.
+- Fixed the left sidebar changing width when entering or leaving the data flow board or World, or opening a project, in the new interface. The width you set now stays the same everywhere.
+- Fixed the left sidebar not collapsing on the data flow board and in World in the new interface.
+
 ## 3.49.49 (2026-11-22)
 
 ### New Features

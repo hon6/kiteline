@@ -5857,5 +5857,13 @@
  "；": "; ",
  "；%@ 上也有": "; also on %@",
  "；先轻点「一键安装」装上 tmux，或在电脑终端运行 %@": "; first tap “One-Click Install” to install tmux, or run %@ in Terminal on the computer",
- "；已重新建立远程连接": "; the remote connection was re-established"
+ "；已重新建立远程连接": "; the remote connection was re-established",
+ "%@ 条线": "%@ links",
+ "吞吐": "Throughput",
+ "失败 %@": "Failed %@",
+ "检查用时": "Check time",
+ "次/分": "/min",
+ "活跃": "active",
+ "缓存": "Cache",
+ "调用热度": "Call heat"
 }

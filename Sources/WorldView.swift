@@ -117,7 +117,9 @@ private struct WorldTitlebar: ViewModifier {
 private struct WorldCanvas: NSViewRepresentable {
     func makeNSView(context: Context) -> WorldContainer { WorldContainer() }
     func updateNSView(_ view: WorldContainer, context: Context) {}
-    static func dismantleNSView(_ view: WorldContainer, coordinator: ()) { WorldHost.shared.setShown(false) }
+    /// 新版界面换布局时整块按 layoutEpoch 重建：新容器先挂上网页、旧容器后拆。网页已经挂到别的容器上了就不算收起，
+    /// 否则网页被标成看不见、停画（底部四块空白、光点不走），3 分钟后整个放掉（11-23 截图：数据流有数据但不动）
+    static func dismantleNSView(_ view: WorldContainer, coordinator: ()) { WorldHost.shared.hide(from: view) }
 }
 
 final class WorldContainer: NSView {
@@ -132,7 +134,7 @@ final class WorldContainer: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         MainActor.assumeIsolated {
-            guard let window else { WorldHost.shared.setShown(false); return }
+            guard let window else { WorldHost.shared.hide(from: self); return }
             let web = WorldHost.shared.webView
             web.removeFromSuperview()
             web.frame = bounds
@@ -275,6 +277,12 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
             DispatchQueue.main.asyncAfter(deadline: .now() + (isAR ? 30 : 180), execute: work)
         }
         sendActive()
+    }
+
+    /// 某个容器要拆了 / 离开窗口：网页还挂在它上面才算收起（网页已经挪到新容器上就不管）
+    func hide(from container: NSView) {
+        if let web, let holder = web.superview, holder !== container, holder.window != nil { return }
+        setShown(false)
     }
 
     private func release() {

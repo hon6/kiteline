@@ -136,6 +136,81 @@ check("尾部扫描：最后一句回复、还在跑的工具、标题兜底", s
 items, more, _ = W.read_history(path, None, 10, W.normalize_codex_line)
 check("历史翻页用 Codex 的规整函数", [i["t"] for i in items] == ["user", "text", "tool"] and not more, str(items))
 
+# Codex 0.166 起的 event_msg/item_completed（GitHub issue #3）：只记这种的要认出来；和 response_item 都记的只留先出现的那份
+def done(item, turn="t1"):
+    return rollout_line("event_msg", {"type": "item_completed", "thread_id": "th", "turn_id": turn, "item": item})
+
+
+got = W.normalize_codex_line(5, done({"type": "CommandExecution", "id": "call_9", "command": ["/bin/zsh", "-lc", "ls -a"],
+                                      "cwd": "file:///w", "aggregated_output": "a\nb\n", "exit_code": 2, "status": "completed"}))
+check("item_completed 的命令 → 工具 + 结果（退出码非 0 算出错）",
+      [i["t"] for i in got] == ["tool", "result"] and got[0]["name"] == "Bash" and got[0]["input"]["command"] == "ls -a"
+      and got[1]["text"] == "a\nb" and got[1]["isError"] and got[0]["toolId"] == got[1]["toolId"] == "call_9", str(got))
+got = (W.normalize_codex_line(6, done({"type": "UserMessage", "id": "u1", "content": [{"type": "text", "text": "你好"}]}))
+       + W.normalize_codex_line(7, done({"type": "AgentMessage", "id": "m1", "content": [{"type": "Text", "text": "收到"}]}))
+       + W.normalize_codex_line(8, done({"type": "Reasoning", "id": "r1", "summary_text": ["想一想"], "raw_content": []}))
+       + W.normalize_codex_line(9, done({"type": "McpToolCall", "id": "mc1", "server": "fs", "tool": "read", "arguments": {"p": 1},
+                                         "result": {"content": [{"type": "text", "text": "内容"}]}})))
+check("item_completed 的用户话 / 回复 / 推理 / MCP 工具",
+      [(i["t"], i.get("text") or i.get("name")) for i in got]
+      == [("user", "你好"), ("text", "收到"), ("thinking", "想一想"), ("tool", "mcp__fs__read"), ("result", "内容")], str(got))
+
+dup_path = os.path.join(ROOT, "rollout-dup.jsonl")
+lines = [rollout_line("response_item", {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "建文件"}],
+                                        "internal_chat_message_metadata_passthrough": {"turn_id": "t1"}}),
+         done({"type": "UserMessage", "id": "u9", "content": [{"type": "text", "text": "建文件"}]}),
+         rollout_line("response_item", {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{\"cmd\": \"touch a\"}"}),
+         rollout_line("response_item", {"type": "function_call_output", "call_id": "call_1", "output": "ok"}),
+         done({"type": "CommandExecution", "id": "call_1", "command": "touch a", "aggregated_output": "ok", "exit_code": 0}),
+         done({"type": "AgentMessage", "id": "msg_1", "content": [{"type": "Text", "text": "好了"}]}),
+         rollout_line("response_item", {"type": "message", "role": "assistant", "id": "msg_1", "content": [{"type": "output_text", "text": "好了"}]}),
+         done({"type": "CommandExecution", "id": "call_2", "command": "pwd", "aggregated_output": "/w", "exit_code": 0}, "t2")]
+with open(dup_path, "w") as handle:
+    for obj in lines:
+        handle.write(json.dumps(obj, ensure_ascii=False) + "\n")
+items, more, _ = W.read_history(dup_path, None, 50, W.CodexPlugin().normalizer_for(dup_path))
+
+# 只读兜底（GitHub issue #7）：新版桌面版不再走 IPC 跟随、终端 --no-daemon 不进后台服务 → 从状态库 + rollout 只读列出
+fb_db = os.path.join(ROOT, "fb_state_5.sqlite")
+conn = sqlite3.connect(fb_db)
+conn.execute("create table threads (id text, rollout_path text, created_at int, updated_at int, source text, cwd text, title text,"
+             " archived int, originator text, thread_source text, first_user_message text)")
+now_s = int(time.time())
+for tid, src, orig, age in (("desk1", "vscode", "codex_work_desktop", 60), ("exec1", "exec", "codex_exec", 60),
+                            ("cli1", "cli", "codex-tui", 30), ("old1", "vscode", "codex_work_desktop", 9 * 3600),
+                            ("seen1", "vscode", "codex_work_desktop", 60)):
+    conn.execute("insert into threads values (?,?,?,?,?,?,?,0,?,'user','第一句')", (tid, dup_path, now_s - age, now_s - age, src, "/w", tid, orig))
+conn.commit()
+conn.close()
+real_db, real_ps = W.codex_state_db, W.process_list
+W.codex_state_db = lambda: fb_db
+try:
+    W.process_list = lambda: [{"pid": 9, "cmd": "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", "start": 1}]
+    got = W.codex_fallback_snapshots({"seen1"})
+    check("桌面版开着：6 小时内的桌面版会话只读列出（exec、太久没动的、已列出的不列；没有终端进程的终端会话不列）",
+          [(s["sessionId"], s["entrypoint"], s["readOnly"]) for s in got] == [("desk1", "codex-desktop", True)]
+          and "桌面版" in got[0]["readOnlyReason"], str([(s["sessionId"], s.get("entrypoint")) for s in got]))
+    W.process_list = lambda: [{"pid": 7, "cmd": "/usr/local/bin/codex --no-daemon", "start": now_s - 100}]
+    got = W.codex_fallback_snapshots(set())
+    check("只有终端 codex 开着：只列它启动后动过的终端会话，说明是没用后台服务",
+          [s["sessionId"] for s in got] == ["cli1"] and "后台服务" in got[0]["readOnlyReason"], str([s["sessionId"] for s in got]))
+    W.process_list = lambda: [{"pid": 7, "cmd": "/usr/local/bin/codex app-server --listen unix://", "start": 1}]
+    check("只有后台服务进程开着：不兜底", W.codex_fallback_snapshots(set()) == [])
+    fbp = W.CodexPlugin()
+    fbp.view_only = {"cli1": "只能查看"}
+    try:
+        fbp.send("cli1", "hi", [])
+        check("只读兜底的会话：发消息被拦下，不交给后台服务", False)
+    except RuntimeError as exc:
+        check("只读兜底的会话：发消息被拦下，不交给后台服务", "只能查看" in str(exc), str(exc))
+    check("只读兜底的会话不给关闭", fbp.closable({"sessionId": "cli1"}) is False)
+finally:
+    W.codex_state_db, W.process_list = real_db, real_ps
+
+check("两种都记的只留一份，只有 item_completed 的照常显示",
+      [(i["t"], i.get("text") or i.get("name")) for i in items]
+      == [("user", "建文件"), ("tool", "Bash"), ("result", "ok"), ("text", "好了"), ("tool", "Bash"), ("result", "/w")], str(items))
+
 # ---------------------------------------------------------------------------
 print("== OpenCode 消息解析")
 
@@ -1169,7 +1244,39 @@ try:
 except RuntimeError as exc:
     check("Proma 不能远程回复：说清楚", "Proma" in str(exc) and "只能查看" in str(exc), str(exc))
 watcher = W.Watcher(plugins=plugins)
+# 没有对话文件的会话（DeepSeek Harness 订阅推过来的，transcriptPath 为空）：发件箱也要轮询（GitHub issue #4）
+watcher.track([{"sessionId": "dsh-x", "transcriptPath": None, "agent": "deepseek-harness"}])
+W.append_outbox("dsh-x", {"kind": "group", "action": "say", "text": "群里说一句"})
+outbox_emitted, real_emit = [], W.emit
+W.emit = outbox_emitted.append
+try:
+    watcher.pump()
+finally:
+    W.emit = real_emit
+check("没有对话文件的会话：发件箱照样发出去",
+      any(e.get("event") == "entries" and e.get("sessionId") == "dsh-x" for e in outbox_emitted), str(outbox_emitted)[:300])
 watcher.track([done])
+check("会话不在了，发件箱的跟踪也去掉", "dsh-x" not in watcher.outboxes)
+# Windows 上 watcher 正读着时追加偶发 PermissionError：重试后写进去，只写一行
+import builtins
+real_open, fails = builtins.open, [2]
+
+
+def flaky_open(path, *args, **kwargs):
+    if str(path).endswith("dsh-y.jsonl") and args and args[0] == "a" and fails[0] > 0:
+        fails[0] -= 1
+        raise PermissionError(13, "被占用")
+    return real_open(path, *args, **kwargs)
+
+
+builtins.open = flaky_open
+try:
+    W.append_outbox("dsh-y", {"kind": "group", "action": "say", "text": "重试后发出"})
+finally:
+    builtins.open = real_open
+with open(W.outbox_path("dsh-y"), encoding="utf-8") as handle:
+    rows = [json.loads(line) for line in handle if line.strip()]
+check("发件箱写入被占用时退避重试，写进去一行", fails[0] == 0 and [r["text"] for r in rows] == ["重试后发出"], str(rows))
 check("watcher 用 Proma 的规整函数跟对话文件", watcher.normalizer("done") is not W.normalize_line
       and [i["t"] for i in watcher.normalizer("done")(0, user_line)] == ["user"])
 hist = watcher.handle({"cmd": "history", "sessionId": "done", "limit": 80})
@@ -1569,6 +1676,50 @@ huse = hermes.usage(0)
 check("Hermes：累计值涨了只记增长的部分", len(huse) == 2 and (huse[1]["input"], huse[1]["output"], huse[1]["requests"]) == (200, 30, 2)
       and abs(huse[1]["cost"] - 0.01) < 1e-9, huse)
 check("Hermes：没有 hermes 进程就没有开着的会话", hermes.sessions() == [])
+# 0.23：官方启动器是 python -I -c "…run_module('hermes_cli.main'…)"，会话 id local-…、source local，profile 有自己的库，clarify 改成 questions 列表
+os.makedirs(os.path.join(HHOME, "profiles", "work"))
+pdb = sqlite3.connect(os.path.join(HHOME, "profiles", "work", "state.db"))
+pdb.executescript(hdb.execute("select group_concat(sql, ';') from sqlite_master where type = 'table' and name not like 'sqlite_%'").fetchone()[0])
+H23 = "local-" + "3ef115ae" * 8
+pdb.execute("insert into sessions values (?, 'local', ?, 'fake-model', '新版会话', 1795399550, null)", (H23, os.getcwd()))
+pdb.execute("insert into messages (session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp) values (?, 'assistant', '', null, ?, null, 1795399551)",
+            (H23, hcall("hq", "clarify", {"questions": [{"question": "选哪个", "choices": ["继续", "取消"]}]})))
+pdb.commit()
+real_list = getattr(W, "process_list", None)
+H23_CMD = ("/Users/x/.hermes/runtime/python/bin/python3.14 -I -c import os, sys, runpy; sys.path.insert(0, '/Users/x/.hermes/hermes-agent'); "
+           "import hermes_bootstrap; runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)")
+W.process_list = lambda: [{"pid": os.getpid(), "cmd": H23_CMD},
+                          {"pid": os.getppid(), "cmd": "/Users/x/.hermes/runtime/python/bin/python3.14 -m hermes_cli.main --profile default gateway run --quiet"}]
+# 插件拿到的是载入时全局名字的副本：先换 process_list 再载入一份
+hermes23 = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "hermes")
+h23snap = hermes23.sessions()
+check("Hermes 0.23：认出新启动器的进程（不认网关子进程）、source local 的会话、profile 里的库",
+      [s["sessionId"] for s in h23snap] == [H23] and h23snap[0]["title"] == "新版会话", h23snap)
+hq, _ = hermes23.history(H23, None, 10)
+check("Hermes 0.23：clarify 的 questions 列表 → 提问卡片的选项", hq and hq[0]["input"]["questions"][0]["options"][1]["label"] == "取消", hq)
+# 自检：hermes 在跑却认不出会话（这里是一个工作目录下没有会话的进程），过了宽限期提示一次，带 Hermes 版本（install-stamp.json）
+STAMP_ROOT = os.path.join(ROOT, "hermes-src")
+os.makedirs(STAMP_ROOT)
+with open(os.path.join(STAMP_ROOT, "install-stamp.json"), "w") as handle:
+    json.dump({"displayVersion": "9.9.9", "baseVersion": "9.9.9"}, handle)
+W.process_list = lambda: [{"pid": 1, "cmd": H23_CMD.replace("/Users/x/.hermes/hermes-agent", STAMP_ROOT)}]
+emitted, real_emit = [], W.emit
+W.emit = lambda obj: emitted.append(obj)
+hermes_sc = next(p for p in W.load_external_plugins(os.path.join(os.path.dirname(WATCHER), "..", "plugins"))[0] if p.id == "hermes")
+hermes_sc.sessions()
+check("Hermes 自检：刚发现认不出的进程先不提示（有宽限期）", hermes_sc.unmatched and not emitted, (hermes_sc.unmatched, emitted))
+hermes_sc.unmatched_since -= 999
+hermes_sc.sessions()
+hermes_sc.unmatched_since -= 999
+hermes_sc.sessions()
+check("Hermes 自检：一直认不出就经 plugin_error 提示一次，带 Hermes 版本，不重复",
+      len(emitted) == 1 and emitted[0]["event"] == "plugin_error" and "9.9.9" in emitted[0]["error"] and "agentVersion=9.9.9" in emitted[0]["trace"], emitted)
+W.emit = real_emit
+if real_list:
+    W.process_list = real_list
+else:
+    del W.process_list
+pdb.close()
 hdb.close()
 del os.environ["HERMES_HOME"]
 

@@ -114,9 +114,13 @@ extension View {
     /// 工具栏按钮要是也跟着，大字号、圆体会撑破系统按标准字号画的玻璃按钮（字溢出、被窗口边裁掉）
     /// 左右各留 6 点：从对话页弹出时，系统把一组按钮画进同一块玻璃底、按内容收得很紧，两头的图标贴着边（10-25 反馈，多列时更明显）。
     /// 不管系统怎么分组，按钮自己带着边距
-    public func panelToolbarItem() -> some View {
+    /// edge：这个按钮在一组玻璃的哪一头（.leading / .trailing / .horizontal 单个成组），那一头再多留 4 点，
+    /// 让图标离玻璃左右边和离上下边差不多远（11-23 反馈：看大图的工具栏左右太挤）
+    public func panelToolbarItem(edge: Edge.Set = []) -> some View {
         #if os(macOS)
         font(.body).tint(Color.primary).padding(.horizontal, 6)
+            .padding(.leading, edge.contains(.leading) ? 4 : 0)
+            .padding(.trailing, edge.contains(.trailing) ? 4 : 0)
         #else
         self
         #endif

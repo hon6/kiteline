@@ -60,7 +60,9 @@ export function startDemo(flow) {
   const tick = () => {
     const busy = sessions.filter(s => s.activity !== 'idle');
     const s = Math.random() < .9 ? pick(busy) : pick(sessions);
-    flow.receive({ type: 'entries', key: s.key, items: call(s, Date.now()) });
+    const items = call(s, Date.now()), res = items.filter(x => x.t === 'result'), slow = items.some(x => x.t === 'tool' && x.name === 'Bash' && /test|build|pytest/.test(x.input?.command || ''));
+    flow.receive({ type: 'entries', key: s.key, items: items.filter(x => x.t !== 'result') });
+    if (res.length) setTimeout(() => flow.receive({ type: 'entries', key: s.key, items: res }), slow ? 4000 + Math.random() * 8000 : 400 + Math.random() * 2500);
     setTimeout(tick, (250 + Math.random() * 700) / Math.max(1, busy.length / 6));
   };
   setTimeout(tick, 600);

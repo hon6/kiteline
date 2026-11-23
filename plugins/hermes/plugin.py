@@ -11,6 +11,12 @@
   危险命令的确认框「Dangerous Command」：1 允许一次 / 2 本会话都允许 / 3 加入永久白名单 / 4 拒绝，方向键选、回车确认；
   clarify 提问框「Hermes needs your input」同样方向键 + 回车，最后一项是 Other 自己填。中断是 Ctrl+C（Esc 没用）。
   记录里看不出「等确认」（工具调用先写进去，确认框只在界面上），也不记中断：在 tmux 里看界面，不在的只能按最后一条消息估。
+11-23 对 0.23.3 实测（用户反馈开着两个 hermes 却一个会话都不显示）：0.20 起不再发 PyPI，官方安装器装出来的 hermes 是
+  shell 包装 `exec <python> -I -c "…runpy.run_module('hermes_cli.main'…)" 参数`，进程命令行里没有 hermes 这个词；还会自己起
+  `python -m hermes_cli.main --profile default gateway run` 子进程。会话 id 变成 local-<64 位十六进制>、source 记 local，
+  欢迎框只显示前 8 位；忙时提示换成「type to redirect this turn · Tab queues it」「ctrl+c stop」；提问框标题「Hermes Agent needs your input」，
+  clarify 参数改成 questions: [{question, choices}]；状态栏「☤ 模型 · ctx …」右边有「/ commands · @ files」。profile 各有自己的
+  state.db（~/.hermes/profiles/<名字>/），一起读。确认框、/queue、Ctrl+C、Other 自己填没变。
 回复、确认、中断：会话在 tmux 里跑时经 tmux 发字、按键；忙时发的消息用 /queue 排到这一轮之后（直接发会打断这一轮）。
 """
 import json
@@ -25,9 +31,18 @@ from urllib.request import pathname2url
 TOOLS = {"terminal": "Bash", "read_file": "Read", "write_file": "Write", "patch": "Edit", "search_files": "Grep",
          "todo": "TodoWrite", "clarify": "AskUserQuestion", "delegate_task": "Agent"}
 TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "completed": "completed", "cancelled": "completed"}
-SESSION_LINE = re.compile(r"Session:\s+(\d{8}_\d{6}_[0-9a-f]{6})")
-BUSY_MARKS = ("Ctrl+C cancel", "processing...", "reasoning...")
-APPROVAL_MARK, QUESTION_MARK = "Dangerous Command", "Hermes needs your input"
+# 欢迎框里的会话号：0.19 是完整的 20261104_104642_39cd4c；0.23 起库里是 local-<64 位十六进制>，框里只显示前 8 位
+SESSION_LINE = re.compile(r"Session:\s+(\d{8}_\d{6}_[0-9a-f]{6}|(?:local-)?[0-9a-f]{8,64})\b")
+# 忙时的提示：0.19「msg=interrupt · /queue · … · Ctrl+C cancel」；0.23「type to redirect this turn · Tab queues it」「ctrl+c stop」
+BUSY_MARKS = ("ctrl+c cancel", "ctrl+c stop", "redirect this turn", "tab queues it", "processing...", "reasoning...")
+# 提问框：0.19「Hermes needs your input」，0.23「Hermes Agent needs your input」
+APPROVAL_MARK, QUESTION_MARK = "Dangerous Command", "needs your input"
+# 交互会话的来源：0.19 记 cli，0.23 起终端界面记 local、TUI 记 tui（telegram 等网关来的不算）
+LOCAL_SOURCES = ("cli", "local", "tui")
+# 0.23 起官方安装器的启动器是 shell 包装：exec <python> -I -c "…runpy.run_module('hermes_cli.main' …)" 参数…，命令行里没有 hermes 这个词
+RUN_MODULE = re.compile(r"""run_module\(\s*['"]hermes_cli\.main['"][^)]*\)""")
+# 不是交互会话的子命令（网关、ACP、仪表盘这些）；0.23 的 CLI 会自己起一个「--profile default gateway run」子进程
+NOT_CHAT = ("gateway", "acp", "dashboard", "setup", "doctor", "update", "cron", "kanban", "desktop", "mcp", "web")
 READ_ONLY = (("Windows 上从手机操作 Hermes 还没实测，暂未开放，只能查看；请在电脑上回复和确认", "Controlling Hermes on Windows from your phone isn't tested yet, so it isn't available and this session is view-only. Reply and confirm on your computer.")
              if os.name == "nt" else
              ("Hermes 不在 tmux 中运行，只能查看；在 tmux 中启动 hermes，或在 Kiteline 新建任务时选择 Hermes（由 Kiteline 在后台运行）后即可从手机回复和确认",
@@ -38,6 +53,8 @@ OPTIONS = ({"key": "deny", "label": "拒绝", "labelEn": "Deny", "style": "destr
            {"key": "session", "label": "允许，且本会话不再询问", "labelEn": "Allow for this session", "style": "normal"})
 APPROVAL_DOWNS = {"once": 0, "1": 0, "session": 1, "2": 1, "deny": 3, "4": 3}
 USAGE_KEEP_MS = 92 * 86400000
+# 自检：hermes 进程在跑、却持续这么久认不出它的会话 → 多半是 Hermes 改了格式，经中台的出错弹窗提示用户报告（每个版本只提示一次）
+UNMATCHED_AFTER = 180
 
 
 def create(kl):
@@ -74,7 +91,7 @@ def create(kl):
         if hasattr(kl, "term_keys"):
             return kl.term_keys(pane, *names)
         for name in names:
-            term_keys(pane, name)
+            subprocess.run(["tmux", "send-keys", "-t", pane, name], capture_output=True, timeout=5)
 
     if os.environ.get("HERMES_HOME"):
         HERMES_HOME = os.environ["HERMES_HOME"]
@@ -85,18 +102,56 @@ def create(kl):
     DB = os.path.join(HERMES_HOME, "state.db")
     LEDGER = os.path.join(kl.DATA_DIR, "plugins", "hermes", "state", "usage.json")
 
-    def connect():
-        return sqlite3.connect("file:%s?mode=ro" % pathname2url(DB), uri=True, timeout=2)
-
-    def query(sql, args=()):
-        if not os.path.isfile(DB):
-            return []
-        db = connect()
+    def all_dbs():
+        """默认的 state.db + 各个 profile（hermes -p <名字>，~/.hermes/profiles/<名字>/state.db）各一个库"""
+        found = [DB] if os.path.isfile(DB) else []
+        root = os.path.join(HERMES_HOME, "profiles")
         try:
-            db.row_factory = sqlite3.Row
-            return [dict(r) for r in db.execute(sql, args)]
-        finally:
-            db.close()
+            names = sorted(os.listdir(root))
+        except OSError:
+            names = []
+        for name in names:
+            path = os.path.join(root, name, "state.db")
+            if not name.startswith(".") and os.path.isfile(path):
+                found.append(path)
+        return found
+
+    def query(sql, args=(), db=None):
+        """在一个库（db 给了）或全部库里查；查不了的库跳过"""
+        rows = []
+        for path in ([db] if db else all_dbs()):
+            if not os.path.isfile(path):
+                continue
+            try:
+                conn = sqlite3.connect("file:%s?mode=ro" % pathname2url(path), uri=True, timeout=2)
+            except sqlite3.Error:
+                continue
+            try:
+                conn.row_factory = sqlite3.Row
+                rows.extend(dict(r, _db=path) for r in conn.execute(sql, args))
+            except sqlite3.Error:
+                if db:
+                    raise
+            finally:
+                conn.close()
+        return rows
+
+    _homes = {}   # 会话 id → 它所在的库
+
+    def db_of(sid):
+        if sid not in _homes:
+            rows = query("select id from sessions where id = ?", (sid,))
+            if not rows:
+                return None
+            _homes[sid] = rows[0]["_db"]
+        return _homes[sid]
+
+    def resolve_sid(shown):
+        """欢迎框里显示的会话号 → 库里完整的 id（0.23 只显示 local-<十六进制> 的前 8 位）"""
+        rows = query("select id, started_at from sessions where id = ? or id like ? or id like ?",
+                     (shown, "local-%s%%" % shown, "%s%%" % shown))
+        exact = next((r["id"] for r in rows if r["id"] == shown), None)
+        return exact or (max(rows, key=lambda r: float(r.get("started_at") or 0))["id"] if rows else None)
 
     def tool_of(name, args):
         mapped = TOOLS.get(name, name or "tool")
@@ -107,9 +162,12 @@ def create(kl):
             args = {"todos": [{"content": t.get("content") or "", "activeForm": t.get("content") or "",
                                "status": TODO_STATUS.get(t.get("status"), "pending")} for t in args["todos"] if isinstance(t, dict)]}
         elif mapped == "AskUserQuestion":
-            choices = args.get("choices") if isinstance(args.get("choices"), list) else []
-            args = {"questions": [{"question": args.get("question") or "", "header": "", "multiSelect": False,
-                                   "options": [{"label": str(c), "description": ""} for c in choices]}]}
+            # 0.19：{question, choices}；0.23 起：{questions: [{question, choices}]}（一次可问几个）
+            asked = [q for q in args["questions"] if isinstance(q, dict)] if isinstance(args.get("questions"), list) else [args]
+            args = {"questions": [{"question": q.get("question") or "", "header": "", "multiSelect": False,
+                                   "options": [{"label": str(c), "description": ""} for c in
+                                               (q.get("choices") if isinstance(q.get("choices"), list) else [])]}
+                                  for q in asked] or [{"question": "", "header": "", "multiSelect": False, "options": []}]}
         elif mapped == "Agent":
             args = {"description": (args.get("goal") or "")[:80], "prompt": args.get("context") or args.get("goal") or ""}
         return mapped, args
@@ -172,10 +230,11 @@ def create(kl):
         return items
 
     def recent(sid, count):
-        rows = query("select * from messages where session_id = ? and active = 1 order by id desc limit ?", (sid, count))
+        rows = query("select * from messages where session_id = ? and active = 1 order by id desc limit ?", (sid, count), db_of(sid))
         return list(reversed(rows))
 
     _cwds = {}
+    _cmds = {}    # pid → 命令行（自检时从里面找安装目录、读 Hermes 的版本）
 
     def process_cwd(pid):
         try:
@@ -188,6 +247,22 @@ def create(kl):
         except (OSError, subprocess.SubprocessError):
             return None
 
+    def chat_args(command):
+        """一行命令行是不是 hermes 主程序：是就返回它后面的参数，不是返回 None。认三种：
+        …/bin/hermes（pip 装的、Mac 桌面版自带的）、python -m hermes_cli.main、0.23 起官方启动器的 python -I -c "…run_module('hermes_cli.main'…)\""""
+        match = RUN_MODULE.search(command)
+        if match:
+            return command[match.end():].split()
+        argv = command.split()
+        if "-m" in argv[:4]:
+            at = argv.index("-m")
+            if at + 1 < len(argv) and argv[at + 1] == "hermes_cli.main":
+                return argv[at + 2:]
+        # Windows 的启动器是 hermes.exe，命令行里的路径常带引号
+        script = next((a for a in argv[:3] if re.split(r"[\\/]", a.strip('"'))[-1].lower()
+                       in ("hermes", "hermes-agent", "hermes.exe", "hermes-agent.exe")), None)
+        return argv[argv.index(script) + 1:] if script else None
+
     def hermes_processes():
         """交互的 hermes 进程（Python 跑的 …/bin/hermes；网关、ACP、仪表盘不算）→ 工作目录"""
         try:
@@ -199,18 +274,78 @@ def create(kl):
             parts = line.strip().split(None, 1)
             if len(parts) != 2 or not parts[0].isdigit():
                 continue
-            argv = parts[1].split()
-            script = next((a for a in argv[:3] if os.path.basename(a) in ("hermes", "hermes-agent")), None)
-            if not script or any(a in ("gateway", "acp", "dashboard", "setup", "doctor", "update") for a in argv[argv.index(script) + 1:argv.index(script) + 2]):
+            args = chat_args(parts[1])
+            if args is None:
+                continue
+            # 跳过 --profile / -p 这类带值的选项，看第一个子命令
+            first, skip = None, False
+            for arg in args:
+                if skip:
+                    skip = False
+                elif arg in ("--profile", "-p", "--model", "-m", "--provider", "--resume", "-r", "--toolsets", "-t"):
+                    skip = True
+                elif not arg.startswith("-"):
+                    first = arg
+                    break
+            if first in NOT_CHAT:
                 continue
             pid = int(parts[0])
             if pid not in _cwds:
                 _cwds[pid] = process_cwd(pid)
             procs[pid] = _cwds[pid]
+            _cmds[pid] = parts[1]
         for pid in list(_cwds):
             if pid not in procs:
                 _cwds.pop(pid, None)
+        for pid in list(_cmds):
+            if pid not in procs:
+                _cmds.pop(pid, None)
         return procs
+
+    def agent_version(command):
+        """从进程命令行找到安装目录读 Hermes 的版本（不起子进程）：打包版的 install-stamp.json、官方脚本装的源码目录（git tag）、
+        pip 装的 dist-info；都没有返回 None"""
+        roots = re.findall(r"""sys\.path\.insert\(0,\s*['"]([^'"]+)['"]""", command)
+        argv = command.split()
+        script = next((a.strip('"') for a in argv[:3] if re.split(r"[\\/]", a.strip('"'))[-1].lower().startswith("hermes")), None)
+        if script:
+            here = os.path.dirname(os.path.realpath(script))
+            for _ in range(5):   # Mac 桌面版：…/Contents/Resources/install-stamp.json；源码安装的 venv/bin/hermes 往上找
+                roots.append(here)
+                here = os.path.dirname(here)
+        for root in roots:
+            try:
+                with open(os.path.join(root, "install-stamp.json"), encoding="utf-8-sig") as handle:
+                    stamp = json.load(handle)
+                if stamp.get("displayVersion") or stamp.get("baseVersion"):
+                    return str(stamp.get("displayVersion") or stamp.get("baseVersion"))
+            except (OSError, ValueError, AttributeError):
+                pass
+            git = os.path.join(root, ".git")
+            try:
+                head = (kl.read_text(os.path.join(git, "HEAD")) or "").strip()
+                if head.startswith("ref: "):
+                    head = (kl.read_text(os.path.join(git, head[5:])) or "").strip()
+                if re.fullmatch(r"[0-9a-f]{40}", head or ""):
+                    tags = [(line.split()[1], line.split()[0]) for line in (kl.read_text(os.path.join(git, "packed-refs")) or "").splitlines()
+                            if line[:40] == head and " refs/tags/" in line]
+                    tag_dir = os.path.join(git, "refs", "tags")
+                    if os.path.isdir(tag_dir):
+                        tags += [(name, None) for name in os.listdir(tag_dir) if (kl.read_text(os.path.join(tag_dir, name)) or "").strip() == head]
+                    return tags[0][0].replace("refs/tags/", "") if tags else "git " + head[:7]
+            except (OSError, IndexError):
+                pass
+        if script:   # pip 装的：…/bin/hermes → …/lib/python3.x/site-packages/hermes_agent-<版本>.dist-info
+            lib = os.path.join(os.path.dirname(os.path.dirname(script)), "lib")
+            try:
+                for py in os.listdir(lib):
+                    for name in os.listdir(os.path.join(lib, py, "site-packages")):
+                        hit = re.match(r"hermes_agent-([^-]+)\.dist-info$", name)
+                        if hit:
+                            return hit.group(1)
+            except OSError:
+                pass
+        return None
 
     def screen(pane, lines=40):
         out = term_screen(pane, lines if lines > 60 else None)
@@ -228,7 +363,7 @@ def create(kl):
         if QUESTION_MARK in text:
             return "question"
         tail = "\n".join(text.splitlines()[-6:])
-        return "busy" if any(mark in tail for mark in BUSY_MARKS) else "idle"
+        return "busy" if any(mark in tail.lower() for mark in BUSY_MARKS) else "idle"
 
     def ledger_usage(since_ms):
         """session_model_usage 只有累计值：记一本账，涨了多少记一条（时间取它 last_seen），第一次看到的整段算在 last_seen 那天"""
@@ -276,6 +411,9 @@ def create(kl):
             self.panes = {}       # 会话 id → 界面状态
             self.last = {}        # 会话 id → 已推过的最后一条消息 id
             self.questions = {}   # 会话 id → 等回答的 clarify 选项
+            self.unmatched = []   # 这一轮认不出会话的 hermes 进程
+            self.unmatched_since = None
+            self.flagged = set()  # 已经提示过的（插件版本, Hermes 版本）
 
         def launch(self, cwd, resume=None):
             """Kiteline 在自己的后台伪终端里起 Hermes 的配方（中台 hosted_start 带 agent 时调）：不用用户自己开 tmux，
@@ -284,7 +422,7 @@ def create(kl):
                 return None
             return {"argv": ["hermes"] + (["--resume", str(resume)] if resume else []),
                     # 输入框上面的状态栏（模型 │ ctx …）出来 = 能输入了
-                    "ready": ["\u2502 ctx"],
+                    "ready": ["\u2502 ctx", "/ commands \u00b7 @ files"],
                     # 还没配置模型：它问要不要现在跑 hermes setup，要用户本人在终端里配
                     "needsUser": ["isn't configured yet", "run setup now?"],
                     "settle": 1.0}
@@ -300,20 +438,47 @@ def create(kl):
                 sid, pane = None, term_pane(pid)
                 if pane:
                     hits = SESSION_LINE.findall(screen(pane, 5000) or "")
-                    sid = hits[-1] if hits else None
+                    sid = resolve_sid(hits[-1]) if hits else None
                 if not sid and cwd:
-                    rows = query("select id from sessions where cwd = ? and source = 'cli' and ended_at is null order by started_at desc", (cwd,))
+                    rows = query("select id, started_at from sessions where cwd = ? and source in (%s) and ended_at is null"
+                                 % ",".join("?" * len(LOCAL_SOURCES)), (cwd,) + LOCAL_SOURCES)
+                    rows.sort(key=lambda r: float(r.get("started_at") or 0), reverse=True)   # 几个库合在一起再排
                     sid = next((r["id"] for r in rows if r["id"] not in found), None)
                 if sid:
                     found[sid] = pid
+            self.unmatched = [pid for pid in hermes_processes() if pid not in found.values()]
             return found
+
+        def self_check(self):
+            """hermes 在跑却一直认不出会话：经中台的 plugin_error 事件提示用户（电脑端弹窗，可一键报告），不算插件出错、不会停用插件。
+            刚启动、还没建会话的有 3 分钟宽限"""
+            if not self.unmatched:
+                self.unmatched_since = None
+                return
+            now = time.time()
+            self.unmatched_since = self.unmatched_since or now
+            if now - self.unmatched_since < UNMATCHED_AFTER or not hasattr(kl, "emit"):
+                return
+            version = next((v for v in (agent_version(_cmds.get(pid) or "") for pid in self.unmatched) if v), None)
+            key = (self.version, version)
+            if key in self.flagged:
+                return
+            self.flagged.add(key)
+            kl.emit({"event": "plugin_error", "id": self.id, "name": self.name, "version": self.version, "source": getattr(self, "source", "external"),
+                     "where": "sessions", "error": ("有 %d 个 Hermes（版本 %s）正在运行，但插件认不出它的会话，可能是 Hermes 更新后记录格式变了，或它用了插件读不到的数据目录（HERMES_HOME）。"
+                                                     "请点「报告」告诉我们，会尽快适配。 / %d Hermes process(es) (version %s) are running "
+                                                     "but their sessions can't be recognized, possibly because Hermes changed its format "
+                                                     "after an update or uses a data folder (HERMES_HOME) the plugin can't read. Please tap Report so we can add support.")
+                                                    % (len(self.unmatched), version or "未知", len(self.unmatched), version or "unknown"),
+                     "trace": "agentVersion=%s\n%s" % (version, "\n".join(re.sub(r"/(Users|home)/[^/\s'\"]+", r"/\1/~", _cmds.get(pid) or "")[:400]
+                                                                         for pid in self.unmatched[:3]))})
 
         def sessions(self):
             out = []
             now = int(time.time() * 1000)
             live = self.live()
             for sid, pid in live.items():
-                rows = query("select * from sessions where id = ?", (sid,))
+                rows = query("select * from sessions where id = ?", (sid,), db_of(sid))
                 if not rows:
                     continue
                 session = rows[0]
@@ -321,7 +486,7 @@ def create(kl):
                 items = to_items(messages)
                 first = next((i["text"] for i in items if i["t"] == "user"), None)
                 if first is None:
-                    first_rows = query("select content from messages where session_id = ? and role = 'user' order by id limit 1", (sid,))
+                    first_rows = query("select content from messages where session_id = ? and role = 'user' order by id limit 1", (sid,), db_of(sid))
                     first = first_rows[0]["content"] if first_rows else None
                 last_text = next((i for i in reversed(items) if i["t"] == "text"), None)
                 calls = {}
@@ -373,6 +538,7 @@ def create(kl):
             for sid in list(self.last):
                 if sid not in live:
                     self.last.pop(sid, None)
+            self.self_check()
             return out
 
         def pump(self):
@@ -397,10 +563,10 @@ def create(kl):
             except (TypeError, ValueError):
                 bound = None
             if bound is None:
-                rows = query("select * from messages where session_id = ? and active = 1 order by id desc limit ?", (sid, count + 1))
+                rows = query("select * from messages where session_id = ? and active = 1 order by id desc limit ?", (sid, count + 1), db_of(sid))
             else:
                 rows = query("select * from messages where session_id = ? and active = 1 and id < ? order by id desc limit ?",
-                             (sid, bound, count + 1))
+                             (sid, bound, count + 1), db_of(sid))
             has_more = len(rows) > count
             return to_items(list(reversed(rows[:count]))), has_more
 

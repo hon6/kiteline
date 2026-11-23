@@ -146,6 +146,7 @@
 "%@ 条%@" = "%@ %@";
 "%@ 条回复" = "%@ replies";
 "%@ 条新消息 ↓" = "%@ new ↓";
+"%@ 条线" = "%@ links";
 "%@ 条通道" = "%@ lanes";
 "%@ 校验失败（SHA-256 与官方不符），已删除" = "%@ failed SHA-256 verification (does not match the official checksum) and was deleted";
 "%@ 根线 · 正在用" = "%@ links · active";
@@ -1730,6 +1731,7 @@
 "向下翻页" = "Page Down";
 "向左 / 向右转" = "Turn left / right";
 "向终端里的会话发送消息" = "Send a message to the session in the terminal.";
+"吞吐" = "Throughput";
 "含估算 %@" = "Est. %@";
 "含思考" = "with thinking";
 "听写" = "Dictation";
@@ -1969,6 +1971,7 @@
 "大型任务多代理并行" = "Parallel Agents for Large Tasks";
 "天空" = "Sky";
 "失败" = "Failed";
+"失败 %@" = "Failed %@";
 "失败 %@ 次" = "%@ failed";
 "头像" = "Avatar";
 "头像、昵称，所在设备的 IP 和配置" = "Avatar, nickname, and the IP and specs of its device";
@@ -3677,6 +3680,7 @@
 "检查中…" = "Checking…";
 "检查更新" = "Check for Updates";
 "检查更新…" = "Check for Updates…";
+"检查用时" = "Check time";
 "检查矩阵" = "Check matrix";
 "检查端口 %@ 是否被占用，或防火墙是否放行" = "Check whether port %@ is in use, or whether the firewall allows it.";
 "检查结果" = "Checks";
@@ -3707,6 +3711,7 @@
 "樱粉" = "Cherry Pink";
 "橄榄" = "Olive";
 "橙色" = "Orange";
+"次/分" = "/min";
 "次回复" = "Replies";
 "次测试" = "test runs";
 "次请求" = "requests";
@@ -3997,6 +4002,7 @@
 "泰语" = "Thai";
 "活动" = "Activity";
 "活动中" = "Active";
+"活跃" = "active";
 "浅色" = "Light";
 "测试" = "Tests";
 "测试 %@" = "Tests %@";
@@ -4532,6 +4538,7 @@
 "继续规划" = "Keep Planning";
 "继续转发" = "Resume Relaying";
 "绿色" = "Green";
+"缓存" = "Cache";
 "缓存命中" = "Cache hits";
 "编程 Agent" = "Coding Agent";
 "编程 agent 遇到只有你能做的事（如注册账号、申请密钥）时会提醒你，可以现在处理或加入待办；它自己以后要做的事会记在「agent 的待办」中。右键任意消息也可手动加入。" = "When a coding agent needs something only you can do, such as registering an account or getting a key, it reminds you so you can handle it now or add it to your to-dos. Work the agent will do later itself is kept in Agent To-Dos. You can also right-click any message to add it manually.";
@@ -4866,6 +4873,7 @@
 "调用" = "Calls";
 "调用失败" = "Call failed";
 "调用工具 %@ 次" = "%@ tool calls";
+"调用热度" = "Call heat";
 "调用的工具（%@）" = "Tools Used (%@)";
 "调用的工具（%lld）" = "Tools Called (%lld)";
 "调研了解" = "Researching";

@@ -1,7 +1,7 @@
 {
  "id": "hermes",
  "name": "Hermes",
- "version": "1.1.0",
+ "version": "1.1.2",
  "summary": "Nous Research 的开源 agent：查看会话、状态和完整对话；在 tmux 中运行、或由 Kiteline 在后台运行时可回复、确认、回答提问和中断",
  "summaryEn": "Nous Research's open-source agent: view sessions, status and full conversations; reply, confirm, answer questions and interrupt when it runs in tmux or in the background through Kiteline",
  "needs": [
@@ -65,8 +65,8 @@
  ],
  "speaker": "Hermes",
  "caps": [],
- "notes": "新建任务时可以选 Hermes，由 Kiteline 在后台运行（Mac、Linux 电脑上的项目），不用先在 tmux 里启动也能从手机回复和中断；它已结束的会话也可以直接发消息接着进行。需要电脑上的 Kiteline 为 Mac 3.49.36、Windows / Linux 1.0.41 及以上。",
- "notesEn": "Choose Hermes when starting a new task and Kiteline runs it in the background (projects on Mac and Linux computers), so you can reply and interrupt from your phone without starting it in tmux first; you can also message its finished sessions to continue them. Requires Kiteline 3.49.36 on Mac or 1.0.41 on Windows / Linux, or later.",
+ "notes": "Hermes 在运行、却一直认不出它的会话时（例如 Hermes 更新后改了格式），会提示你一键报告，方便我们尽快适配；也支持官方安装脚本装的新版 Hermes（如 0.23）和多个 profile。",
+ "notesEn": "If Hermes is running but its sessions still can't be recognized (for example after a Hermes update changed its format), you'll be prompted to report it with one tap so we can add support quickly. Also supports newer Hermes versions installed with the official install script (such as 0.23) and multiple profiles.",
  "gaps": [
   {
    "kind": "untested",
@@ -82,6 +82,11 @@
    "kind": "untested",
    "text": "Mac 上还没实测（Linux 上已全部实测）",
    "textEn": "Not yet tested on Mac (fully tested on Linux)"
+  },
+  {
+   "kind": "unsupported",
+   "text": "Hermes 一次问好几个问题时，手机上只能回答第一个，其余的请在电脑上回答",
+   "textEn": "When Hermes asks several questions at once, only the first can be answered from your phone; answer the rest on your computer"
   }
  ]
 }

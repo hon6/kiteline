@@ -1,7 +1,7 @@
 {
  "id": "pi",
  "name": "pi",
- "version": "1.1.0",
+ "version": "1.1.1",
  "summary": "开源的终端编程 agent（pi-mono）：查看会话、状态和完整对话；在 tmux（Mac、Linux）、终端窗口（Windows）中运行，或由 Kiteline 在后台运行时可回复和中断",
  "summaryEn": "Open-source terminal coding agent (pi-mono): view sessions, status and full conversations; reply and interrupt when it runs in tmux (Mac, Linux), a terminal window (Windows) or in the background through Kiteline",
  "needs": [
@@ -63,8 +63,8 @@
  ],
  "speaker": "pi",
  "caps": [],
- "notes": "新建任务时可以选 pi，由 Kiteline 在后台运行（Mac、Linux 电脑上的项目），不用先在 tmux 里启动也能从手机回复和中断；它已结束的会话也可以直接发消息接着进行。需要电脑上的 Kiteline 为 Mac 3.49.36、Windows / Linux 1.0.41 及以上。",
- "notesEn": "Choose pi when starting a new task and Kiteline runs it in the background (projects on Mac and Linux computers), so you can reply and interrupt from your phone without starting it in tmux first; you can also message its finished sessions to continue them. Requires Kiteline 3.49.36 on Mac or 1.0.41 on Windows / Linux, or later.",
+ "notes": "修复电脑上同时装有 oh-my-pi（pi 的分支）时，把它的进程误认成 pi、会话列表里多出一个空白会话的问题。",
+ "notesEn": "Fixes an extra blank session in the list when oh-my-pi (a fork of pi) is also installed: its processes are no longer mistaken for pi.",
  "gaps": [
   {
    "kind": "unsupported",

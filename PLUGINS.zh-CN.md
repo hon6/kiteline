@@ -30,11 +30,12 @@
 | **Kimi Code** <br><sub>[插件](plugins/kimi-code)</sub> | 命令行 | 全部 <sup>18</sup> | 只读 <sup>9</sup> | 全部 ✓ <sup>18</sup> |
 |  | 桌面版 | 只读 <sup>19</sup> | — | — |
 | **Muse Code** <br><sub>[插件](plugins/muse-code)</sub> | 命令行 | 查看 · 回复 · 中断 <sup>20</sup> | 只读 <sup>9</sup> | 查看 · 回复 · 中断 ✓ <sup>20</sup> |
-| **pi** <br><sub>[插件](plugins/pi)</sub> | 命令行 | 查看 · 回复 · 中断 ✓ <sup>21</sup> | 查看 · 回复 · 中断 ✓ <sup>22</sup> | 查看 · 回复 · 中断 ✓ <sup>21</sup> |
-| **Qwen Code** <br><sub>[插件](plugins/qwen-code)</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>23</sup> | 只读 <sup>24</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>23</sup> |
-| **trae-agent** <br><sub>[插件](plugins/trae-agent)</sub> | 命令行 | 查看 · 回复 <sup>25</sup> | 只读 <sup>9</sup> | 查看 · 回复 ✓ <sup>25</sup> |
-| **ZCode** <br><sub>[插件](plugins/zcode)</sub> | 桌面版 | 全部 ✓ <sup>26</sup> | 全部 ✓ <sup>26</sup> | 全部 ✓ <sup>26</sup> |
-|  | 命令行 | 全部 ✓ <sup>26</sup> | 全部 ✓ <sup>26</sup> | 全部 ✓ <sup>26</sup> |
+| **oh-my-pi** <br><sub>[插件](plugins/oh-my-pi)</sub> | 命令行 | 查看 · 回复 · 回答 · 中断 ✓ <sup>21</sup> | 查看 · 回复 · 回答 · 中断 ✓ <sup>22</sup> | 查看 · 回复 · 回答 · 中断 ✓ <sup>21</sup> |
+| **pi** <br><sub>[插件](plugins/pi)</sub> | 命令行 | 查看 · 回复 · 中断 ✓ <sup>23</sup> | 查看 · 回复 · 中断 ✓ <sup>24</sup> | 查看 · 回复 · 中断 ✓ <sup>23</sup> |
+| **Qwen Code** <br><sub>[插件](plugins/qwen-code)</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>25</sup> | 只读 <sup>26</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>25</sup> |
+| **trae-agent** <br><sub>[插件](plugins/trae-agent)</sub> | 命令行 | 查看 · 回复 <sup>27</sup> | 只读 <sup>9</sup> | 查看 · 回复 ✓ <sup>27</sup> |
+| **ZCode** <br><sub>[插件](plugins/zcode)</sub> | 桌面版 | 全部 ✓ <sup>28</sup> | 全部 ✓ <sup>28</sup> | 全部 ✓ <sup>28</sup> |
+|  | 命令行 | 全部 ✓ <sup>28</sup> | 全部 ✓ <sup>28</sup> | 全部 ✓ <sup>28</sup> |
 
 1. 命令行会话需要在 tmux 中运行
 2. Codex 桌面版没有 Linux 版
@@ -56,9 +57,11 @@
 18. 回复和确认需要 Kimi Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
 19. 桌面版的会话只能查看
 20. 回复需要 Muse Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）；从手机确认命令暂未开放
-21. 回复和中断需要 pi 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
-22. 在终端窗口中运行即可回复和中断
-23. 回复和确认需要 Qwen Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
-24. Windows 上没有 tmux，只能查看
-25. 发任务需要 trae-agent 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
-26. 使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认
+21. 回复、回答和中断需要 omp 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+22. 在终端窗口中运行即可回复、回答和中断
+23. 回复和中断需要 pi 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+24. 在终端窗口中运行即可回复和中断
+25. 回复和确认需要 Qwen Code 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+26. Windows 上没有 tmux，只能查看
+27. 发任务需要 trae-agent 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）
+28. 使用 API Key 添加的模型时可从手机操作；账号登录的模型只能查看；电脑上发起的那一轮请在电脑上确认

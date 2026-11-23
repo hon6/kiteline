@@ -738,24 +738,24 @@ struct MacImageViewer: View {
         if images.count > 1 {
             ToolbarItemGroup(placement: .navigation) {
                 Button { step(-1) } label: { Label(L("上一张"), systemImage: "chevron.left") }
-                    .disabled(index == 0).help(L("上一张（←）")).panelToolbarItem()
+                    .disabled(index == 0).help(L("上一张（←）")).panelToolbarItem(edge: .leading)
                 Button { step(1) } label: { Label(L("下一张"), systemImage: "chevron.right") }
-                    .disabled(index == images.count - 1).help(L("下一张（→）")).panelToolbarItem()
+                    .disabled(index == images.count - 1).help(L("下一张（→）")).panelToolbarItem(edge: .trailing)
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button { zoom.zoomOut() } label: { Label(L("缩小"), systemImage: "minus.magnifyingglass") }
-                .keyboardShortcut("-", modifiers: .command).help(L("缩小（⌘-）")).panelToolbarItem()
+                .keyboardShortcut("-", modifiers: .command).help(L("缩小（⌘-）")).panelToolbarItem(edge: .leading)
             Button { zoom.actualSize() } label: { Text(zoom.percent).monospacedDigit().frame(minWidth: 40) }
                 .keyboardShortcut("0", modifiers: .command).help(L("实际大小（⌘0）")).panelToolbarItem()
             Button { zoom.zoomIn() } label: { Label(L("放大"), systemImage: "plus.magnifyingglass") }
                 .keyboardShortcut("=", modifiers: .command).help(L("放大（⌘+）")).panelToolbarItem()
             Button { zoom.fit() } label: { Label(L("适合窗口"), systemImage: "arrow.up.left.and.down.right.magnifyingglass") }
-                .keyboardShortcut("9", modifiers: .command).disabled(zoom.fitting).help(L("适合窗口（⌘9）")).panelToolbarItem()
+                .keyboardShortcut("9", modifiers: .command).disabled(zoom.fitting).help(L("适合窗口（⌘9）")).panelToolbarItem(edge: .trailing)
         }
         GroupGap()   // 缩放一组、拷贝 / 存储 / 共享 / 预览一组，分成两块玻璃
         ToolbarItemGroup(placement: .primaryAction) {
-            Button { copy() } label: { Label(L("拷贝"), systemImage: "doc.on.doc") }.help(L("拷贝图片")).panelToolbarItem()
+            Button { copy() } label: { Label(L("拷贝"), systemImage: "doc.on.doc") }.help(L("拷贝图片")).panelToolbarItem(edge: .leading)
             // 同 iPhone 看大图的「存到相册」「分享」：存成文件、共享给微信 / 隔空投送 / 信息……
             Button { Task { await saveAs() } } label: { Label(L("存储…"), systemImage: "square.and.arrow.down") }.help(L("存储为文件")).panelToolbarItem()
             if let current {
@@ -765,11 +765,14 @@ struct MacImageViewer: View {
                 .help(L("共享")).panelToolbarItem()
             }
             Button { Task { await openInPreview() } } label: { Label(L("用「预览」打开"), systemImage: "arrow.up.forward.app") }
-                .help(L("用「预览」打开（可标注、另存）")).panelToolbarItem()
+                .help(L("用「预览」打开（可标注、另存）")).panelToolbarItem(edge: .trailing)
         }
-        ToolbarItem(placement: .confirmationAction) {
-            Button(L("完成")) { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton()
-        }.panelBare()
+        // 「完成」和左边几组一样画成玻璃胶囊（11-23 反馈：这个窗口的按钮风格要统一），不用别的面板那种带边框的小按钮；
+        // 前面隔一下单独成一块，不然系统把它并进拷贝那组的玻璃里
+        GroupGap()
+        ToolbarItem(placement: .primaryAction) {
+            Button(L("完成")) { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarItem(edge: .horizontal)
+        }
     }
 
     private func cached(_ image: ViewerImage) -> NSImage? {

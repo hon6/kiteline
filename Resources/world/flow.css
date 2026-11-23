@@ -1,7 +1,7 @@
 /* 数据流大屏：深色、细线、等宽数字；上面遥测条、中间 three.js 场景、底下四块仪表。insets 由宿主给（标题栏、浮动侧栏、刘海、横条） */
 :root {
   --inset-top: 0px; --inset-left: 0px; --inset-right: 0px; --inset-bottom: 0px;
-  --bg: #06070b; --fg: #e6e8ef; --fg2: #9aa1b2; --fg3: #5d6476; --line: rgba(160,175,210,.14);
+  --bg: #050508; --fg: #e6e8ef; --fg2: #9aa1b2; --fg3: #5d6476; --line: rgba(160,175,210,.14);
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, "PingFang SC", "Microsoft YaHei UI", "Helvetica Neue", "Noto Sans CJK SC", sans-serif;
   --hudH: 30px; --dashH: 248px;
@@ -17,16 +17,25 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .fl-hud-l b { color: var(--fg); font-weight: 600; }
 .fl-hud-l i { font-style: normal; color: var(--fg3); margin-right: 5px; font-family: var(--sans); letter-spacing: 0; }
 .fl-hud-l span { color: var(--fg); }
+.fl-hud-l i { font: 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: #4d5363; }
+.fl-hud-l em { font-style: normal; font-weight: 600; }
+.fl-who { margin-left: auto; font: 10.5px var(--mono); color: #ff4d6a; letter-spacing: .04em; }
+.fl-who + .fl-door { margin-left: 10px; }
 .fl-door { margin-left: auto; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px; font: 11px var(--sans); color: var(--fg2); }
 
 .fl-stage { position: fixed; top: calc(var(--inset-top) + var(--hudH)); left: var(--inset-left); right: var(--inset-right); bottom: calc(var(--inset-bottom) + var(--dashH)); overflow: hidden; }
 .fl-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-.fl-title { position: absolute; z-index: 2; left: 14px; top: 12px; display: flex; gap: 10px; align-items: flex-start; padding: 4px 12px 5px 10px; border-left: 2px solid #f2cf5b; border-radius: 0 6px 6px 0; background: rgba(6,7,11,.62); pointer-events: none; max-width: calc(100% - 28px); }
-.fl-title b { font: 700 22px/1 var(--mono); }
-.fl-title span { display: block; font: 700 16px/1.15 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fl-title small { display: block; margin-top: 3px; font: 10.5px var(--mono); color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fl-callout { position: absolute; left: 0; top: 0; z-index: 3; display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border: 1px solid var(--c, #fff); border-radius: 3px; background: rgba(8,9,14,.88); font: 11px var(--mono); color: var(--fg); box-shadow: 0 0 18px -4px var(--c, #fff); will-change: transform; max-width: 300px; min-width: 180px; }
-.fl-callout b { font: 600 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 左上角阶段标题（参考：「04 TESTS RED」+ 彩色小字副标题，左边一根阶段色竖条） */
+.fl-title { position: absolute; z-index: 2; left: max(14px, 12%); top: 14px; display: flex; gap: 9px; align-items: baseline; padding: 3px 12px 5px 9px; border-left: 2px solid var(--c, #5fe0c8); background: rgba(5,5,8,.6); pointer-events: none; max-width: calc(100% - 28px); transition: border-color .4s; }
+.fl-title b { font: 700 19px/1 var(--mono); letter-spacing: .02em; }
+.fl-title span { display: block; font: 700 17px/1.1 var(--sans); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-title small { display: block; margin-top: 4px; font: 10.5px var(--mono); color: var(--c, #5fe0c8); opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 标注框（参考：「reviewer · merge / 16 links · active」）：彩色细边、直角略圆、等宽字，左上角一根斜引线连到卡片 */
+.fl-callout { position: absolute; left: 0; top: 0; z-index: 3; display: flex; flex-direction: column; gap: 2px; padding: 7px 11px 8px; border: 1.5px solid var(--c, #fff); border-radius: 3px; background: rgba(5,5,8,.9); font: 11px var(--mono); color: var(--fg); box-shadow: 0 0 22px -6px var(--c, #fff); will-change: transform; max-width: 300px; min-width: 170px; animation: fl-pop .28s ease-out; }
+.fl-callout::before { content: ""; position: absolute; left: -15px; top: -11px; width: 18px; height: 1.5px; background: var(--c, #fff); transform: rotate(38deg); transform-origin: right center; }
+@keyframes fl-pop { from { opacity: 0; transform-origin: left top; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 0 0 0); } }
+.fl-callout b { font: 600 12.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-callout .st { color: var(--c, #fff); font: 11px var(--mono); }
 .fl-callout span { color: var(--fg2); }
 .fl-callout ul { list-style: none; margin: 3px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .fl-callout li { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: baseline; font: 10.5px/1.35 var(--mono); white-space: nowrap; min-width: 0; }
@@ -40,11 +49,13 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .fl-tools button.on { color: var(--fg); }
 .fl-tools button.on i { background: #8be37c; box-shadow: 0 0 6px #8be37c; }
 
-.fl-dash { position: fixed; left: var(--inset-left); right: var(--inset-right); bottom: var(--inset-bottom); height: var(--dashH); display: grid; grid-template-columns: 1.05fr 1fr 1.05fr 1fr; gap: 6px; padding: 6px; border-top: 1px solid var(--line); background: #07080d; }
-.fl-pn { position: relative; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 3px; background: rgba(12,14,20,.92); overflow: hidden; }
-.fl-ph { display: flex; align-items: baseline; gap: 7px; padding: 6px 9px 2px; font: 10px var(--mono); color: var(--fg3); letter-spacing: .06em; white-space: nowrap; }
-.fl-ph b { font: 700 11.5px var(--sans); color: var(--fg); letter-spacing: 0; }
-.fl-ph em { margin-left: auto; font-style: normal; color: var(--fg2); }
+.fl-dash { position: fixed; left: var(--inset-left); right: var(--inset-right); bottom: var(--inset-bottom); height: var(--dashH); display: grid; grid-template-columns: 1.05fr 1fr 1.05fr 1fr; gap: 6px; padding: 6px; border-top: 1px solid var(--line); background: #050508; }
+.fl-pn { position: relative; min-width: 0; display: flex; flex-direction: column; border: 1px solid rgba(160,175,210,.08); border-radius: 2px; background: #08090e; overflow: hidden; }
+/* 面板标题（参考：THOUGHT STREAM 这样的大写等宽字，左边一根彩色竖条，右边彩色小字） */
+.fl-ph { display: flex; align-items: baseline; gap: 7px; padding: 6px 9px 3px; margin-left: 0; border-left: 2px solid var(--pc, #f2cf5b); font: 9.5px var(--mono); color: #6b7282; letter-spacing: .12em; white-space: nowrap; }
+.fl-ph b { font: 700 11px var(--sans); color: var(--fg); letter-spacing: .02em; }
+.fl-ph em { margin-left: auto; font-style: normal; letter-spacing: .02em; color: var(--pc, var(--fg2)); }
+.fl-pn:nth-child(1) { --pc: #9b8cff; } .fl-pn:nth-child(2) { --pc: #e8f25a; } .fl-pn:nth-child(3) { --pc: #ff4d6a; } .fl-pn:nth-child(4) { --pc: #b8f03c; }
 .fl-pn canvas { flex: 1; min-height: 0; width: 100%; display: block; }
 
 /* 手机：遥测条只留前几项；底下四块左右滑 */

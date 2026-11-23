@@ -431,14 +431,18 @@ final class AppPerf: ObservableObject {
 struct NewLayoutRoot: View {
     @ObservedObject var model: KitelineModel
     @ObservedObject private var collapse = PanelCollapse.shared
+    /// 世界 / 数据流里工具栏的「收起会话列表」：新版界面收起导航栏那一栏（11-23 反馈：数据流模式下侧栏收不起来）
+    @ObservedObject private var sidebar = SidebarState.shared
     /// 收起的侧栏列的展开按钮画在哪（键 = 那一列的收起键）
     @State private var unfoldSpots: [String: UnfoldSpot] = [:]
 
     var body: some View {
         let open = ProjectBlock.visible(model)
+        let navFolded = model.worldMode && sidebar.collapsed
         let columns = model.layoutColumns
             .map { $0.filter { $0 == "nav" || $0 == "tabs" || open } }
             .filter { !$0.isEmpty }
+            .filter { !(navFolded && $0.contains("nav") && !$0.contains("tabs")) }
         // 整个铺到窗口顶上（标题栏底下），各栏自己按「离标题栏底边还差多少」往下让（TitlebarInset），标签页区域的分屏自己铺进标题栏。
         // 原来按外层的安全区算，系统的分栏（HSplitView）又自己让了一次，侧栏顶上空出一大条（11-20 截图）
         VStack(spacing: 0) {
@@ -482,7 +486,9 @@ struct NewLayoutRoot: View {
             if !model.statusOnTop { StatusBar(model: model) }
         }
         .id(model.layoutEpoch)
-        // 各栏宽度：默认侧栏取最窄（导航栏 290、文件 / 会话栏 230，11-21 起的默认宽度），拖过就记住（换界面、重启都不变）
+        // 导航栏收起时纸鸢不再飞在它上方；展开时导航栏出现会自己报宽度
+        .onChange(of: navFolded) { _, folded in if folded { KiteOverlay.shared.sidebarWidth = 0 } }
+        // 各栏宽度：默认侧栏取最窄（导航栏 290、文件 / 会话栏 230，11-21 起的默认宽度），拖过就按栏记住（换界面、进出数据流、重启都不变）
         .background(SplitWidths(columns: columns.filter { column in
             !(!column.contains("nav") && !column.contains("tabs") && collapse.has("column." + column.joined(separator: ",")))
         }, epoch: model.layoutEpoch))
@@ -1332,7 +1338,9 @@ struct KeepTitlebarTransparent: NSViewRepresentable {
 
 
 /// 新版界面左右几栏的宽度：系统分栏（HSplitView）不认 idealWidth，多出来的宽度平摊给各栏，侧栏会被分得很宽。
-/// 找到这个分栏（NSSplitView），没记过宽度时把侧栏摆成默认宽度，之后用户拖了由系统记住（autosaveName，按这一套栏的摆法分开记）
+/// 找到这个分栏（NSSplitView），把侧栏摆成记住的宽度（没记过用默认），标签页那栏拿剩下的；用户拖分隔线时把各侧栏宽度记下来。
+/// 宽度按「哪一栏」记（导航栏那栏一个键，文件 / 会话栏按里面的块），不按整套摆法记：原来用系统 autosaveName 按整套栏记，
+/// 进数据流 / 世界、开关项目时文件栏、会话栏出现消失，整套摆法变了，导航栏就换成另一份宽度，每次切换都在变（11-23 截图）
 struct SplitWidths: NSViewRepresentable {
     let columns: [[String]]
     let epoch: Int
@@ -1343,9 +1351,23 @@ struct SplitWidths: NSViewRepresentable {
         view.schedule()
     }
 
+    private static let storeKey = "newLayoutColumnWidths"
+    static func widthKey(_ column: [String]) -> String { column.contains("nav") ? "nav" : column.joined(separator: ",") }
+    static var saved: [String: Double] {
+        get { AppConfig.defaults.dictionary(forKey: storeKey) as? [String: Double] ?? [:] }
+        set { AppConfig.defaults.set(newValue, forKey: storeKey) }
+    }
+
     final class Probe: NSView {
         var columns: [[String]] = []
+        private weak var split: NSSplitView?
         private var appliedName: String?
+        private var applying = false
+        /// 上次摆的时候分栏多宽：变了就是窗口带动的
+        private var lastWidth: CGFloat = 0
+        private var observer: NSObjectProtocol?
+
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); schedule() }
 
@@ -1360,25 +1382,82 @@ struct SplitWidths: NSViewRepresentable {
         }
 
         private func apply() {
-            guard columns.count > 1, let root = window?.contentView, let split = findSplit(root) else { return }
-            let name = "KitelineNewLayout." + columns.map { $0.joined(separator: ",") }.joined(separator: "|")
-            if split.autosaveName != name {
-                let saved = UserDefaults.standard.object(forKey: "NSSplitView Subview Frames " + name) != nil
-                split.autosaveName = name
-                if saved { return }   // 设了名字系统就按记下的摆
-            } else if appliedName == name {
-                return
+            // 只剩一栏（数据流里收起了导航栏）：下次栏回来要重新摆
+            guard columns.count > 1 else { appliedName = nil; return }
+            guard let root = window?.contentView, let found = findSplit(root) else { return }
+            // 栏的摆法 + 分栏里实际是哪几个子视图：同样的摆法、栏被拆了又建（收起再展开导航栏）也要重新摆，不然系统把它按上限摆宽
+            let name = signature(found)
+            if found !== split {
+                split = found
+                appliedName = nil
+                if let observer { NotificationCenter.default.removeObserver(observer) }
+                observer = NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: found, queue: .main) { [weak self] _ in
+                    self?.resized()
+                }
             }
+            guard appliedName != name else { return }
             appliedName = name
-            // 没记过：侧栏按默认宽度从左往右摆（标签页那栏拿剩下的）
-            var x: CGFloat = 0
-            for (index, column) in columns.enumerated() where index < columns.count - 1 {
-                let width: CGFloat = column.contains("tabs") ? max(420, split.bounds.width - x - CGFloat(columns.count - 1 - index) * 230)
-                    : column.contains("nav") ? 290 : 230
-                x += width
-                split.setPosition(x, ofDividerAt: index)
-                x += split.dividerThickness
+            migrate(columns.map { $0.joined(separator: ",") }.joined(separator: "|"))
+            place(found)
+        }
+
+        /// 侧栏按记住的宽度（没记过用默认：导航栏 290、文件 / 会话栏 230）从左往右摆，标签页那栏拿剩下的
+        private func place(_ found: NSSplitView) {
+            // 窗口变大变小时侧栏宽度不变（11-23）：靠 resized() 每次分栏总宽一变就重摆。
+            // 别对 NSSplitView 设 holdingPriority：SwiftUI 的 HSplitView 不许设，抛异常闪退（11-23 测试实例）
+            lastWidth = found.bounds.width
+            let store = SplitWidths.saved
+            let widths: [CGFloat] = columns.map { column in
+                if column.contains("tabs") { return 0 }
+                let fallback: CGFloat = column.contains("nav") ? 290 : 230
+                return min(640, max(column.contains("nav") ? 290 : 230, store[SplitWidths.widthKey(column)].map { CGFloat($0) } ?? fallback))
             }
+            let gaps = CGFloat(columns.count - 1) * found.dividerThickness
+            let tabs = max(420, found.bounds.width - widths.reduce(0, +) - gaps)
+            applying = true
+            var x: CGFloat = 0
+            for index in 0..<(columns.count - 1) {
+                x += columns[index].contains("tabs") ? tabs : widths[index]
+                found.setPosition(x, ofDividerAt: index)
+                x += found.dividerThickness
+            }
+            applying = false
+        }
+
+        private func signature(_ split: NSSplitView) -> String {
+            columns.map { $0.joined(separator: ",") }.joined(separator: "|")
+                + "#" + split.arrangedSubviews.map { "\(ObjectIdentifier($0).hashValue)" }.joined(separator: ",")
+        }
+
+        /// 分栏里各栏宽度变了：整个分栏变宽变窄（拖窗口边、全屏、缩放）= 窗口带动的，侧栏摆回记住的宽度；
+        /// 分栏总宽没变 = 用户拖了分隔线，记下来
+        private func resized() {
+            guard !applying, let split, split.arrangedSubviews.count == columns.count, appliedName == signature(split) else { return }
+            if abs(split.bounds.width - lastWidth) > 0.5 { place(split) } else { remember() }
+        }
+
+        /// 用户拖分隔线：各侧栏现在的宽度记下来。只在这套栏已经按记住的宽度摆好之后记：换模式、栏出现消失时系统先乱摆一下，
+        /// 那时这套栏还没摆过（签名对不上），不记
+        private func remember() {
+            guard let split else { return }
+            var store = SplitWidths.saved
+            for (column, view) in zip(columns, split.arrangedSubviews) where !column.contains("tabs") && !view.isHidden {
+                store[SplitWidths.widthKey(column)] = Double(view.frame.width)
+            }
+            SplitWidths.saved = store
+        }
+
+        /// 旧版本按整套摆法让系统记的宽度（autosaveName）：自己还没记过的栏从那里接过来，升级后不丢用户拖好的宽度
+        private func migrate(_ name: String) {
+            guard let frames = UserDefaults.standard.array(forKey: "NSSplitView Subview Frames KitelineNewLayout." + name) as? [String],
+                  frames.count == columns.count else { return }
+            var store = SplitWidths.saved
+            var changed = false
+            for (column, frame) in zip(columns, frames) where !column.contains("tabs") && store[SplitWidths.widthKey(column)] == nil {
+                let parts = frame.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                if parts.count >= 3, let width = Double(parts[2]), width > 0 { store[SplitWidths.widthKey(column)] = width; changed = true }
+            }
+            if changed { SplitWidths.saved = store }
         }
     }
 }

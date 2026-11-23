@@ -1,0 +1,102 @@
+{
+ "id": "oh-my-pi",
+ "name": "oh-my-pi",
+ "version": "1.0.0",
+ "summary": "pi 的开源分支（omp）：查看会话、状态和完整对话；在 tmux（Mac、Linux）、终端窗口（Windows）中运行，或由 Kiteline 在后台运行时，可回复、回答提问和中断",
+ "summaryEn": "Open-source fork of pi (omp): view sessions, status and full conversations; reply, answer questions and interrupt when it runs in tmux (Mac, Linux), a terminal window (Windows) or in the background through Kiteline",
+ "needs": [
+  "fs.read",
+  "fs.tail",
+  "proc",
+  "term.tmux"
+ ],
+ "detect": {
+  "paths": [
+   "~/.omp/agent"
+  ],
+  "commands": [
+   "omp"
+  ]
+ },
+ "support": {
+  "mac": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "answer",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复、回答和中断需要 omp 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
+   }
+  },
+  "linux": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "answer",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "回复、回答和中断需要 omp 在 tmux 中运行，或在 Kiteline 新建任务时选它（后台运行）"
+   }
+  },
+  "windows": {
+   "cli": {
+    "abilities": [
+     "view",
+     "reply",
+     "answer",
+     "interrupt"
+    ],
+    "verified": true,
+    "note": "在终端窗口中运行即可回复、回答和中断"
+   }
+  }
+ },
+ "limitsNote": "oh-my-pi 不在本机记录订阅额度，「今日用量」中不显示；token 和花费按它自己的记录统计（含输入预测、起标题等辅助调用）",
+ "limitsNoteEn": "oh-my-pi doesn't record plan quotas on your computer, so they aren't shown under Today's usage; tokens and cost come from its own records (including helper calls such as input prediction and titles)",
+ "mark": [
+  {
+   "d": "M4 5h16v3h-3v8.5q0 1.5 1.5 1.5H20V20h-3q-3 0-3-3V8h-4v12H7V8H4z",
+   "opacity": 1
+  },
+  {
+   "d": "M20.5 1.5a2 2 0 1 1 0 4a2 2 0 1 1 0-4z",
+   "opacity": 0.6
+  }
+ ],
+ "speaker": "oh-my-pi",
+ "caps": [],
+ "notes": "新接入 oh-my-pi：查看会话和完整对话，在 tmux 中运行或由 Kiteline 在后台运行时可以从手机回复、回答提问和中断。",
+ "notesEn": "New: oh-my-pi support. View sessions and full conversations; reply, answer questions and interrupt from your phone when it runs in tmux or in the background through Kiteline.",
+ "gaps": [
+  {
+   "kind": "unsupported",
+   "text": "提问只能从选项中选：自己填写答案、多选、一次多个问题的提问请在电脑上回答",
+   "textEn": "Questions can only be answered by picking an option: answer free-text, multi-select or multi-question prompts on your computer"
+  },
+  {
+   "kind": "unsupported",
+   "text": "从手机发的图片以文件路径随消息发送，由 oh-my-pi 用读文件工具查看：它的终端界面只能从剪贴板贴图",
+   "textEn": "Images sent from your phone go with the message as file paths for oh-my-pi to open with its read tool: its terminal interface only accepts images pasted from the clipboard"
+  },
+  {
+   "kind": "unsupported",
+   "text": "在 config.yml 中改了会话目录的，暂时找不到会话：只认默认目录和 --profile 的目录",
+   "textEn": "Sessions stored in a custom directory set in config.yml aren't found yet: only the default and --profile directories are read"
+  },
+  {
+   "kind": "unsupported",
+   "text": "第一次运行时的设置向导（登录、选模型）需要在电脑上完成",
+   "textEn": "The first-run setup (sign-in, choosing a model) has to be completed on your computer"
+  },
+  {
+   "kind": "untested",
+   "text": "没有用真实的模型服务账号实测（用自定义模型配置接测试服务测的）",
+   "textEn": "Not tested with a real model provider account (tested through a custom model setting)"
+  }
+ ]
+}

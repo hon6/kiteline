@@ -1,6 +1,7 @@
 // 数据流大屏：所有会话一块屏。左边是它们读进来的东西，中间一列是每个会话，右边是做的事和产出去了哪；
 // 每次工具调用画一串线穿过各列（一次一根，越忙越密），发生时一道亮光带着星芒沿线走一趟。
-// 卡片铺在一张带格子的画布上，镜头会自己 2D 运镜：平移、推近到正在忙的那张卡、旁边列出它最近的调用，再拉回全景。
+// 照用户 11-23 给的参考视频：黑底、暗红六芒星，镜头按阶段轮换——甩镜头（带拖影）飞到一张卡的低角度 3D 特写，
+// 卡片整张亮起、四角白括角、它的线束整束变成发光的彩色，旁边标注框；再甩回正上方全景（彩色线束留着），间或整板斜着慢慢转。
 // 和世界共用一套宿主（Mac / iPhone 的 WKWebView、Windows 的 WebView2、Linux 浏览器直连），消息协议同 world.md（内部文档） 第 9 节，
 // 另外会去 api/history 补每个会话最近的调用，一打开就是满的。
 
@@ -10,10 +11,12 @@ import { FlowData, top, baseName, cacheRatio } from './flowdata.js';
 import { Dash, fmtTok, sayOf, VERB, kindColor } from './flowdash.js';
 import { setStrings, t } from './i18n.js';
 
-const DW = 1440, DH = 780, D = 7;      // 设计尺寸（一个单位 = 一个设计像素）、卡片厚度
+const DW = 1440, DH = 780, D = 10;      // 设计尺寸（一个单位 = 一个设计像素）、卡片厚度
 const BUS_X = 262, SES_X = 560, SES_W = 214, MAXS = 37;   // 中间那列最多放几张（只留标题条时一张 20 高），再多合成「其余 N 个会话」
 const SEG = 22;                          // 每根曲线分几段
-const MAXP = 1500;                       // 同时在走的光点上限
+const MAXP = 1200;                       // 同时在走的光点上限
+const TRAIL = 5;                         // 每颗光点后面拖几个点（看着是一道短光条）
+const MAXF = 80;                         // 同时闪着的四角星
 const LITN = 320;                        // 同时亮着的线（有光点在走的那几根）上限
 const SEG_MS = 360;                      // 光点走一段线要多久
 const host = {
@@ -35,12 +38,15 @@ const R = (l, v, r, extra = {}) => ({ l, v, r, ...extra });
 
 const COLORS = { teal: '#5fe0c8', green: '#8be37c', yellow: '#f2cf5b', orange: '#f0a35e', pink: '#ff5fa8', violet: '#9b8cff', blue: '#6ea8ff', red: '#ff5a6a' };
 // 线是淡淡的灰（只带一点色相），普通叠加：叠再多也只是这层淡色，不会越叠越亮（11-02：线要淡、偏灰，光点才显眼）
+// 参考视频里的线是细的灰白，比以前亮一档；线往上拱起（3D 镜头斜着看时是一道道弧）
 const LINE = {
-  hair: { color: new THREE.Color('#5c6270'), a: .16, hot: '#ffffff', lift: [0, 3], cap: 640 },
-  pink: { color: new THREE.Color('#7a6070'), a: .2, hot: '#ff8cc6', lift: [0, 4], cap: 480 },
-  yel: { color: new THREE.Color('#78725c'), a: .2, hot: '#ffe27a', lift: [0, 4], cap: 380 },
-  teal: { color: new THREE.Color('#5c7672'), a: .2, hot: '#8ff5e2', lift: [0, 3], cap: 280 },
+  hair: { color: new THREE.Color('#9aa0ae'), a: .2, hot: '#ffffff', lift: [4, 46], cap: 640 },
+  pink: { color: new THREE.Color('#a497a0'), a: .2, hot: '#ff9ccf', lift: [10, 110], cap: 480 },
+  yel: { color: new THREE.Color('#a8a07e'), a: .2, hot: '#ffe27a', lift: [10, 120], cap: 380 },
+  teal: { color: new THREE.Color('#82a8a2'), a: .2, hot: '#8ff5e2', lift: [6, 70], cap: 280 },
 };
+const BG = '#050508';
+const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 
 // ── 卡片 ──
 class Card {
@@ -56,7 +62,7 @@ class Card {
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.tex.anisotropy = 4;
-    const side = new THREE.MeshBasicMaterial({ color: new THREE.Color(this.color).multiplyScalar(.32) });
+    const side = new THREE.MeshBasicMaterial({ color: new THREE.Color(this.color).multiplyScalar(.5) });
     const back = new THREE.MeshBasicMaterial({ color: 0x0b0d13 });
     const face = new THREE.MeshBasicMaterial({ map: this.tex });
     this.mesh = new THREE.Mesh(new THREE.BoxGeometry(this.w, this.h, D), [side, side, side, side, face, back]);
@@ -79,38 +85,45 @@ class Card {
   fire() { this.heat = 1; this.fires.push(performance.now()); if (this.fires.length > 60) this.fires.shift(); }
   score(now) { while (this.fires.length && now - this.fires[0] > 15000) this.fires.shift(); return this.fires.length; }
 
+  /// 参考视频的卡片：深色半透明底、细彩色描边、整条彩色标题栏（深色等宽字「标题 · 副标题」），
+  /// 每行左右两边各一个彩色接口圆点，行名下面垫一条由亮到暗的彩色条，右边是数；对准时整张卡染上自己的颜色、描边变亮
   draw() {
     const g = this.g, s = this.scale, w = this.w, h = this.h;
     g.setTransform(s, 0, 0, s, 0, 0);
     g.clearRect(0, 0, w, h);
-    const idle = this.isIdle?.();
-    g.fillStyle = 'rgba(13,15,22,0.96)'; g.fillRect(0, 0, w, h);
-    g.strokeStyle = 'rgba(160,175,210,.22)'; g.lineWidth = 1; g.strokeRect(.5, .5, w - 1, h - 1);
-    g.fillStyle = idle ? '#3a3340' : this.color; g.fillRect(0, 0, w, 19);
+    const idle = this.isIdle?.(), lit = this.flow.focusId === this.id, col = idle ? '#4a4452' : this.color;
+    g.fillStyle = 'rgba(9,10,15,0.94)'; g.fillRect(0, 0, w, h);
+    if (lit) { const lg = g.createLinearGradient(0, 0, 0, h); lg.addColorStop(0, hexA(col, .34)); lg.addColorStop(1, hexA(col, .14)); g.fillStyle = lg; g.fillRect(0, 0, w, h); }
+    g.strokeStyle = hexA(col, lit ? 1 : .42); g.lineWidth = lit ? 1.6 : 1; g.strokeRect(.75, .75, w - 1.5, h - 1.5);
+    g.fillStyle = col; g.fillRect(0, 0, w, 19);
+    if (lit) { g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(0, 0, w, 19); }
     const rows = this.rows();
     const em = this.em ? this.em() : '';
     g.textBaseline = 'middle';
-    g.font = `600 10px ${MONO}`; const emW = em ? g.measureText(em).width + 8 : 0;
-    g.font = `700 11px ${SANS}`; g.fillStyle = idle ? '#c9c3cf' : '#0a0b10';
+    g.font = `700 10px ${MONO}`; const emW = em ? g.measureText(em).width + 8 : 0;
+    const ink = idle ? '#cfc8d6' : '#07080c';
     let x = 7;
-    if (this.live !== undefined) { g.beginPath(); g.arc(10, 9.5, 3, 0, 7); g.fillStyle = idle ? '#6b6470' : '#0a0b10'; g.fill(); x = 18; g.fillStyle = idle ? '#c9c3cf' : '#0a0b10'; }
+    if (this.live !== undefined) { g.beginPath(); g.arc(10, 9.5, 3, 0, 7); g.fillStyle = idle ? '#6b6470' : ink; g.fill(); x = 18; }
+    g.fillStyle = ink; g.font = `700 10.5px ${SANS}`;
     const title = fitText(g, this.title, w - x - 8 - emW - (this.sub ? 40 : 0));
     g.fillText(title, x, 10);
-    if (this.sub) { const tw = g.measureText(title).width; g.font = `600 9.5px ${MONO}`; g.globalAlpha = .62; g.fillText(fitText(g, this.sub, w - x - tw - 14 - emW), x + tw + 6, 10.5); g.globalAlpha = 1; }
+    if (this.sub) { const tw = g.measureText(title).width; g.font = `700 9.5px ${MONO}`; g.globalAlpha = .72; g.fillText(fitText(g, '· ' + this.sub, w - x - tw - 14 - emW), x + tw + 5, 10.5); g.globalAlpha = 1; }
     if (em) { g.font = `700 10px ${MONO}`; g.textAlign = 'right'; g.fillText(em, w - 7, 10.5); g.textAlign = 'left'; }
     rows.slice(0, this.rowsN).forEach((r, i) => {
-      const y = 19 + 5 + i * 15 + 7.5, c = r.warn ? COLORS.red : r.good ? COLORS.green : this.color;
-      g.fillStyle = c; g.globalAlpha = .75; g.fillRect(7, y - 2.5, 5, 5); g.globalAlpha = 1;
+      const y = 19 + 5 + i * 15 + 7.5, c = r.warn ? COLORS.red : r.good ? COLORS.green : col;
+      // 左右接口圆点
+      g.fillStyle = c; g.beginPath(); g.arc(2.6, y, 2.1, 0, 7); g.fill(); g.beginPath(); g.arc(w - 2.6, y, 2.1, 0, 7); g.fill();
       if (r.wide) {
-        g.font = `10px ${MONO}`; g.fillStyle = '#9aa1b2'; g.fillText(fitText(g, r.l, w - 26), 18, y + .5);
+        g.strokeStyle = hexA(c, .7); g.lineWidth = 1; g.strokeRect(9.5, y - 3.5, 7, 7);
+        g.font = `9.5px ${MONO}`; g.fillStyle = '#aab0bd'; g.fillText(fitText(g, r.l, w - 30), 21, y + .5);
         return;
       }
-      g.font = `10px ${SANS}`; g.fillStyle = '#9aa1b2'; g.fillText(fitText(g, r.l, 60), 18, y + .5);
-      const bx = 82, bw = w - bx - 52;
-      g.fillStyle = 'rgba(255,255,255,.07)'; g.fillRect(bx, y - 2, bw, 4);
-      g.fillStyle = c; g.fillRect(bx, y - 2, Math.max(0, Math.min(1, r.r || 0)) * bw, 4);
-      g.font = `10px ${MONO}`; g.fillStyle = '#e6e8ef'; g.textAlign = 'right'; g.fillText(String(r.v), w - 8, y + .5); g.textAlign = 'left';
-      g.fillStyle = '#ffffff'; g.globalAlpha = .55; g.fillRect(w - 1.5, y - 1, 1.5, 2); g.globalAlpha = 1;
+      // 行名下面垫的彩色条（长度 = 占比）
+      const bw = (w - 64) * Math.max(.04, Math.min(1, r.r || 0)), bg = g.createLinearGradient(9, 0, 9 + bw, 0);
+      bg.addColorStop(0, hexA(c, lit ? .75 : .55)); bg.addColorStop(1, hexA(c, lit ? .3 : .16));
+      g.fillStyle = bg; g.fillRect(9, y - 5, bw, 10);
+      g.font = `9.5px ${SANS}`; g.fillStyle = '#e2e5ec'; g.fillText(fitText(g, r.l, w - 82), 13, y + .5);
+      g.font = `600 9.5px ${MONO}`; g.fillStyle = lit ? '#ffffff' : '#d8dbe4'; g.textAlign = 'right'; g.fillText(fitText(g, String(r.v), 46), w - 9, y + .5); g.textAlign = 'left';
     });
     this.tex.needsUpdate = true;
     this.dirty = false;
@@ -166,7 +179,7 @@ class Bank {
     this.ca.clearUpdateRanges();
     for (let i = 0; i < this.count; i++) {
       const own = this.owner[i];
-      const want = !id ? 1 : own && own.includes(id) ? 1 : .22;
+      const want = !id ? 1 : own && own.includes(id) ? 1 : .55;
       if (this.boost[i] !== want) this.paint(i, want);
     }
   }
@@ -206,18 +219,24 @@ class Flow {
     const phone = Math.min(innerWidth, innerHeight) < 600;
     this.texScale = Math.min(3, Math.max(2, (devicePixelRatio || 1) * (phone ? 1.2 : 1.5)));
     this.canvas = $('flow-scene');
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
+    // 甩镜头时的拖影（参考视频里转场一闪而过的模糊）：保留上一帧、先盖一层半透明底色再画，所以不让它自己清屏
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: true });
+    this.renderer.autoClear = false;
+    this.renderer.setClearColor(BG, 1);
     this.pixelRatio = Math.min(devicePixelRatio || 1, 2);
     this.renderer.setPixelRatio(this.pixelRatio);
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#06070b');
-    this.camera = new THREE.PerspectiveCamera(32, 1, 5, 9000);
+    this.camera = new THREE.PerspectiveCamera(32, 1, 5, 12000);
+    this.fade = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: BG, transparent: true, depthTest: false, depthWrite: false }));
+    this.fadeScene = new THREE.Scene(); this.fadeScene.add(this.fade);
+    this.fadeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.blur = 0;
     this.controls = new OrbitControls(this.camera, this.canvas);
-    // 纯 2D（11-02：运镜改 2D，不要 3D）：只能拖动、缩放，不能转
-    Object.assign(this.controls, { enableDamping: true, dampingFactor: .08, screenSpacePanning: true, zoomToCursor: true, minDistance: 120, maxDistance: 5200, enableRotate: false });
-    this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-    this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
-    this.controls.addEventListener('start', () => { this.pausedUntil = performance.now() + 25000; this.tween = null; this.setCallout(null); });
+    // 参考视频是 3D 运镜（11-23：完全照视频）：左键拖动、滚轮缩放、右键（双指）转视角
+    Object.assign(this.controls, { enableDamping: true, dampingFactor: .08, screenSpacePanning: true, zoomToCursor: true, minDistance: 120, maxDistance: 6000, enableRotate: true, maxPolarAngle: Math.PI * .98 });
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+    this.controls.addEventListener('start', () => { this.camera.up.set(0, 1, 0); this.pausedUntil = performance.now() + 25000; this.tween = null; this.hold = null; this.setCallout(null); });
 
     this.glowTex = this.makeGlow();
     this.starTex = this.makeStar();
@@ -226,6 +245,8 @@ class Flow {
     this.banks = Object.fromEntries(Object.keys(LINE).map(k => [k, new Bank(this.scene, k)]));
     this.lit = this.makeLit();
     this.hot = this.makeHot();
+    this.fx = this.makeFocusFx();
+    this.running = new Map();   // toolId -> 还没出结果的调用
     this.cards = new Map();
     this.makeCards();
     for (const c of this.cards.values()) c.draw();   // 一打开就有字，不黑一下
@@ -485,11 +506,37 @@ class Flow {
     for (const s of segs) { this.banks[s.kind].add(s.pts, s.cards); for (const id of s.cards) { const cd = this.cards.get(id); if (cd) cd.dirty = true; } }
     // 只重画这次调用经过的卡（数字只在经过它的调用里变）+ 模型卡；以前每次把右边 15 张全标脏，会话卡片排不上、新会话一直是黑的
     this.cards.get('model').dirty = true;
-    if (this.focusId && segs.some(s => s.cards.includes(this.focusId))) for (const b of Object.values(this.banks)) b.focus(this.focusId);
+    if (this.focusId && segs.some(s => s.cards.includes(this.focusId))) { for (const b of Object.values(this.banks)) b.focus(this.focusId); this.fxDirty = true; }
     if (!animate || !segs.length) return;
     this.dash.event(ev);
     for (const s of segs) for (const id of s.cards) this.cards.get(id)?.fires.push(performance.now());
     this.burst(ev, segs);
+    // 还没出结果的调用（11-23：正在进行哪一项，哪一项的光路就一直亮着）：记下来，结果回来前一直亮、一直流
+    if (ev.toolId && this.data.pending.get(ev.toolId) === ev) this.running.set(ev.toolId, { ev, segs, t0: performance.now(), slots: [], next: 0, star: 0 });
+  }
+
+  /// 进行中的调用：线一直亮着，光点一串串沿线走，会话卡片带着光；结果回来（或等了 15 分钟）就收掉，终点闪一颗星
+  tickRunning(now) {
+    for (const [id, r] of this.running) {
+      const done = this.data.pending.get(id) !== r.ev;
+      // 会话已经歇下来半分钟还没等到结果（记录漏了这条结果）：也收掉，别一直亮着
+      const ss = this.data.sessions.get(r.ev.key), stale = !ss || (ss.activity === 'idle' && now - r.t0 > 30000);
+      if (done || stale || now - r.t0 > 900000) {
+        this.running.delete(id);
+        const last = r.segs[r.segs.length - 1];
+        if (done && last && this.flashes.length < MAXF) this.flashes.push({ q: last.pts[SEG], t0: now, col: this.hotColor[last.kind] });
+        continue;
+      }
+      r.segs.forEach((sg, i) => {
+        const k = r.slots[i], sl = k !== undefined ? this.litSlots[k] : null;
+        if (sl && sl.owner === r) sl.end = now + 700;
+        else r.slots[i] = this.light(sg.pts, sg.kind, now, now + 700, 1.15, r);
+      });
+      if (now >= r.next) { r.next = now + 170 + Math.random() * 140; this.spawn(r.segs, now, .75 + Math.random() * .35, false); }
+      if (now >= r.star) { r.star = now + 1600; this.spawn(r.segs, now, 1, true); }
+      const ses = this.cards.get('s:' + r.ev.key) || this.cards.get('s:@more');
+      if (ses) ses.heat = Math.max(ses.heat, .55 + .2 * Math.sin(now / 240));
+    }
   }
 
   /// 一次调用放出一串光点（11-02：光点多一点，有数据时大量出现）：
@@ -553,13 +600,14 @@ class Flow {
     return obj;
   }
 
-  light(pts, kind, start, end, strength) {
+  light(pts, kind, start, end, strength, owner = null) {
     let i = this.litSlots.indexOf(null);
-    if (i < 0) { let oldest = 0; this.litSlots.forEach((sl, k) => { if (sl.end < this.litSlots[oldest].end) oldest = k; }); i = oldest; }
-    this.litSlots[i] = { start, end, strength, col: this.hotLine[kind] };
+    if (i < 0) { let oldest = -1; this.litSlots.forEach((sl, k) => { if (!sl.owner && (oldest < 0 || sl.end < this.litSlots[oldest].end)) oldest = k; }); i = oldest < 0 ? 0 : oldest; }
+    this.litSlots[i] = { start, end, strength, col: this.hotLine[kind], owner };
     const P = this.lit.geometry.attributes.position, o = i * SEG * 2 * 3;
     for (let k = 0; k < SEG; k++) { const a = pts[k], b = pts[k + 1]; P.array.set([a.x, a.y, a.z + .3, b.x, b.y, b.z + .3], o + k * 6); }
     P.needsUpdate = true;
+    return i;
   }
 
   tickLit(now) {
@@ -587,16 +635,16 @@ class Flow {
 
   // MARK: 光点：一组 Points（领头的是星芒，其余是小圆点），只在调用发生时沿线走
   makeHot() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3).setUsage(THREE.DynamicDrawUsage));
-    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3).setUsage(THREE.DynamicDrawUsage));
-    g.setAttribute('size', new THREE.BufferAttribute(new Float32Array(MAXP), 1).setUsage(THREE.DynamicDrawUsage));
-    g.setAttribute('star', new THREE.BufferAttribute(new Float32Array(MAXP), 1).setUsage(THREE.DynamicDrawUsage));
+    const g = new THREE.BufferGeometry(), N = MAXP * TRAIL + MAXF;
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('size', new THREE.BufferAttribute(new Float32Array(N), 1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('star', new THREE.BufferAttribute(new Float32Array(N), 1).setUsage(THREE.DynamicDrawUsage));
     g.setDrawRange(0, 0);
     const pts = new THREE.Points(g, new THREE.ShaderMaterial({
       uniforms: { starMap: { value: this.starTex }, dotMap: { value: this.dotTex }, scale: { value: 1 } },
       vertexShader: 'attribute float size; attribute float star; attribute vec3 color; uniform float scale; varying vec3 vColor; varying float vStar;'
-        + 'void main(){ vColor = color; vStar = star; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = size * scale / -mv.z; gl_Position = projectionMatrix * mv; }',
+        + 'void main(){ vColor = color; vStar = star; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = min(160.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv; }',
       fragmentShader: 'uniform sampler2D starMap; uniform sampler2D dotMap; varying vec3 vColor; varying float vStar;'
         + 'void main(){ vec4 d = texture2D(dotMap, gl_PointCoord); float a = mix(d.a, texture2D(starMap, gl_PointCoord).a, vStar);'
         + ' vec3 c = mix(vColor, vec3(1.0), max(d.r * .85, vStar * .55)); gl_FragColor = vec4(c * 1.25, a); }',
@@ -605,6 +653,7 @@ class Flow {
     pts.frustumCulled = false;
     this.scene.add(pts);
     this.parts = [];
+    this.flashes = [];
     this.hotColor = Object.fromEntries(Object.entries(LINE).map(([k, v]) => [k, new THREE.Color(v.hot)]));
     return { stars: pts };
   }
@@ -612,86 +661,211 @@ class Flow {
   tickGlints(now) {
     const geo = this.hot.stars.geometry, P = geo.attributes.position.array, C = geo.attributes.color.array, S = geo.attributes.size.array, ST = geo.attributes.star.array;
     let n = 0;
+    const put = (q, col, f, size, star) => { P[n * 3] = q.x; P[n * 3 + 1] = q.y; P[n * 3 + 2] = q.z + 1; C[n * 3] = col.r * f; C[n * 3 + 1] = col.g * f; C[n * 3 + 2] = col.b * f; S[n] = size; ST[n] = star; n++; };
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i];
       if (now < p.t0) continue;
       const el = (now - p.t0) / SEG_MS * p.speed, total = p.segs.length;
-      if (el >= total) { this.parts[i] = this.parts[this.parts.length - 1]; this.parts.pop(); continue; }
-      const k = Math.floor(el), u = el - k, seg = p.segs[k];
-      // 领头的星芒到了哪张卡，那张卡亮一下
-      if (p.lead && k >= p.hit) { p.hit = k + 1; for (const id of seg.cards) { const c = this.cards.get(id); if (c) c.heat = 1; } }
-      const q = sample(seg.pts, u * SEG), col = this.hotColor[seg.kind];
-      // 起步淡入、走到头淡出（慢慢冒出来的那些淡入得更慢）
-      const fade = Math.min(1, el * (p.amb ? 2.5 : 6), (total - el) * 3);
-      P[n * 3] = q.x; P[n * 3 + 1] = q.y; P[n * 3 + 2] = q.z + 1;
-      const f = fade * p.dim;
-      C[n * 3] = col.r * f; C[n * 3 + 1] = col.g * f; C[n * 3 + 2] = col.b * f;
-      S[n] = p.lead ? p.size + 14 * Math.sin(now / 70 + i) : p.size * (.9 + .1 * Math.sin(now / 120 + i));
-      ST[n] = p.lead ? 1 : 0;
-      n++;
+      if (el >= total + .25) { this.parts[i] = this.parts[this.parts.length - 1]; this.parts.pop(); continue; }
+      const k = Math.min(total - 1, Math.floor(el)), seg = p.segs[k];
+      // 领头的到了下一张卡：那张卡亮一下，接口处闪一颗四角星
+      if (p.lead && k >= p.hit) {
+        p.hit = k + 1;
+        for (const id of seg.cards) { const c = this.cards.get(id); if (c) c.heat = 1; }
+        if (this.flashes.length < MAXF) this.flashes.push({ q: seg.pts[0], t0: now, col: this.hotColor[seg.kind] });
+      }
+      if (p.lead && el >= total && !p.done) { p.done = true; const last = p.segs[total - 1]; if (this.flashes.length < MAXF) this.flashes.push({ q: last.pts[SEG], t0: now, col: this.hotColor[last.kind] }); }
+      const fade = Math.min(1, el * (p.amb ? 2.5 : 6), Math.max(0, total - el) * 3) * p.dim;
+      // 光条：领头一个亮点，后面拖几个越来越小越来越暗的点
+      const tr = p.amb ? 3 : TRAIL;
+      for (let j = 0; j < tr; j++) {
+        const e2 = Math.min(total - .001, el) - j * .045 * (p.amb ? .8 : 1.4);
+        if (e2 < 0) break;
+        const k2 = Math.floor(e2), s2 = p.segs[k2], q = sample(s2.pts, (e2 - k2) * SEG), col = this.hotColor[s2.kind];
+        const f = fade * Math.pow(1 - j / tr, 1.3);
+        if (j === 0) put(q, col, f, p.lead ? p.size + 14 * Math.sin(now / 70 + i) : p.size * (.9 + .1 * Math.sin(now / 120 + i)), p.lead ? 1 : 0);
+        else put(q, col, f, p.size * (.78 - j * .1), 0);
+      }
+    }
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const fl = this.flashes[i], u = (now - fl.t0) / 520;
+      if (u >= 1) { this.flashes.splice(i, 1); continue; }
+      put(fl.q, fl.col, 1 - u, 70 + 50 * Math.sin(u * Math.PI), 1);
     }
     geo.setDrawRange(0, n);
     for (const a of ['position', 'color', 'size', 'star']) geo.attributes[a].needsUpdate = true;
   }
 
-  // MARK: 镜头：全景、对准一张卡（自动运镜）
+  // MARK: 对准一张卡：它的线整束变成它的颜色、带一圈柔光（加法混合的细带子，比 1 像素的线粗、斜着看也清楚），四角白括角
+  makeFocusFx() {
+    const mk = (w, op) => {
+      const m = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      m.frustumCulled = false; m.userData = { w, op }; this.scene.add(m); return m;
+    };
+    const br = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: .95, depthWrite: false }));
+    br.frustumCulled = false; br.visible = false; this.scene.add(br);
+    return { core: mk(1.1, .85), glow: mk(4, .13), br, at: 0 };
+  }
+  buildFocus() {
+    this.fxDirty = false;
+    const id = this.focusId, card = id ? this.cards.get(id) : null, lines = [];
+    // 只亮最近的一百多根（全亮成一片就看不出线了）：每组从最新写入的往回取
+    if (card) for (const b of Object.values(this.banks)) {
+      let got = 0;
+      for (let j = 1; j <= b.count && got < 45; j++) { const i = (b.next - j + b.cap) % b.cap; if (b.owner[i]?.includes(id)) { lines.push(b.pointsOf(i)); got++; } }
+    }
+    const base = new THREE.Color(card ? card.color : '#ffffff');
+    for (const m of [this.fx.core, this.fx.glow]) {
+      const hw = m.userData.w / 2, n = lines.length * SEG * 6, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+      const c = m === this.fx.core ? base.clone().lerp(new THREE.Color('#ffffff'), .3) : base;
+      let o = 0;
+      for (const pts of lines) for (let k = 0; k < SEG; k++) {
+        const a = pts[k], b = pts[k + 1], dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1, nx = -dy / L * hw, ny = dx / L * hw;
+        for (const [x, y, z] of [[a.x + nx, a.y + ny, a.z], [a.x - nx, a.y - ny, a.z], [b.x + nx, b.y + ny, b.z], [b.x + nx, b.y + ny, b.z], [a.x - nx, a.y - ny, a.z], [b.x - nx, b.y - ny, b.z]]) {
+          pos[o] = x; pos[o + 1] = y; pos[o + 2] = z + .6; col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b; o += 3;
+        }
+      }
+      m.geometry.dispose();
+      m.geometry = new THREE.BufferGeometry();
+      m.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      m.geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    }
+    // 括角：卡片四角各一个直角，从大一圈收进来
+    const br = this.fx.br;
+    br.visible = !!card;
+    if (card) {
+      const pad = 7, arm = Math.min(16, card.h * .35), x0 = -card.w / 2 - pad, x1 = card.w / 2 + pad, y0 = -card.h / 2 - pad, y1 = card.h / 2 + pad, v = [];
+      for (const [x, y, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) v.push(x, y, 0, x + sx * arm, y, 0, x, y, 0, x, y + sy * arm, 0);
+      br.geometry.dispose(); br.geometry = new THREE.BufferGeometry(); br.geometry.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+      br.position.copy(W(card.x + card.w / 2, card.y + card.h / 2, D + 1.5));
+    }
+  }
+  tickFocus(now) {
+    if (this.fxDirty && now - (this.fxAt || 0) > 300) { this.fxAt = now; this.buildFocus(); }
+    const u = Math.min(1, (now - this.fx.at) / 450), shim = .85 + .15 * Math.sin(now / 160);
+    this.fx.core.material.opacity = this.fx.core.userData.op * u * shim;
+    this.fx.glow.material.opacity = this.fx.glow.userData.op * u * (.8 + .2 * Math.sin(now / 300));
+    const sc = 1 + (1 - ease(u)) * .18; this.fx.br.scale.set(sc, sc, 1);
+  }
+
+  // MARK: 镜头：一个机位 = 看着哪（target）、多远（dist）、从哪个方向（az，平面上的方位）、抬多高（el，90° 是正上方）
+  // 参考视频的三种机位：正上方全景、低角度 3D 特写一张卡（停住时慢慢绕着转、推近）、整块板斜着的大全景（慢慢转）
   overviewPose() {
     const fov = this.camera.fov * Math.PI / 180, a = this.camera.aspect;
-    const dist = Math.max((DH * 1.06 / 2) / Math.tan(fov / 2), (DW * 1.04 / 2) / (Math.tan(fov / 2) * a));
+    // 上面留一条给左上角的阶段标题（参考里标题在卡片上方，不压卡片）
+    const dist = Math.max((DH * 1.16 / 2) / Math.tan(fov / 2), (DW * 1.04 / 2) / (Math.tan(fov / 2) * a));
     const phone = this.w < 640;
     // 竖着的手机：全景太小，默认看中间的会话列那一块
-    if (phone && a < 1) return { pos: new THREE.Vector3(-20, 0, dist * .42), target: new THREE.Vector3(-20, 0, 0) };
-    return { pos: new THREE.Vector3(0, 0, dist), target: new THREE.Vector3(0, 0, 0) };
+    if (phone && a < 1) return { target: new THREE.Vector3(-20, 70, 0), dist: dist * .42, az: -Math.PI / 2, el: Math.PI / 2 };
+    return { target: new THREE.Vector3(0, DH * .045, 0), dist, az: -Math.PI / 2, el: Math.PI / 2 };
+  }
+  sweepPose() {
+    const o = this.overviewPose(), side = this.shots % 2 ? 1 : -1;
+    return { target: new THREE.Vector3(-30, -40, 0), dist: o.dist * (this.camera.aspect < 1 ? .55 : .92), az: -Math.PI / 2 + side * .62, el: .6, roll: side * .22, spin: -side * .028, push: .006 };
+  }
+  tiltPose(card) {
+    const half = Math.tan(this.camera.fov * Math.PI / 360), a = this.camera.aspect;
+    // 参考里的特写：这张卡占画面三成左右，旁边几张卡和连过来的线束都在画面里
+    const span = a < 1 ? card.w * 2.4 : Math.max(980, card.w * 4.6);
+    const side = (this.shots >> 1) % 2 ? 1 : -1;
+    return { target: card.center.clone().setZ(0), dist: Math.max(span / (2 * half * Math.min(1.6, a)), 420), az: -Math.PI / 2 + side * (.5 + Math.random() * .35), el: .62 + Math.random() * .2, roll: side * .25, spin: -side * .03, push: .01 };
+  }
+  setPose(p) {
+    const ce = Math.cos(p.el), t = p.target;
+    this.camera.position.set(t.x + p.dist * ce * Math.cos(p.az), t.y + p.dist * ce * Math.sin(p.az), t.z + p.dist * Math.sin(p.el));
+    this.controls.target.copy(t);
+    // 上方向：正上方看时是平面的 y 轴（北在上），斜着看时是画面真正的上方（地平线水平），再侧倾一点点（参考里画面是微微歪着的）
+    const se = Math.sin(p.el), ce2 = Math.cos(p.el), roll = (p.roll ?? 0) * ce2;
+    this.camera.up.set(-Math.cos(p.az) * se - Math.sin(p.az) * roll, -Math.sin(p.az) * se + Math.cos(p.az) * roll, ce2).normalize();
+    this.camera.lookAt(t);
+  }
+  poseNow() {
+    const t = this.controls.target.clone(), o = this.camera.position.clone().sub(t), dist = o.length() || 1;
+    const el = Math.asin(Math.max(-1, Math.min(1, o.z / dist)));
+    const az = Math.hypot(o.x, o.y) < dist * .02 ? -Math.PI / 2 : Math.atan2(o.y, o.x);
+    return { target: t, dist, az, el, roll: this.hold?.pose.roll ?? this.tween?.to.roll ?? 0 };
   }
   overview(now) {
-    const p = this.overviewPose();
     this.setCallout(null);
-    this.flyTo(p.pos, p.target, now ? 0 : 2200);
+    this.flyTo(this.overviewPose(), now ? 0 : 1200);
     this.title(null);
   }
   shoot(card) {
-    // 2D：正对着平移、放大到这张卡，画面里留出旁边的卡和连过来的线（不倾斜、不旋转）
-    const half = Math.tan(this.camera.fov * Math.PI / 360), a = this.camera.aspect;
-    const wantW = a < 1 ? card.w * 1.7 : Math.max(560, Math.min(900, card.w * 3.2));
-    const r = Math.max(wantW / (2 * half * a), (card.h * 2.4) / (2 * half));
-    const target = card.center.clone().setZ(0).add(new THREE.Vector3(card.kind === 'ses' ? -40 : 0, 0, 0));
-    const pos = target.clone().add(new THREE.Vector3(0, 0, r));
-    this.flyTo(pos, target, 2400);
-    this.shots++;
+    this.flyTo(this.tiltPose(card), 1300);
     this.focus(card.id);
     this.shotCard = card;
     this.title(card);
-    setTimeout(() => { if (this.shotCard === card) this.setCallout(card); }, 1600);
+    this.setCallout(null);
+    setTimeout(() => { if (this.shotCard === card) this.setCallout(card); }, 1250);
   }
-  flyTo(pos, target, ms) {
-    if (!ms) { this.camera.position.copy(pos); this.controls.target.copy(target); this.controls.update(); this.tween = null; return; }
-    this.tween = { p0: this.camera.position.clone(), t0: this.controls.target.clone(), p1: pos, t1: target, s: performance.now(), ms };
+  /// 甩过去：先快后慢，中途抬高一点再落下（参考视频的转场），拖影由速度决定
+  flyTo(pose, ms) {
+    this.hold = null;
+    if (!ms) { this.setPose(pose); this.controls.update(); this.tween = null; this.hold = pose.spin || pose.push ? { pose } : null; return; }
+    const from = this.poseNow();
+    let d = pose.az - from.az; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+    this.tween = { from, to: pose, daz: d, s: performance.now(), ms };
+  }
+  stepCamera(now) {
+    if (this.tween) {
+      const T = this.tween, u = Math.min(1, (now - T.s) / T.ms), e = 1 - Math.pow(1 - u, 4);
+      const lift = Math.sin(u * Math.PI) * .15;
+      this.setPose({
+        target: T.from.target.clone().lerp(T.to.target, e), dist: T.from.dist * Math.pow(T.to.dist / T.from.dist, e) * (1 + lift),
+        az: T.from.az + T.daz * e, el: T.from.el + (T.to.el - T.from.el) * e, roll: (T.from.roll ?? 0) + ((T.to.roll ?? 0) - (T.from.roll ?? 0)) * e,
+      });
+      if (u >= 1) { this.tween = null; this.hold = { pose: { ...T.to, target: T.to.target.clone() } }; }
+      return true;
+    }
+    if (this.hold && this.auto && now > this.pausedUntil) {
+      const p = this.hold.pose, dt = Math.min(.05, (now - (this.hold.at || now)) / 1000);
+      this.hold.at = now;
+      if (p.spin) p.az += p.spin * dt;
+      if (p.push) p.dist *= 1 - p.push * dt;
+      this.setPose(p);
+      return true;
+    }
+    return false;
   }
   focus(id) {
     if (this.focusId === id) return;
+    const old = this.focusId && this.cards.get(this.focusId);
     this.focusId = id;
     for (const b of Object.values(this.banks)) b.focus(id);
+    if (old) old.draw();
+    if (id) this.cards.get(id)?.draw();
+    this.fx.at = performance.now();
+    this.buildFocus();
   }
 
-  /// 自动运镜：挑最近最忙的一张卡飞过去、停一会儿，每三下回一次全景
+  /// 自动运镜（照参考视频的节奏）：特写一张最忙的卡 → 甩回全景（它的彩色线束、标注留着）→ 特写下一张 → 全景 → 整块板斜着慢慢转
   direct(now) {
     if (!this.auto || now < this.pausedUntil || this.picked) return;
     if (this.nextShot && now < this.nextShot) return;
+    const step = this.shots % 5;
+    if (step === 1 || step === 3) {
+      this.shots++;
+      this.flyTo(this.overviewPose(), 1100);
+      this.nextShot = now + 5200;
+      return;
+    }
+    if (step === 4) {
+      this.shots++;
+      this.shotCard = null; this.focus(null); this.setCallout(null); this.title(null);
+      this.flyTo(this.sweepPose(), 1500);
+      this.nextShot = now + 7000;
+      return;
+    }
     let busy = [...this.cards.values()].map(c => [c, c.score(now) * (c.kind === 'ses' ? 1.3 : 1)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]);
     // 这会儿没人在干活：轮流看连线最多的几张卡，画面别停
     if (!busy.length) busy = [...this.cards.values()].map(c => [c, this.lineCount(c.id)]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
     const recent = this.recentShots || (this.recentShots = []);
     const pick = busy.find(([c]) => !recent.includes(c.id));
-    if (this.shots % 3 === 2 || !pick) {
-      this.shots++;
-      this.shotCard = null; this.focus(null);
-      this.overview(false);
-      this.nextShot = now + 6500;
-      return;
-    }
+    if (!pick) { this.shots++; this.overview(false); this.nextShot = now + 6000; return; }
     recent.push(pick[0].id); if (recent.length > 3) recent.shift();
     this.shoot(pick[0]);
-    this.nextShot = now + 7200;
+    this.shots++;
+    this.nextShot = now + 6200;
   }
 
   title(card) {
@@ -714,6 +888,8 @@ class Flow {
         sub = last ? `${this.itemText(last)} · ${this.data.sessions.get(last.key)?.title || ''}` : '';
       }
     }
+    const tone = card ? (card.id === 'checks' && this.data.G.testFail ? COLORS.red : card.color) : '#5fe0c8';
+    box.style.setProperty('--c', tone);
     box.innerHTML = `<b>${esc(num)}</b><div><span>${esc(name)}</span><small>${esc(sub)}</small></div>`;
   }
   lineCount(id) { return Object.values(this.banks).reduce((a, b) => a + b.countOf(id), 0); }
@@ -749,7 +925,9 @@ class Flow {
       return `<li><i style="color:${kindColor(ev)}">${esc(t(VERB[ev.k] || '命令'))}</i><span>${esc(what)}</span>${who}</li>`;
     }).join('');
     const open = card.kind === 'ses' && !card.more ? `<button id="flow-open">${esc(t('打开会话'))}</button>` : '';
+    const act = card.score(performance.now()) > 0 || (card.kind === 'ses' && this.data.live(this.data.sessions.get(card.key) || {}));
     el.innerHTML = `<b>${esc(card.kind === 'ses' ? card.title : card.title + ' · ' + card.sub)}</b>` +
+      `<span class="st">${esc(t('%@ 条线', this.lineCount(card.id)))} · ${esc(act ? t('活跃') : t('空闲'))}</span>` +
       (rows ? `<ul>${rows}</ul>` : `<span>${esc(t('还没有调用经过这里'))}</span>`) + open;
     $('flow-open')?.addEventListener('click', (e) => { e.stopPropagation(); host.post({ type: 'open', key: card.key }); });
   }
@@ -797,64 +975,57 @@ class Flow {
     if (!this.tween && !this.picked && !this.shotCard) this.overview(true);
   }
 
-  // MARK: 背景：暗红的大星形、竖总线
+  // MARK: 背景（照参考视频）：黑底、暗红的六芒星和圆环；总线是一条暗色竖带，中间一根亮线、两边刻度和青色小点，
+  // 一段青色亮光沿着它上下走，两个小圆环在上面滑
   decor() {
     const g = new THREE.Group();
-    // 总线：一列小点 + 一根虚线 + 刻度
-    const dots = [], ticks = document.createElement('canvas'), s = 3;
-    ticks.width = 40 * s; ticks.height = DH * s;
-    const tg = ticks.getContext('2d'); tg.scale(s, s); tg.font = `7px ${MONO}`; tg.fillStyle = '#5d6476';
-    for (let y = 18, i = 0; y < DH - 6; y += 20, i++) { dots.push(W(BUS_X, y, 1)); if (i % 2 === 0) tg.fillText(String(i).padStart(2, '0'), 6, y + 2.5); }
-    g.add(new THREE.Points(new THREE.BufferGeometry().setFromPoints(dots), new THREE.PointsMaterial({ color: 0x7d93c9, size: 3, sizeAttenuation: false })));
-    const bus = new THREE.Line(new THREE.BufferGeometry().setFromPoints([W(BUS_X, 10, .5), W(BUS_X, DH - 6, .5)]), new THREE.LineDashedMaterial({ color: 0x5a6a90, dashSize: 2, gapSize: 3 }));
-    bus.computeLineDistances();
-    g.add(bus);
-    const tt = new THREE.CanvasTexture(ticks); tt.colorSpace = THREE.SRGBColorSpace;
+    const cx = SES_X + 30, cy = DH / 2, R = DH * .66, star = [];
+    for (const start of [-90, 90]) {
+      const pts = [0, 1, 2].map(k => { const a = (start + k * 120) * Math.PI / 180; return W(cx + Math.cos(a) * R, cy + Math.sin(a) * R, -3); });
+      for (let k = 0; k < 3; k++) star.push(pts[k], pts[(k + 1) % 3]);
+    }
+    const ring = (r, z) => { const v = []; for (let k = 0; k < 160; k++) { const a = k / 160 * Math.PI * 2, b = (k + 1) / 160 * Math.PI * 2; v.push(W(cx + Math.cos(a) * r, cy + Math.sin(a) * r, z), W(cx + Math.cos(b) * r, cy + Math.sin(b) * r, z)); } return v; };
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(star), new THREE.LineBasicMaterial({ color: 0xc0284e, transparent: true, opacity: .5, depthWrite: false })));
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([...ring(R * .93, -3), ...ring(R * .5, -3)]), new THREE.LineBasicMaterial({ color: 0x9a2040, transparent: true, opacity: .32, depthWrite: false })));
+    // 总线竖带
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(14, DH - 14), new THREE.MeshBasicMaterial({ color: 0x0c0e15, transparent: true, opacity: .95, depthWrite: false }));
+    strip.position.copy(W(BUS_X, DH / 2 + 2, .2)); g.add(strip);
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([W(BUS_X, 10, .6), W(BUS_X, DH - 6, .6)]), new THREE.LineBasicMaterial({ color: 0xd8dce6, transparent: true, opacity: .55 })));
+    const ticks = [], dotsL = [], s = 3, lab = document.createElement('canvas');
+    lab.width = 40 * s; lab.height = DH * s;
+    const tg = lab.getContext('2d'); tg.scale(s, s); tg.font = `7px ${MONO}`; tg.fillStyle = '#6b7282';
+    for (let y = 18, i = 0; y < DH - 6; y += 10, i++) {
+      const big = i % 10 === 0, mid = i % 2 === 0;
+      ticks.push(W(BUS_X - (big ? 7 : mid ? 4 : 2), y, .7), W(BUS_X + (big ? 7 : mid ? 4 : 2), y, .7));
+      if (mid) dotsL.push(W(BUS_X + (i % 4 ? -10 : 10), y, 1));
+      if (big) tg.fillText(String(i / 2).padStart(2, '0'), 12, y + 2.5);
+    }
+    // 底下一行竖排的小字
+    tg.save(); tg.translate(30, DH - 14); tg.rotate(-Math.PI / 2); tg.fillStyle = '#4d5363'; tg.fillText('context taps · tokens', 0, 0); tg.restore();
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ticks), new THREE.LineBasicMaterial({ color: 0x8a90a0, transparent: true, opacity: .5 })));
+    g.add(new THREE.Points(new THREE.BufferGeometry().setFromPoints(dotsL), new THREE.PointsMaterial({ color: 0x4fe3ec, size: 3, sizeAttenuation: false })));
+    const tt = new THREE.CanvasTexture(lab); tt.colorSpace = THREE.SRGBColorSpace;
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(40, DH), new THREE.MeshBasicMaterial({ map: tt, transparent: true, depthWrite: false }));
-    plane.position.copy(W(BUS_X + 20, DH / 2, .5));
-    g.add(plane);
+    plane.position.copy(W(BUS_X + 20, DH / 2, .5)); g.add(plane);
+    // 走动的青色亮段
+    this.busGlow = new THREE.Mesh(new THREE.PlaneGeometry(3, 90), new THREE.MeshBasicMaterial({ map: this.makeBar(), color: 0x6ff0ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    g.add(this.busGlow);
+    // 两个小圆环
+    const circ = []; for (let k = 0; k < 40; k++) { const a = k / 40 * Math.PI * 2, b = (k + 1) / 40 * Math.PI * 2; circ.push(new THREE.Vector3(Math.cos(a) * 9, Math.sin(a) * 9, 0), new THREE.Vector3(Math.cos(b) * 9, Math.sin(b) * 9, 0)); }
+    this.busRings = [0, 1].map(() => { const m = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(circ), new THREE.LineBasicMaterial({ color: 0xe6e8ef, transparent: true, opacity: .6 })); g.add(m); return m; });
     this.scene.add(g);
-    this.grid = this.makeGrid();
   }
-
-  /// 背景是一张带格子的画布（11-02）：20 一小格、100 一大格，对齐设计坐标；
-  /// 着色器按屏幕像素画线，怎么缩放线都是 1 像素细，拉远了小格慢慢隐去只留大格。平面跟着镜头走，拖到哪都铺满
-  makeGrid() {
-    const mat = new THREE.ShaderMaterial({
-      uniforms: {
-        uBg: { value: new THREE.Color('#06070b') }, uMinor: { value: new THREE.Color('#11141c') }, uMajor: { value: new THREE.Color('#1a1e2a') },
-        uOrigin: { value: new THREE.Vector2(-DW / 2, DH / 2) }, uCell: { value: 20 }, uPx: { value: this.pixelRatio },
-      },
-      vertexShader: `varying vec2 vP;
-        void main() { vec4 w = modelMatrix * vec4(position, 1.0); vP = w.xy; gl_Position = projectionMatrix * viewMatrix * w; }`,
-      fragmentShader: `uniform vec3 uBg; uniform vec3 uMinor; uniform vec3 uMajor; uniform vec2 uOrigin; uniform float uCell; uniform float uPx;
-        varying vec2 vP;
-        float line(vec2 p, float cell) {
-          vec2 c = p / cell, d = fwidth(c);
-          vec2 g = abs(fract(c - 0.5) - 0.5) / d / uPx;
-          return 1.0 - min(min(g.x, g.y), 1.0);
-        }
-        void main() {
-          vec2 p = vP - uOrigin;
-          float px = uCell / max(fwidth(p.x), 1e-4) / uPx;
-          vec3 c = mix(uBg, uMinor, line(p, uCell) * smoothstep(5.0, 14.0, px));
-          c = mix(c, uMajor, line(p, uCell * 5.0));
-          gl_FragColor = vec4(c, 1.0);
-          #include <colorspace_fragment>
-        }`,
-      depthWrite: false,
-    });
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
-    m.position.z = -8; m.renderOrder = -1; m.frustumCulled = false;
-    this.scene.add(m);
-    return m;
+  tickDecor(now) {
+    const y = 20 + ((now / 30) % (DH - 40));
+    this.busGlow.position.copy(W(BUS_X, y, 1.2));
+    this.busRings.forEach((m, i) => { const yy = DH / 2 + Math.sin(now / (5200 + i * 2300) + i * 2) * (DH * .4); m.position.copy(W(BUS_X, yy, 1.3)); });
   }
-  /// 画布平面挪到镜头正下方、按看到的范围放大（每帧）
-  fitGrid() {
-    const h = 2 * Math.tan(this.camera.fov * Math.PI / 360) * (this.camera.position.z + 8) * 1.3;
-    this.grid.position.x = this.camera.position.x; this.grid.position.y = this.camera.position.y;
-    this.grid.scale.set(h * Math.max(1, this.camera.aspect), h, 1);
-    this.grid.material.uniforms.uPx.value = this.pixelRatio;
+  makeBar() {
+    const c = document.createElement('canvas'); c.width = 8; c.height = 128;
+    const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 128);
+    gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(.5, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 8, 128);
+    return new THREE.CanvasTexture(c);
   }
 
   makeGlow() {
@@ -895,10 +1066,10 @@ class Flow {
     const cm = this.cards.get('model'); if (cm) { const m = this.modelName(); if (m !== cm.title) { cm.title = m; cm.dirty = true; } }
     const ss = [...this.data.sessions.values()], live = ss.filter(s => this.data.live(s)).length, G = this.data.G, tot = this.data.usage?.totals || {};
     const ctx = ss.reduce((a, s) => a + s.context, 0);
-    const it = (k, v, opt) => `<span class="${opt ? 'opt' : ''}"><i>${esc(k)}</i>${esc(v)}</span>`;
-    $('flow-hud-l').innerHTML = `<span class="brand">KITELINE</span><b>${esc(this.modelName())}</b>` + it(t('会话'), `${live}/${ss.length}`) + it(t('改动行'), G.adds + G.dels) +
-      it(t('上下文合计'), fmtTok(ctx), 1) + it(t('工具调用'), G.calls) + it(t('今日 token'), fmtTok((tot.input || 0) + (tot.output || 0) + (tot.cacheRead || 0) + (tot.cacheWrite || 0)), 1) +
-      it(t('今日请求'), tot.requests || 0, 1) + it('TICK', String(G.calls % 10000).padStart(4, '0'), 1);
+    const it = (k, v, c, opt) => `<span class="${opt ? 'opt' : ''}"><i>${esc(k)}</i><em style="color:${c}">${esc(v)}</em></span>`;
+    $('flow-hud-l').innerHTML = `<span class="brand">KITELINE</span><b>${esc(this.modelName())}</b>` + it(t('会话'), `${live}/${ss.length}`, '#e6e8ef') + it(t('改动行'), G.adds + G.dels, '#e6e8ef') +
+      it(t('上下文合计'), fmtTok(ctx), '#f0a35e', 1) + it(t('工具调用'), G.calls, '#ff5a6a') + it(t('今日 token'), fmtTok((tot.input || 0) + (tot.output || 0) + (tot.cacheRead || 0) + (tot.cacheWrite || 0)), '#e8f25a', 1) +
+      it(t('今日请求'), tot.requests || 0, '#e6e8ef', 1) + it('TICK', String(G.calls % 10000).padStart(4, '0'), '#e6e8ef', 1);
     if (!this.shotCard && !this.picked) this.title(null);
     if (this.calloutCard) {
       const sig = this.recentFor(this.calloutCard, this.w < 640 ? 4 : 6).map(e => e.toolId || e.ts).join('|');
@@ -912,26 +1083,28 @@ class Flow {
     if (!this.active && now - (this.lastFrame || 0) < 80) return;
     this.lastFrame = now;
     this.direct(now);
-    if (this.tween) {
-      const u = Math.min(1, (now - this.tween.s) / this.tween.ms), e = ease(u);
-      this.camera.position.lerpVectors(this.tween.p0, this.tween.p1, e);
-      this.controls.target.lerpVectors(this.tween.t0, this.tween.t1, e);
-      if (u >= 1) this.tween = null;
-    } else if (this.auto && now > this.pausedUntil && this.shotCard) {
-      // 停在一张卡前时镜头慢慢推近一点、往右挪一点（2D 的推拉摇移），画面不死
-      this.camera.position.z -= this.camera.position.z * .00025;
-      this.camera.position.x += .05; this.controls.target.x += .05;
-    }
-    this.controls.update();
+    const p0 = this.camera.position.clone(), t0 = this.controls.target.clone();
+    if (!this.stepCamera(now)) this.controls.update();
+    // 拖影：镜头动得越快，上一帧留得越多（静止时每帧整屏重画）
+    const dist = Math.max(1, this.camera.position.distanceTo(this.controls.target));
+    const v = (this.camera.position.distanceTo(p0) + this.controls.target.distanceTo(t0)) / dist;
+    this.blur += (Math.min(.8, v * 22) - this.blur) * .35;
     for (const c of this.cards.values()) {
       if (c.heat > 0) c.heat = Math.max(0, c.heat - .02);
-      const want = Math.max(c.heat * .9, this.focusId === c.id ? .55 : 0);
+      const want = Math.max(c.heat * .9, this.focusId === c.id ? .7 : 0);
       if (Math.abs(c.glow.material.opacity - want) > .005) c.glow.material.opacity = want;
     }
     this.ambient(now);
+    this.tickRunning(now);
     this.tickGlints(now);
     this.tickLit(now);
-    this.fitGrid();
+    this.tickFocus(now);
+    this.tickDecor(now);
+    if (this.blur > .03) {
+      this.fade.material.opacity = 1 - this.blur;
+      this.renderer.render(this.fadeScene, this.fadeCam);
+      this.renderer.clearDepth();
+    } else this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
     this.placeCallout();
     this.dash.draw(now);
