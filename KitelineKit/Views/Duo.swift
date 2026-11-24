@@ -65,12 +65,12 @@ extension View {
 
 #if !targetEnvironment(macCatalyst)
 @available(iOS 27.1, *)
-private struct SideBarsProbe: ViewModifier {
+private struct SideBarsProbe: KLViewModifier {
     @Environment(\.toolbarVerticalEdge) private var edge
     @Binding var onSide: Bool
 
-    func body(content: Content) -> some View {
-        content.onChange(of: edge != nil, initial: true) { _, side in onSide = side }
+    func klBody(content: Content) -> some View {
+        content.klOnChange(of: edge != nil, initial: true) { _, side in onSide = side }
     }
 }
 #endif
@@ -130,10 +130,11 @@ extension View {
 /// 横屏时按宽屏排、同 iPad 竖着用：右边对话占满，会话列表从左边浮出来、可以收起（见 MainView 的 splitOverlay）；
 /// 左右分栏、对话分屏都靠把根视图的水平尺寸类别改成常规（普通 iPhone 横着是紧凑，系统不分栏）。
 /// 不记到下次启动：下次打开照常竖屏
-@MainActor @Observable
-final class Rotation {
+@MainActor 
+final class Rotation: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = Rotation()
-    private(set) var landscape = false
+    @Tracked private(set) var landscape = false
 
     /// 这台设备用得上旋转按钮：普通 iPhone（iPad、iPhone Duo 本来各个方向都能转）
     var available: Bool { UIDevice.current.userInterfaceIdiom == .phone && !Hinge.present }
@@ -147,7 +148,7 @@ final class Rotation {
 
     /// 会话浏览器正全屏（MainView 设）：手机横过来、竖回去，界面直接跟着转，不用点角上的转屏按钮
     /// （11-19 反馈：全屏要支持旋转；同看视频）。这样转成横屏的，退出全屏时转回竖屏
-    var follow = false {
+    @Tracked var follow = false {
         didSet {
             guard oldValue, !follow, followed else { return }
             followed = false
@@ -155,7 +156,7 @@ final class Rotation {
         }
     }
     /// 现在的横屏是跟着手机自己转过去的（不是用户点转屏按钮转的）
-    @ObservationIgnored private var followed = false
+    private var followed = false
 
     /// 转屏提示判断出手里的方向稳住了、和界面不一样：正跟着转时直接转过去，返回 true（不用出按钮）
     func followTo(_ landscape: Bool) -> Bool {
@@ -197,7 +198,7 @@ extension View {
     /// 根视图上挂一次：iPhone 横过来按宽屏排，竖回来照旧
     func tracksRotation() -> some View {
         // 按连安全区算上的整块大小判断：小屏 iPhone 竖着打字、键盘带候选栏时，剩下的高度比宽度小，只看 size 会当成横过来了
-        onGeometryChange(for: Bool.self) { $0.sizeWithSafeArea.width > $0.sizeWithSafeArea.height } action: { wide in
+        klOnGeometryChange(for: Bool.self) { $0.sizeWithSafeArea.width > $0.sizeWithSafeArea.height } action: { wide in
             Rotation.shared.fit(wide: wide)
         }
     }
@@ -220,7 +221,7 @@ enum SharedMotion {
 /// 转屏提示（同系统「照片」）：手里的手机转了方向、界面没跟着转时，在手里那个方向的右上角放一个慢慢闪的旋转按钮，
 /// 点了界面转过去；竖着转横、横着转竖都提示。看加速度计（系统锁了竖屏也读得到），平放、刚转一下不算。
 /// 闪 12 秒后不再闪、常亮着，手机一直横着就一直在（11-13 起首页顶栏不再放旋转按钮，这是唯一的入口，不能收起）
-struct RotationHint: View {
+struct RotationHint: KLView {
     @Environment(\.scenePhase) private var phase
     private var rotation = Rotation.shared
     /// 手里的方向：机身坐标的重力（竖着拿 y≈-1；顶朝左横拿 x≈-1）
@@ -234,13 +235,13 @@ struct RotationHint: View {
         var landscape: Bool { self != .portrait }
     }
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { proxy in
             if shown, let physical {
                 let (corner, angle) = layout(physical)
                 Button {
                     rotation.set(physical.landscape)
-                    withAnimation(.snappy) { shown = false }
+                    withAnimation(.klSnappy) { shown = false }
                 } label: {
                     // 慢闪按时间直接算不透明度、每秒 20 次只重画这个按钮：SwiftUI 的循环动画每一帧都要牵动所在的整页
                     // （同 Mac 上 11-13 查出的 LiveDot）；1.3 秒一程来回。闪够了常亮，不再跑定时器
@@ -267,8 +268,8 @@ struct RotationHint: View {
         .allowsHitTesting(shown)
         .onAppear(perform: start)
         .onDisappear(perform: stop)
-        .onChange(of: phase) { _, phase in if phase == .active { start() } else { stop() } }
-        .onChange(of: rotation.landscape) { _, _ in withAnimation(.snappy) { shown = false } }
+        .klOnChange(of: phase) { _, phase in if phase == .active { start() } else { stop() } }
+        .klOnChange(of: rotation.landscape) { _, _ in withAnimation(.klSnappy) { shown = false } }
         #if DEBUG || SNAPSHOT
         // 模拟器没有加速度计：hint topLeft|topRight|portrait 当作手里转到那个方向（见 DebugRemote）
         .onReceive(NotificationCenter.default.publisher(for: DebugRemote.command)) { note in
@@ -276,7 +277,7 @@ struct RotationHint: View {
             let next: Physical? = ["topLeft": .topLeft, "topRight": .topRight, "portrait": .portrait][String(line.dropFirst(5))]
             physical = next
             if let next, rotation.followTo(next.landscape) { return }   // 浏览器全屏：直接转
-            withAnimation(.snappy) { shown = next.map { $0.landscape != rotation.landscape } ?? false }
+            withAnimation(.klSnappy) { shown = next.map { $0.landscape != rotation.landscape } ?? false }
         }
         #endif
     }
@@ -332,7 +333,7 @@ struct RotationHint: View {
         if next != physical {
             physical = next
             since = Date()
-            if shown { withAnimation(.snappy) { shown = false } }
+            if shown { withAnimation(.klSnappy) { shown = false } }
             return
         }
         guard let since else { return }
@@ -341,17 +342,17 @@ struct RotationHint: View {
         let want = mismatch && age > 0.75
         // 会话浏览器全屏时直接跟着转（同看视频），不出按钮
         if want, rotation.followTo(next.landscape) { return }
-        if want != shown { withAnimation(.snappy) { shown = want } }
+        if want != shown { withAnimation(.klSnappy) { shown = want } }
         let calm = age >= 12.75
         if calm != steady { steady = calm }
     }
 }
 
 /// 首页右上角的旋转按钮：竖着时点了转横屏，横着时点了转回竖屏
-struct RotateButton: View {
+struct RotateButton: KLView {
     private var rotation = Rotation.shared
 
-    var body: some View {
+    var klBody: some View {
         Button { rotation.toggle() } label: {
             Image(systemName: rotation.landscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate").barIcon()
         }
@@ -378,8 +379,8 @@ struct SessionCounts {
 /// 概览看板：今日用量（带近 7 天小柱图、每日预算）、各状态会话数、今日动态 / 历史 / 项目入口。
 /// iPhone Duo 外屏首页顶上用紧凑版；宽屏右栏的概览页用大号（large）。
 /// 状态格同时是首页列表的筛选（和列表顶上的筛选条存同一个值）：点一下只看这一类，再点一下取消
-struct GlanceBoard: View {
-    @Environment(AppModel.self) private var model
+struct GlanceBoard: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @AppStorage("listFilter") private var statusFilter = "all"
     var large = false
@@ -388,7 +389,7 @@ struct GlanceBoard: View {
     ///（浅灰块和页面底色只差两个色阶，压上去就和页面融在一起）
     private var surface: Color { large ? Theme.card : Theme.tile }
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: large ? 14 : 10) {
             usageCard
             statusRow
@@ -420,7 +421,7 @@ struct GlanceBoard: View {
                         Text(usage.map { Money.cost($0.cost) } ?? "—")
                             .font(.app(size: large ? 40 : 32, weight: .bold).monospacedDigit())
                             .lineLimit(1).minimumScaleFactor(0.6)
-                            .contentTransition(.numericText())
+                            .klContentTransition(.numericText())
                         Text(usage.map { "输出 \(Money.compact($0.output)) · \(Int($0.requests.rounded())) 次请求" } ?? "正在统计…")
                             .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -467,13 +468,13 @@ struct GlanceBoard: View {
         let selected = statusFilter == id
         return Button {
             Haptics.tap()
-            withAnimation(.snappy) { statusFilter = selected ? "all" : id }
+            withAnimation(.klSnappy) { statusFilter = selected ? "all" : id }
         } label: {
             VStack(spacing: 3) {
                 Text("\(count)")
                     .font(.app(size: large ? 30 : 24, weight: .bold).monospacedDigit())
                     .foregroundStyle(count > 0 ? .primary : .tertiary)
-                    .contentTransition(.numericText())
+                    .klContentTransition(.numericText())
                 HStack(spacing: 4) {
                     Circle().fill(count > 0 ? dot : Color.secondary.opacity(0.4)).frame(width: 6, height: 6)
                     Text(title).font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
@@ -518,7 +519,7 @@ private struct GlanceLabelStyle: LabelStyle {
 }
 
 /// 看板底下一排入口：图标 + 名字 + 数
-private struct GlanceLink: View {
+private struct GlanceLink: KLView {
     let symbol: String
     let title: String
     let value: String
@@ -526,7 +527,7 @@ private struct GlanceLink: View {
     var surface: Color = Theme.tile
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.ui(.caption)).foregroundStyle(Theme.claude)
@@ -545,11 +546,11 @@ private struct GlanceLink: View {
 }
 
 /// 近 7 天每天的花费：一种颜色，今天实色、往前几天浅色（不画坐标轴；large 时底下写星期）
-struct WeekBars: View {
+struct WeekBars: KLView {
     let days: [UsageItem]
     var labels = false
 
-    var body: some View {
+    var klBody: some View {
         let recent = Array(days.suffix(7))
         let top = max(recent.map(\.cost).max() ?? 0, 0.01)
         VStack(spacing: 4) {
@@ -601,11 +602,11 @@ struct WeekBars: View {
 }
 
 /// 预算进度：一条细线 + 一行字（达到提醒线变橙，达到上限变红）
-private struct BudgetMeter: View {
+private struct BudgetMeter: KLView {
     let spent: Double
     let budget: Budget
 
-    var body: some View {
+    var klBody: some View {
         let limit = budget.cap > 0 ? budget.cap : budget.daily
         let ratio = min(spent / max(limit, 0.01), 1)
         let over = budget.cap > 0 && spent >= budget.cap
@@ -628,11 +629,11 @@ private struct BudgetMeter: View {
 // MARK: - 宽屏左栏顶上的一行汇总
 
 /// 宽屏（iPhone Duo 内屏、iPad）左栏顶上：今日花费和各状态会话数缩成一行，轻点在右栏打开概览
-struct GlanceStrip: View {
-    @Environment(AppModel.self) private var model
+struct GlanceStrip: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
 
-    var body: some View {
+    var klBody: some View {
         let counts = SessionCounts(model)
         Button { open(.overview) } label: {
             HStack(spacing: 0) {
@@ -665,11 +666,11 @@ struct GlanceStrip: View {
 // MARK: - 宽屏右栏：概览页
 
 /// 宽屏未选会话时右栏显示的概览（iPhone Duo 内屏、iPad）：看板、需要处理的会话、运行中的会话、今日动态
-struct OverviewPage: View {
-    @Environment(AppModel.self) private var model
+struct OverviewPage: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
 
-    var body: some View {
+    var klBody: some View {
         let attention = model.sortedSessions("status").filter { $0.isWaiting || $0.error != nil }
         let running = model.sortedSessions("recent").filter { $0.isBusy && !$0.isWaiting }
         ScrollView {
@@ -737,10 +738,10 @@ struct OverviewPage: View {
 }
 
 /// 概览页里的一行会话：头像、标题、状态一行
-private struct OverviewRow: View {
+private struct OverviewRow: KLView {
     let session: SessionInfo
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 12) {
             Avatar(text: Format.initials(session.title), size: 36)
             VStack(alignment: .leading, spacing: 3) {
@@ -815,8 +816,8 @@ extension View {
     func readFold(_ fold: Binding<ChatFold?>) -> some View {
         background {
             GeometryReader { proxy in
-                Color.clear.onChange(of: ChatFold.read(proxy), initial: true) { _, value in
-                    withAnimation(.snappy) { fold.wrappedValue = value }
+                Color.clear.klOnChange(of: ChatFold.read(proxy), initial: true) { _, value in
+                    withAnimation(.klSnappy) { fold.wrappedValue = value }
                 }
             }
         }
@@ -824,11 +825,11 @@ extension View {
 }
 
 /// 半折时折痕另一边、输入框上面空出来的那块：会话当前在做什么、Claude 的任务清单
-struct FoldDeck: View {
+struct FoldDeck: KLView {
     let session: SessionInfo?
     let todos: [JSONValue]
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
@@ -845,7 +846,7 @@ struct FoldDeck: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .klScrollBounceBehavior(.basedOnSize)
     }
 
     private var state: String {

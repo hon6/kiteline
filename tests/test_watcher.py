@@ -1544,7 +1544,7 @@ try:
     check("mod v3：不再往一轮中间插（session.append 的行 2.1.327 起被标成「不是用户说的」）",
           "$.session.append(" not in mod_ts and "classic.PostToolBatch" not in mod_ts)
     check("mod v4：Claude Code 不收的提交（你在电脑上按了停止，回 drop）放回队列；直发、强插被丢回 dropped，alive 标 v4；会话重开接着排",
-          "v: 6" in mod_ts and ".drop !== undefined" in mod_ts and "requeue($, q)" in mod_ts and mod_ts.count("result = 'dropped'") == 2
+          "v: 7" in mod_ts and ".drop !== undefined" in mod_ts and "requeue($, q)" in mod_ts and mod_ts.count("result = 'dropped'") == 2
           and "startedAt - q.at < 1800 * 1000" in mod_ts and hasattr(W.Watcher, "bridge_dropped"))
     note = {"type": "attachment", "timestamp": ts(1), "attachment": {"type": "plugin_note", "plugin": "kiteline",
             "content": ["\u200b现在部署"], "sentAs": "system"}}
@@ -1558,12 +1558,18 @@ try:
           and not any(W.bridge_typeable(x) for x in ("/compact", "!ls", "# 记住", "@file", "看看 @src/ma", "", "  ")))
     check("mod：排队的话写进 <会话>.queue.json，认 queue 指令（move / edit / delete / now），alive 标 v2",
           "queue.json" in mod_ts and "item.op === 'queue'" in mod_ts and all("item.action === '%s'" % a in mod_ts for a in ("move", "edit", "delete", "now"))
-          and "v: 6" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now", "hold"} and "queue" in W.BRIDGE_OPS)
+          and "v: 7" in mod_ts and set(W.BRIDGE_QUEUE_ACTIONS) == {"move", "edit", "delete", "now", "hold"} and "queue" in W.BRIDGE_OPS)
     # 忙时切模型 / 思考等级不排队（11-20）：记进 over，turn.step 里这一轮接下来的请求按新的发；这一轮做完先执行命令本身再交排着的话
     check("mod：忙时的 /model、/effort 不进排队列表，下一次模型请求起生效，这一轮做完再执行命令本身",
           "if (turn && slash && instant(slash))" in mod_ts and "on('turn.step', async function* ($, e, next)" in mod_ts
-          and "e.agentId !== undefined || e.turnId !== turn" in mod_ts and "settle.splice(0)" in mod_ts
+          and "e.agentId === undefined && e.turnId === turn" in mod_ts and "settle.splice(0)" in mod_ts
           and mod_ts.index("settle.splice(0)") < mod_ts.index("for (const q of jumps.splice(0))"))
+    # 逐字显示（11-24）：turn.step 里主对话的文字 / 思考原样往上交，最新一块写进 <会话>.live.json，调工具 / 请求结束清空
+    check("mod v7：正在生成的文字写进 live.json（只管主对话、原样 yield、结束清空、取回 stream.result）",
+          "for await (const c of stream)" in mod_ts and "yield c" in mod_ts and "return await stream.result" in mod_ts
+          and "if (e.agentId !== undefined || !dir) return yield* next(ev)" in mod_ts and "${sid}.live.json" in mod_ts
+          and "finally {\n      endLive()" in mod_ts and "$.clock.every(200, () => flushLive($))" in mod_ts
+          and mod_ts.index("ticking = true") < mod_ts.index("$.clock.every(200, () => flushLive($))"))
     check("mod v5：正在编辑的那条（hold）和它后面的这一轮做完先不交，保存 / 取消 / 删除后空闲就交；编辑保留 n、at；到点放开",
           "item.action === 'hold'" in mod_ts and "later[at].held = now" in mod_ts and "delete later[at].held" in mod_ts
           and "const stop = later.findIndex(q => held(q, now))" in mod_ts and "if (release) await flushIdle($)" in mod_ts

@@ -3,8 +3,8 @@ import SwiftUI
 /// 输入框上方的排队列表：Claude 正忙时发的消息先排在这里，等它做完当前这一步（正在跑的工具）再读到。
 /// 每条可以上移、下移、编辑、删除；最右边「强插」= 中断 Claude 当前这一步，排队的消息马上发送（这一条排到最前）。
 /// 参照 Cursor 的排队样式；Windows / Linux 客户端（desktop/client/Views/QueueStrip.cs）、小程序（pages/chat）同一套布局和图标
-struct QueueStrip: View {
-    @Environment(AppModel.self) private var model
+struct QueueStrip: KLView {
+    @EnvModel private var model
     let key: String
     let session: SessionInfo?
     let chat: ChatStore
@@ -22,7 +22,7 @@ struct QueueStrip: View {
     private static let button: CGFloat = 30
     #endif
 
-    var body: some View {
+    var klBody: some View {
         let rows = chat.queueRows(session)
         if !rows.isEmpty {
             VStack(spacing: 0) {
@@ -49,8 +49,8 @@ struct QueueStrip: View {
             .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
             .padding(.horizontal, 10)
             #endif
-            .animation(.snappy(duration: 0.22), value: rows)
-            .animation(.snappy(duration: 0.22), value: chat.queueCollapsed)
+            .animation(.klSnappy(duration: 0.22), value: rows)
+            .animation(.klSnappy(duration: 0.22), value: chat.queueCollapsed)
             // 编辑到一半离开了这一页：放开那条，别一直拦着不交
             .onDisappear {
                 if let id = editing {
@@ -144,10 +144,10 @@ struct QueueStrip: View {
     /// 编辑：多行输入框 + 取消 / 保存
     private func editor(_ row: ChatStore.QueueRow) -> some View {
         VStack(alignment: .trailing, spacing: 6) {
-            TextField(L("消息内容"), text: $draft, axis: .vertical)
+            KLTextField(L("消息内容"), text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.ui(.subheadline))
-                .lineLimit(1...6)
+                .klLineLimit(1...6)
                 .focused($focused)
                 // 输入框是点了编辑才出现的，同一刻设 focused 不生效：出现后再聚焦，光标放进去直接改（11-23 反馈：还要我点一下输入框）
                 .task { try? await Task.sleep(nanoseconds: 60_000_000); focused = true }
@@ -165,7 +165,7 @@ struct QueueStrip: View {
                     .foregroundStyle(.secondary)
                 Button(L("保存")) { save(row) }
                 .buttonStyle(.plain)
-                .fontWeight(.semibold)
+                .klFontWeight(.semibold)
                 .foregroundStyle(Theme.claude)
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

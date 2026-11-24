@@ -2,12 +2,12 @@
 import SwiftUI
 
 /// 设置 → 外观 → 主题色、字体、字号（只改这台 iPhone；Mac、网页版、Apple Watch 各自在设置里改）
-struct LookSettingsView: View {
+struct LookSettingsView: KLView {
     @State private var look = Look.shared
     @AppStorage(HomeKite.key) private var homeKite = true
     @AppStorage(PadStatusBar.key) private var padStatusBar = false
 
-    var body: some View {
+    var klBody: some View {
         List {
             Section {
                 LookPreview()
@@ -79,7 +79,7 @@ struct LookSettingsView: View {
     }
 
     /// 一种字体：名字用这种字体写出来；中文字体没下好时显示进度
-    private struct FontRow: View {
+    private struct FontRow: KLView {
         let option: LookFont
         let selected: Bool
         let pick: () -> Void
@@ -90,7 +90,7 @@ struct LookSettingsView: View {
             return .system(.body, design: option.design)
         }
 
-        var body: some View {
+        var klBody: some View {
             Button(action: pick) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -113,14 +113,14 @@ struct LookSettingsView: View {
     }
 
     /// 七档字号：左右两个大小不同的「A」，拖到哪档界面立刻跟着变
-    private struct SizeSlider: View {
+    private struct SizeSlider: KLView {
         @Binding var sizeID: String
 
         private var index: Double {
             Double(LookSize.all.firstIndex { $0.id == sizeID } ?? 3)
         }
 
-        var body: some View {
+        var klBody: some View {
             VStack(spacing: 6) {
                 HStack(spacing: 12) {
                     Text("A").font(.system(size: 13))

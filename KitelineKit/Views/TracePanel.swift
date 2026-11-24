@@ -7,8 +7,8 @@ import SwiftUI
 /// 轮次的时间条按模型调用 / 工具调用 / 出错分段着色，出错处有红色菱形，派出子 agent 的时刻有一道细竖线；点轮次的条看用时拆分。
 /// 「回放」把整场会话十几秒重演一遍（播放线从左走到右，数字往上涨，新的 agent、轮次一行行冒出来，画面跟着走）；
 /// 「跟随」打开后画面自己往下、往右跟着最新一步走。点一步在底部看详情；一键跳到第一处出错。开着时每几秒刷新一次。
-struct TracePanel: View {
-    @Environment(AppModel.self) private var model
+struct TracePanel: KLView {
+    @EnvModel private var model
     let key: String
     var onClose: () -> Void
 
@@ -52,7 +52,7 @@ struct TracePanel: View {
     /// 1 倍速回放一整场用多久（秒）
     private static let replaySeconds: Double = 30
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             header
             Divider()
@@ -88,12 +88,12 @@ struct TracePanel: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(TraceColor.panel)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { panelSize = $0 }
+        .klOnGeometryChange(for: CGSize.self) { $0.size } action: { panelSize = $0 }
         .task(id: reloadTick) {
             // 开着时一直刷新：跟随时 2 秒一次，有在跑的 3 秒，都停了 8 秒；回放时不刷新（数据先定住）
             while !Task.isCancelled {
                 if replay == nil { await load() }
-                try? await Task.sleep(for: .seconds(camera ? 2 : (reply?.running == false ? 8 : 3)))
+                try? await Task.sleep(seconds: camera ? 2 : (reply?.running == false ? 8 : 3))
             }
         }
         .onDisappear { replayTask?.cancel() }
@@ -187,7 +187,7 @@ struct TracePanel: View {
         let span = TraceFormat.span(reply.start, cut ?? (reply.running ? nil : reply.end), now: now)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Button { withAnimation(.snappy) { overviewOpen = !showOverview } } label: {
+                Button { withAnimation(.klSnappy) { overviewOpen = !showOverview } } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
                             .rotationEffect(.degrees(showOverview ? 90 : 0))
@@ -195,7 +195,7 @@ struct TracePanel: View {
                               L("%lld 次模型调用", count: stats.llm), L("%lld 次工具调用", count: stats.tools)]
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.ui(.caption).monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
-                            .contentTransition(.numericText())
+                            .klContentTransition(.numericText())
                     }
                     .contentShape(Rectangle())
                 }
@@ -295,27 +295,27 @@ struct TracePanel: View {
                         .offset(x: offset.x, y: offset.y)
                 }
                 .frame(width: labelWidth + map.width, height: header + bodyHeight, alignment: .topLeading)
-                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.space)).origin } action: { origin in
+                .klOnGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.space)).origin } action: { origin in
                     offset = CGPoint(x: max(0, -origin.x), y: max(0, -origin.y))
                 }
             }
             .coordinateSpace(name: Self.space)
             // 手指拖动：退出跟随（别跟用户抢画面）
             .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in if camera { camera = false } })
-            .onChange(of: scrollTarget) { _, target in
+            .klOnChange(of: scrollTarget) { _, target in
                 guard let target else { return }
-                withAnimation(.smooth(duration: replay != nil ? 0.3 : 0.45)) { proxy.scrollTo(target.id, anchor: target.anchor) }
+                withAnimation(.klSmooth(duration: replay != nil ? 0.3 : 0.45)) { proxy.scrollTo(target.id, anchor: target.anchor) }
             }
             // 时间线刚出现（第一次拉到数据、从「暂无记录」变过来）：之前要滚的这时才滚得到
             .onAppear {
                 guard let target = scrollTarget else { return }
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(150))
+                    try? await Task.sleep(milliseconds: 150)
                     proxy.scrollTo(target.id, anchor: target.anchor)
                 }
             }
             // 回放：最新冒出来的那行变了就跟过去
-            .onChange(of: rows.last(where: { $0.start != nil && $0.kind != .step })?.id) { _, id in
+            .klOnChange(of: rows.last(where: { $0.start != nil && $0.kind != .step })?.id) { _, id in
                 guard replay != nil, let id, id != replayRow else { return }
                 replayRow = id
                 scrollTarget = ScrollRequest(id: "bar:\(id)", anchor: UnitPoint(x: 0.6, y: 0.9))
@@ -344,7 +344,7 @@ struct TracePanel: View {
                 .padding(.horizontal, 6).frame(height: 22)
                 .overlay(Capsule(style: .circular).strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
             }
-            .menuStyle(.button)
+            .klMenuButtonStyle()
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
@@ -626,14 +626,14 @@ struct TracePanel: View {
         replayTask = Task { @MainActor in
             var last = Date()
             while !Task.isCancelled, let progress = replay {
-                try? await Task.sleep(for: .milliseconds(33))
+                try? await Task.sleep(milliseconds: 33)
                 let now = Date()
                 let step = now.timeIntervalSince(last) * replaySpeed / Self.replaySeconds
                 last = now
                 let next = progress + step
                 if next >= 1 {
                     replay = 1
-                    try? await Task.sleep(for: .milliseconds(600))
+                    try? await Task.sleep(milliseconds: 600)
                     stopReplay()
                     break
                 }
@@ -841,7 +841,7 @@ struct TracePanel: View {
             } else if let target = initialTarget, steps[target.replacingOccurrences(of: "bar:turn:", with: "")] != nil {
                 // 第一次：这一轮的步骤到了、时间线也画出来了再滚过去（太早滚，滚动区还没出来，会落空）
                 initialTarget = nil
-                try? await Task.sleep(for: .milliseconds(200))
+                try? await Task.sleep(milliseconds: 200)
                 scrollAnchor = UnitPoint(x: 0.85, y: 0.25)
                 scrollTarget = ScrollRequest(id: target, anchor: scrollAnchor)
             }
@@ -1093,14 +1093,14 @@ struct TimeMap {
 }
 
 /// 表头：时间刻度（「14:05」，刻度密到秒时带秒）、折起来的空档（「7h」灰块）、回放时的播放线
-private struct AxisHeader: View {
+private struct AxisHeader: KLView {
     let map: TimeMap
     var playhead: CGFloat?
 
     private static let minute: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
     private static let second: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f }()
 
-    var body: some View {
+    var klBody: some View {
         let formatter = map.tickSeconds ? Self.second : Self.minute
         let gaps = map.gaps()
         // 刻度的字（约 34 点宽）和空档灰块挤在一起时不写字，只留刻度线
@@ -1132,12 +1132,12 @@ private struct AxisHeader: View {
 }
 
 /// 时间线背景：每个刻度一条淡竖线，折起来的空档一道虚线，派出子 agent 的时刻一道细金线
-private struct GridLines: View {
+private struct GridLines: KLView {
     let map: TimeMap
     let height: CGFloat
     var spawns: [CGFloat] = []
 
-    var body: some View {
+    var klBody: some View {
         ZStack(alignment: .topLeading) {
             ForEach(Array(map.ticks().enumerated()), id: \.offset) { _, tick in
                 Rectangle().fill(Color.primary.opacity(0.05)).frame(width: 1, height: height).offset(x: tick.x)
@@ -1166,7 +1166,7 @@ private struct DashedLine: Shape {
 
 /// 一条时间条：轮次是淡底条上按模型（主题色）/ 工具（灰）/ 出错（红）分段；agent 是淡主题色底条；步骤按种类整条着色。
 /// 出错的时刻画红色菱形；在跑的末端呼吸
-private struct TimeBar: View {
+private struct TimeBar: KLView {
     let tone: TraceGridRow.Tone
     let running: Bool
     let selected: Bool
@@ -1180,7 +1180,7 @@ private struct TimeBar: View {
     /// 这条左端的横坐标（分段、菱形的位置相对它算）
     var x0: CGFloat = 0
 
-    var body: some View {
+    var klBody: some View {
         RoundedRectangle(cornerRadius: 3, style: .circular)
             .fill(color)
             .frame(height: height)
@@ -1239,11 +1239,11 @@ private struct TimeBar: View {
 }
 
 /// 状态点：在跑呼吸、出错红点、做完空心圈
-struct TraceStatusDot: View {
+struct TraceStatusDot: KLView {
     enum Status { case running, failed, done, none }
     let status: Status
 
-    var body: some View {
+    var klBody: some View {
         switch status {
         case .running: LiveDot()
         case .failed: Circle().fill(TraceColor.red).frame(width: 7, height: 7)
@@ -1282,19 +1282,19 @@ private struct TraceEntry: Identifiable {
 /// 这个点还挂在对话页右上角的「执行过程」按钮上（会话在工作、面板没开时），所以只要有会话在工作就一直在跑——
 /// 11-13 用 Instruments 量到 Mac 版 4 秒里 11 万次视图更新、主线程八成时间在重排，CPU 常驻 35～45%（改之前的写法见 git 历史）。
 /// 位置不参与动画，也就没有原来「刚出现时在两处之间来回跑」的问题
-private struct LiveDot: View {
-    var body: some View {
+private struct LiveDot: KLView {
+    var klBody: some View {
         PulseDot(color: Theme.claude, size: 7, low: 0.3, period: 0.9)
     }
 }
 
-private struct StatTile: View {
+private struct StatTile: KLView {
     let label: String
     let value: String
     let sub: String?
     var alert = false
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.ui(.caption2).weight(.medium)).foregroundStyle(.secondary).textCase(.uppercase)
             Text(value.isEmpty ? "—" : value).font(.ui(.title3).weight(.semibold).monospacedDigit())
@@ -1309,11 +1309,11 @@ private struct StatTile: View {
     }
 }
 
-private struct Legend: View {
+private struct Legend: KLView {
     let color: Color
     let text: String
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 1.5).fill(color).frame(width: 8, height: 8)
             Text(text).font(.ui(.caption2)).foregroundStyle(.secondary)
@@ -1322,7 +1322,7 @@ private struct Legend: View {
 }
 
 /// 按分钟的活动条：每格堆叠「模型调用 / 工具调用 / 出错」；超过 10 分钟没动静的空档折成一道细缝，标上空了多久
-private struct ActivityStrip: View {
+private struct ActivityStrip: KLView {
     let buckets: [[Double]]
 
     private enum Cell { case bar(Double, Double, Double), gap(Double) }
@@ -1338,7 +1338,7 @@ private struct ActivityStrip: View {
         return out
     }
 
-    var body: some View {
+    var klBody: some View {
         Canvas { context, size in
             var cells = self.cells
             let gaps = cells.filter { if case .gap = $0 { return true } else { return false } }.count
@@ -1398,11 +1398,11 @@ private struct ActivityStrip: View {
 }
 
 /// 点开一步：模型调用看思考和输出、token；工具调用看命令和结果；派了子 agent 的可以跳过去
-private struct StepDetail: View {
+private struct StepDetail: KLView {
     let step: TraceStep
     var openAgent: (String) -> Void
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             switch step.k {
             case "llm":
@@ -1454,7 +1454,7 @@ private struct StepDetail: View {
 /// 对话页挂执行过程：上下布局（11-04 起，不左右分列）——上面是执行过程的流程图（默认占 1/3 高），下面是对话。
 /// 矮的横屏（iPhone 横放，高不到 500 点）上下排放不下，改左右：左边流程图、右边对话。
 /// 中间一道分隔条可以拖，调两块的比例（上下、左右各记一份，记在本机，下次打开照旧）
-struct TraceSplit: ViewModifier {
+struct TraceSplit: KLViewModifier {
     let key: String
     @Binding var isOn: Bool
     /// 流程图占整页高度的比例（上下排）
@@ -1476,8 +1476,9 @@ struct TraceSplit: ViewModifier {
         #endif
     }
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         let side = sideBySide
+        #if os(iOS) || KL_MODERN
         let layout = side ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
         layout {
             if isOn {
@@ -1495,6 +1496,24 @@ struct TraceSplit: ViewModifier {
         // 量的是外面给这一页的大小（先撑满再量），不量自己算出来的尺寸，免得量和排互相牵动
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        #else
+        KLStack(side ? .horizontal : .vertical, spacing: 0) {
+            if isOn {
+                TracePanel(key: key) { withAnimation(.klSnappy) { isOn = false } }
+                    .frame(width: side ? max(260, (size.width * widthRatio).rounded()) : nil,
+                           height: side ? nil : (size.height > 0 ? max(180, (size.height * ratio).rounded()) : 260))
+                    .clipped()
+                    .transition(.move(edge: side ? .leading : .top).combined(with: .opacity))
+                handle(side: side)
+            }
+            // 流程图开着时对话区裁在自己那块里：滚动的消息不盖到分隔条、流程图上
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .modifier(ClipWhen(on: isOn))
+        }
+        // 量的是外面给这一页的大小（先撑满再量），不量自己算出来的尺寸，免得量和排互相牵动
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .klOnGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        #endif
     }
 
     /// 分隔条：拖动调比例；中间一根短线示意能拖（上下排是横的，左右排是竖的）
@@ -1532,9 +1551,9 @@ struct TraceSplit: ViewModifier {
 }
 
 /// 只在流程图开着时裁切（平时对话照常滚到导航栏底下，保留系统的滚动边缘效果）
-private struct ClipWhen: ViewModifier {
+private struct ClipWhen: KLViewModifier {
     let on: Bool
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if on { content.clipShape(Rectangle()) } else { content }
     }
 }
@@ -1560,12 +1579,12 @@ extension Binding where Value == Bool {
 }
 
 /// 对话区右上角的悬浮按钮：打开 / 收起执行过程
-struct TraceButton: View {
+struct TraceButton: KLView {
     @Binding var isOn: Bool
     var running: Bool
 
-    var body: some View {
-        Button { withAnimation(.snappy) { isOn.toggle() } } label: {
+    var klBody: some View {
+        Button { withAnimation(.klSnappy) { isOn.toggle() } } label: {
             Image(systemName: "align.horizontal.left")
                 .font(.app(size: 15, weight: .medium))
                 .foregroundStyle(isOn ? Theme.claude : Color.primary)

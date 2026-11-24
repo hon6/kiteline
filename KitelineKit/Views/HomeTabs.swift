@@ -26,23 +26,24 @@ struct TabBadges: Equatable {
 }
 
 /// 读待办算角标，数变了才写回 MainView（MainView 自己读模型的话，任何数据一变整个主界面都要重算）
-struct TabBadgeProbe: View {
-    @Environment(AppModel.self) private var model
+struct TabBadgeProbe: KLView {
+    @EnvModel private var model
     @Binding var badges: TabBadges
 
-    var body: some View {
+    var klBody: some View {
         let now = TabBadges(todos: model.todos.suggestions.reduce(0) { $0 + $1.asks.count })
-        Color.clear.onChange(of: now, initial: true) { _, value in
+        Color.clear.klOnChange(of: now, initial: true) { _, value in
             if badges != value { badges = value }
         }
     }
 }
 
 /// Tab 栏该不该展开：各页签第一层的列表报滚动方向（TabBarScrollWatch），TabBarMinimize 照着换收起方式
-@Observable final class TabBarScroll {
+final class TabBarScroll: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     /// 收起方式临时是 .never（系统随即把收起的 Tab 栏展开）
-    var expand = false
-    @ObservationIgnored private var pulse = 0
+    @Tracked var expand = false
+    private var pulse = 0
 
     /// 往回滑了：展开 Tab 栏。只临时换一下收起方式就换回来：一直留着 .never 的话，
     /// 下次往下翻到一半才换回 .onScrollDown，系统接不上、那一下不收起
@@ -70,14 +71,14 @@ struct TabBadgeProbe: View {
             }
             Task { @MainActor in
                 // 等展开动画（约 0.5 秒）走完再换回，别中途打断
-                try? await Task.sleep(for: .milliseconds(600))
+                try? await Task.sleep(milliseconds: 600)
                 if self.pulse == id { bar.tabBarMinimizeBehavior = .onScrollDown }
             }
             return
         }
         expand = true
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(milliseconds: 400)
             if self.pulse == id { self.expand = false }
         }
     }
@@ -167,10 +168,10 @@ extension EnvironmentValues {
 /// iOS 26 起往下翻时 Tab 栏缩成小胶囊，把地方让给列表。系统的 .onScrollDown 要滚回顶部才展开，
 /// 11-13 改为「只要往下滑页面就直接展开」：往回滑时把收起方式临时换成 .never 一下（系统随即展开）再换回来。
 /// 模拟器里用 XCUITest 真拖验证过（程序滚动不会让系统收起，测不了）
-struct TabBarMinimize: ViewModifier {
+struct TabBarMinimize: KLViewModifier {
     let scroll: TabBarScroll
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content.tabBarMinimizeBehavior(scroll.expand ? .never : .onScrollDown)
         } else {
@@ -182,7 +183,7 @@ struct TabBarMinimize: ViewModifier {
 /// 挂在页签第一层的列表 / 滚动视图上：按方向累计滚过的距离，过了门槛才报，抖一下不算。
 /// 顶部下拉、底部回弹那段橡皮筋不算（回弹是往回走，会被当成往回滑）；内容变高变矮（新消息、展开收起）带来的位移也不算。
 /// （没用 onScrollPhaseChange 区分手指拖动：List 上它不报）
-struct TabBarScrollWatch: ViewModifier {
+struct TabBarScrollWatch: KLViewModifier {
     @Environment(\.tabBarScroll) private var bar
     @State private var travel: CGFloat = 0
     /// 这一段往回滑已经展开过了（换方向才重来）
@@ -194,7 +195,7 @@ struct TabBarScrollWatch: ViewModifier {
         var bottom: CGFloat
     }
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if #available(iOS 26.0, *), let bar {
             content
                 .onScrollGeometryChange(for: Spot.self) { geo in
@@ -223,14 +224,14 @@ extension View {
 }
 
 /// 「概览」页签：今日用量、今日战绩、今日动态（几个数），下面世界和数据流两个入口
-struct DashboardView: View {
-    @Environment(AppModel.self) private var model
+struct DashboardView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @State private var cover: Cover?
 
     private struct Cover: Identifiable { let id: String }
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HomeTiles(entries: false, onTile: false)
@@ -291,21 +292,21 @@ struct DashboardView: View {
             guard model.connected else { return }
             await model.home.refresh(model.api)
         }
-        .fullScreenCover(item: $cover) { cover in WorldScreen(page: cover.id).environment(model) }
+        .fullScreenCover(item: $cover) { cover in WorldScreen(page: cover.id).environment(\.appModelSlot, model) }
     }
 }
 
 #if SNAPSHOT
 /// 截图版：把主屏 / 锁屏小组件按 iPhone 上的尺寸画出来核对（TARS_DEMO_ROUTE=widgets；数据就是 App 此刻会写给小组件的那份）
-struct WidgetGallery: View {
-    @Environment(AppModel.self) private var model
+struct WidgetGallery: KLView {
+    @EnvModel private var model
 
     /// 从钥匙串里读回来的那份（App 写、小组件读的就是它）：读到了说明写入、读出这条路是通的
     @State private var stored: WidgetSnapshot?
     /// 没等到时直接写一次的结果（钥匙串状态码）
     @State private var probe: String?
 
-    var body: some View {
+    var klBody: some View {
         var computed = WidgetSync.snapshot(model)
         let _ = (computed.at = Date().timeIntervalSince1970 * 1000)
         let snapshot = stored ?? computed
@@ -338,7 +339,7 @@ struct WidgetGallery: View {
             await model.home.refresh(model.api, force: true)
             // 等 WidgetProbe 把最新的写进去（只改文字的 20 秒内最多写一次）
             for _ in 0..<30 {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(seconds: 1)
                 if let s = WidgetSnapshot.load(), !s.limits.isEmpty { stored = s; break }
             }
             if stored == nil {
@@ -362,12 +363,12 @@ struct WidgetGallery: View {
 #endif
 
 /// 世界、数据流的入口：左上图标，下面名字和一句说明
-private struct SceneCard<Icon: View>: View {
+private struct SceneCard<Icon: View>: KLView {
     let title: String
     let detail: String
     @ViewBuilder let icon: () -> Icon
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             icon().frame(width: 28, height: 28, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {

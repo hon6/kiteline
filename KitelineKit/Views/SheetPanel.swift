@@ -216,32 +216,32 @@ final class PanelAnchor {
     }
 }
 
-private struct PanelWindowStyle: ViewModifier {
+private struct PanelWindowStyle: KLViewModifier {
     @Environment(\.closePanel) private var panel
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .onAppear { panel?.setWindowStyle(true) }
             .onDisappear { panel?.setWindowStyle(false) }
     }
 }
 
-private struct PanelCloseGuard: ViewModifier {
+private struct PanelCloseGuard: KLViewModifier {
     let check: () -> Bool
     @Environment(\.closePanel) private var panel
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .onAppear { panel?.shouldClose = check }
             .onDisappear { panel?.shouldClose = nil }
     }
 }
 
-private struct PanelAnchorMarker: ViewModifier {
+private struct PanelAnchorMarker: KLViewModifier {
     let key: String?
     @State private var anchor = PanelAnchor()
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         anchor.key = key
         return content
             .background(AnchorProbe(anchor: anchor))
@@ -296,14 +296,14 @@ private struct PanelInherited {
     var font: Font?
 }
 
-private struct SheetPanelModifier<Panel: View>: ViewModifier {
+private struct SheetPanelModifier<Panel: View>: KLViewModifier {
     @Binding var isPresented: Bool
     let onDismiss: (() -> Void)?
     /// 哪一处弹的（文件:行）：同一处再弹时接管还留着的那个面板，不重复开
     let site: String
     let panel: () -> Panel
     @State private var holder = PanelHolder()
-    @Environment(AppModel.self) private var model: AppModel?
+    @Environment(\.appModelSlot) private var model: AppModel?
     @Environment(\.openRoute) private var openRoute
     @Environment(\.openURL) private var openURL
     @Environment(\.chatPane) private var chatPane
@@ -312,7 +312,7 @@ private struct SheetPanelModifier<Panel: View>: ViewModifier {
     @Environment(\.font) private var font
     @Environment(\.panelAnchor) private var anchor
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .background {
                 if isPresented {
@@ -323,7 +323,7 @@ private struct SheetPanelModifier<Panel: View>: ViewModifier {
                         .frame(width: 0, height: 0)
                 }
             }
-            .onChange(of: isPresented) { _, shown in
+            .klOnChange(of: isPresented) { _, shown in
                 if !shown { holder.controller?.dismiss() }
             }
     }
@@ -461,13 +461,13 @@ private final class PanelHosting: NSHostingController<AnyView> {
     }
 }
 
-private struct PanelRoot: View {
+private struct PanelRoot: KLView {
     @ObservedObject var state: PanelState
     let content: AnyView
     let inherited: PanelInherited
     let close: PanelCloser
 
-    var body: some View {
+    var klBody: some View {
         styled
             .environment(\.closePanel, close)
             .environment(\.panelAnchor, nil)   // 面板里再弹的面板对着这个面板居中
@@ -482,7 +482,7 @@ private struct PanelRoot: View {
             .environment(\.chatPane, inherited.chatPane)
             .environment(\.chatAgent, inherited.chatAgent)
             .environment(\.chatReadOnly, inherited.chatReadOnly)
-            .environment(inherited.model ?? KitelineKit.model)   // 从 Mac App 自己的界面（新任务）弹的也能用
+            .environment(\.appModelSlot, inherited.model ?? KitelineKit.model)   // 从 Mac App 自己的界面（新任务）弹的也能用
             .modifier(LookRoot())
     }
 }
@@ -543,8 +543,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         super.init()
         // 不让 SwiftUI 按内容的最小尺寸装约束（.minSize）：文字高度随宽度变的内容（确认卡片）会和窗口大小来回触发，AppKit 直接抛异常崩掉。
         // 最小尺寸打开时量一次，设成窗口的 contentMinSize
-        hosting.sizingOptions = [.preferredContentSize]
-        hosting.sceneBridgingOptions = [.toolbars, .title]   // 面板里的导航标题、返回按钮放进小窗的工具栏
+        if #available(macOS 13, *) { hosting.sizingOptions = [.preferredContentSize] }
+        if #available(macOS 14, *) { hosting.sceneBridgingOptions = [.toolbars, .title] }   // 面板里的导航标题、返回按钮放进小窗的工具栏
         panel.contentViewController = hosting
         panel.title = ""
         // 标题栏有底：内容往上滚时从标题栏底下过，不和标题叠在一起（11-02 截图：目标面板的标题压在第一行上）
@@ -816,7 +816,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 // MARK: - 确认卡片
 
 /// Mac 的确认框：一段说明 + 取消 / 确认（回车确认、Esc 取消），同 NSAlert 的排法
-private struct ConfirmCard: View {
+private struct ConfirmCard: KLView {
     let message: String
     let confirm: String
     let destructive: Bool
@@ -824,7 +824,7 @@ private struct ConfirmCard: View {
     let action: () -> Void
     @PanelDismiss private var dismiss
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(message)
                 .font(.ui(.body))
@@ -876,9 +876,14 @@ extension KitelineKit {
 extension ToolbarContent {
     /// 面板工具栏上自己画了样式的按钮（panelToolbarButton）：macOS 26 默认再给每个工具栏项套一层玻璃底，
     /// 成了一个胶囊里套一个带边框的按钮（11-21 截图：「完成」样子怪），去掉那层
+    /// macOS 12 的 ToolbarContentBuilder 里不能写 if #available：那里用 View 的 klBareToolbarItem
+    @available(macOS 13, *)
     @ToolbarContentBuilder
     func panelBare() -> some ToolbarContent {
-        #if os(macOS)
+        #if os(macOS) && !KL_MODERN
+        // 兼容包只在 macOS 12 / 13 上用，没有 26 的玻璃底；这里写 if #available 会用到 14.5 才有的 LimitedAvailabilityToolbarContent，13 上会崩
+        self
+        #elseif os(macOS)
         if #available(macOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) } else { self }
         #else
         self   // iPhone / iPad 用系统的样子

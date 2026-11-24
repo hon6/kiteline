@@ -5,10 +5,10 @@ import SwiftUI
 // 首页顶上的「有新版本」提示条在 RemoteNotices.swift。
 
 /// 打开 App 时弹出：这台手机和连着的电脑各有什么新版本、更新了什么；底下「此版本不再提示」，右上角「以后再说」（24 小时后再提醒）
-struct UpdatePromptSheet: View {
+struct UpdatePromptSheet: KLView {
     private let updates = AppUpdates.shared
 
-    var body: some View {
+    var klBody: some View {
         let offers = updates.prompt ?? []
         FitSheet(title: L("发现新版本"), doneTitle: L("以后再说")) {
             VStack(alignment: .leading, spacing: 14) {
@@ -22,11 +22,11 @@ struct UpdatePromptSheet: View {
 }
 
 /// 设置里点「可更新至 x.y」进来：同一张卡片，和「此版本不再提示」
-struct UpdateOfferPage: View {
+struct UpdateOfferPage: KLView {
     let app: Bool
     private let updates = AppUpdates.shared
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             if let offer = app ? updates.appOffer : updates.hostOffer {
                 VStack(alignment: .leading, spacing: 14) {
@@ -37,7 +37,7 @@ struct UpdateOfferPage: View {
                 .frame(maxWidth: 680)
                 .frame(maxWidth: .infinity)
             } else {
-                ContentUnavailableView(L("已是最新版本"), systemImage: "checkmark.circle")
+                KLUnavailableView(L("已是最新版本"), systemImage: "checkmark.circle")
                     .padding(.top, 60)
             }
         }
@@ -47,11 +47,11 @@ struct UpdateOfferPage: View {
     }
 }
 
-private struct SkipToggle: View {
+private struct SkipToggle: KLView {
     let offers: [UpdateOffer]
     private let updates = AppUpdates.shared
 
-    var body: some View {
+    var klBody: some View {
         Toggle(isOn: Binding(get: { !offers.isEmpty && offers.allSatisfy(updates.isSkipped) }, set: { updates.setSkipped(offers, $0) })) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(offers.count > 1 ? L("这些版本不再提示") : L("此版本不再提示")).font(.ui(.body))
@@ -64,12 +64,12 @@ private struct SkipToggle: View {
 }
 
 /// 一项新版本：哪一端、当前版本 → 新版本、落后的各版本更新内容、怎么更新
-struct UpdateOfferCard: View {
+struct UpdateOfferCard: KLView {
     let offer: UpdateOffer
     private let updates = AppUpdates.shared
     @Environment(\.openURL) private var openURL
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 TarsIcon(symbol: offer.isApp ? (UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone") : "desktopcomputer", size: 40)
@@ -109,11 +109,11 @@ struct UpdateOfferCard: View {
 }
 
 /// 电脑那一项怎么更新：新版电脑端能从手机上让它下载安装、重启；旧版电脑端（没有接口）、开发版只能在电脑上操作
-private struct HostUpdateAction: View {
+private struct HostUpdateAction: KLView {
     let offer: UpdateOffer
     private let updates = AppUpdates.shared
 
-    var body: some View {
+    var klBody: some View {
         if updates.hostOffer?.version != offer.version, let done = updates.hostDone, done == offer.version {
             Label(L("电脑端已更新到 %@", done), systemImage: "checkmark.circle.fill")
                 .font(.ui(.subheadline).weight(.medium)).foregroundStyle(.green)
@@ -163,10 +163,10 @@ private struct HostUpdateAction: View {
 }
 
 /// 更新内容：「新功能」「改进」这种分节标题加粗，「· 」开头的一条条缩进排
-private struct ReleaseNotesText: View {
+private struct ReleaseNotesText: KLView {
     let text: String
 
-    var body: some View {
+    var klBody: some View {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in

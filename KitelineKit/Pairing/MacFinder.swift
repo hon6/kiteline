@@ -4,8 +4,8 @@ import Observation
 
 /// 在局域网上找开着 Kiteline 的 Mac（Mac 用 Bonjour 宣告 _tars._tcp），找到了只输 6 位配对码就能配上
 @MainActor
-@Observable
-final class MacFinder {
+final class MacFinder: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     struct Found: Identifiable, Hashable {
         var name: String
         /// Mac 本机根证书指纹，配对时核对
@@ -14,10 +14,10 @@ final class MacFinder {
         var id: String { name }
     }
 
-    private(set) var macs: [Found] = []
+    @Tracked private(set) var macs: [Found] = []
     /// 找了一会儿了（没找到就该让用户手输地址了）
-    private(set) var settled = false
-    private var browser: NWBrowser?
+    @Tracked private(set) var settled = false
+    @Tracked private var browser: NWBrowser?
 
     func start() {
         guard browser == nil else { return }
@@ -33,7 +33,7 @@ final class MacFinder {
         browser.start(queue: .main)
         self.browser = browser
         Task {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(seconds: 3)
             settled = true
         }
     }

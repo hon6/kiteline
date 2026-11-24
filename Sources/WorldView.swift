@@ -11,11 +11,11 @@ import WebKit
 
 // MARK: - 右边：世界
 
-struct WorldView: View {
+struct WorldView: KLView {
     @ObservedObject var model: KitelineModel
     @ObservedObject private var sidebar = SidebarState.shared
 
-    var body: some View {
+    var klBody: some View {
         // 点了某人的屏幕：这个会话的对话页浮在世界右边。和网页并排叠着放、不挂在网页上：
         // 网页铺到标题栏、侧栏底下（ignoresSafeArea），挂在它上面的会话页会继承那片边距，对话的行就叠在一起
         ZStack(alignment: .trailing) {
@@ -35,7 +35,7 @@ struct WorldView: View {
                     .help(model.worldPage == "flow" ? L("离开数据流大屏，回到会话（⇧⌘D）") : L("离开世界模式，回到会话（⇧⌘E）"))
                     // 会话列表收起 / 展开：展开时从左边浮出来，盖在世界上（macOS 26 起是液态玻璃）
                     Button {
-                        withAnimation(.snappy(duration: 0.32)) { sidebar.toggle() }
+                        withAnimation(.klSnappy(duration: 0.32)) { sidebar.toggle() }
                     } label: {
                         Label(sidebar.collapsed ? L("展开会话列表") : L("收起会话列表"), systemImage: "sidebar.left")
                     }
@@ -43,7 +43,7 @@ struct WorldView: View {
                 }
             }
             // 左边栏点了会话：镜头飞过去
-            .onChange(of: model.selection) { _, key in
+            .klOnChange(of: model.selection) { _, key in
                 if let key, !key.hasPrefix("@") { WorldHost.shared.focus(key) }
             }
     }
@@ -51,7 +51,7 @@ struct WorldView: View {
 
 /// 悬浮在世界右边的会话页：只有点的这一个会话（自己一份单块分屏，不带主窗口的多列），标题条、按钮、输入框和平时一样；
 /// 左上角外面一个关闭（Esc），「更多」菜单最上面是「在主窗口中打开」
-private struct WorldSessionCard: View, Equatable {
+private struct WorldSessionCard: KLView, Equatable {
     let key: String
 
     /// 标题条上的按钮同主窗口；菜单前面加「在主窗口中打开」（只建一份，理由同 ConversationDetail.accessory）
@@ -68,7 +68,7 @@ private struct WorldSessionCard: View, Equatable {
             })
         })
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geometry in
             let width = min(max(geometry.size.width * 0.5, 480), 860)
             TarsSessionCard(key: key, accessory: Self.accessory)
@@ -94,15 +94,15 @@ private struct WorldSessionCard: View, Equatable {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 // 世界的按钮、画面中心让开右边这一块
                 .onAppear { WorldHost.shared.setRightInset(width + 36) }
-                .onChange(of: width) { _, value in WorldHost.shared.setRightInset(value + 36) }
+                .klOnChange(of: width) { _, value in WorldHost.shared.setRightInset(value + 36) }
                 .onDisappear { WorldHost.shared.setRightInset(0) }
         }
     }
 }
 
 /// 工具栏那一带让给世界：不画标题、底色透明（macOS 15 起），世界一直铺到窗口顶
-private struct WorldTitlebar: ViewModifier {
-    func body(content: Content) -> some View {
+private struct WorldTitlebar: KLViewModifier {
+    func klBody(content: Content) -> some View {
         if #available(macOS 15, *) {
             content
                 .toolbar(removing: .title)
@@ -511,11 +511,11 @@ final class WorldHost: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         switch action {
         case "start":
             // 拒绝过麦克风：系统不会再弹授权框，直接打开「隐私与安全性 → 麦克风」
-            if AVAudioApplication.shared.recordPermission == .denied { micDenied(); return }
+            if KLMicPermission.denied { micDenied(); return }
             Task { @MainActor in
                 let ok = await TarsWorldChat.startDictation()
                 guard ok else {
-                    if AVAudioApplication.shared.recordPermission == .denied { self.micDenied() }
+                    if KLMicPermission.denied { self.micDenied() }
                     else { self.send(["type": "dictation", "state": "failed", "text": L("录音未能开始，请重试")]) }
                     return
                 }

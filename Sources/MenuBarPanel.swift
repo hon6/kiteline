@@ -3,13 +3,13 @@ import SwiftUI
 import KitelineKit
 
 /// 菜单栏图标点开的面板：一眼看清每个会话在干什么，等你确认的可以直接点允许 / 拒绝。
-struct MenuBarPanel: View {
+struct MenuBarPanel: KLView {
     @ObservedObject var model = KitelineModel.shared
     @ObservedObject private var screen = VirtualScreen.shared
     var openMain: (String?) -> Void
     var close: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             if model.sessions.isEmpty {
@@ -104,7 +104,7 @@ struct MenuBarPanel: View {
     }
 }
 
-struct MiniSessionRow: View {
+struct MiniSessionRow: KLView {
     @ObservedObject var model: KitelineModel
     let item: SessionItem
     var open: () -> Void
@@ -116,7 +116,7 @@ struct MiniSessionRow: View {
         ["AskUserQuestion", "ExitPlanMode"].contains(item.pendingTool ?? "")
     }
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             SessionAvatar(key: item.id, title: item.title, activity: item.activity, size: 30)
             VStack(alignment: .leading, spacing: 1) {

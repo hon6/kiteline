@@ -32,8 +32,8 @@ enum DeviceBench {
     }
 
     @MainActor private static func run(_ label: String) async {
-        for _ in 0..<240 where !ready { try? await Task.sleep(for: .milliseconds(500)) }
-        try? await Task.sleep(for: .seconds(3))
+        for _ in 0..<240 where !ready { try? await Task.sleep(milliseconds: 500) }
+        try? await Task.sleep(seconds: 3)
         var found: [UIScrollView] = []
         func walk(_ view: UIView) {
             if let scroll = view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height + 100 { found.append(scroll) }
@@ -55,7 +55,7 @@ enum DeviceBench {
                 phases.append(await Driver(scroll: scroll, up: up, speed: CGFloat(speed)).run(name: name))
                 scrolling = false
                 NotificationCenter.default.post(name: idle, object: nil)
-                try? await Task.sleep(for: .milliseconds(800))
+                try? await Task.sleep(milliseconds: 800)
                 scrolling = true
             }
             scrolling = false

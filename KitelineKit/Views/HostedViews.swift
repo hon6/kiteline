@@ -6,12 +6,12 @@ import SwiftUI
 // iPhone 设置、Mac 设置的「来源」页、各端对话页都用这一份。
 
 /// 会话页顶上的提示：「当前会话支持后台托管 Claude」。所在设备没开后台运行时一直显示，勾了「不再提示」才不再出现（存在电脑上，各端一起）
-struct HostedTip: View {
-    @Environment(AppModel.self) private var model
+struct HostedTip: KLView {
+    @EnvModel private var model
     let session: SessionInfo
     let open: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         if session.hostable, model.hostFeatures.contains("hostedSetup"), !model.hosted.tipOff,
            model.sources.first(where: { $0.id == session.sourceId })?.hosted == "off" {
             HStack(spacing: 10) {
@@ -51,12 +51,12 @@ struct HostedTip: View {
 /// 会话页顶上的提示：所在电脑开着后台运行，这次却没起来、改在 VS Code 中打开了——说清楚原因和怎么办
 /// （11-16 反馈：「要在会话详情里显示什么原因无法使用，否则用户都不知道该怎么办」）。
 /// 点「重试」打开后台运行面板（能把当前会话转到后台，就是再试一次）；「知道了」只在这台设备上收起这一次的（下次起不来又会出现）
-struct HostedIssueTip: View {
+struct HostedIssueTip: KLView {
     let session: SessionInfo
     let retry: () -> Void
     @AppStorage("kiteline.hostedIssueDismissed") private var dismissed = ""
 
-    var body: some View {
+    var klBody: some View {
         if let issue = session.hostedIssue, dismissed != Self.mark(session.sourceId, issue) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -126,8 +126,8 @@ struct HostedProbe {
 }
 
 /// 后台运行 Claude Code 的设置面板：说明；每台能后台运行的电脑（本机、远端）各自「检测出口 IP」「确认开启 / 关闭」；从会话进来的还能把它转到后台
-struct HostedSetupSheet: View {
-    @Environment(AppModel.self) private var model
+struct HostedSetupSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     /// 只看这一台（来源页某一行、会话页提示进来的）；nil = 所有能后台运行的
     var sourceId: String?
@@ -148,7 +148,7 @@ struct HostedSetupSheet: View {
     }
     private var session: SessionInfo? { key.flatMap { model.session($0) } }
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("后台运行 Claude Code")) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("开启后，这台电脑上的新建任务和恢复的会话不再打开 VS Code，由 Kiteline 在那台电脑上后台运行 Claude Code，可减少 VS Code 的内存占用；发送消息、确认均不切换前台，电脑锁屏时也能操作。")
@@ -228,7 +228,7 @@ struct HostedSetupSheet: View {
             // 截图版一启动就是这个面板，连接可能还没建好：没问到就隔一秒再问，最多 8 次
             var asked = await model.loadEditorWindows()
             for _ in 0..<8 where !asked {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(seconds: 1)
                 asked = await model.loadEditorWindows()
             }
             #else
@@ -237,7 +237,7 @@ struct HostedSetupSheet: View {
             windowsLoaded = asked   // 没问到就不说「目前没有可以关闭的窗口」
             #if SNAPSHOT
             if Snapshot.closeWindows, !model.editorIdle.isEmpty {   // 截图版点不了按钮：替它点一下，看关完以后的样子
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(seconds: 2)
                 await closeWindows()
             }
             #endif

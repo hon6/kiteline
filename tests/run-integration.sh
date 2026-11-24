@@ -34,7 +34,7 @@ echo "==== 1/3 watcher ===="
 
 echo ""
 echo "==== 2/3 手机服务接口 ===="
-[ -x "$APP/Contents/MacOS/TARS" ] || { echo "先运行 ./build.sh"; exit 1; }
+[ -x "$APP/Contents/MacOS/Kiteline" ] || { echo "先运行 ./build.sh"; exit 1; }
 "$PY" "$ROOT/tests/fixture.py" "$TMP/fake" >/dev/null
 mkdir -p "$TMP/config"
 cat > "$TMP/config/config.json" <<JSON
@@ -45,7 +45,7 @@ JSON
 CCPULSE_CONFIG_DIR="$TMP/config" CCPULSE_DRY_RUN=1 CCPULSE_FAKE_TRANSCRIPT="帮我看一下首页的按钮" \
   CCPULSE_SESSIONS_DIR="$TMP/fake/sessions" CCPULSE_DATA_DIR="$TMP/fake/data" CLAUDE_CONFIG_DIR="$TMP/fake/claude" CODEX_HOME="$TMP/codex" DSH_HOME="$TMP/dsh" CCPULSE_PROMA_DIR="$TMP/proma" \
   XDG_CONFIG_HOME="$TMP/xdg-config" XDG_DATA_HOME="$TMP/xdg-data" \
-  "$APP/Contents/MacOS/TARS" --selftest-exit 120 >/dev/null 2>&1 &
+  "$APP/Contents/MacOS/Kiteline" --selftest-exit 120 >/dev/null 2>&1 &
 APP_PID=$!
 for _ in $(seq 1 40); do
   curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break
@@ -56,7 +56,7 @@ done
 echo ""
 echo "==== 3/3 推送加密 ===="
 if "$PY" -c "import cryptography" 2>/dev/null; then
-  CCPULSE_CONFIG_DIR="$TMP/config" "$PY" "$ROOT/tests/test_webpush.py" "$APP/Contents/MacOS/TARS" || FAILED=1
+  CCPULSE_CONFIG_DIR="$TMP/config" "$PY" "$ROOT/tests/test_webpush.py" "$APP/Contents/MacOS/Kiteline" || FAILED=1
 else
   echo "  （跳过：没装 python 的 cryptography 库。pip3 install cryptography 后可运行）"
 fi

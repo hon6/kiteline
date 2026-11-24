@@ -111,10 +111,10 @@ final class UsageReportModel: ObservableObject {
     }
 }
 
-struct UsageReportView: View {
+struct UsageReportView: KLView {
     @ObservedObject var model = UsageReportModel.shared
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 // 订阅额度（各台电脑的 5 小时 / 本周）：侧栏卡片上那几条，这里字大一号、一台电脑一栏
@@ -190,6 +190,7 @@ struct UsageReportView: View {
         .tarsCard(padding: 12, cornerRadius: 14)
     }
 
+    #if KL_MODERN
     private var chart: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("每天花费").font(.app(size: 12, weight: .semibold)).foregroundStyle(.secondary)
@@ -210,6 +211,54 @@ struct UsageReportView: View {
             .frame(height: 200)
         }
         .tarsCard(padding: 14, cornerRadius: 16)
+    }
+    #else
+    private var chart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("每天花费").font(.app(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            if #available(macOS 13, *) { dayChart } else { dayBars }
+        }
+        .tarsCard(padding: 14, cornerRadius: 16)
+    }
+    #endif
+
+    /// macOS 12：一排柱子（记录的实色、估算的淡色叠在上面），鼠标指上去看金额
+    private var dayBars: some View {
+        let rows = model.dayRows
+        let top = max(rows.map(\.cost).max() ?? 0, 0.0001)
+        return HStack(alignment: .bottom, spacing: 3) {
+            ForEach(rows, id: \.key) { day in
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    Rectangle().fill(Color.tarsBrand.opacity(0.4)).frame(height: 180 * CGFloat(day.estimated / top))
+                    Rectangle().fill(Color.tarsBrand).frame(height: 180 * CGFloat(max(0, day.cost - day.estimated) / top))
+                }
+                .frame(maxWidth: .infinity)
+                .help("\(day.key)  \(UsageReportModel.money(day.cost))")
+            }
+        }
+        .frame(height: 200)
+    }
+
+    @available(macOS 13, *)
+    private var dayChart: some View {
+        VStack {
+            Chart(model.dayRows) { day in
+                BarMark(x: .value("日期", day.date, unit: .day), y: .value("记录", day.cost - day.estimated))
+                    .foregroundStyle(by: .value("类型", L("记录")))
+                BarMark(x: .value("日期", day.date, unit: .day), y: .value("估算", day.estimated))
+                    .foregroundStyle(by: .value("类型", L("估算")))
+            }
+            .chartForegroundStyleScale([L("记录"): Color.tarsBrand, L("估算"): Color.tarsBrand.opacity(0.4)])
+            .chartYAxis { AxisMarks { value in
+                AxisGridLine()
+                AxisValueLabel { if let v = value.as(Double.self) { Text(UsageReportModel.money(v)) } }
+            } }
+            .chartXAxis { AxisMarks(values: .stride(by: .day, count: model.days > 10 ? 5 : 1)) { _ in
+                AxisValueLabel(format: .dateTime.month(.defaultDigits).day(), centered: true)
+            } }
+            .frame(height: 200)
+        }
     }
 
     @ViewBuilder

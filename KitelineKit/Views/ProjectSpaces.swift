@@ -7,17 +7,18 @@ import SwiftUI
 /// 新版界面里每个项目一套分屏（怎么分、每块开着哪些标签——同会话组存的那份），切项目就整套换掉（同 VS Code 换工作区）。
 /// 没选项目时是「""」那一套。经典界面不分项目：切到新版时把经典那套存起来，切回去原样放回（经典的会话组照旧管它自己的）。
 /// 只有正显示的那套画在屏幕上，别的只是存着的几百字节
-@Observable @MainActor
-public final class ProjectSpaces {
+@MainActor
+public final class ProjectSpaces: KLObservable {
+    public let _klRegistrar = KLRegistrar.make()
     let panes: ChatPanes
     /// 新版界面开着（分项目）
-    public private(set) var enabled = false
+    @Tracked public private(set) var enabled = false
     /// 正显示的那个项目（项目的 id；"" = 没选项目）
-    public private(set) var active: String = ""
-    private var layouts: [String: Data] = [:]
+    @Tracked public private(set) var active: String = ""
+    @Tracked private var layouts: [String: Data] = [:]
     /// 经典界面那一套（新版开着时存在这）
-    private var classic: Data?
-    @ObservationIgnored private var store: (defaults: UserDefaults, key: String)?
+    @Tracked private var classic: Data?
+    private var store: (defaults: UserDefaults, key: String)?
 
     private struct Stored: Codable {
         var enabled: Bool

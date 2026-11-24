@@ -99,7 +99,7 @@ enum ShareInbox {
 }
 
 /// 「发送到会话」面板（Mac）：收到的内容 + 补充说明 + 发到哪儿（已有会话 / 新建会话）
-struct ShareSheet: View {
+struct ShareSheet: KLView {
     @ObservedObject var model = KitelineModel.shared
     @State private var payload: SharedPayload?
     @State private var text = ""
@@ -126,7 +126,7 @@ struct ShareSheet: View {
         !sending && hasContent && !tooLarge && (target == "project" || picked != nil)
     }
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("把从其他应用共享来的内容发给一个会话，或新建会话（可选择项目和 Agent）。")
                 .font(.app(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -136,7 +136,7 @@ struct ShareSheet: View {
                 Text("内容").font(.app(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
                 TextEditor(text: $text)
                     .font(.app(size: 13))
-                    .scrollContentBackground(.hidden)
+                    .klScrollContentBackground(.hidden)
                     .padding(6)
                     .frame(height: 72)
                     .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
@@ -181,7 +181,7 @@ struct ShareSheet: View {
         .navigationTitle(L("发送到会话"))
         .onAppear(perform: take)
         // 面板开着又共享来一批：换成新的（旧的那批没发，丢掉）
-        .onChange(of: model.sharedPayload?.id) { _, id in if id != nil { take() } }
+        .klOnChange(of: model.sharedPayload?.id) { _, id in if id != nil { take() } }
     }
 
     // MARK: 文件
@@ -234,7 +234,7 @@ struct ShareSheet: View {
                 .tag(item.id)
             }
             if sessions.isEmpty {
-                Text(query.isEmpty ? "暂无可发送的会话，请选择「新建会话」" : "无匹配的会话").foregroundStyle(.secondary).selectionDisabled()
+                Text(query.isEmpty ? "暂无可发送的会话，请选择「新建会话」" : "无匹配的会话").foregroundStyle(.secondary).klSelectionDisabled()
             }
         }
         .listStyle(.bordered(alternatesRowBackgrounds: false))

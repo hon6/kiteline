@@ -11,10 +11,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-# 构建产物和可执行文件仍叫 TARS（内部名，开发脚本都认这个路径）；装进「应用程序」时用对外的名字 Kiteline
+# 构建产物的包目录仍叫 dist/Kiteline.app（内部名，开发脚本都认这个路径），可执行文件（进程名）11-24 起叫 Kiteline；
+# 装进「应用程序」时用对外的名字 Kiteline
 APP="$ROOT/dist/Kiteline.app"
 DEST="/Applications/Kiteline.app"
-CC="$DEST/Contents/MacOS/TARS"
+CC="$DEST/Contents/MacOS/Kiteline"
 
 # 同一时间只让一个会话编译、安装：几个会话同时 install 时，一个的 rm -rf / cp 和另一个的 open 会交错，
 # App 在安装包还没拷完时就被启动、找不到打包的 watcher，本机和远端全连不上（11-14）；同时编译还会互相覆盖 dist/Kiteline.app。

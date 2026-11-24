@@ -186,7 +186,7 @@ extension AppModel {
                     self.applyCombined()
                 }
                 _ = await host.api.probe()
-                try? await Task.sleep(for: .seconds(delay))
+                try? await Task.sleep(seconds: delay)
                 delay = min(max(delay * 2, 1), 30)
             }
         }
@@ -204,7 +204,7 @@ extension AppModel {
                 }
             }
             applyCombined()
-        case "entries", "reset", "notify", "peers", "term", "term_exit", "term_open", "term_meta", "browser_frame", "browser_ask":
+        case "entries", "live", "reset", "notify", "peers", "term", "term_exit", "term_open", "term_meta", "browser_frame", "browser_ask":
             guard var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
             if event == "notify" { object.removeValue(forKey: "inbox") }   // 通知收件箱只在主电脑上（铃铛数不跟着加）
             let mapped = DeviceHub.outward(object, prefix: host.prefix, own: host.own)
@@ -376,7 +376,7 @@ extension AppModel {
                 return hit.key
             }
             if MacStore.shared.linked.isEmpty { return key }
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(milliseconds: 300)
         }
         return key
     }

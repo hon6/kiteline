@@ -5,12 +5,12 @@ import KitelineKit
 
 /// 侧栏底栏里的绿色向上箭头（手机数和右边几个图标中间）：只在有新版本、下载中、装好待重启时出现，没有更新时不占地方；
 /// 下载中外圈一道进度；点开更新窗口
-struct UpdateButton: View {
+struct UpdateButton: KLView {
     @ObservedObject var updater = Updater.shared
     var size: CGFloat = 28
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         if updater.visible {
             Button { UpdateWindowController.shared.show() } label: {
                 ZStack {
@@ -61,7 +61,7 @@ final class UpdateWindowController: NSWindowController, NSWindowDelegate {
         isPhones = phones
         let root = phones ? AnyView(PhoneUpdateView()) : AnyView(UpdateView())
         let hosting = NSHostingController(rootView: root.tarsLook())
-        hosting.sizingOptions = [.preferredContentSize]
+        if #available(macOS 13, *) { hosting.sizingOptions = [.preferredContentSize] }
         let panel = NSPanel(contentViewController: hosting)
         // 同别的弹窗（11-02 反馈：要有标题栏、全屏、关闭）：标题栏写明是什么，红黄绿钮都能用，绿钮铺满屏幕
         panel.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
@@ -133,11 +133,11 @@ final class UpdateWindowController: NSWindowController, NSWindowDelegate {
 }
 
 /// 更新内容：落后几版就列几版（每版一个小标题），只拿得到新版本这一版的就直接列
-private struct ReleaseNotesBox: View {
+private struct ReleaseNotesBox: KLView {
     let history: [Updater.Note]
     let notes: String
 
-    var body: some View {
+    var klBody: some View {
         let single = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !history.isEmpty || !single.isEmpty {
             ScrollView {
@@ -164,11 +164,11 @@ private struct ReleaseNotesBox: View {
 }
 
 /// 「此版本不再提示」：勾上当场记下（直接关窗口也算），有更新的版本时照样会弹
-private struct SkipCheckbox: View {
+private struct SkipCheckbox: KLView {
     @ObservedObject var updater = Updater.shared
     let key: String
 
-    var body: some View {
+    var klBody: some View {
         Toggle(L("此版本不再提示"), isOn: Binding(get: { updater.isSkipped(key) }, set: { updater.setSkipped(key, $0) }))
             .toggleStyle(.checkbox)
             .font(.app(size: 12))
@@ -176,10 +176,10 @@ private struct SkipCheckbox: View {
     }
 }
 
-private struct UpdateView: View {
+private struct UpdateView: KLView {
     @ObservedObject var updater = Updater.shared
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 12) {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
             Text(title).font(.app(size: 15, weight: .bold)).multilineTextAlignment(.center)
@@ -204,7 +204,7 @@ private struct UpdateView: View {
         }
         .padding(DialogMetric.pad)
         .frame(width: 420)
-        .animation(.snappy(duration: 0.2), value: updater.phase)
+        .animation(.klSnappy(duration: 0.2), value: updater.phase)
     }
 
     private var version: String { updater.release?.version ?? "" }
@@ -279,10 +279,10 @@ private struct UpdateView: View {
 
 /// 「手机端有新版本」：配对过的手机上的 Kiteline 比 App Store 上的旧——哪几台、各是什么版本、新版本更新了什么。
 /// 手机打开 Kiteline 时自己也会提示；这里提醒一声，免得手机一直开着旧版本、用不上电脑端的新功能
-private struct PhoneUpdateView: View {
+private struct PhoneUpdateView: KLView {
     @ObservedObject var updater = Updater.shared
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 12) {
             Image(systemName: "iphone.gen3").font(.system(size: 40, weight: .regular)).foregroundStyle(.secondary).frame(height: 64)
             if let offer = updater.phones {

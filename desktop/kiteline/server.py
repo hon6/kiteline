@@ -222,7 +222,7 @@ class MobileServer:
 
     def publish(self, event, payload):
         # 对话增量、会话之间的消息全是内容：英文连接也原样发，只换其中电脑生成的事件提示（同 /api/history）
-        if event in ("peers", "term", "term_open", "term_meta", "browser_frame"):   # 终端输出、浏览器画面原样转（没有界面文字）
+        if event in ("peers", "term", "term_open", "term_meta", "browser_frame", "live"):   # 终端输出、浏览器画面、正在生成的文字原样转（没有界面文字）
             english = None
         elif event == "entries":
             english = (lambda: self._event_text(event, dict(payload, items=localize_events(payload.get("items") or [])))) \

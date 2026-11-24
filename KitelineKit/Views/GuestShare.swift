@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 会话菜单「分享只读链接」：生成一个局域网网址，同一网络里的人用浏览器就能看这个会话（对话和步骤，只读）。
 /// 页面和内容都由电脑直接给（见 Sources/GuestLinks.swift），不经过任何服务器；可选有效期，随时停止分享
-struct GuestShareSheet: View {
-    @Environment(AppModel.self) private var model
+struct GuestShareSheet: KLView {
+    @EnvModel private var model
     let key: String
 
     struct Share: Identifiable {
@@ -18,7 +18,7 @@ struct GuestShareSheet: View {
     @State private var busy = false
     @State private var error: String?
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("分享只读链接")) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("生成一个局域网网址，和这台电脑在同一网络（Wi-Fi）里的人用浏览器就能查看这个会话，不用装 Kiteline：对话和执行的步骤，不含思考过程、图片和关键信息。会话有进展时，对方的页面自动更新。")
@@ -66,7 +66,11 @@ struct GuestShareSheet: View {
             HStack(spacing: 10) {
                 Button { Clipboard.copy(share.url) } label: { Label("复制链接", systemImage: "doc.on.doc") }
                 if let url = URL(string: share.url) {
+                    #if os(iOS) || KL_MODERN
                     ShareLink(item: url) { Label("转发", systemImage: "square.and.arrow.up") }
+                    #else
+                    KLShareLink(url: url) { Label("转发", systemImage: "square.and.arrow.up") }
+                    #endif
                 }
             }
             .font(.ui(.subheadline))
@@ -82,7 +86,7 @@ struct GuestShareSheet: View {
             // 打开面板时正赶上重连：任务被取消就等连上后的那次再读；请求被掐断（已取消）就稍后再读，都不算出错
             if Task.isCancelled { return }
             if (error as? URLError)?.code == .cancelled, attempt < 3 {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(seconds: 1)
                 if !Task.isCancelled { await load(attempt: attempt + 1) }
                 return
             }

@@ -170,11 +170,11 @@ struct LimitWindow: Decodable, Identifiable, Hashable {
 // MARK: 视图
 
 /// 一条额度：上面一行「5 小时 · 22:10 重置」和已用百分比，下面一根横条（10-31：不要环形，两台设备时太占地方）
-struct LimitBar: View {
+struct LimitBar: KLView {
     let window: LimitWindow
     var compact = false
 
-    var body: some View {
+    var klBody: some View {
         let height: CGFloat = compact ? 5 : 6
         let ratio = min(1, max(0, window.percent / 100))
         VStack(alignment: .leading, spacing: 4) {
@@ -201,11 +201,11 @@ struct LimitBar: View {
 }
 
 /// 余额一行：「余额 ¥18.52」，有赠送的后面跟「赠送 ¥5.00」（DeepSeek 按量付费，没有周期额度）
-struct BalanceLine: View {
+struct BalanceLine: KLView {
     let balances: [LimitBalance]
     var compact = false
 
-    var body: some View {
+    var klBody: some View {
         // 只有赠送余额的就把它当余额显示
         let paid = balances.filter { $0.kind != "bonus" }
         let main = paid.isEmpty ? balances : paid
@@ -227,7 +227,7 @@ struct BalanceLine: View {
 
 /// 额度面板：每台电脑每家 agent 一块——上面一行左边电脑名、右边 agent，下面「5 小时」「本周」两条各占一半并排（10-31）。
 /// 手机首页卡片、用量页、Mac 侧栏共用
-struct LimitsBoard: View {
+struct LimitsBoard: KLView {
     let devices: [LimitDevice]
     /// Mac 侧栏：窄，字小一号
     var compact = false
@@ -238,7 +238,7 @@ struct LimitsBoard: View {
         devices.flatMap { device in device.agents.map { (device, $0) } }
     }
 
-    var body: some View {
+    var klBody: some View {
         if wide {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 32, alignment: .top)], alignment: .leading, spacing: 18) {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { _, item in block(item.device, item.agent) }
@@ -293,7 +293,7 @@ struct LimitsBoard: View {
 
 /// 首页的「今日用量」大卡片（10-31）：右上角今天的 token 总数，下面各台电脑的额度条，花费这些明细点进去看。
 /// 还没有额度读数（没用订阅登录、旧版电脑端）时退回一行今天的花费
-struct LimitsTile: View {
+struct LimitsTile: KLView {
     let devices: [LimitDevice]
     let usage: UsageItem?
     /// 标题后面给刷新按钮留个位（LimitsRefreshSlot）：卡片本身是个按钮，刷新按钮要从外面盖上去
@@ -301,7 +301,7 @@ struct LimitsTile: View {
     /// 白色列表上用浅灰块；灰底页面（「概览」页签）上用白卡片，浅灰块和页面底色只差两个色阶、看不出边界
     var onTile = true
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 TarsIcon(symbol: "chart.bar.fill", size: 34)
@@ -340,11 +340,11 @@ struct LimitsRefreshSlot: PreferenceKey {
 }
 
 /// 手动刷新额度的小按钮（11-03）：拉的时候转圈
-struct LimitsRefreshButton: View {
+struct LimitsRefreshButton: KLView {
     let busy: Bool
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             Group {
                 if busy {

@@ -1,16 +1,17 @@
 import AppKit
 import SwiftUI
+import KitelineKit
 
 /// 鼠标停在图标按钮上 0.35 秒后显示的说明。
 ///
 /// 系统的 `.help()` 提示在主窗口侧栏底栏里显示不出来（辅助功能里读得到，鼠标停上去就是不出，10-22 反馈），
 /// 而且要停一秒多。这里用一个不抢焦点、不接鼠标的小浮窗画在鼠标上方：不会被侧栏列表盖住，也不打断输入框里的输入。
 /// 文字照样作为辅助功能提示（旁白读得到）
-struct HoverTip: ViewModifier {
+struct HoverTip: KLViewModifier {
     let text: String
     @State private var pending: DispatchWorkItem?
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .accessibilityHint(text)
             .onHover { inside in
@@ -88,10 +89,10 @@ enum HoverTipPanel {
         panel = nil
     }
 
-    private struct Label: View {
+    private struct Label: KLView {
         let text: String
 
-        var body: some View {
+        var klBody: some View {
             Text(text)
                 .font(.app(size: 12))
                 .multilineTextAlignment(.leading)

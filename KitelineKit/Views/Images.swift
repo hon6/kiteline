@@ -118,7 +118,7 @@ final class ImageCache {
     private nonisolated static func download(_ api: MacAPI, _ path: String, _ query: [String: String], gate: Gate,
                                              progress key: String? = nil) async -> Data? {
         for attempt in 0..<3 {
-            if attempt > 0 { try? await Task.sleep(for: .seconds(attempt == 1 ? 1.5 : 4)) }
+            if attempt > 0 { try? await Task.sleep(seconds: attempt == 1 ? 1.5 : 4) }
             await gate.enter()
             let started = Date()
             let result: Result<Data, Error>
@@ -184,11 +184,12 @@ final class ImageCache {
 }
 
 /// 看大图时原图的下载进度（按 ImageCache.progressKey 记）
-@MainActor @Observable
-final class ImageProgress {
+@MainActor 
+final class ImageProgress: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = ImageProgress()
     struct Item { var received: Int64; var total: Int64 }
-    private(set) var items: [String: Item] = [:]
+    @Tracked private(set) var items: [String: Item] = [:]
 
     func update(_ key: String, received: Int64, total: Int64) {
         items[key] = Item(received: received, total: total)
@@ -196,10 +197,10 @@ final class ImageProgress {
 }
 
 /// 看大图时还没下完：原图多大、下了多少（电脑没报总大小时只显示已下载多少）
-struct DownloadProgressView: View {
+struct DownloadProgressView: KLView {
     let key: String
 
-    var body: some View {
+    var klBody: some View {
         let item = ImageProgress.shared.items[key]
         VStack(spacing: 10) {
             if let item, item.total > 0 {
@@ -251,8 +252,8 @@ extension PlatformImage {
 }
 
 /// Mac 上的一张图
-struct RemoteImage: View {
-    @Environment(AppModel.self) private var model
+struct RemoteImage: KLView {
+    @EnvModel private var model
     let path: String
     let query: [String: String]
     var mode: ContentMode = .fill
@@ -268,7 +269,7 @@ struct RemoteImage: View {
     @State private var failed = false
     @State private var attempt = 0
 
-    var body: some View {
+    var klBody: some View {
         ZStack {
             if let image = shown {
                 #if os(iOS)
@@ -307,7 +308,7 @@ struct RemoteImage: View {
                 image = await ImageCache.shared.load(model.api, path, query, variant, title: title)
                 failed = image == nil
                 guard failed, delay > 0, !Task.isCancelled else { return }
-                try? await Task.sleep(for: .seconds(delay))
+                try? await Task.sleep(seconds: delay)
                 guard !Task.isCancelled else { return }
             }
         }
@@ -376,7 +377,7 @@ extension RemoteImage {
 #endif
 
 /// 一条消息里的图：一张按原比例缩进框里，多张排成一样大的方格（裁成填满）；点开全屏看
-struct MessageImages: View {
+struct MessageImages: KLView {
     let key: String
     let images: [ChatImage]
     /// 点开后左右滑着看的一组图（比如一张步骤卡片里所有工具结果的图），从点的那张开始；不给就只看这条自己的
@@ -385,7 +386,7 @@ struct MessageImages: View {
     var path = "/api/media"
     @State private var viewing: Int?
 
-    var body: some View {
+    var klBody: some View {
         // 对话里只放 100 点的方形缩略图（电脑上居中裁好，一张几 KB 到二十几 KB），点开再取原图。
         // 一张、两张、四张是 100 的方块；三张、五张以上一排三个 80 的方块
         let columns = images.count == 1 ? 1 : (images.count == 2 || images.count == 4 ? 2 : 3)
@@ -427,9 +428,9 @@ private struct ViewerIndex: Identifiable {
 #if os(iOS)
 /// 全屏看图：左右滑切换；双指缩放、松手保持，放大后上下左右拖着看，拖到边再划翻下一张；双击放大 / 还原；单击关闭；
 /// 右上角存相册、分享（长按图也是分享）
-struct ImageViewer: View {
+struct ImageViewer: KLView {
     @Environment(\.dismiss) private var dismiss
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     let key: String
     let images: [ChatImage]
     @State var index: Int
@@ -438,7 +439,7 @@ struct ImageViewer: View {
     /// 往下拖着要关的进度（0–1）：顶栏跟着淡掉
     @State private var pull: CGFloat = 0
 
-    var body: some View {
+    var klBody: some View {
         // 顶栏单独占一行、不盖在图上：盖在上面时点按钮会落到底下那页（没取到的页点成了「重试」，有图的页点成了关闭）
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -675,9 +676,9 @@ enum ViewerImage {
 
 /// Mac 上看大图：能放大缩小、拖着看（见 ZoomImageView），← → 切换，拷贝、存储、共享、用「预览」打开。
 /// 是能拖动、改大小的面板（见 SheetPanel），拉大窗口图跟着变大
-struct MacImageViewer: View {
+struct MacImageViewer: KLView {
     @PanelDismiss private var dismiss
-    @Environment(AppModel.self) private var model: AppModel?
+    @Environment(\.appModelSlot) private var model: AppModel?
     let images: [ViewerImage]
     @State var index: Int
     /// 只有一张时标题显示的名字（文件名）
@@ -699,12 +700,12 @@ struct MacImageViewer: View {
         self.init(images: images.map { .remote(path: path, query: ["key": key, "ref": $0.ref]) }, index: index)
     }
 
-    var body: some View {
+    var klBody: some View {
         Group {
             if let current {
                 ZoomImageView(image: current, control: zoom, onSwipe: images.count > 1 ? { step($0) } : nil)
             } else if failed {
-                ContentUnavailableView(L("无法获取图片"), systemImage: "photo")
+                KLUnavailableView(L("无法获取图片"), systemImage: "photo")
             } else {
                 ProgressView()
             }
@@ -715,14 +716,22 @@ struct MacImageViewer: View {
         .background { Button("") { zoom.zoomIn() }.keyboardShortcut("+", modifiers: .command).opacity(0).accessibilityHidden(true) }
         // 按钮放小窗的工具栏（同「预览」）：左边标题，右边按钮；macOS 26 起是液态玻璃，窄了收进「»」
         .navigationTitle(images.count > 1 ? "\(index + 1) / \(images.count)" : (name ?? L("图片")))
+        #if KL_MODERN
         .toolbar { toolbar }
+        #else
+        .klApply { withToolbar($0) }
+        #endif
         .panelFrame(width: 900, height: 700, minWidth: 480, minHeight: 320)
         .focusable()
         .focused($focused)
-        .focusEffectDisabled()
+        .klFocusEffectDisabled()
         .onAppear { focused = true }   // 一打开就能按 ←/→ 翻
+        #if KL_MODERN
         .onKeyPress(.leftArrow) { step(-1); return .handled }
         .onKeyPress(.rightArrow) { step(1); return .handled }
+        #else
+        .klArrowKeys(left: { step(-1) }, right: { step(1) })
+        #endif
         .task(id: index) {
             failed = false
             current = cached(images[index])
@@ -733,16 +742,61 @@ struct MacImageViewer: View {
         }
     }
 
+    /// macOS 13 起用原来的工具栏，macOS 12 用 toolbar12
+    @ViewBuilder
+    private func withToolbar<V: View>(_ view: V) -> some View {
+        if #available(macOS 13, *) { view.toolbar { toolbar } } else { view.toolbar { toolbar12 } }
+    }
+
+    /// macOS 12 的工具栏：ToolbarContentBuilder 里不能写 if，条件都放进各组里面（没有分组间隔、上下张按钮一直在）
+    @ToolbarContentBuilder
+    private var toolbar12: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button { step(-1) } label: { Label(L("上一张"), systemImage: "chevron.left") }
+                .disabled(index == 0).help(L("上一张（←）"))
+            Button { step(1) } label: { Label(L("下一张"), systemImage: "chevron.right") }
+                .disabled(index >= images.count - 1).help(L("下一张（→）"))
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { zoom.zoomOut() } label: { Label(L("缩小"), systemImage: "minus.magnifyingglass") }
+                .keyboardShortcut("-", modifiers: .command).help(L("缩小（⌘-）"))
+            Button { zoom.actualSize() } label: { Text(zoom.percent).monospacedDigit().frame(minWidth: 40) }
+                .keyboardShortcut("0", modifiers: .command).help(L("实际大小（⌘0）"))
+            Button { zoom.zoomIn() } label: { Label(L("放大"), systemImage: "plus.magnifyingglass") }
+                .keyboardShortcut("=", modifiers: .command).help(L("放大（⌘+）"))
+            Button { zoom.fit() } label: { Label(L("适合窗口"), systemImage: "arrow.up.left.and.down.right.magnifyingglass") }
+                .keyboardShortcut("9", modifiers: .command).disabled(zoom.fitting).help(L("适合窗口（⌘9）"))
+            Button { copy() } label: { Label(L("拷贝"), systemImage: "doc.on.doc") }.help(L("拷贝图片"))
+            Button { Task { await saveAs() } } label: { Label(L("存储…"), systemImage: "square.and.arrow.down") }.help(L("存储为文件"))
+            if let current {
+                KLShareLink(image: current, title: L("图片")) { Label(L("共享"), systemImage: "square.and.arrow.up") }.help(L("共享"))
+            }
+            Button { Task { await openInPreview() } } label: { Label(L("用「预览」打开"), systemImage: "arrow.up.forward.app") }
+                .help(L("用「预览」打开（可标注、另存）"))
+            Button(L("完成")) { dismiss() }.keyboardShortcut(.cancelAction)
+        }
+    }
+
+    /// 上一张 / 下一张
+    @ViewBuilder
+    private var stepButtons: some View {
+        Button { step(-1) } label: { Label(L("上一张"), systemImage: "chevron.left") }
+            .disabled(index == 0).help(L("上一张（←）")).panelToolbarItem(edge: .leading)
+        Button { step(1) } label: { Label(L("下一张"), systemImage: "chevron.right") }
+            .disabled(index == images.count - 1).help(L("下一张（→）")).panelToolbarItem(edge: .trailing)
+    }
+
+    @available(macOS 13, *)
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        #if KL_MODERN
         if images.count > 1 {
-            ToolbarItemGroup(placement: .navigation) {
-                Button { step(-1) } label: { Label(L("上一张"), systemImage: "chevron.left") }
-                    .disabled(index == 0).help(L("上一张（←）")).panelToolbarItem(edge: .leading)
-                Button { step(1) } label: { Label(L("下一张"), systemImage: "chevron.right") }
-                    .disabled(index == images.count - 1).help(L("下一张（→）")).panelToolbarItem(edge: .trailing)
-            }
+            ToolbarItemGroup(placement: .navigation) { stepButtons }
         }
+        #else
+        // 兼容包：工具栏里不写 if（13 上能用，但兼容包统一不用，发版前查弱引用时一眼看清）：条目常在，按钮按张数出现
+        ToolbarItemGroup(placement: .navigation) { if images.count > 1 { stepButtons } }
+        #endif
         ToolbarItemGroup(placement: .primaryAction) {
             Button { zoom.zoomOut() } label: { Label(L("缩小"), systemImage: "minus.magnifyingglass") }
                 .keyboardShortcut("-", modifiers: .command).help(L("缩小（⌘-）")).panelToolbarItem(edge: .leading)
@@ -753,7 +807,9 @@ struct MacImageViewer: View {
             Button { zoom.fit() } label: { Label(L("适合窗口"), systemImage: "arrow.up.left.and.down.right.magnifyingglass") }
                 .keyboardShortcut("9", modifiers: .command).disabled(zoom.fitting).help(L("适合窗口（⌘9）")).panelToolbarItem(edge: .trailing)
         }
-        GroupGap()   // 缩放一组、拷贝 / 存储 / 共享 / 预览一组，分成两块玻璃
+        #if KL_MODERN
+        GroupGap()   // 缩放一组、拷贝 / 存储 / 共享 / 预览一组，分成两块玻璃（兼容包只在 macOS 12 / 13 上用，没有玻璃，不要）
+        #endif
         ToolbarItemGroup(placement: .primaryAction) {
             Button { copy() } label: { Label(L("拷贝"), systemImage: "doc.on.doc") }.help(L("拷贝图片")).panelToolbarItem(edge: .leading)
             // 同 iPhone 看大图的「存到相册」「分享」：存成文件、共享给微信 / 隔空投送 / 信息……
@@ -769,7 +825,9 @@ struct MacImageViewer: View {
         }
         // 「完成」和左边几组一样画成玻璃胶囊（11-23 反馈：这个窗口的按钮风格要统一），不用别的面板那种带边框的小按钮；
         // 前面隔一下单独成一块，不然系统把它并进拷贝那组的玻璃里
+        #if KL_MODERN
         GroupGap()
+        #endif
         ToolbarItem(placement: .primaryAction) {
             Button(L("完成")) { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarItem(edge: .horizontal)
         }
@@ -841,6 +899,8 @@ struct MacImageViewer: View {
 }
 
 /// 工具栏里两组按钮之间留一点空，各成一块玻璃（macOS 26 起；更早的系统工具栏本来就分得开）
+/// 只在主包里有：工具栏里的 if #available 要 macOS 14.5 才有的 LimitedAvailabilityToolbarContent，兼容包（12 / 13）上会崩
+#if KL_MODERN
 private struct GroupGap: ToolbarContent {
     var body: some ToolbarContent {
         if #available(macOS 26.0, *) {
@@ -848,6 +908,7 @@ private struct GroupGap: ToolbarContent {
         }
     }
 }
+#endif
 
 extension View {
     /// Mac：点这张图放大看（能缩放的看大图面板）；鼠标指上去显示放大镜手势
@@ -857,13 +918,13 @@ extension View {
     }
 }
 
-private struct ZoomOnClick: ViewModifier {
+private struct ZoomOnClick: KLViewModifier {
     let images: [ViewerImage]
     let index: Int
     let name: String?
     @State private var viewing = false
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .contentShape(Rectangle())
             .onTapGesture { viewing = true }

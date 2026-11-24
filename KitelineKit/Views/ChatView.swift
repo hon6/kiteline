@@ -6,8 +6,8 @@ import AppKit
 #endif
 
 /// 一个会话的对话页
-struct ChatView: View {
-    @Environment(AppModel.self) private var model
+struct ChatView: KLView {
+    @EnvModel private var model
     let key: String
     /// 滚动时的状态放在不会触发重画的地方：手指一滑就整页重画，会和列表的高度估算互相拉扯，画面来回跳
     @State private var scroll = ScrollState()
@@ -80,7 +80,7 @@ struct ChatView: View {
     @State private var voice = VoiceSession()
     #endif
 
-    var body: some View {
+    var klBody: some View {
         let _ = PerfTrace.body("ChatView")
         let chat = model.chat(key)
         // 只看自己这个会话的状态（见 AppModel.sessionSlot）：别的会话变了不连带重算。
@@ -92,8 +92,8 @@ struct ChatView: View {
         // 刚打开只画最后一截，更早的分几轮补上（见 revealed）；要跳到某条消息时全画
         let shown = min(revealed, limit)
         let rows = jumpTarget == nil && shown < all.count ? Array(all.suffix(shown)) : all
-        ScrollViewReader { proxy in
-            ScrollView {
+        ScrollViewReader { proxy in KLTracking {
+            ScrollView { KLTracking {
                 // 不用 LazyVStack：懒加载的行高是估算的，Claude 的回复边写边变长时，后面的行没跟着重排，
                 // 新消息会叠在上一条上面；往上翻时估算高度一变还会被拽回底部。一页 60 条，分几轮排完（见 revealed）
                 RowsStack {
@@ -108,7 +108,7 @@ struct ChatView: View {
                             await model.loadHistory(key, older: true)
                             if let anchor { proxy.scrollTo(anchor, anchor: .top) }
                         }
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.headerHeight = $0 }
+                        .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.headerHeight = $0 }
                     } else if revealed >= limit {
                         // 只画着最后 limit 行（见 limit）：先在本地展开更早的一截，展开完停在原来看的那条上
                         Button("查看更早的消息") {
@@ -120,7 +120,7 @@ struct ChatView: View {
                         }
                         .font(.ui(.footnote)).padding(10)
                         .frame(maxWidth: .infinity)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.headerHeight = $0 }
+                        .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.headerHeight = $0 }
                     }
                     // 消息行单独成一个视图、按值比较：会话状态变了（正在执行哪个工具、用量……）但行没变时整段跳过，
                     // 不用把几十上百行逐个重新比一遍（10-22 真机追踪：每次推送更新都要重算整页，滑动时一顿一顿）
@@ -152,7 +152,7 @@ struct ChatView: View {
                 .environment(\.openAgentInfo, AgentInfoOpener { showAgentInfo = true })
                 #if DEBUG && os(iOS)
                 // 排查「能左右拖」：钉宽之前整列的宽（哪一块比屏幕宽，见 ScrollPerf.noteScrollWidth）
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { ScrollPerf.shared.stackWidth = $0 }
+                .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { ScrollPerf.shared.stackWidth = $0 }
                 #endif
                 #if os(iOS)
                 // 内容宽度钉成外面给这一块的宽（量法见下面的 chatWidth，不随内容变，不会互相依赖）：哪一行比屏幕宽也撑不宽整页，
@@ -170,21 +170,22 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
                 // 消息少、不满一屏时内容撑满可视区贴底放：不然系统把标题栏下的滚动边缘效果（模糊 + 一道线）拉长到内容顶上，空白里横着一条线
                 .frame(minHeight: visibleHeight, alignment: .bottom)
-                .onGeometryChange(for: ContentMetrics.self) { geo in
+                .klOnGeometryChange(for: ContentMetrics.self) { geo in
                     ContentMetrics(height: geo.size.height, bottom: geo.frame(in: .named("chatScroll")).maxY)
                 } action: { metrics in
                     follow(metrics, proxy: proxy)
                 }
                 #endif
             }
+}
             // 手机上只上下滚：内容不比屏幕宽时横向不回弹。
             // 别用 containerRelativeFrame 把内容钉成可视区宽：滚动区宽和内容宽互相依赖，字号大时整页会随机被撑宽
             #if os(iOS)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .klScrollBounceBehavior(.basedOnSize, axes: .horizontal)
             #endif
             .modifier(ChatScrollFollow(scroll: scroll, window: window, freeze: freeze, newPill: $newPill, farUp: $farUp, proxy: proxy) { thaw += 1 })
-            .onChange(of: rows.map(\.id), initial: true) { _, ids in window.setOrder(ids) }
-            .onChange(of: PaneResize.shared.active) { _, on in
+            .klOnChange(of: rows.map(\.id), initial: true) { _, ids in window.setOrder(ids) }
+            .klOnChange(of: PaneResize.shared.active) { _, on in
                 if on {
                     guard chatWidth > 0, scroll.outer.width > 0, scroll.outer.height > 0 else { return }
                     frozen = FrozenWidth(outer: scroll.outer.width, height: scroll.outer.height, chat: chatWidth, message: messageWidth)
@@ -196,7 +197,7 @@ struct ChatView: View {
                     frozen = nil
                 }
             }
-            .onChange(of: rowsWidth, initial: true) { _, width in
+            .klOnChange(of: rowsWidth, initial: true) { _, width in
                 // 宽度变了：换行跟着变、内容变高变矮，系统不挪滚动位置——贴底的会停在内容外面（整块空白，要碰一下才弹回来），
                 // 往上翻着的会跳到别处（10-24 反馈 iPad 收起、拉出左栏时）。排完版再滚回去：贴底的回到底，
                 // 翻着的回到原来顶上那一行（宽度刚量到、内容还按原来的宽排着时记下的，见下面量 chatWidth 的地方）
@@ -216,8 +217,8 @@ struct ChatView: View {
                 // 量滚动卡顿（TARS_BENCH_OUT）：先把更早的消息加载出来，等于点了几次「查看更早的消息」
                 guard Snapshot.benchOutput != nil else { return }
                 // 先等第一页加载完（还没加载完时 hasMore 是 false，会以为没有更早的消息）
-                for _ in 0..<60 where !model.chat(key).loaded { try? await Task.sleep(for: .milliseconds(500)) }
-                try? await Task.sleep(for: .seconds(1))
+                for _ in 0..<60 where !model.chat(key).loaded { try? await Task.sleep(milliseconds: 500) }
+                try? await Task.sleep(seconds: 1)
                 for _ in 0..<Snapshot.benchPages where model.chat(key).hasMore {
                     scroll.stick = false
                     limit = .max
@@ -232,8 +233,8 @@ struct ChatView: View {
                 // 真机自动测试（DeviceBench）：先把更早的消息加载出来
                 guard DeviceBench.active else { return }
                 // 先等第一页加载完（还没加载完时 hasMore 是 false，会以为没有更早的消息）
-                for _ in 0..<60 where !model.chat(key).loaded { try? await Task.sleep(for: .milliseconds(500)) }
-                try? await Task.sleep(for: .seconds(1))
+                for _ in 0..<60 where !model.chat(key).loaded { try? await Task.sleep(milliseconds: 500) }
+                try? await Task.sleep(seconds: 1)
                 for _ in 0..<DeviceBench.pages where model.chat(key).hasMore {
                     scroll.stick = false
                     limit = .max
@@ -251,46 +252,46 @@ struct ChatView: View {
             // 来回改个不停（10-22 Mac 分屏的窄列里死循环：CPU 占满，布局停在半路，左列钻到侧栏底下、右边空一大块）。
             // 最小宽写 0：这一层始终是外面给的宽，撑宽的内容靠左放、多出来的在右边被裁掉
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { outer in
+            .klOnGeometryChange(for: CGSize.self) { $0.size } action: { outer in
                 scroll.outer = outer   // 不放 @State：拖动期间每帧都变，别为它重算整页
                 // 拖动改大小期间先不换（整页不跟着每帧重算），松手时一次换上（见 onChange(of: PaneResize.shared.active)）
                 if frozen == nil { setChatWidth(outer.width) }
             }
             #if os(macOS)
-            .coordinateSpace(.named("chatScroll"))
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            .coordinateSpace(name: "chatScroll")
+            .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                 // 窗口拉高拉矮：贴着底的继续贴底
                 scroll.viewport = height
                 visibleHeight = height   // 已经是去掉标题栏、输入区后的高度
                 if scroll.stick { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
             #endif
-            .scrollDismissesKeyboard(.interactively)
+            .klScrollDismissesKeyboard(.interactively)
             .background(Theme.chatBackground)
             #if os(iOS)
             // 点对话区：收起键盘和「+」面板（同微信）。Mac 上没有这两样，不挂
             .simultaneousGesture(TapGesture().onEnded {
                 Keyboard.hide()
-                if chat.panelOpen { withAnimation(.snappy(duration: 0.2)) { chat.panelOpen = false } }
+                if chat.panelOpen { withAnimation(.klSnappy(duration: 0.2)) { chat.panelOpen = false } }
             })
             #endif
-            .onChange(of: rows.last?.id) { _, _ in
+            .klOnChange(of: rows.last?.id) { _, _ in
                 // 新消息来了：本来就在底部（或是我刚发的）就跟着滚下去；往上翻着看就只冒「新消息 ↓」
                 if scroll.stick || rows.last.map(isPending) == true {
                     scroll.stick = true
                     newPill = false
                     // 看过更早的消息又回到底部了：收回只画最后 shownRows 行（见 limit）
                     if limit > Self.shownRows, jumpTarget == nil { limit = Self.shownRows }
-                    withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    withAnimation(.klSnappy) { proxy.scrollTo("bottom", anchor: .bottom) }
                 } else {
                     newPill = true
                 }
             }
-            .onChange(of: bottomRequest) { _, _ in
+            .klOnChange(of: bottomRequest) { _, _ in
                 scroll.stick = true
                 newPill = false
                 farUp = false
-                withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
+                withAnimation(.klSnappy) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .overlay(alignment: .top) {
                 VStack(spacing: 6) {
@@ -315,7 +316,7 @@ struct ChatView: View {
                         .transition(.opacity)
                     }
                 }
-                .animation(.snappy, value: model.net.quality)
+                .animation(.klSnappy, value: model.net.quality)
             }
             .overlay(alignment: .bottom) {
                 if newPill || farUp {
@@ -330,12 +331,12 @@ struct ChatView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.snappy, value: newPill)
-            .animation(.snappy, value: farUp)
+            .animation(.klSnappy, value: newPill)
+            .animation(.klSnappy, value: farUp)
             .task {
                 // 先画的那一截上屏以后，每轮补 16 行更早的（见 revealed）
                 while revealed < limit {
-                    try? await Task.sleep(for: .milliseconds(16))
+                    try? await Task.sleep(milliseconds: 16)
                     if Task.isCancelled { return }
                     // 睡的这一下里别处可能把两个数都设成了最大值（跳到某条消息、翻到顶加载更早的）：这时再 revealed + 16 就整数溢出，
                     // 整个 App 直接闪退（11-20 反馈：点收藏 / 待办的「原消息」打开另一个会话必闪退——新开的对话页正好还在补画）。
@@ -350,10 +351,10 @@ struct ChatView: View {
                 scroll.stick = false
                 for _ in 0..<12 {
                     if let row = model.chat(key).rows(session: model.session(key)).first(where: { $0.contains(target) }) {
-                        withAnimation(.snappy) { proxy.scrollTo(row.id, anchor: .center) }
+                        withAnimation(.klSnappy) { proxy.scrollTo(row.id, anchor: .center) }
                         flashRow = row.id
                         jumpTarget = nil
-                        try? await Task.sleep(for: .seconds(1.6))
+                        try? await Task.sleep(seconds: 1.6)
                         withAnimation { flashRow = nil }
                         return
                     }
@@ -368,7 +369,7 @@ struct ChatView: View {
                 if fold?.horizontal != false {
                     SessionReader(slot: slot) { foldable(session: $0, chat: chat) }
                         // 分屏里：输入栏上沿报给分屏，信绳不钉到输入栏上
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(ChatPanes.space)).minY } action: { top in
+                        .klOnGeometryChange(for: CGFloat.self) { $0.frame(in: .named(ChatPanes.space)).minY } action: { top in
                             if let pane { pane.panes.composerTops[pane.id] = top }
                         }
                 }
@@ -377,12 +378,13 @@ struct ChatView: View {
                 if let fold, !fold.horizontal { SessionReader(slot: slot) { foldable(session: $0, chat: chat) } }
             }
         }
+}
         // 右上角悬浮：打开 / 收起执行过程（在忙时按钮上一个呼吸的小点）
         .overlay(alignment: .topTrailing) { if TraceFeature.enabled { TraceButton(isOn: $showTrace, running: activity == "busy") } }
         // agent 在用 Kiteline 的浏览器：右上角浮出实时画面小窗，点开放大到半个 / 整个会话（整个应用、全屏的画在窗口根上）
-        .overlay { BrowserDock(key: key, info: slot.info?.browser, available: chatHeight).animation(.snappy, value: model.browsers.size(key)) }
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chatHeight = $0 }
-        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { homeBottom = $0 }
+        .overlay { BrowserDock(key: key, info: slot.info?.browser, available: chatHeight).animation(.klSnappy, value: model.browsers.size(key)) }
+        .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { chatHeight = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { homeBottom = $0 }
         .environment(\.homeBottom, homeBottom)
         .readFold($fold)
         .readSideBars($sideBars)
@@ -430,14 +432,14 @@ struct ChatView: View {
                                 Button { model.setMarked(key, !marked) } label: {
                                     Image(systemName: marked ? "star.fill" : "star")
                                         .foregroundStyle(marked ? Theme.claude : Color.primary)
-                                        .contentTransition(.symbolEffect(.replace))
+                                        .klContentTransition(.symbolEffect(.replace))
                                         .barIcon()
                                 }
                                 .accessibilityLabel(marked ? "已标记，轻点取消标记" : "标记会话")
                             }
                             Button { speakLatest() } label: {
                                 Image(systemName: Speaker.shared.speaking != nil ? "speaker.wave.2.fill" : "speaker.wave.2")
-                                    .symbolEffect(.variableColor.iterative, isActive: Speaker.shared.speaking != nil)
+                                    .klVariableColor(isActive: Speaker.shared.speaking != nil)
                                     .barIcon()
                             }
                             .accessibilityLabel(Speaker.shared.speaking != nil ? "停止朗读" : "朗读最新回复")
@@ -450,7 +452,7 @@ struct ChatView: View {
         }
         #endif
         // Mac 标题栏、横着的 iPhone 分屏标题条上的按钮：交给这个会话的对话页做
-        .onChange(of: model.externalAction?.id) { _, _ in
+        .klOnChange(of: model.externalAction?.id) { _, _ in
             guard let request = model.externalAction, request.key == key else { return }
             model.externalAction = nil
             perform(request.action)
@@ -471,9 +473,9 @@ struct ChatView: View {
         // 按 key 现取（面板在单独的窗口里，slot 的变化传不过去时会画成空的，11-21 自测：会话信息面板一片空白）
         .sheetPanel(isPresented: $showInfo) { SessionInfoPanel(key: key) }
         .sheetPanel(isPresented: $showAgentInfo) { AgentInfoSheet(key: key, agent: slot.agent) }
-        .sheetPanel(isPresented: $showShare) { GuestShareSheet(key: key).environment(model) }
-        .sheetPanel(isPresented: $showBrag) { BragShareSheet(sessionKey: key).environment(model) }
-        .sheetPanel(isPresented: $showGroup) { GroupPickerSheet(mode: .create([key])) { open(.group($0)) }.environment(model) }
+        .sheetPanel(isPresented: $showShare) { GuestShareSheet(key: key).environment(\.appModelSlot, model) }
+        .sheetPanel(isPresented: $showBrag) { BragShareSheet(sessionKey: key).environment(\.appModelSlot, model) }
+        .sheetPanel(isPresented: $showGroup) { GroupPickerSheet(mode: .create([key])) { open(.group($0)) }.environment(\.appModelSlot, model) }
         .sheetPanel(isPresented: $showSearch) { ChatSearchSheet(key: key) { jumpTarget = $0 } }
         .sheetPanel(isPresented: $showNewTask) {
             SessionReader(slot: slot) { session in
@@ -509,7 +511,7 @@ struct ChatView: View {
             if let jump = model.jumpRequests.removeValue(forKey: key) { jumpTarget = jump }
         }
         // 已经开着这个会话时又要跳（待办里点「原消息」、分屏里换到这块）：onAppear 不会再来，在这里接
-        .onChange(of: model.jumpRequests[key]) { _, target in
+        .klOnChange(of: model.jumpRequests[key]) { _, target in
             guard let target, onScreen else { return }
             model.jumpRequests[key] = nil
             jumpTarget = target
@@ -520,24 +522,24 @@ struct ChatView: View {
             if Snapshot.panel { chat.panelOpen = true }
             if Snapshot.terminal { chat.terminalOpen = true }
             if let back = Snapshot.scrollBack {
-                try? await Task.sleep(for: .seconds(2.5))
+                try? await Task.sleep(seconds: 2.5)
                 let rows = chat.rows(session: model.session(key))
                 if case .bot(let item, _)? = rows.dropLast(back).last { jumpTarget = item.id }
                 else if case .user(let item, _)? = rows.dropLast(back).last { jumpTarget = item.id }
             }
             if let zone = Snapshot.voiceZone {
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(seconds: 2)
                 voice.zone = ["cancel": .cancel, "text": .text][zone] ?? .send
                 voice.active = true
             }
-            if Snapshot.sheet == "menu" { try? await Task.sleep(for: .seconds(2)); showMenu = true }
-            if Snapshot.sheet == "mode" { try? await Task.sleep(for: .seconds(2)); showMode = true }
-            if Snapshot.sheet == "model" { try? await Task.sleep(for: .seconds(2)); showModel = true }
-            if Snapshot.sheet == "agents" { try? await Task.sleep(for: .seconds(2)); showAgents = true }
-            if Snapshot.sheet == "tracesplit" { try? await Task.sleep(for: .seconds(2)); showTrace = true }
-            if Snapshot.sheet == "goal" { try? await Task.sleep(for: .seconds(2)); model.chat(key).goalSheet = true }
+            if Snapshot.sheet == "menu" { try? await Task.sleep(seconds: 2); showMenu = true }
+            if Snapshot.sheet == "mode" { try? await Task.sleep(seconds: 2); showMode = true }
+            if Snapshot.sheet == "model" { try? await Task.sleep(seconds: 2); showModel = true }
+            if Snapshot.sheet == "agents" { try? await Task.sleep(seconds: 2); showAgents = true }
+            if Snapshot.sheet == "tracesplit" { try? await Task.sleep(seconds: 2); showTrace = true }
+            if Snapshot.sheet == "goal" { try? await Task.sleep(seconds: 2); model.chat(key).goalSheet = true }
             if let text = Snapshot.send {
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(seconds: 3)
                 model.send(key, text: text, images: [])
             }
         }
@@ -596,14 +598,14 @@ struct ChatView: View {
                 composer(session: session, chat: chat)
             }
         }
-        .animation(.snappy, value: session?.isWaiting)
-        .animation(.snappy, value: session?.liveStage == nil)
-        .animation(.snappy, value: session?.goal?.state)
+        .animation(.klSnappy, value: session?.isWaiting)
+        .animation(.klSnappy, value: session?.liveStage == nil)
+        .animation(.klSnappy, value: session?.goal?.state)
         .environment(\.chatWidth, chatWidth)   // 分屏的窄块里：卡片按钮上下叠、打字时收起语音和停止键
         .environment(\.promptCap, promptCap)
         #if os(iOS)
         // 收起终端面板：它还拿着键盘的话马上交回去，键盘和面板一起落下去；别等面板滑出去、终端视图被拆掉时才被动收起
-        .onChange(of: chat.terminalOpen) { _, open in if !open { Keyboard.hide() } }
+        .klOnChange(of: chat.terminalOpen) { _, open in if !open { Keyboard.hide() } }
         #endif
         #if os(macOS)
         // 对话内容会滚到底部这一块下面：垫一层窗口底色，别从常用语、输入框之间透出来
@@ -719,7 +721,7 @@ struct ChatView: View {
         case .speak: speakLatest()
         case .terminal:
             let chat = model.chat(key)
-            withAnimation(.snappy(duration: 0.25)) { chat.terminalOpen.toggle() }
+            withAnimation(.klSnappy(duration: 0.25)) { chat.terminalOpen.toggle() }
         }
     }
 
@@ -773,11 +775,11 @@ struct ChatView: View {
 }
 
 /// 对话里的一行（对话页、子 agent 的完整记录共用）
-struct ChatRowView: View {
+struct ChatRowView: KLView {
     let key: String
     let row: ChatRow
 
-    var body: some View {
+    var klBody: some View {
         let _ = PerfTrace.body("ChatRowView")
         switch row {
         case .separator(_, let text):
@@ -884,11 +886,12 @@ struct ScrollMetrics: Equatable {
 @MainActor
 final class RowWindow {
     /// 每行一个开关：重算时只拨动真正变了的那几行，别的行不重画
-    @Observable @MainActor
-    final class Slot {
-        var live = true
+    @MainActor
+    final class Slot: KLObservable {
+        let _klRegistrar = KLRegistrar.make()
+        @Tracked var live = true
         /// 拖动改大小期间（见 park）：远处的行换成同样高的空白
-        var parked = false
+        @Tracked var parked = false
     }
 
     private var slots: [String: Slot] = [:]
@@ -1012,12 +1015,12 @@ final class RowWindow {
 /// 项目目录里的代码、文本进项目文件页（能看内容和改动记录），目录外的（Claude 常放桌面）和办公文档、图片取回手机预览、能转发（见 FileOpener）。
 /// 单独成一个只带 key 的修饰器：对话页每来一条新内容整页重算一次，直接在 body 里写 .environment(\.openURL, OpenURLAction { … })
 /// 的话每次都是新闭包，SwiftUI 当成环境变了，整页几百行消息的环境全部重传一遍（10-26 Mac 4 列分屏，每来一条一卡几十到几百毫秒）
-private struct ChatLinkOpener: ViewModifier {
+private struct ChatLinkOpener: KLViewModifier {
     let key: String
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content.environment(\.openURL, OpenURLAction { openLink($0) })
     }
 
@@ -1025,7 +1028,7 @@ private struct ChatLinkOpener: ViewModifier {
         if Markdown.blockedLink(url) { return .handled }   // claude.ai 的链接不打开（Markdown.inline 里已经摘掉，这里兜底）
         if let path = FileLink.path(url) { openFile(path); return .handled }
         if let scheme = url.scheme?.lowercased(), scheme != "file" { return .systemAction }
-        let path = url.path(percentEncoded: false)
+        let path = url.klPathDecoded
         guard !path.isEmpty else { return .systemAction }
         openFile(path)
         return .handled
@@ -1048,7 +1051,7 @@ private struct ChatLinkOpener: ViewModifier {
 }
 
 /// 对话页的消息行（见 ChatView 里的说明）：行、高亮的行都没变就不重算
-private struct ChatRowsList: View, Equatable {
+private struct ChatRowsList: KLView, Equatable {
     let window: RowWindow
     let key: String
     let rows: [ChatRow]
@@ -1058,7 +1061,7 @@ private struct ChatRowsList: View, Equatable {
         a.key == b.key && a.flashRow == b.flashRow && a.window === b.window && a.rows == b.rows
     }
 
-    var body: some View {
+    var klBody: some View {
         let _ = PerfTrace.body("ChatRowsList")
         // 行在这里自己排成一列再交出去：body 直接是 ForEach（多个视图）的话，外面套上 .equatable() 后有时被当成一个视图，
         // 几十行全叠在同一处、居中摞着（10-27 iPhone 横屏从世界里点开的会话页：iOS 18 真机、iOS 27 模拟器都能复现）
@@ -1090,21 +1093,21 @@ enum ChatRowsMode {
 }
 
 /// 只在这一小块里读会话详情：电脑推来的状态一变（正在执行哪个工具、用量……）只重算这一块，不连带整个对话页
-struct SessionReader<Content: View>: View {
+struct SessionReader<Content: View>: KLView {
     let slot: AppModel.SessionSlot
     @ViewBuilder let content: (SessionInfo?) -> Content
 
-    var body: some View {
+    var klBody: some View {
         let _ = PerfTrace.body("SessionReader")
         content(slot.info)
     }
 }
 
 /// 对话行的容器：普通 VStack（原因见 ChatView 里的说明）；测试懒加载时换 LazyVStack
-private struct RowsStack<Content: View>: View {
+private struct RowsStack<Content: View>: KLView {
     @ViewBuilder let content: Content
 
-    var body: some View {
+    var klBody: some View {
         if ChatRowsMode.current == .lazy {
             LazyVStack(spacing: 0) { content }
         } else {
@@ -1114,13 +1117,13 @@ private struct RowsStack<Content: View>: View {
 }
 
 /// 对话里的一行：离可视区远时设成全透明（见 RowWindow）
-private struct WindowedRow: View {
+private struct WindowedRow: KLView {
     let window: RowWindow
     let slot: RowWindow.Slot
     let key: String
     let row: ChatRow
 
-    var body: some View {
+    var klBody: some View {
         switch ChatRowsMode.current {
         case .plain, .lazy:
             ChatRowView(key: key, row: row)
@@ -1129,7 +1132,7 @@ private struct WindowedRow: View {
                 Color.clear.frame(height: height)
             } else {
                 ChatRowView(key: key, row: row)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.measured(row.id, $0) }
+                    .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.measured(row.id, $0) }
             }
         case .opacity:
             if slot.parked, let height = window.height(row.id) {
@@ -1143,18 +1146,18 @@ private struct WindowedRow: View {
     private var opacityRow: some View {
         ChatRowView(key: key, row: row)
             .opacity(slot.live ? 1 : 0)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.measured(row.id, $0) }
+            .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { window.measured(row.id, $0) }
             #if SNAPSHOT
             // 排查用（TARS_DEMO_WIDE=文件）：比可用宽度宽的行记下来（会把整页撑宽、能左右拖）
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { Snapshot.noteWidth(row.id, $0) }
+            .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { Snapshot.noteWidth(row.id, $0) }
             #elseif DEBUG && os(iOS)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { ScrollPerf.shared.noteWidth(row, $0) }
+            .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { ScrollPerf.shared.noteWidth(row, $0) }
             #endif
     }
 }
 
 /// 标题栏：会话标题 + 「● 正在工作 · 本机 · Opus 5.5 · 上下文 38%」
-struct ChatTitle: View {
+struct ChatTitle: KLView {
     let session: SessionInfo?
     /// 已经结束的会话：标题、机器、目录
     var past: PastSession? = nil
@@ -1163,7 +1166,7 @@ struct ChatTitle: View {
     /// 点标题前的 agent 标志 / 小头像：打开 Agent 详情
     var onAgent: (() -> Void)? = nil
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 1) {
             HStack(spacing: 5) {
                 // 正在看的是哪个 agent 的会话（已结束的会话没记 agent，按 Claude Code 算）
@@ -1217,11 +1220,11 @@ enum StatusColor {
 }
 
 /// 会话信息面板：按 key 从模型里取会话（取不到时说一声，不画成空白）
-struct SessionInfoPanel: View {
-    @Environment(AppModel.self) private var model
+struct SessionInfoPanel: KLView {
+    @EnvModel private var model
     let key: String
 
-    var body: some View {
+    var klBody: some View {
         if let session = model.session(key) {
             SessionInfoView(session: session)
         } else {
@@ -1232,10 +1235,10 @@ struct SessionInfoPanel: View {
     }
 }
 
-struct SessionInfoView: View {
+struct SessionInfoView: KLView {
     let session: SessionInfo
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("会话信息")) {
             SheetSection {
                 SheetInfoRow(L("标题"), session.title)
@@ -1243,7 +1246,7 @@ struct SessionInfoView: View {
                 SheetInfoRow(L("所在机器"), session.sourceName)
                 if let cwd = session.cwd {
                     SheetDivider()
-                    SheetInfoRow(title: L("目录")) { Text(cwd).font(.ui(.footnote).monospaced()).fontDesign(nil).textSelection(.enabled) }
+                    SheetInfoRow(title: L("目录")) { Text(cwd).font(.ui(.footnote).monospaced()).klFontDesign(nil).textSelection(.enabled) }
                 }
                 if let branch = session.branch {
                     SheetDivider()
@@ -1279,7 +1282,7 @@ struct SessionInfoView: View {
 /// 往上翻着看时关掉它（nil）：不然列表边滑边算高度，内容高度一变就被拽回底部。
 /// 以前是每次尺寸一变就「排到下一帧再 scrollTo 底部」：键盘动画里每一帧都慢半拍追着滚，弹出、收起键盘时一顿一顿的。
 /// 这几个接口 iOS 18 / macOS 15 起才有；更老的 Mac 退回普通的「从底部开始」，新消息照样会滚到底（见 onChange(of: rows.last?.id)）
-private struct ChatScrollFollow: ViewModifier {
+private struct ChatScrollFollow: KLViewModifier {
     let scroll: ScrollState
     let window: RowWindow
     let freeze: RowFreeze
@@ -1301,12 +1304,12 @@ private struct ChatScrollFollow: ViewModifier {
         return scroll.userScrolling
     }
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         #if os(macOS)
         if #available(macOS 15.0, *) {
             // 告诉 RowWindow 可视区在哪：离得远的行设透明、不再画（以前 Mac 上没接，长会话几百行全画着，
             // 息屏再亮屏时整页几千处文字一起重画）
-            content.defaultScrollAnchor(.bottom)
+            content.klDefaultScrollAnchor(.bottom)
                 .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in
                     window.scrolled(top: rect.minY, height: rect.height)
                 }
@@ -1314,7 +1317,7 @@ private struct ChatScrollFollow: ViewModifier {
                 // 内容其实在最底下、滑块却停在上面（11-11 反馈：切会话组再切回来滚动条位置不对）
                 .modifier(ChatScrollBar())
         } else {
-            content.defaultScrollAnchor(.bottom)
+            content.klDefaultScrollAnchor(.bottom)
         }
         #else
         if #available(iOS 18.0, *) {
@@ -1386,7 +1389,7 @@ private struct ChatScrollFollow: ViewModifier {
                     if anchored != scroll.stick, !userScrolling || new.content != old.content { anchored = scroll.stick }
                 }
         } else {
-            content.defaultScrollAnchor(.bottom)
+            content.klDefaultScrollAnchor(.bottom)
         }
         #endif
     }
@@ -1493,7 +1496,7 @@ enum MacScrollInput {
 /// 系统的滑块碰上底部 safeAreaInset（输入栏、待确认卡片）时位置、长短都不对，内容贴底了滑块还在上半截（11-11 截图）。
 /// 平时细细一条，指着这一列或拖着时变粗变深；拖滑块、点轨道都能滚（ScrollPosition，macOS 15 起）
 @available(macOS 15.0, *)
-private struct ChatScrollBar: ViewModifier {
+private struct ChatScrollBar: KLViewModifier {
     private struct Metrics: Equatable {
         var content: CGFloat = 0
         var container: CGFloat = 0
@@ -1508,7 +1511,7 @@ private struct ChatScrollBar: ViewModifier {
     @State private var hovering = false
     @State private var dragStart: CGFloat?
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .scrollIndicators(.never)
             .scrollPosition($position)
@@ -1533,7 +1536,7 @@ private struct ChatScrollBar: ViewModifier {
                     .onTapGesture(coordinateSpace: .local) { point in
                         MacScrollInput.note()
                         let target = (point.y - length / 2) / max(1, track - length) * m.range
-                        withAnimation(.snappy) { position.scrollTo(y: min(m.range, max(0, target))) }
+                        withAnimation(.klSnappy) { position.scrollTo(y: min(m.range, max(0, target))) }
                     }
                 Capsule(style: .circular)
                     .fill(Color.primary.opacity(active ? 0.38 : 0.22))

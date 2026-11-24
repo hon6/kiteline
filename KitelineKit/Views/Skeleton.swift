@@ -75,7 +75,7 @@ public extension Animation {
 }
 
 /// 一整块占位：一句「正在读取…」+ 骨架。直接放在页面 / 弹窗内容的位置
-public struct SkeletonPage: View {
+public struct SkeletonPage: KLView {
     let label: LocalizedStringKey?
     let style: SkeletonStyle
     /// 外面已经留了边距（放在带 padding 的滚动页里）就传 false
@@ -87,7 +87,7 @@ public struct SkeletonPage: View {
         self.padded = padded
     }
 
-    public var body: some View {
+    public var klBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let label {
                 HStack(spacing: 8) {
@@ -108,7 +108,7 @@ public struct SkeletonPage: View {
 }
 
 /// 只有骨架、不带那句话（放在已有标题、按钮的弹窗里）
-public struct SkeletonShape: View {
+public struct SkeletonShape: KLView {
     let style: SkeletonStyle
     public init(style: SkeletonStyle) { self.style = style }
 
@@ -116,7 +116,7 @@ public struct SkeletonShape: View {
     static let widths: [CGFloat] = [0.42, 0.28, 0.5, 0.35, 0.46, 0.3, 0.4, 0.25, 0.48, 0.33]
     static func w(_ i: Int) -> CGFloat { widths[((i % widths.count) + widths.count) % widths.count] }
 
-    public var body: some View {
+    public var klBody: some View {
         content.skeletonShimmer()
     }
 
@@ -415,7 +415,7 @@ public struct SkeletonShape: View {
 }
 
 /// 一行列表的骨架（和 PastRow / 会话行 / 项目行同样的排法）
-struct SkeletonRow: View {
+struct SkeletonRow: KLView {
     let index: Int
     let lead: SkeletonLead
     let lines: Int
@@ -423,7 +423,7 @@ struct SkeletonRow: View {
     var badge = false
     var rowHeight: CGFloat? = nil
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: lines > 2 ? .top : .center, spacing: 10) {
             switch lead {
             case .none: EmptyView()
@@ -456,7 +456,7 @@ struct SkeletonRow: View {
 }
 
 /// 一根灰条
-public struct SkeletonBar: View {
+public struct SkeletonBar: KLView {
     let width: CGFloat
     let height: CGFloat
     var radius: CGFloat = 3
@@ -466,19 +466,19 @@ public struct SkeletonBar: View {
         self.width = width; self.height = height; self.radius = radius; self.dim = dim
     }
 
-    public var body: some View {
+    public var klBody: some View {
         RoundedRectangle(cornerRadius: radius).fill(.quaternary.opacity(dim ? 0.7 : 1)).frame(width: max(0, width), height: height)
     }
 }
 
 /// 扫光：一道亮带从左往右扫过所有灰块（只在灰块上亮：用灰块本身做遮罩），1.4 秒一趟；
 /// 系统开了「减弱动态效果」就改成整块缓慢明暗变化
-struct SkeletonShimmer: ViewModifier {
+struct SkeletonShimmer: KLViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
     @State private var phase: CGFloat = 0
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .overlay {
                 if !reduceMotion {

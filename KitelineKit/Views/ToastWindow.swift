@@ -17,7 +17,7 @@ enum ToastWindow {
         show(text)
         hideTask?.cancel()
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.5))
+            try? await Task.sleep(seconds: 2.5)
             if !Task.isCancelled { show(nil) }
         }
     }
@@ -80,10 +80,10 @@ private final class ToastHost: UIHostingController<ToastBubble> {
     override var prefersStatusBarHidden: Bool { shown?.prefersStatusBarHidden ?? false }
 }
 
-private struct ToastBubble: View {
+private struct ToastBubble: KLView {
     let text: String
 
-    var body: some View {
+    var klBody: some View {
         VStack {
             Spacer(minLength: 0)
             if !text.isEmpty {

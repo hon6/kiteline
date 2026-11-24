@@ -922,13 +922,13 @@ enum VirtualScreenHint {
         panel = nil
     }
 
-    private struct HintView: View {
+    private struct HintView: KLView {
         let message: String
         let action: String?
         let perform: () -> Void
         let close: () -> Void
 
-        var body: some View {
+        var klBody: some View {
             HStack(spacing: 12) {
                 Image(systemName: "display").font(.app(size: 15, weight: .medium)).foregroundStyle(.secondary)
                 Text(message).font(.app(size: 13, weight: .medium)).lineLimit(2).fixedSize(horizontal: false, vertical: true)

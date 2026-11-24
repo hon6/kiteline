@@ -8,8 +8,8 @@ import UniformTypeIdentifiers
 /// 输入框（回车发送，Shift+回车换行，输入法选字的回车不算），Claude 在干活时红色停止键，空着时「+」选图，有字时绿色「发送」；
 /// 输入框下面一排同手机：权限模式、模型和思考等级、上下文、任务清单进度、子 agent。⌘V 粘贴截图、把图拖进窗口都能附上。
 /// 群聊页用的也是它（group 不为空）：发到群里，下面那排换成「发给全部成员」
-struct MacComposer: View {
-    @Environment(AppModel.self) private var model
+struct MacComposer: KLView {
+    @EnvModel private var model
     let key: String
     let session: SessionInfo?
     let chat: ChatStore
@@ -47,7 +47,7 @@ struct MacComposer: View {
     /// 能附图：会话都能；群要电脑端收得了群里的图（老版本只收文字）
     private var canAttach: Bool { group == nil || model.supportsGroupMedia }
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: Bar.spacing) {
             if quickShown, quickAvailable, !hasContent, !(session?.isWaiting ?? false) {
                 quickRow.transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -84,7 +84,7 @@ struct MacComposer: View {
             .padding(.trailing, -Bar.iconInset)   // 最右边的圆圈和下面那排右边对齐
             if (session?.canReply ?? false) || group != nil || quickAvailable { chipRow }
         }
-        .animation(.snappy(duration: 0.2), value: quickShown)
+        .animation(.klSnappy(duration: 0.2), value: quickShown)
         .frame(maxWidth: 832)
         .padding(.horizontal, Bar.spacing).padding(.bottom, Bar.spacing)   // 左右下都是 8（11-21）；上面不再留：输入区（deck）上面已经留了 8、和上面的目标 / 进展条之间也是 8，原来叠成 16（11-21 反馈：这里间距大，用统一间距）
         .frame(maxWidth: .infinity)
@@ -127,7 +127,7 @@ struct MacComposer: View {
                     }
                 }
                 .padding(.top, -Bar.badgeRoom)
-                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .klScrollBounceBehavior(.basedOnSize, axes: .horizontal)
                 .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)   // 同手机：别把一排的总宽往上报，撑宽整页
             }
         }
@@ -215,12 +215,12 @@ struct MacComposer: View {
 }
 
 /// 细线圆圈里一个方块（停止）或加号，28pt，和网页版的图标一样
-private struct CircleGlyph: View {
+private struct CircleGlyph: KLView {
     enum Kind { case stop, plus, up, down }
     let kind: Kind
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             ZStack {
                 Circle().strokeBorder(lineWidth: 1.6).frame(width: 30, height: 30)
@@ -245,14 +245,14 @@ private struct CircleGlyph: View {
 }
 
 /// 常用语小标签：点一下发，按住半秒放进输入框；鼠标移上去变深一点
-private struct QuickChip: View {
+private struct QuickChip: KLView {
     var text: String? = nil
     var symbol: String? = nil
     let action: () -> Void
     var longPress: (() -> Void)? = nil
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         Group {
             if let text {
                 Text(text).lineLimit(1).truncationMode(.tail)

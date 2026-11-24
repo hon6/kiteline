@@ -65,20 +65,21 @@ protocol TermSink: AnyObject {
 
 /// 会话里的终端：开、关、按键、改大小经 /api/term 发给电脑；输出从实时连接来（term 事件，seq = 这段在整条输出里的字节位置），
 /// 按位置接起来喂给正在显示它的视图，漏了就向电脑要最近的输出补上
-@MainActor @Observable
-final class TerminalStore {
+@MainActor 
+final class TerminalStore: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     /// 会话 key → 开着的终端（按开的先后）；没拉过的会话没有
-    private(set) var lists: [String: [TermInfo]] = [:]
+    @Tracked private(set) var lists: [String: [TermInfo]] = [:]
     /// 会话 key → 正在看的那个
-    var selected: [String: String] = [:]
+    @Tracked var selected: [String: String] = [:]
     /// 正在开终端的会话
-    private(set) var opening: Set<String> = []
+    @Tracked private(set) var opening: Set<String> = []
     /// 会话 key → 会话所在的设备名（新开的终端开在这台上；电脑端列表里给的）
-    private(set) var devices: [String: String] = [:]
+    @Tracked private(set) var devices: [String: String] = [:]
 
-    @ObservationIgnored weak var model: AppModel?
+    weak var model: AppModel?
     /// 还没开出来的会话（Mac 新会话标签：会话编号预先定好）→ 终端开在哪个目录：电脑端查不到这个会话时按它开
-    @ObservationIgnored var pendingCwd: [String: String] = [:]
+    var pendingCwd: [String: String] = [:]
 
     private func withCwd(_ key: String, _ body: [String: Any]) -> [String: Any] {
         guard let cwd = pendingCwd[key] else { return body }
@@ -86,10 +87,10 @@ final class TerminalStore {
         body["cwd"] = cwd
         return body
     }
-    @ObservationIgnored private var feeds: [String: Feed] = [:]
-    @ObservationIgnored private var outbox: [String: (key: String, bytes: [UInt8])] = [:]
-    @ObservationIgnored private var sending: Set<String> = []
-    @ObservationIgnored private var resizes: [String: Task<Void, Never>] = [:]
+    private var feeds: [String: Feed] = [:]
+    private var outbox: [String: (key: String, bytes: [UInt8])] = [:]
+    private var sending: Set<String> = []
+    private var resizes: [String: Task<Void, Never>] = [:]
 
     /// 一个终端的输出接到哪了
     private final class Feed {
@@ -236,11 +237,11 @@ final class TerminalStore {
     /// 同一个终端可能几端在看（后台运行的「claude」终端电脑上也开着）：它按最后设的那个宽度排版，
     /// 手机接上时回放的旧输出和 Claude 只重画变化那几行的做法叠在一起，窄屏上就是一团错位的字（11-16 截图）
     func takeOver(_ key: String, _ id: String) async {
-        for _ in 0..<20 where feeds[id]?.sink?.grid == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0..<20 where feeds[id]?.sink?.grid == nil { try? await Task.sleep(milliseconds: 50) }
         guard let grid = feeds[id]?.sink?.grid, grid.rows > 2, let api = model?.api else { return }
         resizes[id]?.cancel()
         _ = try? await api.post("/api/term", ["key": key], body: ["op": "resize", "term": id, "cols": grid.cols, "rows": grid.rows - 1])
-        try? await Task.sleep(for: .milliseconds(250))
+        try? await Task.sleep(milliseconds: 250)
         _ = try? await api.post("/api/term", ["key": key], body: ["op": "resize", "term": id, "cols": grid.cols, "rows": grid.rows])
     }
 
@@ -362,7 +363,7 @@ final class TerminalStore {
     func resize(_ key: String, _ id: String, cols: Int, rows: Int) {
         resizes[id]?.cancel()
         resizes[id] = Task {
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(milliseconds: 150)
             guard !Task.isCancelled, let api = model?.api else { return }
             _ = try? await api.post("/api/term", ["key": key], body: ["op": "resize", "term": id, "cols": cols, "rows": rows])
         }

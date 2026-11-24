@@ -6,8 +6,8 @@ import StoreKit
 /// - 免费版：在电脑所在的 Wi-Fi（局域网）里全部功能都能用——看、回复、语音、发图、点允许、新建任务……
 /// - 订阅后：不在同一个 Wi-Fi 也能连（远程访问：点对点 / 中继 / Tailscale）。不设免费试用：局域网本来就免费（10-29）
 @MainActor
-@Observable
-final class Store {
+final class Store: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = Store()
 
     /// App Store Connect 里建的订阅（同一个订阅组「Kiteline Pro」）
@@ -19,23 +19,23 @@ final class Store {
 
     enum Reason { case remote, settings }
 
-    private(set) var products: [Product] = []
+    @Tracked private(set) var products: [Product] = []
     /// App Store 里确实买了、还在有效期
-    private(set) var entitled = false
+    @Tracked private(set) var entitled = false
     /// 买的是哪个方案：year / month（报给电脑的使用统计，运营后台分年付、月付）；没买是 nil
-    private(set) var plan: String?
-    private(set) var loadingProducts = false
-    private(set) var purchasing: String?
+    @Tracked private(set) var plan: String?
+    @Tracked private(set) var loadingProducts = false
+    @Tracked private(set) var purchasing: String?
     /// 首次免费试用还能不能用（每个 Apple ID 只有一次）
-    private(set) var trialEligible = true
-    var message: String?
+    @Tracked private(set) var trialEligible = true
+    @Tracked var message: String?
     /// 付费页开着，以及为什么弹的
-    var paywall: Reason?
+    @Tracked var paywall: Reason?
 
     /// 开发版（Xcode 装的）默认全部放开，免得还没在 App Store Connect 建好商品就把自己锁住；
     /// 设置里打开「模拟免费版」才按真的订阅状态来
     #if DEBUG
-    var simulateFree = UserDefaults.standard.bool(forKey: "simulateFree") {
+    @Tracked var simulateFree = UserDefaults.standard.bool(forKey: "simulateFree") {
         didSet { UserDefaults.standard.set(simulateFree, forKey: "simulateFree"); publish() }
     }
     #endif
@@ -57,7 +57,7 @@ final class Store {
         #endif
     }
 
-    private var updates: Task<Void, Never>?
+    @Tracked private var updates: Task<Void, Never>?
 
     func start() {
         publish()
@@ -140,7 +140,7 @@ final class Store {
         }
     }
 
-    @ObservationIgnored private var published: Bool?
+    private var published: Bool?
 
     /// 进出演示模式：订阅状态跟着变（演示里全部放开）
     func demoChanged() { publish() }

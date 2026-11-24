@@ -49,11 +49,11 @@ struct TabGroupDigest {
 }
 
 /// 角标：实心底白字的小胶囊（数字或一两个字）
-struct TabGroupBadge: View {
+struct TabGroupBadge: KLView {
     let text: String
     let color: Color
 
-    var body: some View {
+    var klBody: some View {
         Text(text).font(.app(size: 10, weight: .semibold)).monospacedDigit().foregroundStyle(.white).lineLimit(1)
             .padding(.horizontal, 5).frame(minWidth: 16, minHeight: 16)
             .background(color, in: Capsule())
@@ -62,10 +62,10 @@ struct TabGroupBadge: View {
 }
 
 /// 右边的角标：待确认的会话数（橙），有新消息的会话数（主题色）
-struct TabGroupBadges: View {
+struct TabGroupBadges: KLView {
     let digest: TabGroupDigest
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 4) {
             if !digest.waiting.isEmpty {
                 TabGroupBadge(text: "\(digest.waiting.count)", color: .orange)
@@ -101,10 +101,10 @@ extension TabGroupPalette {
 }
 
 /// 一排九个色点（新建、编辑标签组用）：选中的外面一圈加对号
-struct TabGroupColorDots: View {
+struct TabGroupColorDots: KLView {
     @Binding var selection: String
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             ForEach(TabGroupPalette.all, id: \.self) { id in
                 let on = selection == id
@@ -130,7 +130,7 @@ struct TabGroupColorDots: View {
 // MARK: 首页的页签和引导
 
 /// 「会话 9 | 群 1 | 标签组 2」：选中的字加粗、下面一条主题色短线；alert = 右上角橙点（里面有等你确认的）
-struct ListTabs: View {
+struct ListTabs: KLView {
     struct Tab {
         let id: String
         let title: String
@@ -143,13 +143,13 @@ struct ListTabs: View {
     /// 占满宽度、几格平分（iPhone Tab 栏里贴在标题栏下面那一排，11-13）；不给就是按字宽排在左边
     var fill = false
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: fill ? 0 : 18) {
             ForEach(tabs, id: \.id) { tab in
                 let on = selection == tab.id
                 Button {
                     Haptics.tap()
-                    withAnimation(.snappy) { selection = tab.id }
+                    withAnimation(.klSnappy) { selection = tab.id }
                 } label: {
                     HStack(spacing: 4) {
                         Text(tab.title).font(.ui(.headline).weight(on ? .semibold : .regular))
@@ -177,7 +177,7 @@ struct ListTabs: View {
 }
 
 /// 设备、项目筛选收起成的一行：「🖥 全部设备 · 📁 ccpulse ⌄」，筛着的那项用主题色；点了展开 / 收起两排胶囊
-struct ScopeSummary: View {
+struct ScopeSummary: KLView {
     let source: String?
     let project: String?
     let narrowedSource: Bool
@@ -185,7 +185,7 @@ struct ScopeSummary: View {
     let open: Bool
     let toggle: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         let narrowed = narrowedSource || narrowedProject
         Button(action: toggle) {
             HStack(spacing: 6) {
@@ -213,7 +213,7 @@ struct ScopeSummary: View {
 }
 
 /// 改版后第一次看到会话列表时的说明卡（11-10）：会话列表去哪了、会话 / 群 / 标签组有什么不同、标签组怎么用。点「知道了」以后不再出现
-public struct ListTabsGuide: View {
+public struct ListTabsGuide: KLView {
     @AppStorage("guide.listTabs") private var seen = false
     let showTabGroups: () -> Void
     let groups: Bool
@@ -223,14 +223,14 @@ public struct ListTabsGuide: View {
         self.showTabGroups = showTabGroups
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if !seen {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles").foregroundStyle(Theme.claude)
                     Text("会话列表有新的排法").font(.app(size: 14, weight: .semibold))
                     Spacer(minLength: 4)
-                    Button { withAnimation(.snappy) { seen = true } } label: {
+                    Button { withAnimation(.klSnappy) { seen = true } } label: {
                         Image(systemName: "xmark").font(.app(size: 11, weight: .bold)).foregroundStyle(.secondary)
                             .frame(width: 24, height: 24).contentShape(Rectangle())
                     }
@@ -244,11 +244,11 @@ public struct ListTabsGuide: View {
                 }
                 HStack(spacing: 10) {
                     Button(L("看看会话组")) {
-                        withAnimation(.snappy) { seen = true }
+                        withAnimation(.klSnappy) { seen = true }
                         showTabGroups()
                     }
                     .font(.app(size: 13, weight: .semibold)).foregroundStyle(Theme.claude)
-                    Button(L("知道了")) { withAnimation(.snappy) { seen = true } }
+                    Button(L("知道了")) { withAnimation(.klSnappy) { seen = true } }
                         .font(.app(size: 13, weight: .medium)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -270,7 +270,7 @@ public struct ListTabsGuide: View {
     private func line(_ symbol: String, _ title: String, _ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: symbol).font(.app(size: 11, weight: .semibold)).foregroundStyle(.secondary).frame(width: 16)
-            (Text(title).fontWeight(.semibold) + Text("　") + Text(text).foregroundStyle(.secondary))
+            (Text(title).fontWeight(.semibold) + Text("　") + Text(text).foregroundColor(.secondary))
                 // Mac 侧栏列表里的文字默认只排一行（后面省略号），这里要整段换行看全
                 .font(.app(size: 12.5)).lineLimit(nil).multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -301,11 +301,11 @@ struct TabGroupSheet: Identifiable {
 }
 
 /// 首页「标签组」页签里的一组：颜色小方块、组名、会话数，右边角标；第二行小字说最要紧的那件事。点开进组页
-struct TabGroupPhoneRow: View {
+struct TabGroupPhoneRow: KLView {
     let group: SharedTabGroup
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         let digest = TabGroupDigest(keys: group.keys, model: model)
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -332,16 +332,16 @@ struct TabGroupPhoneRow: View {
 }
 
 /// 一个标签组：组里的会话（和首页一样的卡片，正在工作的有动画、有新消息的有角标），点了照常打开对话页（一次看一个）
-struct TabGroupPage: View {
+struct TabGroupPage: KLView {
     let id: String
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @Environment(\.listSelection) private var selection
     @Environment(\.dismiss) private var dismiss
     @State private var sheet: TabGroupSheet?
     @State private var deleting = false
 
-    var body: some View {
+    var klBody: some View {
         let shared = model.tabGroupShared
         if let group = shared.group(id) {
             List {
@@ -385,13 +385,13 @@ struct TabGroupPage: View {
                     .accessibilityLabel(L("会话组操作"))
                 }
             }
-            .sheetPanel(item: $sheet) { TabGroupEditor(mode: $0.mode).environment(model) }
+            .sheetPanel(item: $sheet) { TabGroupEditor(mode: $0.mode).environment(\.appModelSlot, model) }
             .confirmPanel(L("删除这个会话组？组里的会话不会关闭，仍在会话列表里。"), isPresented: $deleting, confirm: L("删除会话组"), destructive: true) {
                 shared.delete(id)
                 dismiss()
             }
         } else {
-            ContentUnavailableView(L("会话组已删除"), systemImage: "square.stack")
+            KLUnavailableView(L("会话组已删除"), systemImage: "square.stack")
         }
     }
 
@@ -435,9 +435,9 @@ struct TabGroupPage: View {
 }
 
 /// 新建（组名、颜色、勾会话）/ 编辑（组名、颜色）/ 往组里加会话（勾会话）
-struct TabGroupEditor: View {
+struct TabGroupEditor: KLView {
     let mode: TabGroupSheet.Mode
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @PanelDismiss private var dismiss
     @State private var name = ""
@@ -450,7 +450,7 @@ struct TabGroupEditor: View {
     private var adding: String? { if case .add(let id) = mode { id } else { nil } }
     private var existing: Set<String> { Set(adding.flatMap { model.tabGroupShared.group($0)?.keys } ?? []) }
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: title, cancel: true) {
             VStack(alignment: .leading, spacing: 14) {
                 if adding == nil {
@@ -597,12 +597,12 @@ enum TabGroupDevice {
 }
 
 /// 会话长按菜单里的「添加到标签组 ▸」：各组（已在组里的打勾，点了移出）、新建标签组
-struct TabGroupSessionMenu: View {
+struct TabGroupSessionMenu: KLView {
     let key: String
     let create: () -> Void
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         let shared = model.tabGroupShared
         if shared.supported, TabGroupDevice.shows {
             Menu {

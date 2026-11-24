@@ -784,11 +784,11 @@ final class PluginErrorPanel: NSObject, NSWindowDelegate {
     }
 }
 
-private struct PluginErrorCard: View {
+private struct PluginErrorCard: KLView {
     let error: PluginStore.PluginError
     let close: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 AgentGlyph(error.plugin, size: 16)
@@ -816,12 +816,12 @@ private struct PluginErrorCard: View {
 
 /// 设置 → 插件：我们做好的 Agent 插件，每家一行——标志、名字和版本、本机的 agent、能做什么、状态；右边操作按钮和开关。
 /// 检测到本机装了对应的 agent 自动启用，插件有新版本自动更新：这一页主要是看状态、手动开关
-struct PluginsPane: View {
+struct PluginsPane: KLView {
     @ObservedObject var store = PluginStore.shared
     /// 右边滚到的那家（左边跟着选中）
     @State private var focus: String?
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("每个插件把一家编程 agent 接进 Kiteline，在手机和电脑上查看它的会话、回复和审批。检测到本机装了对应的 agent 会自动启用（标明需手动开启的除外），插件有新版本时自动更新。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
@@ -843,16 +843,16 @@ struct PluginsPane: View {
                             VStack(spacing: 2) {
                                 ForEach(shown) { row in
                                     PluginNameRow(row: row, selected: row.id == current) {
-                                        withAnimation(.snappy(duration: 0.3)) { focus = row.id }
+                                        withAnimation(.klSnappy(duration: 0.3)) { focus = row.id }
                                     }
                                     .id(row.id)
                                 }
                             }
                             .padding(6)
                         }
-                        .onChange(of: current) { _, id in
+                        .klOnChange(of: current) { _, id in
                             guard let id else { return }
-                            withAnimation(.snappy(duration: 0.2)) { proxy.scrollTo(id) }
+                            withAnimation(.klSnappy(duration: 0.2)) { proxy.scrollTo(id) }
                         }
                     }
                     .tarsCard(padding: 0)
@@ -866,10 +866,10 @@ struct PluginsPane: View {
                             // 最后一家也能滚到顶上（左边才选得中它）
                             Color.clear.frame(height: 220)
                         }
-                        .scrollTargetLayout()
+                        .klScrollTargetLayout()
                         .padding(6)
                     }
-                    .scrollPosition(id: $focus, anchor: .top)
+                    .klScrollPosition(id: $focus, anchor: .top)
                     .tarsCard(padding: 0)
                 }
             }
@@ -900,12 +900,12 @@ struct PluginsPane: View {
     }
 }
 
-private struct PluginRowView: View {
+private struct PluginRowView: KLView {
     let row: PluginStore.Row
     let busy: Bool
     @ObservedObject private var store = PluginStore.shared
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             line.opacity(dimmed ? 0.55 : 1)
             // 接入方式、兼容表放在整行下面、占满宽度（和文字左对齐），不跟右边的按钮挤。接入方式是开启前要读的，关着也不调暗
@@ -1061,12 +1061,12 @@ private struct PluginRowView: View {
 }
 
 /// 设置 → 插件左栏的一行：标志、名字，下面一句状态（版本 / 未安装 / 已关闭）；选中的淡色底 + 细边
-private struct PluginNameRow: View {
+private struct PluginNameRow: KLView {
     let row: PluginStore.Row
     let selected: Bool
     let select: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: select) {
             HStack(spacing: 8) {
                 AgentGlyph(row.id, size: 13)
@@ -1095,12 +1095,12 @@ private struct PluginNameRow: View {
 }
 
 /// 插件的单项开关（如 Cursor 的「显示本月用量」）：名字和一句说明，右边小开关；要读那家凭证，打开前弹出完整说明确认
-private struct PluginOptionLine: View {
+private struct PluginOptionLine: KLView {
     let row: PluginStore.Row
     let option: [String: Any]
     @ObservedObject private var store = PluginStore.shared
 
-    var body: some View {
+    var klBody: some View {
         let id = option["id"] as? String ?? ""
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
@@ -1140,15 +1140,15 @@ private struct PluginOptionLine: View {
 
 /// 兼容表：行是形态（命令行 / VS Code 扩展 / 桌面版），列是平台（Mac / Windows / Linux，本机那一列加粗）；
 /// 每格写读 / 写 / 执行或只读，✓ 是我们在那个平台实测过，「无」是那家 agent 在这个平台没有这个形态
-private struct SupportGrid: View {
+private struct SupportGrid: KLView {
     let support: [String: Any]
     private static let platforms = [("mac", "Mac"), ("windows", "Windows"), ("linux", "Linux")]
     private static let forms = [("cli", "命令行"), ("vscode", "VS Code 扩展"), ("desktop", "桌面版")]
 
-    var body: some View {
+    var klBody: some View {
         let forms = Self.forms.filter { form in Self.platforms.contains { cell($0.0, form.0) != nil } }
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
-                GridRow {
+        KLGrid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+                KLGridRow {
                     Text(verbatim: "")
                     ForEach(Self.platforms, id: \.0) { platform in
                         Text(verbatim: platform.1).font(.app(size: 11, weight: platform.0 == "mac" ? .semibold : .regular))
@@ -1156,7 +1156,7 @@ private struct SupportGrid: View {
                     }
                 }
                 ForEach(forms, id: \.0) { form in
-                    GridRow {
+                    KLGridRow {
                         Text(L(form.1)).font(.app(size: 11)).foregroundStyle(.secondary)
                         ForEach(Self.platforms, id: \.0) { platform in label(cell(platform.0, form.0)) }
                     }

@@ -81,7 +81,7 @@ final class P2P {
             // 远程访问刚启动、还没拿到公钥：等一会儿
             var current = await MainActor.run { self.status }
             for _ in 0..<20 where current.id?.isEmpty ?? true {
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(milliseconds: 500)
                 current = await MainActor.run { self.status }
             }
             guard let id = current.id, !id.isEmpty, let relay = current.relay, !relay.isEmpty,

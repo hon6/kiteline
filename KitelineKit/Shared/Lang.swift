@@ -11,8 +11,8 @@ import SwiftUI
 ///   （整数 %lld、字符串 %@、小数 %lf）
 /// - 别用 String(localized:)：它只认系统语言，不跟这里的设置走（实测）
 /// - 发给电脑的请求带上语言（X-Kiteline-Lang），电脑生成的提醒、日报、出错原因按看的那台设备的语言出
-@Observable
-public final class Lang {
+public final class Lang: KLObservable {
+    public let _klRegistrar = KLRegistrar.make()
     public static let shared = Lang()
 
     public enum Choice: String, CaseIterable, Identifiable, Sendable {
@@ -26,7 +26,7 @@ public final class Lang {
     /// （不然和正式版共用一份，用户在正式版里切了英文，测试实例也跟着英文）
     nonisolated(unsafe) public static var store: UserDefaults = .standard
 
-    public var choice: Choice {
+    @Tracked public var choice: Choice {
         didSet {
             guard choice != oldValue else { return }
             Self.store.set(choice.rawValue, forKey: Self.key)
@@ -44,10 +44,10 @@ public final class Lang {
     }
 
     /// 系统首选语言是不是中文（跟随系统时用）。在系统设置里改了语言，App 回到前台时 refreshSystem() 重读
-    private var systemChinese = Lang.systemPrefersChinese()
+    @Tracked private var systemChinese = Lang.systemPrefersChinese()
 
     /// 语言变了：Mac 上重建 AppKit 菜单、告诉电脑和手表……（主线程）
-    @ObservationIgnored public var onChange: (() -> Void)?
+    public var onChange: (() -> Void)?
 
     init() {
         choice = Choice(rawValue: Self.store.string(forKey: Self.key) ?? "") ?? .system
@@ -63,7 +63,8 @@ public final class Lang {
 
     /// 给 SwiftUI 的语言环境：查表用它的语言，日期、数字也按它的写法；地区沿用系统的
     public var locale: Locale {
-        let region = Locale.current.region?.identifier
+        let region: String?
+        if #available(macOS 13, iOS 16, watchOS 9, *) { region = Locale.current.region?.identifier } else { region = Locale.current.regionCode }
         return Locale(identifier: (isEnglish ? "en" : "zh-Hans") + (region.map { "_" + $0 } ?? ""))
     }
 
@@ -88,7 +89,7 @@ public final class Lang {
         }
     }
 
-    @ObservationIgnored private lazy var english: Bundle? = Bundle.main.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:))
+    private lazy var english: Bundle? = Bundle.main.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:))
 
     /// 中文原文 → 当前语言。表里没有的照原样返回（新加的字还没翻译时显示中文，不会空白）；服务器下发了更正的用更正（见 setPatches）
     public func translate(_ key: String) -> String {
@@ -103,7 +104,7 @@ public final class Lang {
     }
 
     /// 整张英文表（中文 → 英文）：电脑反推带变量的句子用（「已连接 虚拟机」← 「已连接 %@」）
-    @ObservationIgnored public private(set) lazy var englishTable: [String: String] = {
+    public private(set) lazy var englishTable: [String: String] = {
         guard let path = english?.path(forResource: "Localizable", ofType: "strings"),
               let table = NSDictionary(contentsOfFile: path) as? [String: String] else { return [:] }
         return table
@@ -269,9 +270,10 @@ public enum ServerText {
             // 英文模板里的占位符依次换成抠出来的值（%% 是百分号）
             var result = "", i = output.startIndex, next = 0
             while i < output.endIndex {
-                if output[i] == "%", let spec = output[i...].firstMatch(of: placeholder) {
-                    if output[spec.range] == "%%" { result += "%" } else { result += next < values.count ? values[next] : ""; next += 1 }
-                    i = spec.range.upperBound
+                if output[i] == "%", let hit = placeholder.firstMatch(in: output, range: NSRange(i..<output.endIndex, in: output)),
+                   let specRange = Range(hit.range, in: output) {
+                    if output[specRange] == "%%" { result += "%" } else { result += next < values.count ? values[next] : ""; next += 1 }
+                    i = specRange.upperBound
                 } else {
                     result.append(output[i]); i = output.index(after: i)
                 }
@@ -331,22 +333,23 @@ public enum ServerText {
         var fixed: Int
     }
 
-    private static let placeholder = try! Regex(#"%(?:\d+\$)?(?:lld|ld|d|@|lf|f|\.\d+f|%)"#)
+    private static let placeholder = try! NSRegularExpression(pattern: #"%(?:\d+\$)?(?:lld|ld|d|@|lf|f|\.\d+f|%)"#)
 
     /// 表里带占位符的键 → 正则
     private static let patterns: [Pattern] = {
         Lang.shared.englishTable.compactMap { key, english -> Pattern? in
-            guard key.contains("%"), key.firstMatch(of: placeholder) != nil else { return nil }
+            guard key.contains("%"), placeholder.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)) != nil else { return nil }
             var regex = "^", prefix = "", sawPlaceholder = false, i = key.startIndex
             while i < key.endIndex {
-                if key[i] == "%", let spec = key[i...].firstMatch(of: placeholder), spec.range.lowerBound == i {
-                    switch String(key[spec.range]) {
+                if key[i] == "%", let hit = placeholder.firstMatch(in: key, options: .anchored, range: NSRange(i..<key.endIndex, in: key)),
+                   let specRange = Range(hit.range, in: key) {
+                    switch String(key[specRange]) {
                     case "%%": regex += "%"; if !sawPlaceholder { prefix += "%" }
                     case "%lld", "%ld", "%d": regex += "(-?\\d+)"; sawPlaceholder = true
                     case "%lf", "%f": regex += "(-?[\\d.]+)"; sawPlaceholder = true
                     default: regex += "(.+?)"; sawPlaceholder = true
                     }
-                    i = spec.range.upperBound
+                    i = specRange.upperBound
                 } else {
                     regex += NSRegularExpression.escapedPattern(for: String(key[i]))
                     if !sawPlaceholder { prefix.append(key[i]) }
@@ -354,7 +357,7 @@ public enum ServerText {
                 }
             }
             // 固定的字里至少两个汉字才拿来反推：「%@ %@」「%@：%@」这种太泛，会把别的句子拆成乱码
-            let fixed = key.replacing(placeholder, with: "")
+            let fixed = placeholder.stringByReplacingMatches(in: key, range: NSRange(key.startIndex..., in: key), withTemplate: "")
             guard sawPlaceholder, fixed.unicodeScalars.filter({ (0x4E00...0x9FFF).contains($0.value) }).count >= 2,
                   let compiled = try? NSRegularExpression(pattern: regex + "$", options: [.dotMatchesLineSeparators]) else { return nil }
             return Pattern(regex: compiled, prefix: prefix, english: english, fixed: fixed.count)

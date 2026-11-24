@@ -9,8 +9,9 @@ import SwiftUI
 // 终端：主程序预先定好新会话的编号（futureKey = 设备#编号），终端就开在这个编号名下，会话开出来后同一个终端还在那个会话里
 
 /// 草稿上选的设置（按草稿标签的 key 记，切走再回来还在）
-@MainActor @Observable
-final class DraftSettings {
+@MainActor 
+final class DraftSettings: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = DraftSettings()
 
     struct Options: Equatable {
@@ -20,7 +21,7 @@ final class DraftSettings {
         var goal: String?
     }
 
-    var options: [String: Options] = [:]
+    @Tracked var options: [String: Options] = [:]
 }
 
 /// 发第一句时交给主程序的内容
@@ -38,7 +39,7 @@ public struct DraftLaunch {
 extension KitelineKit {
     /// 新会话标签的输入区。draftKey：草稿标签的 key（文字、图片、选的设置记在它上面）；futureKey：新会话开出来以后的 key（终端记在它上面），
     /// terminal 为 false 时（没法预先定编号：在 VS Code 里开、别家 agent、老版本电脑端）不出终端按钮
-    public struct DraftComposer: View {
+    public struct DraftComposer: KLView {
         let draftKey: String
         let futureKey: String
         let sourceId: String
@@ -64,13 +65,13 @@ extension KitelineKit {
             self.onSend = onSend
         }
 
-        public var body: some View {
+        public var klBody: some View {
             if let model = KitelineKit.model {
                 DraftComposerBody(draftKey: draftKey, futureKey: futureKey, sourceId: sourceId, cwd: cwd, agent: agent,
                                   placeholder: placeholder, busy: busy, terminal: terminal, available: available, onSend: onSend)
                     .font(.ui(.body))
                     .tint(Theme.claude)
-                    .environment(model)
+                    .environment(\.appModelSlot, model)
             }
         }
     }
@@ -130,7 +131,7 @@ extension KitelineKit {
         Task { @MainActor in
             for _ in 0..<60 {
                 if model.session(key)?.canReply == true { break }
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await Task.sleep(milliseconds: 250)
             }
             guard model.session(key)?.canReply == true else { return }
             if !carried {
@@ -143,8 +144,8 @@ extension KitelineKit {
     }
 }
 
-private struct DraftComposerBody: View {
-    @Environment(AppModel.self) private var model
+private struct DraftComposerBody: KLView {
+    @EnvModel private var model
     @Environment(\.chipHeight) private var chipHeight
     let draftKey: String
     let futureKey: String
@@ -184,7 +185,7 @@ private struct DraftComposerBody: View {
         return try? JSONDecoder().decode(SessionInfo.self, from: data)
     }
 
-    var body: some View {
+    var klBody: some View {
         Group {
             if terminal, futureChat.terminalOpen, let session = placeholderSession {
                 TerminalPanel(key: futureKey, session: session, chat: futureChat, available: available)
@@ -198,8 +199,8 @@ private struct DraftComposerBody: View {
             if terminal { model.terminals.pendingCwd[futureKey] = cwd }
             focusToken += 1
         }
-        .onChange(of: futureKey) { _, key in if terminal { model.terminals.pendingCwd[key] = cwd } }
-        .onChange(of: cwd) { _, value in if terminal { model.terminals.pendingCwd[futureKey] = value } }
+        .klOnChange(of: futureKey) { _, key in if terminal { model.terminals.pendingCwd[key] = cwd } }
+        .klOnChange(of: cwd) { _, value in if terminal { model.terminals.pendingCwd[futureKey] = value } }
     }
 
     private var composer: some View {
@@ -257,7 +258,7 @@ private struct DraftComposerBody: View {
             .padding(.top, Bar.badgeRoom)
         }
         .padding(.top, -Bar.badgeRoom)
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .klScrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
     }
 
@@ -282,7 +283,7 @@ private struct DraftComposerBody: View {
             .foregroundStyle(.primary.opacity(0.75))
             .chipFace(height: chipHeight)
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .klMenuButtonStyle().buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .help(mode?.detail ?? L("权限模式：新会话开出来时用的模式"))
     }
 
@@ -318,7 +319,7 @@ private struct DraftComposerBody: View {
             .font(.chip).lineLimit(1)
             .chipFace(height: chipHeight)
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .klMenuButtonStyle().buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .help(L("模型和思考等级：新会话开出来时用的"))
     }
 
@@ -351,7 +352,7 @@ private struct DraftComposerBody: View {
             Text("目标").font(.app(size: 13, weight: .semibold))
             TextEditor(text: $goalText)
                 .font(.app(size: 13))
-                .scrollContentBackground(.hidden)
+                .klScrollContentBackground(.hidden)
                 .padding(6)
                 .frame(width: 360, height: 120)
                 .background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))

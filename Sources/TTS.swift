@@ -8,6 +8,12 @@ import Foundation
 /// - Mac 自带语音：离线；macOS 27 上 App 里只拿得到压缩版婷婷，比较机械，作为备用。
 /// 合成过的按「文字 + 声音 + 语速」缓存在临时目录。
 final class TTS {
+    /// 「优质」语音（AVSpeechSynthesisVoiceQuality.premium 要 macOS 13）
+    static func isPremium(_ voice: AVSpeechSynthesisVoice) -> Bool {
+        if #available(macOS 13, *) { return voice.quality == .premium }
+        return false
+    }
+
     static let shared = TTS()
 
     struct Voice {
@@ -46,7 +52,7 @@ final class TTS {
             .filter { $0.language.hasPrefix("zh-CN") && !$0.identifier.contains("eloquence") && !$0.identifier.contains("super-compact") }
             .map { voice -> Voice in
                 let siri = voice.identifier.contains("siri")
-                let premium = voice.identifier.contains("premium") || voice.quality == .premium
+                let premium = voice.identifier.contains("premium") || Self.isPremium(voice)
                 let rank = siri ? 4 : (premium ? 3 : (voice.quality == .enhanced ? 2 : 1))
                 let kind = siri ? "Siri 自然语音" : (premium ? "高级语音" : (rank == 2 ? "增强语音" : "普通语音，较机械"))
                 return Voice(id: voice.identifier, name: voice.name, label: "\(voice.name)（\(kind)）", quality: rank)

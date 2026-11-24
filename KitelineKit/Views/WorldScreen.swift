@@ -11,8 +11,8 @@ import WebKit
 // 图片、头像、朗读的语音由这里代取。点屏幕弹出会话页，点卫星弹设备详情，右上角的门关掉世界
 
 /// 全屏的世界：网页 + 点出来的会话页、设备详情。page = world（像素园区）/ flow（数据流大屏，同一个宿主换一页）
-struct WorldScreen: View {
-    @Environment(AppModel.self) private var model
+struct WorldScreen: KLView {
+    @EnvModel private var model
     @Environment(\.dismiss) private var dismiss
     @State private var bridge: WorldBridge
     private let page: String
@@ -30,7 +30,7 @@ struct WorldScreen: View {
     /// 弹出的会话 / 机器（sheet 要 Identifiable）
     struct ChatTarget: Identifiable { let id: String }
 
-    var body: some View {
+    var klBody: some View {
         // 只铺满刘海、横条这些边（网页按 insets 让开）；键盘弹出时整块缩到键盘上方，私聊输入框不被挡
         WorldWebView(bridge: bridge)
             .ignoresSafeArea(.container)
@@ -80,7 +80,7 @@ struct WorldScreen: View {
             }
             // 会话页：同点进会话一样（能看能回），往下一拉回到世界
             .sheet(item: $chatKey) { target in
-                NavigationStack {
+                KLNavigationStack {
                     ChatView(key: target.id)
                         .toolbar {
                             // 左上角关掉、回到世界：横着的 iPhone 上弹出页铺满整屏，看不出能往下拉（10-27：进去回不来）
@@ -90,14 +90,14 @@ struct WorldScreen: View {
                             }
                         }
                 }
-                    .environment(model)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
+                    .environment(\.appModelSlot, model)
+                    .klPresentationDetents([.large])
+                    .klPresentationDragIndicator(.visible)
             }
             .sheet(item: $machine) { target in
-                MachineInfoSheet(sourceId: target.id).environment(model)
+                MachineInfoSheet(sourceId: target.id).environment(\.appModelSlot, model)
             }
-            .onChange(of: chatKey == nil && machine == nil) { _, clear in bridge.setCovered(!clear) }
+            .klOnChange(of: chatKey == nil && machine == nil) { _, clear in bridge.setCovered(!clear) }
             .statusBarHidden()
             .persistentSystemOverlays(.hidden)
     }
@@ -237,7 +237,7 @@ final class WorldBridge: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
         usageTask = Task { [weak self] in
             while !Task.isCancelled {
                 if let usage = try? await model.api.get("/api/usage", ["days": "1"]) { self?.send(usage.merging(["type": "usage"]) { $1 }) }
-                try? await Task.sleep(for: .seconds(60))
+                try? await Task.sleep(seconds: 60)
             }
         }
     }
@@ -401,7 +401,7 @@ final class WorldBridge: NSObject, WKScriptMessageHandler, WKURLSchemeHandler {
                     while !Task.isCancelled, let self, let recorder = self.recorder, recorder.recording {
                         self.send(["type": "dictation", "state": "level", "level": recorder.levels.last ?? 0, "elapsed": recorder.elapsed])
                         if recorder.elapsed >= 60 { self.dictate("stop"); break }
-                        try? await Task.sleep(for: .milliseconds(100))
+                        try? await Task.sleep(milliseconds: 100)
                     }
                 }
             }

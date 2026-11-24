@@ -491,7 +491,7 @@ final class MobileServer {
         lock.unlock()
         var english: Data?
         for (stream, lang) in all {
-            guard lang == "en", event != "peers", event != "term", event != "term_open", event != "term_meta", event != "browser_frame" else { stream.send(original); continue }   // 终端输出、浏览器画面原样转（没有界面文字）
+            guard lang == "en", event != "peers", event != "term", event != "term_open", event != "term_meta", event != "browser_frame", event != "live" else { stream.send(original); continue }   // 终端输出、浏览器画面、正在生成的文字原样转（没有界面文字）
             if english == nil {
                 let body = event == "entries" ? ServerLang.localizeEvents(json: Data(json.utf8)) : ServerLang.localize(json: Data(json.utf8))
                 english = Data("event: \(event)\ndata: \(String(decoding: body, as: UTF8.self))\n\n".utf8)

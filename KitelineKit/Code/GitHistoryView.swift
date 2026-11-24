@@ -2,9 +2,9 @@ import SwiftUI
 
 /// 提交历史：提交图（每条分支一种颜色的线，汇合 / 分叉一眼看出）+ 分支 / 标签胶囊 + 分支上有几个会话。
 /// 点一行看提交详情；右键（长按）检出、建分支、打标签、拣选、还原、重置
-struct GitHistoryView: View {
-    @Environment(AppModel.self) private var model
-    @Bindable var store: RepoStore
+struct GitHistoryView: KLView {
+    @EnvModel private var model
+    @KLBindable var store: RepoStore
     var openCommit: (String) -> Void
     /// 只看某个文件的历史
     var path: String? = nil
@@ -22,7 +22,7 @@ struct GitHistoryView: View {
     private var rowHeight: CGFloat { wide ? 30 : 52 }
     private var lane: CGFloat { wide ? 13 : 12 }
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             toolbar
             Divider()
@@ -42,7 +42,7 @@ struct GitHistoryView: View {
             }
         }
         .task(id: "\(query)|\(onlyCurrent)|\(store.revision)|\(path ?? "")") {
-            if !query.isEmpty { try? await Task.sleep(for: .milliseconds(350)) }
+            if !query.isEmpty { try? await Task.sleep(milliseconds: 350) }
             guard !Task.isCancelled else { return }
             await load()
         }
@@ -150,14 +150,14 @@ struct GitHistoryView: View {
 }
 
 /// 提交图的一格：服务端算好的线段照着画（竖线直画，换列的画成平滑的 S 形），圆点在本提交那一列
-struct GraphCell: View {
+struct GraphCell: KLView {
     let graph: GraphRow
     let lane: CGFloat
     let height: CGFloat
     var head = false
     var merge = false
 
-    var body: some View {
+    var klBody: some View {
         Canvas { context, size in
             let ys: [CGFloat] = [0, height / 2, height]
             func x(_ col: Int) -> CGFloat { CGFloat(col) * lane + lane / 2 + 3 }
@@ -194,8 +194,8 @@ struct GraphCell: View {
 }
 
 /// 一个提交能做的事（提交图里右键 / 长按、提交详情的工具栏）
-struct CommitActions: View {
-    @Environment(AppModel.self) private var model
+struct CommitActions: KLView {
+    @EnvModel private var model
     let store: RepoStore
     let hash: String
     let short: String
@@ -203,7 +203,7 @@ struct CommitActions: View {
     @Binding var ask: CodeAsk?
     @Binding var nameAsk: NameAsk?
 
-    var body: some View {
+    var klBody: some View {
         Button { Clipboard.copy(hash); model.flash(L("已拷贝提交号")) } label: { Label("拷贝提交号", systemImage: "number") }
         Button { Clipboard.copy(subject) } label: { Label("拷贝提交信息", systemImage: "doc.on.doc") }
         Divider()
@@ -250,8 +250,8 @@ struct CommitActions: View {
 }
 
 /// 提交详情：提交信息、作者时间、父提交、所在分支、改了哪些文件（点开看对比）
-struct CommitDetailView: View {
-    @Environment(AppModel.self) private var model
+struct CommitDetailView: KLView {
+    @EnvModel private var model
     let store: RepoStore
     let hash: String
     var openDiff: (RepoChange, String) -> Void
@@ -261,7 +261,7 @@ struct CommitDetailView: View {
     @State private var ask: CodeAsk?
     @State private var nameAsk: NameAsk?
 
-    var body: some View {
+    var klBody: some View {
         List {
             if let info {
                 Section {
@@ -274,17 +274,17 @@ struct CommitDetailView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    LabeledContent("作者") { Text("\(info.author) <\(info.email)>").textSelection(.enabled).multilineTextAlignment(.trailing) }
-                    if let ts = info.ts { LabeledContent("时间", value: Self.date(ts)) }
-                    if !info.committer.isEmpty && info.committer != info.author { LabeledContent("提交者", value: info.committer) }
-                    LabeledContent("提交号") {
+                    KLLabeledContent("作者") { Text("\(info.author) <\(info.email)>").textSelection(.enabled).multilineTextAlignment(.trailing) }
+                    if let ts = info.ts { KLLabeledContent("时间", value: Self.date(ts)) }
+                    if !info.committer.isEmpty && info.committer != info.author { KLLabeledContent("提交者", value: info.committer) }
+                    KLLabeledContent("提交号") {
                         Button { Clipboard.copy(info.hash); model.flash(L("已拷贝提交号")) } label: {
                             Text(String(info.hash.prefix(12))).font(.system(.footnote, design: .monospaced))
                         }
                         .buttonStyle(.plain)
                     }
                     if !info.parents.isEmpty {
-                        LabeledContent(info.parents.count > 1 ? "父提交（合并）" : "父提交") {
+                        KLLabeledContent(info.parents.count > 1 ? "父提交（合并）" : "父提交") {
                             HStack(spacing: 6) {
                                 ForEach(info.parents, id: \.self) { parent in
                                     Button(String(parent.prefix(8))) { openCommit(parent) }.font(.system(.footnote, design: .monospaced))
@@ -293,7 +293,7 @@ struct CommitDetailView: View {
                         }
                     }
                     if !info.branches.isEmpty {
-                        LabeledContent("所在分支") { Text(info.branches.prefix(6).joined(separator: ", ")).multilineTextAlignment(.trailing) }
+                        KLLabeledContent("所在分支") { Text(info.branches.prefix(6).joined(separator: ", ")).multilineTextAlignment(.trailing) }
                     }
                 }
                 Section {
@@ -327,6 +327,16 @@ struct CommitDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(macOS) && !KL_MODERN
+            // 兼容包：macOS 12 的工具栏里不能写 if（buildIf 要 13）：条目常在，菜单按条件出现
+            ToolbarItem(placement: .primaryAction) {
+                if let info {
+                    Menu {
+                        CommitActions(store: store, hash: info.hash, short: String(info.hash.prefix(8)), subject: info.subject, ask: $ask, nameAsk: $nameAsk)
+                    } label: { Image(systemName: "ellipsis.circle") }
+                }
+            }
+            #else
             if let info {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
@@ -334,6 +344,7 @@ struct CommitDetailView: View {
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
+            #endif
         }
         .task(id: hash) { await load() }
         .codeAsks($ask, $nameAsk)

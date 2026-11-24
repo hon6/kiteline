@@ -10,7 +10,7 @@ final class ChangelogWindowController: NSWindowController, NSWindowDelegate {
 
     private init() {
         let hosting = NSHostingController(rootView: ChangelogRoot(content: content))
-        hosting.sizingOptions = []   // 窗口大小由用户拖，不跟内容走（内容几十屏高）
+        if #available(macOS 13, *) { hosting.sizingOptions = [] }   // 窗口大小由用户拖，不跟内容走（内容几十屏高）
         let window = NSWindow(contentViewController: hosting)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.title = L("更新记录")
@@ -61,10 +61,10 @@ private final class ChangelogContent: ObservableObject {
     @Published var text = ""
 }
 
-private struct ChangelogRoot: View {
+private struct ChangelogRoot: KLView {
     @ObservedObject var content: ChangelogContent
 
-    var body: some View {
+    var klBody: some View {
         TarsChangelogView(markdown: content.text, version: AppVersion.app)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))

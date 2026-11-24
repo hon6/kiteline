@@ -207,22 +207,23 @@ extension Lang.Patch: Decodable {
 
 // MARK: - 本机缓存 + 后台更新
 
-@MainActor @Observable
-final class RemoteConfig {
+@MainActor 
+final class RemoteConfig: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = RemoteConfig()
     nonisolated static let url = URL(string: "https://tars.betac.cn/app/config.json")!
     /// 上次取到的那份，原样存着。Application Support 不会像 Caches 那样在空间紧张时被系统清掉
     static let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("remote-config.json")
 
-    private(set) var config = AppConfig()
+    @Tracked private(set) var config = AppConfig()
     /// 这台手机上关掉的公告（id）、插件要求更新的提示（plugin-app:版本号）
-    private(set) var dismissed: Set<String>
+    @Tracked private(set) var dismissed: Set<String>
     /// 这个 App 的版本（Info.plist 的 CFBundleShortVersionString）
     let version: VersionNumber
 
-    @ObservationIgnored private var fetching = false
-    @ObservationIgnored private var checked: Date?
+    private var fetching = false
+    private var checked: Date?
 
     private static let dismissedKey = "remoteConfigDismissed"
     private static let etagKey = "remoteConfigETag"

@@ -148,11 +148,11 @@ enum Changelog {
 
 /// 更新记录的时间轴：左边一条竖线串起各版本，节点对齐版本号；当前版本的节点用强调色并标「当前版本」（找不到就标最新一版）。
 /// 版本之间、分类之间、条目之间都留足间距，长篇也好读
-struct ChangelogTimeline: View {
+struct ChangelogTimeline: KLView {
     let releases: [ChangelogRelease]
     let current: String
 
-    var body: some View {
+    var klBody: some View {
         let marked = releases.contains { $0.version == current } ? current : releases.first?.version
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(releases.indices, id: \.self) { i in
@@ -181,13 +181,13 @@ private struct TitleCenter: PreferenceKey {
     static func reduce(value: inout Anchor<CGPoint>?, nextValue: () -> Anchor<CGPoint>?) { value = value ?? nextValue() }
 }
 
-private struct ChangelogReleaseRow: View {
+private struct ChangelogReleaseRow: KLView {
     let release: ChangelogRelease
     let isCurrent: Bool
     let isFirst: Bool
     let isLast: Bool
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if !release.notes.isEmpty || !release.sections.isEmpty {
@@ -281,10 +281,10 @@ private struct ChangelogReleaseRow: View {
 }
 
 /// 分类标题：新功能 / 改进 / 问题修复 / 安全，单色小图标 + 字
-private struct SectionTitle: View {
+private struct SectionTitle: KLView {
     let title: String
 
-    var body: some View {
+    var klBody: some View {
         Label {
             Text(title)
         } icon: {
@@ -318,10 +318,10 @@ private struct SpacedLabel: LabelStyle {
 }
 
 /// 一条：有加粗标题的，标题一行、说明在下面（次要色）；没有标题的整句用正文色。子条目缩进、字小一号
-private struct ItemRow: View {
+private struct ItemRow: KLView {
     let item: ChangelogItem
 
-    var body: some View {
+    var klBody: some View {
         let parts = item.parts
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("•")

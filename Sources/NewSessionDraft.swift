@@ -102,7 +102,7 @@ final class NewDrafts: ObservableObject {
                                             effort: draft.effort, followUp: followUp)
                     return
                 }
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(milliseconds: 500)
             }
             drafts.waiting.remove(key)
             drafts.messages[key] = L("消息已发出，但新会话还没有出现在列表中。可以在左侧会话列表中查看，或稍后再试。")
@@ -110,7 +110,7 @@ final class NewDrafts: ObservableObject {
     }
 }
 
-struct NewSessionDraftView: View {
+struct NewSessionDraftView: KLView {
     let key: String
     @ObservedObject private var model = KitelineModel.shared
     @ObservedObject private var projects = ProjectsModel.shared
@@ -130,7 +130,7 @@ struct NewSessionDraftView: View {
     /// 每台电脑上除了 Claude Code 还能后台运行哪几家（问过的记着）
     @State private var launchable: [String: [NewTaskSheet.LaunchAgent]] = [:]
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 20)
             VStack(spacing: 14) {
@@ -151,14 +151,14 @@ struct NewSessionDraftView: View {
             if let place { composer(place, available: height) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(GeometryReader { proxy in Color.clear.onAppear { height = proxy.size.height }.onChange(of: proxy.size.height) { _, value in height = value } })
+        .background(GeometryReader { proxy in Color.clear.onAppear { height = proxy.size.height }.klOnChange(of: proxy.size.height) { _, value in height = value } })
         .background(Look.shared.scheme?.editorColor ?? Color(nsColor: .windowBackgroundColor))
         .task(id: key) {
             place = NewDrafts.places[key] ?? NewDraftKey.parse(key)
             if !projects.loaded { projects.load() }
             askAgents()
         }
-        .onChange(of: place) { _, value in
+        .klOnChange(of: place) { _, value in
             if let value { NewDrafts.places[key] = value }
             askAgents()
         }
@@ -178,7 +178,7 @@ struct NewSessionDraftView: View {
     /// 项目、设备、Agent 三个下拉：放得下排一行；会话区窄了竖着排；再窄（单个都放不下）就把名字截短。
     /// 不能一律 fixedSize 排一行：三个加起来四百来点宽，窄的分屏里会把整页撑宽，连输入框一起被裁掉（11-22）
     private func pickers(_ place: NewDraftKey.Place) -> some View {
-        ViewThatFits(in: .horizontal) {
+        KLViewThatFits(in: .horizontal) {
             HStack(spacing: 8) { pickerMenus(place, fixed: true) }
             VStack(spacing: 6) { pickerMenus(place, fixed: true) }
             VStack(spacing: 6) { pickerMenus(place, fixed: false) }
@@ -200,7 +200,7 @@ struct NewSessionDraftView: View {
                 }
             }
         } label: { chip("folder", (place.cwd as NSString).lastPathComponent) }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
+        .klMenuButtonStyle().buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
         .help(place.cwd)
         Menu {
             if devices.count > 1 {
@@ -211,7 +211,7 @@ struct NewSessionDraftView: View {
                 Text("这个项目只在「\(sourceName)」上")
             }
         } label: { chip("desktopcomputer", sourceName) }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
+        .klMenuButtonStyle().buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
         Menu {
             ForEach(agents(place.sourceId)) { agent in
                 Button(agent.name) { self.place = .init(sourceId: place.sourceId, cwd: place.cwd, agent: agent.id) }
@@ -224,7 +224,7 @@ struct NewSessionDraftView: View {
             }
             .modifier(ChipStyle())
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
+        .klMenuButtonStyle().buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: fixed, vertical: true)
     }
 
     private func chip(_ symbol: String, _ title: String) -> some View {
@@ -236,8 +236,8 @@ struct NewSessionDraftView: View {
         .modifier(ChipStyle())
     }
 
-    private struct ChipStyle: ViewModifier {
-        func body(content: Content) -> some View {
+    private struct ChipStyle: KLViewModifier {
+        func klBody(content: Content) -> some View {
             content.kiteLook()
         }
     }

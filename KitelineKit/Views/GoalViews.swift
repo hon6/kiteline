@@ -148,7 +148,7 @@ public enum GoalText {
 // MARK: - 列表小标识
 
 /// 列表里的「◎ 目标 · 第 3 轮」（iPhone 会话列表、Mac 侧栏和菜单栏）：同任务阶段的小标识，淡色底、细边，颜色按状态
-public struct GoalBadge: View {
+public struct GoalBadge: KLView {
     let state: String
     /// 正在第几轮（Claude Code 有，Codex 没有）
     let round: Int?
@@ -166,7 +166,7 @@ public struct GoalBadge: View {
 
     private var text: String { GoalText.badge(state: state, round: round) }
 
-    public var body: some View {
+    public var klBody: some View {
         let tint = GoalText.tint(state)
         HStack(spacing: size * 0.28) {
             Image(systemName: GoalText.symbol(state)).font(.app(size: size * 0.92, weight: .semibold))
@@ -188,8 +188,8 @@ public struct GoalBadge: View {
 
 /// 对话页输入框上方（任务进展条之上）的一条：目标是什么、到哪了（第几轮、最近一次检查还差什么），轻点打开目标面板。
 /// 结束了的（达成、做不到、出错）显示结果，点 × 收起（同一个目标不再出来）
-struct GoalStrip: View {
-    @Environment(AppModel.self) private var model
+struct GoalStrip: KLView {
+    @EnvModel private var model
     @Environment(\.chatWidth) private var chatWidth
     let key: String
     let goal: GoalInfo
@@ -200,7 +200,7 @@ struct GoalStrip: View {
         goal.valid && (goal.running || !(UserDefaults.standard.string(forKey: "goalStripDismissed") ?? "").split(separator: "\n").contains(Substring(goal.id)))
     }
 
-    var body: some View {
+    var klBody: some View {
         TimelineView(.periodic(from: .now, by: goal.running ? 30 : 3600)) { context in
             Button { model.chat(key).goalSheet = true } label: { row(now: context.date) }
                 .buttonStyle(.plain)
@@ -262,14 +262,14 @@ struct GoalStrip: View {
 }
 
 /// 输入区上方浮着的卡片（任务进展条、目标条）：iPhone 白卡片细边浅阴影；Mac 同输入框，最宽 832 居中
-private struct DeckCard: ViewModifier {
+private struct DeckCard: KLViewModifier {
     #if os(macOS)
     private static let corner: CGFloat = 12
     #else
     private static let corner: CGFloat = 14
     #endif
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
             #if os(macOS)
@@ -295,13 +295,13 @@ extension View {
 // MARK: - 输入框下面那排的「目标」
 
 /// 输入框下面那排里的「◎ 目标」：会话支持目标（caps 的 goal）才有。没设目标时点开写一个；设了的显示状态，点开看进展
-struct GoalChip: View {
-    @Environment(AppModel.self) private var model
+struct GoalChip: KLView {
+    @EnvModel private var model
     @Environment(\.chipHeight) private var height
     let key: String
     let session: SessionInfo
 
-    var body: some View {
+    var klBody: some View {
         let goal = session.goal.flatMap { $0.valid && $0.running ? $0 : nil }
         Button { model.chat(key).goalSheet = true } label: {
             HStack(spacing: 4) {
@@ -327,8 +327,8 @@ struct GoalChip: View {
 
 /// 目标面板：没设目标时写一个（多行，可以说话输入），点「开始」发 /goal；设了的看进展（第几轮、用了多久、最近一次检查还差什么），
 /// 可以清除、换一个，Codex 的还能暂停 / 继续。从输入框下面的「目标」、对话页的目标条、会话菜单打开
-struct GoalSheet: View {
-    @Environment(AppModel.self) private var model
+struct GoalSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let key: String
     @State private var text = ""
@@ -348,14 +348,14 @@ struct GoalSheet: View {
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var ready: Bool { !trimmed.isEmpty && trimmed.count <= Self.limit && session?.canReply == true }
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("目标"), cancel: writing) {
             VStack(alignment: .leading, spacing: 14) {
                 if let goal { current(goal) }
                 if writing { editor }
             }
         } bottom: {
-            Button(action: writing ? start : { withAnimation(.snappy) { replacing = true }; focused = true }) {
+            Button(action: writing ? start : { withAnimation(.klSnappy) { replacing = true }; focused = true }) {
                 Text(writing ? L("开始") : L("换一个目标"))
                     .font(.ui(.body).weight(.semibold))
                     .foregroundStyle(writing ? .white : Theme.claude)
@@ -469,8 +469,8 @@ struct GoalSheet: View {
             if goal?.running == true {
                 Text("新目标会替换当前目标").font(.ui(.caption).weight(.semibold)).foregroundStyle(.secondary)
             }
-            TextField(L("例如：把登录模块的单元测试全部跑通，并修复发现的问题"), text: $text, axis: .vertical)
-                .lineLimit(4...12)
+            KLTextField(L("例如：把登录模块的单元测试全部跑通，并修复发现的问题"), text: $text, axis: .vertical)
+                .klLineLimit(4...12)
                 .textFieldStyle(.plain).font(.ui(.body))
                 .focused($focused)
                 .padding(.horizontal, 12).padding(.vertical, 10)

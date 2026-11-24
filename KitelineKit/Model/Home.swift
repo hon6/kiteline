@@ -338,23 +338,23 @@ struct ProjectInfo: Decodable, Identifiable, Hashable {
 // MARK: 首页卡片的数
 
 @MainActor
-@Observable
-final class HomeStats {
-    private(set) var today: DigestTotals?
-    private(set) var usage: UsageItem?
+final class HomeStats: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
+    @Tracked private(set) var today: DigestTotals?
+    @Tracked private(set) var usage: UsageItem?
     /// 各台电脑的订阅额度（5 小时 / 本周），首页「今日用量」大卡片画成环形
-    private(set) var limits: [LimitDevice] = []
-    private(set) var projects: [ProjectInfo] = []
+    @Tracked private(set) var limits: [LimitDevice] = []
+    @Tracked private(set) var projects: [ProjectInfo] = []
     /// 近 7 天每天的用量（概览看板的小柱图；只在显示概览时取）
-    private(set) var week: [UsageItem] = []
-    private(set) var budget: Budget?
+    @Tracked private(set) var week: [UsageItem] = []
+    @Tracked private(set) var budget: Budget?
     /// 卡片上的刷新按钮转圈
-    private(set) var limitsBusy = false
+    @Tracked private(set) var limitsBusy = false
     /// 正在后台取新的（页面上已经显示着上次存的，右上角一个小转圈「更新中」）
-    private(set) var refreshing = false
-    private var refreshedAt: Date?
-    private var limitsRefreshedAt: Date?
-    private var weekRefreshedAt: Date?
+    @Tracked private(set) var refreshing = false
+    @Tracked private var refreshedAt: Date?
+    @Tracked private var limitsRefreshedAt: Date?
+    @Tracked private var weekRefreshedAt: Date?
 
     /// 启动时先填上次存在手机上的（今天的动态、用量、额度、项目、近 7 天），没连上电脑也有数；之后 refresh 静默换成新的
     func restore(_ api: MacAPI) {

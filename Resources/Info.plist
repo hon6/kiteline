@@ -14,7 +14,7 @@
     <key>CFBundleDisplayName</key>
     <string>Kiteline</string>
     <key>CFBundleExecutable</key>
-    <string>TARS</string>
+    <string>Kiteline</string>
     <key>CFBundleIdentifier</key>
     <string>com.mrhong.tars</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -22,9 +22,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>3.49.53</string>
+    <string>3.49.55</string>
     <key>CFBundleVersion</key>
-    <string>61</string>
+    <string>63</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>

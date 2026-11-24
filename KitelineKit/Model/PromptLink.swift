@@ -61,10 +61,11 @@ public struct PromptLink: Identifiable, Equatable, Sendable {
 }
 
 /// 收到、还没弹出来的提示词链接（App 收到链接时界面可能还没搭好：主界面出来再弹）
-@MainActor @Observable
-public final class PromptLinks {
+@MainActor 
+public final class PromptLinks: KLObservable {
+    public let _klRegistrar = KLRegistrar.make()
     public static let shared = PromptLinks()
-    public var pending: PromptLink?
+    @Tracked public var pending: PromptLink?
 
     /// 是提示词链接就收下，返回 true
     @discardableResult
@@ -77,14 +78,14 @@ public final class PromptLinks {
 
 #if os(iOS)
 /// 主界面上挂着：收到提示词链接就推进「新会话」页（提示词填好，链接里的项目对得上就定下）
-struct PromptLinkHost: ViewModifier {
+struct PromptLinkHost: KLViewModifier {
     /// 推进「新会话」页（MainView 的 openFromOutside：切到会话页签推进去）
     let open: (NewTaskSeed) -> Void
     @State private var links = PromptLinks.shared
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         // initial：App 收到链接时主界面还没搭好的，出来时接着打开
-        content.onChange(of: links.pending?.id, initial: true) { _, _ in
+        content.klOnChange(of: links.pending?.id, initial: true) { _, _ in
             guard let link = links.pending else { return }
             links.pending = nil
             open(NewTaskSeed(initialText: link.prompt, hint: link.project))

@@ -21,12 +21,12 @@ enum PluginAppRequirement {
 }
 
 /// 首页顶上：服务器配的公告、「Kiteline x.y 已发布」、电脑上的插件要求更新。都没有就什么都不画
-struct RemoteNoticeStrip: View {
+struct RemoteNoticeStrip: KLView {
     private let remote = RemoteConfig.shared
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @Environment(\.openURL) private var openURL
 
-    var body: some View {
+    var klBody: some View {
         let notices = remote.notices()
         // 这台手机、连着的电脑有新版本（见 AppUpdates）：点开是更新面板，✕ = 这个版本不再提示。必须更新时整屏挡着，不在这里说
         let updates = AppUpdates.shared
@@ -41,21 +41,21 @@ struct RemoteNoticeStrip: View {
                                title: offer.isApp ? L("Kiteline %@ 已发布", offer.version) : L("电脑端 Kiteline %@ 已发布", offer.version),
                                detail: offer.isApp ? L("轻点查看更新内容并前往 App Store 更新") : L("电脑上是 %@，轻点查看更新内容", offer.current),
                                open: { updates.present([offer]) },
-                               close: { withAnimation(.snappy) { updates.setSkipped([offer], true) } })
+                               close: { withAnimation(.klSnappy) { updates.setSkipped([offer], true) } })
                 }
                 if let plugin {
                     NoticeCard(symbol: "arrow.down.circle", title: L("需要更新 Kiteline"),
                                detail: L("电脑上的 %@ 需要 Kiteline %@ 或更高版本才能完整显示，轻点前往 App Store 更新",
                                          plugin.names.joined(separator: Lang.shared.isEnglish ? ", " : "、"), plugin.version.description),
                                open: { Task { await remote.openStore(openURL) } },
-                               close: { withAnimation(.snappy) { remote.dismiss(PluginAppRequirement.dismissID(plugin.version)) } })
+                               close: { withAnimation(.klSnappy) { remote.dismiss(PluginAppRequirement.dismissID(plugin.version)) } })
                 }
                 ForEach(notices) { notice in
                     NoticeCard(symbol: notice.level == .warning ? "exclamationmark.triangle" : "megaphone",
                                tint: notice.level == .warning ? .orange : Theme.claude,
                                title: notice.title?.text, detail: notice.body?.text,
                                open: notice.url.map { url -> () -> Void in { openURL(url) } },
-                               close: notice.dismissible ? { withAnimation(.snappy) { remote.dismiss(notice.id) } } : nil)
+                               close: notice.dismissible ? { withAnimation(.klSnappy) { remote.dismiss(notice.id) } } : nil)
                 }
             }
         }
@@ -63,12 +63,12 @@ struct RemoteNoticeStrip: View {
 }
 
 /// 对话页输入框上方：这个会话的 agent 要求更新版本的 Kiteline 才能完整显示（关不掉，更新了自然就没了）
-struct PluginUpdateHint: View {
+struct PluginUpdateHint: KLView {
     let session: SessionInfo
     private let remote = RemoteConfig.shared
     @Environment(\.openURL) private var openURL
 
-    var body: some View {
+    var klBody: some View {
         if let need = PluginAppRequirement.check([session.agent]) {
             NoticeCard(symbol: "arrow.down.circle", title: L("需要更新 Kiteline"),
                        detail: L("这个会话需要 Kiteline %@ 或更高版本才能完整显示，轻点前往 App Store 更新", need.version.description),
@@ -79,7 +79,7 @@ struct PluginUpdateHint: View {
 }
 
 /// 一条公告：图标、标题、说明；有链接的整条可点，能关的右边一个 ✕（样子同首页的待办提示条）
-private struct NoticeCard: View {
+private struct NoticeCard: KLView {
     let symbol: String
     var tint: Color = Theme.claude
     let title: String?
@@ -87,7 +87,7 @@ private struct NoticeCard: View {
     let open: (() -> Void)?
     let close: (() -> Void)?
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 4) {
             if let open {
                 Button(action: open) { content(chevron: close == nil) }
@@ -131,11 +131,11 @@ private struct NoticeCard: View {
 
 /// 这个版本已经低于服务器要求的最低版本：整屏挡住，只能去 App Store 更新（盖在整个 App 上、启动页下面）。
 /// 样子同第一次打开的引导页：纯石墨底、纸鸢、白字、品牌橙的主按钮
-struct UpdateGate: View {
+struct UpdateGate: KLView {
     private let remote = RemoteConfig.shared
     @Environment(\.openURL) private var openURL
 
-    var body: some View {
+    var klBody: some View {
         if remote.updateRequired {
             ZStack {
                 GlassBackdrop()

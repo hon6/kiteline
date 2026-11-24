@@ -4,13 +4,13 @@ import KitelineKit
 /// 设置 → 通用 → 外观：浅色 / 深色、主题色、字体、字号（只改这台 Mac；手机、网页版各自在设置里改）。
 /// 主题、字体、字号的表在 KitelineKit/Views/Look.swift，和 iPhone App 共用
 /// 设置 → 通用 → 会话之间的消息：几样效果各自开关（存的键和 iPhone 一样，见 KitelineKit/Model/Peers.swift 的 PeerPrefs）
-struct PeerSection: View {
+struct PeerSection: KLView {
     @AppStorage("peerFlights") private var flights = true
     @AppStorage("peerLanes") private var lanes = true
     @AppStorage("peerCards") private var cards = true
     @AppStorage("peerRopes") private var ropes = true
 
-    var body: some View {
+    var klBody: some View {
         Section {
             Toggle("纸鸢传信：纸鸢从发信会话飞到收信会话", isOn: $flights)
             Toggle("风筝线：流动的虚线连起最近 15 分钟有往来的会话", isOn: $lanes)
@@ -25,21 +25,21 @@ struct PeerSection: View {
     }
 }
 
-struct LookSection: View {
+struct LookSection: KLView {
     @State private var appearance = AppAppearance.current
     @State private var look = Look.shared
     @State private var kite = KiteOverlay.enabled
 
-    var body: some View {
+    var klBody: some View {
         Section {
-            LabeledContent("外观") {
+            KLLabeledContent("外观") {
                 LookSegmented(selection: $appearance, options: [("system", L("跟随系统")), ("light", L("浅色")), ("dark", L("深色"))])
                     .frame(width: 260)
             }
-            .onChange(of: appearance) { _, value in AppAppearance.set(value) }
+            .klOnChange(of: appearance) { _, value in AppAppearance.set(value) }
             // 界面语言（同手机）：跟随系统（中文系统用中文，其余用英文）/ 简体中文 / English，选了马上换、不用重启
-            LabeledContent("语言") {
-                LookSegmented(selection: Bindable(Lang.shared).choice, options: Lang.Choice.allCases.map { ($0, Lang.title($0)) })
+            KLLabeledContent("语言") {
+                LookSegmented(selection: KLBindable(Lang.shared).choice, options: Lang.Choice.allCases.map { ($0, Lang.title($0)) })
                     .frame(width: 260)
             }
             // 配色方案（仿 VS Code 的颜色主题，11-20 用户）：一格一套，小图画着图标栏、侧栏、编辑区、状态栏的颜色；选了窗口深浅跟着它
@@ -58,7 +58,7 @@ struct LookSection: View {
             }
             .padding(.vertical, 2)
             Toggle("主窗口顶部的纸鸢", isOn: $kite)
-                .onChange(of: kite) { _, value in KiteOverlay.enabled = value }
+                .klOnChange(of: kite) { _, value in KiteOverlay.enabled = value }
             VStack(alignment: .leading, spacing: 10) {
                 Text("主题色")
                 LookThemePicker(selection: $look.themeID, diameter: 28, columns: 8)
@@ -83,7 +83,7 @@ struct LookSection: View {
                 }
             }
             .padding(.vertical, 2)
-            LabeledContent("字号") {
+            KLLabeledContent("字号") {
                 HStack(spacing: 10) {
                     Text("A").font(.system(size: 11))
                     Slider(value: Binding(get: { Double(LookSize.all.firstIndex { $0.id == look.sizeID } ?? 3) }, set: { value in
@@ -108,7 +108,7 @@ struct LookSection: View {
 }
 
 /// 字体列表的一行：名字和示例字用这种字体写；中文字体在下载时显示进度，失败了点一下重试
-private struct FontRow: View {
+private struct FontRow: KLView {
     let option: LookFont
     let selected: Bool
     let pick: () -> Void
@@ -125,7 +125,7 @@ private struct FontRow: View {
         return .system(size: 14 * look.textScale, design: design)
     }
 
-    var body: some View {
+    var klBody: some View {
         Button(action: pick) {
             HStack(spacing: 10) {
                 Text("\(option.name)　Aa 你好").font(sample)
@@ -147,12 +147,12 @@ private struct FontRow: View {
 }
 
 /// 一套配色方案的小样：左边一条图标栏、一条侧栏、右边编辑区、底下状态栏，下面写名字；选中的描强调色边
-private struct SchemeSwatch: View {
+private struct SchemeSwatch: KLView {
     let scheme: LookScheme?
     let selected: Bool
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             VStack(spacing: 5) {
                 Group {

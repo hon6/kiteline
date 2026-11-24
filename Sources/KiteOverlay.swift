@@ -89,7 +89,7 @@ final class KiteOverlay {
 
     /// 主题色变了（设置 → 通用 → 外观）重新上色：Look 是 @Observable，用一次观察一次
     private func trackTheme() {
-        withObservationTracking {
+        KLObservation.withTracking {
             _ = Look.shared.palette
         } onChange: { [weak self] in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.layout(); self?.trackTheme() } }
@@ -100,7 +100,7 @@ final class KiteOverlay {
     private func tint(for window: NSWindow) -> CGColor {
         var environment = EnvironmentValues()
         environment.colorScheme = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
-        return Color.tarsBrand.resolve(in: environment).cgColor
+        return Color.tarsBrand.klCGColor(in: environment)
     }
 
     func detach() {

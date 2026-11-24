@@ -137,7 +137,7 @@ public enum Agents {
 }
 
 /// agent 的小标志：单色，跟着 foregroundStyle 走；读屏读 agent 名字
-public struct AgentGlyph: View {
+public struct AgentGlyph: KLView {
     let info: AgentInfo
     let size: CGFloat
 
@@ -146,7 +146,7 @@ public struct AgentGlyph: View {
         self.size = size
     }
 
-    public var body: some View {
+    public var klBody: some View {
         Group {
             if info.layers.isEmpty {
                 Text(info.name.prefix(1).uppercased())

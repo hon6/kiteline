@@ -7,8 +7,8 @@ import SwiftUI
 
 // MARK: - 对话里的卡片
 
-struct PeerCard: View {
-    @Environment(AppModel.self) private var model
+struct PeerCard: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     let item: ChatItem
@@ -21,7 +21,7 @@ struct PeerCard: View {
     /// 信纸的底色：比普通气泡暖一点、浅一点，一眼看出是一封信
     static let paper = Theme.dynamic(light: 0xFBF8F2, dark: 0x262422)
 
-    var body: some View {
+    var klBody: some View {
         let other = model.peerTitle(otherKey, fallback: peer.name)
         let me = model.session(key)?.title ?? L("本会话")
         // 这封信（往来）的 id：发出的那张、收到的那张一样，分屏里两张都看得见时用绳子连起来
@@ -63,7 +63,7 @@ struct PeerCard: View {
                 status
                 Spacer(minLength: 0)
                 if canExpand {
-                    Button(expanded ? L("收起") : L("展开全文")) { withAnimation(.snappy) { expanded.toggle() } }
+                    Button(expanded ? L("收起") : L("展开全文")) { withAnimation(.klSnappy) { expanded.toggle() } }
                         .buttonStyle(.plain).foregroundStyle(Theme.claude)
                 }
             }
@@ -113,10 +113,10 @@ struct PeerCard: View {
 }
 
 /// 信上的邮戳：一圈虚线圆里一只小纸鸢，下面是寄出的时间，略微歪着盖
-private struct PeerPostmark: View {
+private struct PeerPostmark: KLView {
     let time: Double?
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             KiteMark(color: Theme.claude.opacity(0.8)).frame(width: 15, height: 15)
             if let time { Text(Format.clock(time)).font(.app(size: 8.5, weight: .medium).monospacedDigit()).foregroundStyle(Theme.claude.opacity(0.75)) }
@@ -158,7 +158,7 @@ final class PeerFrames {
 extension View {
     /// 会话列表的一行：报出头像的位置（窗口坐标）
     func peerAnchor(_ key: String, tab: Bool = false) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+        klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             if tab { PeerFrames.shared.tabs[key] = frame } else { PeerFrames.shared.rows[key] = frame }
         }
         .onDisappear {
@@ -174,8 +174,8 @@ extension View {
 /// 虚线朝收信的一方流动（不画箭头：10-27 觉得不和谐）；最近 15 分钟里有往来的才画，越久越淡。滚动交给 Core Animation（不逐帧重画，常驻也不费电）。
 /// order：列表里会话的先后（对方那行滚出屏幕时，知道它在上面还是下面）
 /// 不跟系统的「减弱动态效果」：虚线滚动、纸鸢传信要不要，由设置里的开关决定（10-24 起：Mac 开着减弱动态效果也要动）
-struct PeerStage: View {
-    @Environment(AppModel.self) private var model
+struct PeerStage: KLView {
+    @EnvModel private var model
     @AppStorage(PeerPrefs.flightsKey) private var flightsOn = true
     @AppStorage(PeerPrefs.lanesKey) private var lanesOn = true
     var order: [String]
@@ -185,7 +185,7 @@ struct PeerStage: View {
     /// 风筝线留多久（毫秒）
     static let laneWindow: Double = 15 * 60_000
 
-    var body: some View {
+    var klBody: some View {
         // 每半分钟看一次哪些线该淡掉、该收掉；纸鸢在飞、收信那行在闪时才逐帧画（几秒）
         TimelineView(.periodic(from: .now, by: 30)) { _ in
             let now = Date().timeIntervalSince1970 * 1000
@@ -499,11 +499,11 @@ final class PeerLanePainter {
     }
 }
 
-private struct PeerChip: View {
+private struct PeerChip: KLView {
     @Environment(\.openRoute) private var open
     let flight: PeerFlight
 
-    var body: some View {
+    var klBody: some View {
         Button {
             if let to = flight.to { open(.chat(to)) }
         } label: {
@@ -524,13 +524,13 @@ private struct PeerChip: View {
 // MARK: - 设置
 
 /// 设置里的三个开关（Mac 设置页放的是同样的三个，存的键一样）
-struct PeerSettingsSection: View {
+struct PeerSettingsSection: KLView {
     @AppStorage(PeerPrefs.flightsKey) private var flights = true
     @AppStorage(PeerPrefs.lanesKey) private var lanes = true
     @AppStorage(PeerPrefs.cardsKey) private var cards = true
     @AppStorage(PeerPrefs.ropesKey) private var ropes = true
 
-    var body: some View {
+    var klBody: some View {
         Section {
             Toggle("纸鸢传信", isOn: $flights)
             Toggle("风筝线", isOn: $lanes)
@@ -554,14 +554,14 @@ extension View {
 
 extension KitelineKit {
     /// 盖在 Mac 主窗口上的一层：纸鸢传信（会话开在分屏里时在标签之间飞）、侧栏左边的风筝线
-    public struct PeerStageView: View {
+    public struct PeerStageView: KLView {
         let order: [String]
         public init(order: [String]) { self.order = order }
 
-        public var body: some View {
+        public var klBody: some View {
             if let model = KitelineKit.model {
                 PeerStage(order: order, useTabs: true)
-                    .environment(model)
+                    .environment(\.appModelSlot, model)
                     .environment(\.openRoute, OpenRoute { route in
                         if case .chat(let key) = route { KitelineKit.openSession(key) }
                     })

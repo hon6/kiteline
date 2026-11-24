@@ -5,8 +5,8 @@ import SwiftUI
 
 // MARK: 项目详情
 
-struct ProjectDetailView: View {
-    @Environment(AppModel.self) private var model
+struct ProjectDetailView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let project: ProjectInfo
     @State private var past: [PastSession]?
@@ -20,7 +20,7 @@ struct ProjectDetailView: View {
     }
     private var key: String? { lives.first?.key ?? project.sessionKey }
 
-    var body: some View {
+    var klBody: some View {
         let p = project
         List {
             Section {
@@ -47,17 +47,17 @@ struct ProjectDetailView: View {
                 }
             } else if p.hasGit {
                 Section {
-                    LabeledContent("分支", value: (p.branch ?? L("(无分支)")) + (p.upstream.map { " → \($0)" } ?? L("（无远端）")))
-                    LabeledContent("未提交", value: p.changed + p.untracked > 0
+                    KLLabeledContent("分支", value: (p.branch ?? L("(无分支)")) + (p.upstream.map { " → \($0)" } ?? L("（无远端）")))
+                    KLLabeledContent("未提交", value: p.changed + p.untracked > 0
                                    ? [p.changed > 0 ? L("%lld 个改动", count: p.changed) : nil, p.untracked > 0 ? L("%lld 个新文件", count: p.untracked) : nil].compactMap { $0 }.joined(separator: " · ")
                                    : L("无，已全部提交"))
                     if p.upstream != nil {
-                        LabeledContent("与远端对比", value: p.ahead + p.behind > 0
+                        KLLabeledContent("与远端对比", value: p.ahead + p.behind > 0
                                        ? [p.ahead > 0 ? L("领先 %@ 个提交（未推送）", "\(p.ahead)") : nil, p.behind > 0 ? L("落后 %@ 个", "\(p.behind)") : nil].compactMap { $0 }.joined(separator: "，")
                                        : L("一致"))
                     }
                     if let commit = p.lastCommit {
-                        LabeledContent("最近提交") {
+                        KLLabeledContent("最近提交") {
                             Text(commit + (p.lastCommitAt.map { " · \(Bytes.relative($0))" } ?? "")).multilineTextAlignment(.trailing)
                         }
                     }
@@ -104,7 +104,7 @@ struct ProjectDetailView: View {
         .refreshable { await loadPast() }
         #if os(iOS)
         // iPhone / iPad：推进「新会话」页（项目已定，不再选）
-        .onChange(of: showNew) { _, on in
+        .klOnChange(of: showNew) { _, on in
             guard on else { return }
             showNew = false
             open(.newTask(NewTaskSeed(preset: p)))
@@ -123,13 +123,13 @@ struct ProjectDetailView: View {
 }
 
 /// 会话的一行（项目详情里用）
-struct SessionMini: View {
+struct SessionMini: KLView {
     let title: String
     let sub: String
     let time: Double?
     let live: Bool
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             Avatar(text: Format.initials(title), size: 36)
             VStack(alignment: .leading, spacing: 2) {
@@ -149,12 +149,12 @@ struct SessionMini: View {
 }
 
 /// 等宽的操作格子：图标在上、字在下（项目详情顶上）
-struct ActionTile: View {
+struct ActionTile: KLView {
     let title: String
     let symbol: String
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             VStack(spacing: 6) {
                 TarsIcon(symbol: symbol, size: 32)
@@ -169,12 +169,12 @@ struct ActionTile: View {
 }
 
 /// 一排操作按钮里的一个（浅色胶囊）
-struct ActionChip: View {
+struct ActionChip: KLView {
     let title: String
     let symbol: String
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             Label(title, systemImage: symbol).font(.ui(.footnote).weight(.medium))
                 .padding(.horizontal, 10).padding(.vertical, 7)
@@ -185,8 +185,8 @@ struct ActionChip: View {
 
 // MARK: 改动报告
 
-struct ChangesView: View {
-    @Environment(AppModel.self) private var model
+struct ChangesView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     @State private var report: GitReport?
@@ -206,7 +206,7 @@ struct ChangesView: View {
         }
     }
 
-    var body: some View {
+    var klBody: some View {
         List {
             if let r = report {
                 if r.repo == nil {
@@ -215,7 +215,7 @@ struct ChangesView: View {
                     Section {
                         HStack {
                             Text("⎇ \(r.branch ?? "(无分支)")" + (r.upstream.map { " → \($0)" } ?? "") + (r.ahead > 0 ? " · ↑\(r.ahead)" : "") + (r.behind > 0 ? " · ↓\(r.behind)" : ""))
-                                .font(.ui(.footnote).monospaced()).fontDesign(nil)
+                                .font(.ui(.footnote).monospaced()).klFontDesign(nil)
                             Spacer()
                             Text((r.repo.map { ($0 as NSString).lastPathComponent }) ?? "").font(.ui(.footnote)).foregroundStyle(.secondary)
                         }
@@ -248,7 +248,7 @@ struct ChangesView: View {
                             ForEach(r.commits, id: \.hash) { c in
                                 Button { open(.diff(key: key, path: nil, commit: c.hash, title: c.subject)) } label: {
                                     HStack(spacing: 8) {
-                                        Text(c.hash).font(.ui(.caption).monospaced()).fontDesign(nil).foregroundStyle(.secondary)
+                                        Text(c.hash).font(.ui(.caption).monospaced()).klFontDesign(nil).foregroundStyle(.secondary)
                                         Text(c.subject).foregroundStyle(.primary).lineLimit(1)
                                         Spacer()
                                         Text(Bytes.relative(c.ts)).font(.ui(.caption)).foregroundStyle(.tertiary)
@@ -288,7 +288,7 @@ struct ChangesView: View {
                 Text(mark).font(.ui(.caption2).weight(.bold)).foregroundStyle(color)
                     .frame(width: 20, height: 20).background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
                 (Text(dir).foregroundColor(.secondary) + Text(name).foregroundColor(.primary))
-                    .font(.ui(.footnote).monospaced()).fontDesign(nil).lineLimit(1).truncationMode(.head)
+                    .font(.ui(.footnote).monospaced()).klFontDesign(nil).lineLimit(1).truncationMode(.head)
                 Spacer()
                 if add + del > 0 {
                     (Text("+\(add)").foregroundColor(Theme.added) + Text(" −\(del)").foregroundColor(Theme.removed)).font(.ui(.caption).monospacedDigit())
@@ -305,8 +305,8 @@ struct ChangesView: View {
 
 // MARK: 对比（diff）
 
-struct GitDiffView: View {
-    @Environment(AppModel.self) private var model
+struct GitDiffView: KLView {
+    @EnvModel private var model
     let key: String
     let path: String?
     let commit: String?
@@ -314,7 +314,7 @@ struct GitDiffView: View {
     @State private var lines: [String]?
     @State private var error: String?
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             if let lines {
                 if lines.allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) {
@@ -324,7 +324,7 @@ struct GitDiffView: View {
                         ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                             let (fg, bg) = colors(line)
                             Text(line.isEmpty ? " " : line)
-                                .font(.app(size: 12, design: .monospaced)).fontDesign(nil)
+                                .font(.app(size: 12, design: .monospaced)).klFontDesign(nil)
                                 .foregroundStyle(fg)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 10)
@@ -374,19 +374,19 @@ struct GitDiffView: View {
 
 // MARK: 测试报告
 
-struct TestsView: View {
-    @Environment(AppModel.self) private var model
+struct TestsView: KLView {
+    @EnvModel private var model
     let key: String
     @State private var runs: [TestRunInfo]?
     @State private var error: String?
     @State private var opened: TestRunInfo?
 
-    var body: some View {
+    var klBody: some View {
         List {
             if let runs {
                 if runs.isEmpty {
                     // 空状态照系统样式（图标 + 标题 + 说明），不塞在卡片里
-                    ContentUnavailableView {
+                    KLUnavailableView {
                         Label("尚未运行测试", systemImage: "checkmark.seal")
                     } description: {
                         Text("Claude 在此会话中运行 pytest、jest、vitest、go test、cargo test、npm test 等命令后，结果会显示在这里。")
@@ -418,7 +418,7 @@ struct TestsView: View {
         .overlay { if runs == nil { if let error { LoadFailed(error: error) { await load() } } else { SkeletonPage(style: .list(5, lead: .icon)) } } }
         .animation(.skeletonFade, value: runs == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("测试报告")
-        .navigationDestination(item: $opened) { TestRunDetail(run: $0) }
+        .klNavigationDestination(item: $opened) { TestRunDetail(run: $0) }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -448,10 +448,10 @@ struct TestsView: View {
     }
 }
 
-struct TestRunDetail: View {
+struct TestRunDetail: KLView {
     let run: TestRunInfo
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 SectionLabel(text: L("命令"))
@@ -474,8 +474,8 @@ struct TestRunDetail: View {
 
 // MARK: 项目文件（只读）
 
-struct FilesView: View {
-    @Environment(AppModel.self) private var model
+struct FilesView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     @State var path: String
@@ -484,7 +484,7 @@ struct FilesView: View {
     @State private var query = ""
     @State private var found: FindReply?
 
-    var body: some View {
+    var klBody: some View {
         List {
             if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 if let found {
@@ -537,7 +537,7 @@ struct FilesView: View {
             }
         }
         // 去掉分组列表给第一组留的那一大截上边距：路径紧跟在搜索框下面
-        .contentMargins(.top, 4, for: .scrollContent)
+        .klContentMargins(.top, 4, for: .scrollContent)
         .overlay { if list == nil, query.isEmpty { if let error { LoadFailed(error: error) { await load() } } else { SkeletonPage(style: .files(10)) } } }
         .animation(.skeletonFade, value: list == nil)   // 读回来时骨架淡出、内容淡入
         .panelSearch($query, prompt: L("按文件名搜索（多个关键词以空格分隔）"))
@@ -552,7 +552,7 @@ struct FilesView: View {
             let q = query.trimmingCharacters(in: .whitespaces)
             found = nil
             guard !q.isEmpty else { return }
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(milliseconds: 400)
             guard !Task.isCancelled else { return }
             found = try? await model.api.get(FindReply.self, "/api/files/find", ["key": key, "q": q])
         }
@@ -570,13 +570,13 @@ struct FilesView: View {
     }
 }
 
-struct FileRowLabel: View {
+struct FileRowLabel: KLView {
     let name: String
     let sub: String
     let dir: Bool
     let git: String?
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             if dir {
                 TarsIcon(symbol: "folder.fill", size: 30)
@@ -599,8 +599,8 @@ struct FileRowLabel: View {
     }
 }
 
-struct FileView: View {
-    @Environment(AppModel.self) private var model
+struct FileView: KLView {
+    @EnvModel private var model
     @Environment(\.dismiss) private var dismiss
     let key: String
     let path: String
@@ -613,10 +613,10 @@ struct FileView: View {
     private var name: String { (path as NSString).lastPathComponent }
     private var ext: String { (name as NSString).pathExtension.lowercased() }
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                Text(path).font(.ui(.caption).monospaced()).fontDesign(nil).foregroundStyle(.secondary)
+                Text(path).font(.ui(.caption).monospaced()).klFontDesign(nil).foregroundStyle(.secondary)
                 if let c = content {
                     Text([Bytes.size(c.size), c.lines > 0 ? L("%@ 行", "\(c.lines)") : "", Bytes.relative(c.mtime)].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.ui(.caption)).foregroundStyle(.secondary)
@@ -693,13 +693,13 @@ struct FileView: View {
 }
 
 /// 带行号、简单着色的代码（关键字、字符串、注释、数字）
-struct CodeView: View {
+struct CodeView: KLView {
     let text: String
     let hashComments: Bool
 
     private static let keywords: Set<String> = Set(("const let var function return if else for while do switch case break continue new class extends import from export default async await try catch finally throw typeof instanceof in of null undefined true false this super static public private protected interface type enum implements def lambda None True False self elif pass raise with as yield func guard struct protocol extension init nil package go defer chan range fn mut impl pub use mod match where crate then end local fi esac done echo").split(separator: " ").map(String.init))
 
-    var body: some View {
+    var klBody: some View {
         let lines = text.components(separatedBy: "\n")
         let shown = Array(lines.prefix(3000))
         LazyVStack(alignment: .leading, spacing: 1) {
@@ -709,7 +709,7 @@ struct CodeView: View {
                     Text(highlight(line)).fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .font(.app(size: 12, design: .monospaced)).fontDesign(nil)
+                .font(.app(size: 12, design: .monospaced)).klFontDesign(nil)
             }
         }
         .padding(10)
@@ -756,8 +756,8 @@ struct TaskOrigin: Hashable {
     var cwd: String
 }
 
-struct NewTaskView: View {
-    @Environment(AppModel.self) private var model
+struct NewTaskView: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     var preset: ProjectInfo? = nil
     /// 从「定时任务」进来：只能建定时任务
@@ -779,8 +779,8 @@ struct NewTaskView: View {
     /// 「打开其他文件夹」：在哪台电脑上一层层点
     @State private var browsing: SourceInfo?
 
-    var body: some View {
-        NavigationStack {
+    var klBody: some View {
+        KLNavigationStack {
             Group {
                 if let picked {
                     ComposeTask(project: picked, scheduleOnly: scheduleOnly, change: { self.picked = nil }) { dismiss() }
@@ -788,13 +788,13 @@ struct NewTaskView: View {
                     projectList
                 }
             }
-            .navigationDestination(item: $browsing) { source in
+            .klNavigationDestination(item: $browsing) { source in
                 FolderPicker(sourceId: source.id, machine: source.name,
                              start: FolderStart.usual((projects ?? []).filter { $0.sourceId == source.id }.map(\.cwd))) { path in
                     adopt(path, source: source)
                 }
             }
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.panelToolbarButton() }.panelBare() }
+            .klBareToolbarItem(.cancellationAction) { Button("取消") { dismiss() }.panelToolbarButton() }
         }
         .task {
             if let preset { picked = preset }
@@ -805,7 +805,7 @@ struct NewTaskView: View {
                 adoptProjects(reply.projects, first: projects == nil)
             } catch { if projects == nil { self.error = error.localizedDescription } }
         }
-        .onChange(of: picked?.id) { _, _ in fill() }
+        .klOnChange(of: picked?.id) { _, _ in fill() }
         .onAppear { fill() }
         .paywallHost()
         #if os(macOS)
@@ -899,7 +899,7 @@ struct NewTaskView: View {
                     }
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                .listRowSeparator(.hidden)
+                .klListRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             }
             Section {
@@ -968,10 +968,10 @@ extension NewTaskView {
     }
 }
 
-struct ProjectPickRow: View {
+struct ProjectPickRow: KLView {
     let project: ProjectInfo
 
-    var body: some View {
+    var klBody: some View {
         let p = project
         HStack(spacing: 10) {
             Avatar(text: Format.initials(p.name), size: 38)
@@ -990,8 +990,8 @@ struct ProjectPickRow: View {
 }
 
 /// 写新任务：现在开始（可附图、可放进独立分支）或定时
-struct ComposeTask: View {
-    @Environment(AppModel.self) private var model
+struct ComposeTask: KLView {
+    @EnvModel private var model
     let project: ProjectInfo
     let scheduleOnly: Bool
     let change: () -> Void
@@ -1012,7 +1012,7 @@ struct ComposeTask: View {
     @State private var isolated = false
     @State private var canIsolate = false
     @State private var worktrees = 0
-    @State private var picks: [PhotosPickerItem] = []
+    @State private var picks: [KLPhotoItem] = []
     @State private var attachments: [ComposeAttachment] = []
     /// 剪贴板里有图：附图那一栏多一行「粘贴」
     @State private var clipboardImage = false
@@ -1042,7 +1042,7 @@ struct ComposeTask: View {
     /// 选了别家 agent（定时任务只做 Claude Code）
     private var otherAgent: LaunchableAgent? { scheduled ? nil : agents.first { $0.id == agent } }
 
-    var body: some View {
+    var klBody: some View {
         // 输入框在最后一节：键盘弹出后系统只保证光标那一行露出来，这里再把整个输入框连同「按住说话」滚到键盘上方
         ScrollViewReader { proxy in
             Form {
@@ -1093,7 +1093,7 @@ struct ComposeTask: View {
                     }
                 } else {
                     Section {
-                        PhotosPicker(selection: $picks, maxSelectionCount: 6, matching: .images) { Label("附图片", systemImage: "photo") }
+                        KLPhotosPicker(selection: $picks, maxSelectionCount: 6) { Label("附图片", systemImage: "photo") }
                         // 剪贴板里有图（刚截的屏、别处拷的图）：系统输入框只粘贴文字，另给一个「粘贴」（同发消息、加待办）
                         if clipboardImage, attachments.count < 6 {
                             HStack(spacing: 10) {
@@ -1112,7 +1112,7 @@ struct ComposeTask: View {
                                     }
                                 }
                                 .labelStyle(.titleAndIcon)
-                                .buttonBorderShape(.capsule)
+                                .klButtonBorderShape(.capsule)
                                 .controlSize(.small)
                             }
                         }
@@ -1179,7 +1179,7 @@ struct ComposeTask: View {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.inputEnd, anchor: .bottom) }
             }
             // 上面的选项多了一行、少了一行（切到定时、附了图、读到是 Git 仓库）：输入框跟着挪，仍贴着键盘
-            .onChange(of: optionsShape) { _, _ in
+            .klOnChange(of: optionsShape) { _, _ in
                 guard focused else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.inputEnd, anchor: .bottom) }
@@ -1226,7 +1226,7 @@ struct ComposeTask: View {
             }
             if !agents.contains(where: { $0.id == agent }) { agent = "claude-code" }
         }
-        .onChange(of: picks) { _, items in
+        .klOnChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             picks = []
             Task {
@@ -1248,7 +1248,7 @@ struct ComposeTask: View {
             inputField
             // 说出来转成文字接在后面（同对话页的「转文字」），改好再点开始
             HoldToDictate { said in text.wrappedValue = Dictation.append(said, to: text.wrappedValue) }
-                .listRowSeparator(.hidden)
+                .klListRowSeparator(.hidden)
                 .id(Self.inputEnd)
         } footer: {
             // 「开始」在右上角：发出去之后的进展写在输入框下面（键盘上方看得到）
@@ -1265,9 +1265,9 @@ struct ComposeTask: View {
     }
 
     private var inputField: some View {
-        TextField(otherAgent.map { L("请描述需要 %@ 在此项目中完成的任务", $0.name) } ?? L("请描述需要 Claude 在此项目中完成的任务"),
+        KLTextField(otherAgent.map { L("请描述需要 %@ 在此项目中完成的任务", $0.name) } ?? L("请描述需要 Claude 在此项目中完成的任务"),
                   text: text, axis: .vertical)
-            .lineLimit(5...12)
+            .klLineLimit(5...12)
             .focused($focused)
     }
 
@@ -1320,8 +1320,8 @@ struct ComposeTask: View {
 }
 
 /// 文件的改动记录：Git 里还没提交的改动，加上这次对话里 Claude 对它的每一次修改（新的在上）
-struct FileChanges: View {
-    @Environment(AppModel.self) private var model
+struct FileChanges: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     /// 相对会话目录的路径
@@ -1345,7 +1345,7 @@ struct FileChanges: View {
             .sorted { ChatItem.ordered($1, $0) }
     }
 
-    var body: some View {
+    var klBody: some View {
         let edits = Self.edits(model, key, path)
         VStack(alignment: .leading, spacing: 12) {
             gitSection
@@ -1407,7 +1407,7 @@ struct FileChanges: View {
         let stat = Tools.diffStat(item)
         return VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.snappy(duration: 0.2)) { if open { expanded.remove(item.id) } else { expanded.insert(item.id) } }
+                withAnimation(.klSnappy(duration: 0.2)) { if open { expanded.remove(item.id) } else { expanded.insert(item.id) } }
             } label: {
                 HStack(spacing: 8) {
                     Text(item.name == "Write" ? "写入整个文件" : (item.name == "MultiEdit" ? "多处修改" : "修改")).foregroundStyle(.primary)

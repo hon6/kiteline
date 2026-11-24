@@ -83,12 +83,12 @@ final class NewLayoutTour: ObservableObject {
 }
 
 /// 盖在新版界面上的引导：其余地方压暗，指到的那一处留亮框，旁边一张说明卡（上一步 / 下一步 / 跳过）
-struct TourOverlay: View {
+struct TourOverlay: KLView {
     let anchors: [String: Anchor<CGRect>]
     @ObservedObject private var tour = NewLayoutTour.shared
     @ObservedObject private var model = KitelineModel.shared
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geo in
             if let index = tour.index, !model.showLayoutSetup {
                 let steps = NewLayoutTour.steps
@@ -111,7 +111,7 @@ struct TourOverlay: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .position(cardCenter(rect, in: geo.size))
                     }
-                    .animation(.snappy(duration: 0.25), value: index)
+                    .animation(.klSnappy(duration: 0.25), value: index)
                 } else {
                     // 这一处现在看不到（比如没选项目时没有「打开项目」以外的东西）：跳过
                     Color.clear.onAppear { tour.next() }
@@ -120,7 +120,7 @@ struct TourOverlay: View {
         }
         .ignoresSafeArea()
         .onAppear { if model.newLayout { tour.startIfNeeded() } }
-        .onChange(of: model.newLayout) { _, on in if on { tour.startIfNeeded() } }
+        .klOnChange(of: model.newLayout) { _, on in if on { tour.startIfNeeded() } }
     }
 
     /// 卡片放在亮框右边；右边放不下放左边；上下夹在窗口里
@@ -160,11 +160,11 @@ struct TourOverlay: View {
 }
 
 /// 经典界面右上角「新版界面」按钮下面的小卡片：装了新版本后告诉一声（只出一次）
-struct NewLayoutAnnouncement: View {
+struct NewLayoutAnnouncement: KLView {
     @ObservedObject private var tour = NewLayoutTour.shared
     @ObservedObject private var model = KitelineModel.shared
 
-    var body: some View {
+    var klBody: some View {
         if tour.announcing, !model.newLayout {
             VStack(alignment: .leading, spacing: 8) {
                 Label(L("新版界面上线了"), systemImage: "sparkles").font(.app(size: 13, weight: .semibold))

@@ -20,7 +20,7 @@ public struct TarsTaskImage: Identifiable {
 /// Mac「新任务」面板的输入区（面板在 Mac App 里：Sources/NewTaskSheet.swift），排法同 Mac 的「加入待办」：
 /// 整段文字框（回车换行、⌘回车开始；⌘V 粘贴截图），底下一条「听写」和快捷键；图片一栏（拖进面板、⌘V、粘贴、选择文件、从「照片」），最多 6 张。
 /// 10-23 反馈新任务不能粘贴、选择图片：原来是系统的纯文本框，没有附图的地方
-public struct TarsTaskInput: View {
+public struct TarsTaskInput: KLView {
     @Binding var text: String
     @Binding var images: [TarsTaskImage]
     let placeholder: String
@@ -31,7 +31,7 @@ public struct TarsTaskInput: View {
     @State private var focusToken = 0
     @State private var choosingFiles = false
     @State private var choosingPhotos = false
-    @State private var picks: [PhotosPickerItem] = []
+    @State private var picks: [KLPhotoItem] = []
     @State private var dropTargeted = false
     /// 剪贴板里有图：图片一栏多一个「粘贴」（截图后不用再点进文字框按 ⌘V）
     @State private var clipboardImage = false
@@ -48,7 +48,7 @@ public struct TarsTaskInput: View {
         self.onSubmit = onSubmit
     }
 
-    public var body: some View {
+    public var klBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
                 MacInputField(text: $text, height: $inputHeight, placeholder: placeholder, enabled: enabled, focusToken: focusToken,
@@ -61,7 +61,7 @@ public struct TarsTaskInput: View {
                             text = Dictation.append(said, to: text)
                             focusToken += 1
                         }
-                        .environment(model)
+                        .environment(\.appModelSlot, model)
                         .disabled(!enabled)
                     }
                     Spacer(minLength: 8)
@@ -103,8 +103,8 @@ public struct TarsTaskInput: View {
             Task { add(await DroppedImages.load(providers)) }
             return true
         }
-        .photosPicker(isPresented: $choosingPhotos, selection: $picks, maxSelectionCount: max(1, Self.maxImages - images.count), matching: .images)
-        .onChange(of: picks) { _, items in
+        .klPhotosPicker(isPresented: $choosingPhotos, selection: $picks, maxSelectionCount: max(1, Self.maxImages - images.count))
+        .klOnChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             picks = []
             Task {
@@ -145,7 +145,7 @@ public struct TarsTaskInput: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 68, maximum: 68), spacing: 10, alignment: .leading)], alignment: .leading, spacing: 10) {
                     ForEach(images) { image in
-                        TaskImageTile(image: image) { withAnimation(.snappy) { images.removeAll { $0.id == image.id } } }
+                        TaskImageTile(image: image) { withAnimation(.klSnappy) { images.removeAll { $0.id == image.id } } }
                             .zoomableOnClick(images.map { .local($0.data) }, index: images.firstIndex { $0.id == image.id } ?? 0)
                     }
                     if images.count < Self.maxImages {
@@ -177,7 +177,7 @@ public struct TarsTaskInput: View {
         if list.count > Self.maxImages - images.count { KitelineKit.flash(L("最多附 %@ 张图片", "\(Self.maxImages)")) }
         for data in list where images.count < Self.maxImages {
             guard let prepared = ImagePrep.prepare(data) else { continue }
-            withAnimation(.snappy) {
+            withAnimation(.klSnappy) {
                 images.append(TarsTaskImage(name: "image-\(images.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
             }
         }
@@ -186,12 +186,12 @@ public struct TarsTaskInput: View {
 }
 
 /// 一张已附上的图：鼠标指上去右上角出现 ✕，右键也能移除
-private struct TaskImageTile: View {
+private struct TaskImageTile: KLView {
     let image: TarsTaskImage
     let remove: () -> Void
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         Group {
             if let picture = NSImage(data: image.preview) {
                 Image(nsImage: picture).resizable().scaledToFill()

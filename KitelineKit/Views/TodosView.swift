@@ -6,8 +6,8 @@ import AppKit
 
 /// 我的待办：Claude 说要你做的事（你点了「加入待办」的）、自己记的。按出自哪条消息分组，组头就是来源，点一下跳回那条消息；
 /// 做完点左边的圈打勾。最上面是 Claude 刚说的、还没决定加不加的提示
-struct TodosView: View {
-    @Environment(AppModel.self) private var model
+struct TodosView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     /// 嵌在 Mac 左边栏的「待办」页签里（11-20）：列表的第一行是左边栏顶上那几格（跟着一起滚），没有窗口工具栏和标题，
     /// 「新建待办」放在格子下面一行，空着的说明也排在列表里（不盖住那几格）
@@ -29,12 +29,15 @@ struct TodosView: View {
     @AppStorage("todosSorting") private var sorting = "status"
     @AppStorage("todosSource") private var sourceFilter = ""
 
-    var body: some View {
+    var klBody: some View {
         let state = model.todos
         // 我的待办（只有你能做的、你自己记的）和 agent 的待办（它自己会做，你只看进度）分开两块
         let pending = state.items.filter { !$0.done && !$0.agentTask }
         let agentAll = state.items.filter { !$0.done && $0.agentTask }
         let agentTasks = sortedAgentTasks(agentAll.filter { activeSource == nil || model.todoPlace($0).sourceId == activeSource?.id })
+        // 行的顺序和勾选状态（变了就动画挪动）；分开写，整个表达式太长类型推断会超时
+        let orderKey: [String] = state.items.map { "\($0.id)\($0.done)" } as [String]
+            + state.suggestions.map { $0.id } + agentTasks.map { $0.id }
         let done = state.items.filter(\.done).sorted { ($0.doneAt ?? 0) > ($1.doneAt ?? 0) }
         let isEmpty = state.items.isEmpty && state.suggestions.isEmpty
         List {
@@ -53,7 +56,7 @@ struct TodosView: View {
                         sectionTitle(L("需要你处理"))
                         Spacer(minLength: 8)
                         if state.suggestions.count > 1 {
-                            Button { withAnimation(.snappy) { model.dismissAllAsks() } } label: {
+                            Button { withAnimation(.klSnappy) { model.dismissAllAsks() } } label: {
                                 HStack(spacing: 5) {
                                     Image(systemName: "xmark").font(.ui(.caption).weight(.bold))
                                     Text("全部忽略").font(.ui(.subheadline).weight(.semibold))
@@ -105,7 +108,7 @@ struct TodosView: View {
                     if showDone { ForEach(done) { row($0, showSource: true) } }
                 } header: {
                     HStack {
-                        Button { withAnimation(.snappy) { showDone.toggle() } } label: {
+                        Button { withAnimation(.klSnappy) { showDone.toggle() } } label: {
                             HStack(spacing: 4) {
                                 Text("已完成 \(done.count)")
                                 Image(systemName: "chevron.right").font(.ui(.caption2).weight(.semibold))
@@ -126,18 +129,28 @@ struct TodosView: View {
         .overlay { if isEmpty, sidebarHeader == nil { if fetched { emptyState } else { SkeletonPage(style: .todos(6)) } } }
         .animation(.skeletonFade, value: fetched)   // 读回来时骨架淡出、内容淡入
         // 别处（电脑、网页）勾掉 / 加了一条，推过来时行平滑挪动，不是一下跳过去
-        .animation(.snappy, value: state.items.map { "\($0.id)\($0.done)" } + state.suggestions.map(\.id) + agentTasks.map(\.id))
+        .animation(.klSnappy, value: orderKey)
         .navigationTitle(sidebarHeader == nil ? L("待办") : "")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(macOS) && !KL_MODERN
+            // 兼容包：macOS 12 的工具栏里不能写 if（buildIf 要 13）：条目常在，按钮按条件出现
+            ToolbarItem(placement: .primaryAction) {
+                if sidebarHeader == nil {
+                    Button { editor = .new } label: { Image(systemName: "plus") }
+                        .help("新建待办")
+                }
+            }
+            #else
             if sidebarHeader == nil {
                 ToolbarItem(placement: .primaryAction) {
                     Button { editor = .new } label: { Image(systemName: "plus") }
                         .help("新建待办")
                 }
             }
+            #endif
         }
         .task { await model.refreshTodos(); fetched = true }
         .refreshable { await model.refreshTodos() }
@@ -145,7 +158,7 @@ struct TodosView: View {
         .sheetPanel(item: $editor) { TodoEditor(target: $0) }
         #if os(iOS)
         // iPhone / iPad：推进「新会话」页，待办内容填好、原项目能找到就直接定下
-        .onChange(of: creating?.id) { _, _ in
+        .klOnChange(of: creating?.id) { _, _ in
             guard let item = creating else { return }
             creating = nil
             open(.newTask(NewTaskSeed(initialText: item.task, match: model.todoOrigin(item))))
@@ -188,7 +201,7 @@ struct TodosView: View {
 
     private func row(_ item: TodoItem, showSource: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Button { withAnimation(.snappy) { model.setTodoDone(item, !item.done) } } label: {
+            Button { withAnimation(.klSnappy) { model.setTodoDone(item, !item.done) } } label: {
                 Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 21, weight: .light))
                     .foregroundStyle(item.done ? Theme.wechatGreen : Color.secondary)
@@ -477,7 +490,7 @@ struct TodosView: View {
         HStack(spacing: 8) {
             Text(L("%@上没有 agent 的待办", activeSource?.name ?? "")).foregroundStyle(.secondary)
             Spacer(minLength: 8)
-            Button(L("显示全部")) { withAnimation(.snappy) { sourceFilter = "" } }
+            Button(L("显示全部")) { withAnimation(.klSnappy) { sourceFilter = "" } }
                 .buttonStyle(.steady(.plain)).foregroundStyle(Theme.claude)
         }
         .font(.ui(.footnote))
@@ -487,16 +500,16 @@ struct TodosView: View {
     private func viewMenu(_ all: [TodoItem]) -> some View {
         Menu {
             // 系统单选菜单：选中的那项左边打对号
-            Picker("分组", selection: Binding(get: { grouping }, set: { value in withAnimation(.snappy) { groupingChoice = value } })) {
+            Picker("分组", selection: Binding(get: { grouping }, set: { value in withAnimation(.klSnappy) { groupingChoice = value } })) {
                 ForEach(Self.groupOptions, id: \.0) { option in Text(option.1).tag(option.0) }
             }
             .pickerStyle(.inline)
-            Picker("排序", selection: Binding(get: { sortKey }, set: { value in withAnimation(.snappy) { sorting = value } })) {
+            Picker("排序", selection: Binding(get: { sortKey }, set: { value in withAnimation(.klSnappy) { sorting = value } })) {
                 ForEach(Self.sortOptions, id: \.0) { option in Text(option.1).tag(option.0) }
             }
             .pickerStyle(.inline)
             if model.sources.count > 1 {
-                Picker("机器", selection: Binding(get: { activeSource?.id ?? "" }, set: { id in withAnimation(.snappy) { sourceFilter = id } })) {
+                Picker("机器", selection: Binding(get: { activeSource?.id ?? "" }, set: { id in withAnimation(.klSnappy) { sourceFilter = id } })) {
                     Text("全部机器").tag("")
                     ForEach(model.sources, id: \.id) { source in
                         Text("\(source.name)（\(all.filter { model.todoPlace($0).sourceId == source.id }.count)）").tag(source.id)
@@ -506,7 +519,7 @@ struct TodosView: View {
             }
             if !isDefaultView {
                 Section {
-                    Button { withAnimation(.snappy) { groupingChoice = "none"; sorting = "status"; sourceFilter = "" } } label: {
+                    Button { withAnimation(.klSnappy) { groupingChoice = "none"; sorting = "status"; sourceFilter = "" } } label: {
                         Label("恢复默认", systemImage: "arrow.counterclockwise")
                     }
                 }
@@ -515,7 +528,7 @@ struct TodosView: View {
             ViewMenuLabel(summary: viewSummary, isDefault: isDefaultView)
         }
         #if os(macOS)
-        .menuStyle(.button)
+        .klMenuButtonStyle()
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
@@ -630,7 +643,7 @@ struct TodosView: View {
                         .background(Theme.wechatGreen, in: Capsule())
                 }
                 .buttonStyle(.steady(.plain))
-                Button("现在处理") { withAnimation(.snappy) { model.handleNow(key: s.key, itemId: s.itemId, open: open) } }
+                Button("现在处理") { withAnimation(.klSnappy) { model.handleNow(key: s.key, itemId: s.itemId, open: open) } }
                     .buttonStyle(.steady(.plain))
                     .font(.ui(.subheadline).weight(.medium))
                     .foregroundStyle(Theme.claude)
@@ -641,7 +654,7 @@ struct TodosView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
+        KLUnavailableView {
             Label("暂无待办", systemImage: "checklist")
         } description: {
             Text("编程 agent 遇到只有你能做的事（如注册账号、申请密钥）时会提醒你，可以现在处理或加入待办；它自己以后要做的事会记在「agent 的待办」中。长按任意消息也可手动加入。")
@@ -652,7 +665,7 @@ struct TodosView: View {
 // MARK: - 一条待办的内容：截图 + 文字
 
 /// 一张截图：左边正方形缩略图、右边文字；两张以上：九宫格在上、文字在下。点图全屏看（左右滑切换）
-struct TodoContent: View {
+struct TodoContent: KLView {
     let item: TodoItem
     @State private var viewing: Int?
 
@@ -662,7 +675,7 @@ struct TodoContent: View {
     private let single: CGFloat = 64, gridWidth: CGFloat = 240
     #endif
 
-    var body: some View {
+    var klBody: some View {
         Group {
             if item.images.count == 1 {
                 HStack(alignment: .top, spacing: 10) {
@@ -722,7 +735,7 @@ private struct TodoViewerIndex: Identifiable {
 // MARK: - 记一条 / 修改
 
 /// 记一条待办、修改一条：多行文字（长句子整段看得见）、按住说话转文字接在后面、附截图（相册选，或刚截的图点一下附上）
-struct TodoEditor: View {
+struct TodoEditor: KLView {
     enum Target: Identifiable {
         case new
         /// 从某条消息加一条（长按「加入待办」、只认出一件事）：带着那条消息的来源
@@ -737,12 +750,12 @@ struct TodoEditor: View {
         }
     }
 
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let target: Target
     @State private var text: String
     @State private var shots: [TodoShot]
-    @State private var picks: [PhotosPickerItem] = []
+    @State private var picks: [KLPhotoItem] = []
     @State private var busy = false
     @State private var confirmDiscard = false
     @FocusState private var focused: Bool
@@ -814,19 +827,19 @@ struct TodoEditor: View {
 
     private func cancel() { if dirty { confirmDiscard = true } else { dismiss() } }
 
-    var body: some View {
+    var klBody: some View {
         #if os(macOS)
         macBody
         #else
-        NavigationStack {
+        KLNavigationStack {
             Form {
                 Section {
-                    TextField("待办内容", text: $text, axis: .vertical)
-                        .lineLimit(4...14)
+                    KLTextField("待办内容", text: $text, axis: .vertical)
+                        .klLineLimit(4...14)
                         .focused($focused)
                     // 说出来转成文字接在后面（同新任务、对话页的「转文字」）
                     HoldToDictate { said in text = Dictation.append(said, to: text) }
-                        .listRowSeparator(.hidden)
+                        .klListRowSeparator(.hidden)
                 } footer: { Group {
                         if let sourceText { Text(request != nil ? sourceText + "，加入后轻点即可跳转到原消息" : sourceText) }
                     }
@@ -836,7 +849,7 @@ struct TodoEditor: View {
                     if !shots.isEmpty { strip }
                     if let recent, shots.count < Self.maxShots { recentRow(recent) }
                     if clipboardImage, shots.count < Self.maxShots { pasteRow }
-                    PhotosPicker(selection: $picks, maxSelectionCount: max(1, Self.maxShots - shots.count), matching: .images) {
+                    KLPhotosPicker(selection: $picks, maxSelectionCount: max(1, Self.maxShots - shots.count)) {
                         Label(shots.isEmpty ? "附截图" : "继续添加", systemImage: "photo.on.rectangle")
                     }
                     .disabled(shots.count >= Self.maxShots)
@@ -863,7 +876,7 @@ struct TodoEditor: View {
                     }
                 }
             }
-            .onChange(of: picks) { _, items in
+            .klOnChange(of: picks) { _, items in
                 guard !items.isEmpty else { return }
                 picks = []
                 Task { await load(items) }
@@ -974,7 +987,7 @@ struct TodoEditor: View {
         .frame(minWidth: 440, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
         .confirmPanel(editing == nil ? L("放弃这条待办？") : L("放弃所做的修改？"), isPresented: $confirmDiscard,
                       confirm: editing == nil ? L("放弃") : L("放弃修改"), destructive: true, cancel: L("继续编辑")) { dismiss() }
-        .onChange(of: picks) { _, items in
+        .klOnChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             picks = []
             Task { await load(items) }
@@ -984,7 +997,7 @@ struct TodoEditor: View {
             Task { add(await DroppedImages.load(providers)) }
             return true
         }
-        .photosPicker(isPresented: $choosingPhotos, selection: $picks, maxSelectionCount: max(1, Self.maxShots - shots.count), matching: .images)
+        .klPhotosPicker(isPresented: $choosingPhotos, selection: $picks, maxSelectionCount: max(1, Self.maxShots - shots.count))
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             add(urls.compactMap { url in
@@ -1018,7 +1031,7 @@ struct TodoEditor: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 76, maximum: 76), spacing: 10, alignment: .leading)], alignment: .leading, spacing: 10) {
                     ForEach(shots) { shot in
-                        MacShotTile(remove: { withAnimation(.snappy) { shots.removeAll { $0.id == shot.id } } }) { shotThumb(shot) }
+                        MacShotTile(remove: { withAnimation(.klSnappy) { shots.removeAll { $0.id == shot.id } } }) { shotThumb(shot) }
                             .zoomableOnClick(shots.map(\.viewerImage), index: shots.firstIndex { $0.id == shot.id } ?? 0)
                     }
                     if shots.count < Self.maxShots {
@@ -1053,7 +1066,7 @@ struct TodoEditor: View {
                         .frame(width: 64, height: 64)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(alignment: .topTrailing) {
-                            Button { withAnimation(.snappy) { shots.removeAll { $0.id == shot.id } } } label: {
+                            Button { withAnimation(.klSnappy) { shots.removeAll { $0.id == shot.id } } } label: {
                                 Image(systemName: "xmark.circle.fill").font(.system(size: 18))
                                     .foregroundStyle(.white, .black.opacity(0.6))
                                     // 叉只有 18 点：点的范围放大到 30（叉画的位置不变）
@@ -1094,7 +1107,7 @@ struct TodoEditor: View {
                     model.flash(L("无法获取此截图"))
                     return
                 }
-                withAnimation(.snappy) {
+                withAnimation(.klSnappy) {
                     shots.append(.new(ComposeAttachment(name: "screenshot.jpg", data: prepared.jpeg, preview: prepared.preview)))
                     recent = nil
                 }
@@ -1130,7 +1143,7 @@ struct TodoEditor: View {
                 }
             }
             .labelStyle(.titleAndIcon)
-            .buttonBorderShape(.capsule)
+            .klButtonBorderShape(.capsule)
             .controlSize(.small)
         }
     }
@@ -1139,12 +1152,12 @@ struct TodoEditor: View {
     private func add(_ list: [Data]) {
         for data in list where shots.count < Self.maxShots {
             guard let prepared = ImagePrep.prepare(data) else { continue }
-            withAnimation(.snappy) { shots.append(.new(ComposeAttachment(name: "image.jpg", data: prepared.jpeg, preview: prepared.preview))) }
+            withAnimation(.klSnappy) { shots.append(.new(ComposeAttachment(name: "image.jpg", data: prepared.jpeg, preview: prepared.preview))) }
         }
     }
 
     /// 和发消息一样：长边缩到 2048、转 JPEG
-    private func load(_ items: [PhotosPickerItem]) async {
+    private func load(_ items: [KLPhotoItem]) async {
         for item in items where shots.count < Self.maxShots {
             guard let raw = try? await item.loadTransferable(type: Data.self), let prepared = ImagePrep.prepare(raw) else { continue }
             shots.append(.new(ComposeAttachment(name: "image.jpg", data: prepared.jpeg, preview: prepared.preview)))
@@ -1180,12 +1193,12 @@ extension TodoShot {
     }
 }
 
-private struct MacShotTile<Content: View>: View {
+private struct MacShotTile<Content: View>: KLView {
     let remove: () -> Void
     @ViewBuilder let content: Content
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         content
             .frame(width: 76, height: 76)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -1233,8 +1246,8 @@ struct AddTodosRequest: Identifiable {
 }
 
 /// 「加入待办」：列出认出来的几件事，默认全选，可以去掉几条、改改字，再一起加进来
-struct AddTodosSheet: View {
-    @Environment(AppModel.self) private var model
+struct AddTodosSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let request: AddTodosRequest
     @State private var texts: [String]
@@ -1248,7 +1261,7 @@ struct AddTodosSheet: View {
         _picked = State(initialValue: Set(request.candidates.indices))
     }
 
-    var body: some View {
+    var klBody: some View {
         // 只有一件事（长按整条消息加、只认出一件）：用记一条的面板，多行、按住说话、附截图
         if request.candidates.count == 1 {
             TodoEditor(target: .fromMessage(request))
@@ -1281,7 +1294,7 @@ struct AddTodosSheet: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(picked.contains(i) ? "不加入这一项" : "加入这一项")
-                            TextField("待办内容", text: $texts[i], axis: .vertical)
+                            KLTextField("待办内容", text: $texts[i], axis: .vertical)
                                 .font(.ui(.body))
                                 .textFieldStyle(.plain)
                                 .focused($focusedRow, equals: i)
@@ -1348,8 +1361,8 @@ struct AddTodosSheet: View {
 
 /// Claude 这条回复里有要你做的事：气泡下面一张小卡片「有 N 件事需要你来做 · 加入待办」；
 /// 加过了变成一行「已加入待办 · N 项」（点开待办），说过不用的只留一个小小的「加入待办」
-struct AskPrompt: View {
-    @Environment(AppModel.self) private var model
+struct AskPrompt: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     /// 只读的对话（子 agent 的完整记录）里不问
     @Environment(\.chatReadOnly) private var readOnly
@@ -1358,7 +1371,7 @@ struct AskPrompt: View {
     let asks: [String]
     @State private var adding: AddTodosRequest?
 
-    var body: some View {
+    var klBody: some View {
         if !readOnly {
             let added = model.todos.added(key: key, itemId: item.id)
             let handled = model.todos.isHandled(key: key, itemId: item.id)
@@ -1391,7 +1404,7 @@ struct AskPrompt: View {
                 }
                 .lineLimit(1)
                 Spacer(minLength: 6)
-                Button("忽略") { withAnimation(.snappy) { model.dismissAsks(key: key, itemId: item.id) } }
+                Button("忽略") { withAnimation(.klSnappy) { model.dismissAsks(key: key, itemId: item.id) } }
                     .buttonStyle(.steady(.plain))
                     .font(.ui(.subheadline))
                     .foregroundStyle(.secondary)
@@ -1422,11 +1435,11 @@ struct AskPrompt: View {
 // MARK: - 首页入口
 
 /// 首页右上角：待办。角标（红色，同通知铃铛）：有 Claude 刚说的、还没决定加不加的就是那几件，没有就是还有几件没做完
-struct TodoBarButton: View {
-    @Environment(AppModel.self) private var model
+struct TodoBarButton: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
 
-    var body: some View {
+    var klBody: some View {
         let fresh = model.todos.suggestions.reduce(0) { $0 + $1.asks.count }
         let pending = model.todos.openCount
         let count = fresh > 0 ? fresh : pending
@@ -1449,11 +1462,11 @@ struct TodoBarButton: View {
 }
 
 /// 首页卡片下面一条：Claude 说有几件事要你做，还没加进待办
-struct TodoSuggestStrip: View {
-    @Environment(AppModel.self) private var model
+struct TodoSuggestStrip: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
 
-    var body: some View {
+    var klBody: some View {
         let list = model.todos.suggestions
         if !list.isEmpty {
             let count = list.reduce(0) { $0 + $1.asks.count }

@@ -146,13 +146,13 @@ enum FaceSpec: Hashable {
 
 /// 助手的头像：用户设过就按设的画（标志 / 表情 / 昵称首字 / 上传的图），没设过是 agent 自己的样子（AgentAvatar）。
 /// corner 是圆角占边长的比例（对话里同 avatarCorner，列表里的头像稍圆）
-struct AgentFaceView: View {
+struct AgentFaceView: KLView {
     let agent: String
     var face: AgentFace?
     var size: CGFloat = 40
     var corner: CGFloat = avatarCorner
 
-    var body: some View {
+    var klBody: some View {
         switch FaceSpec(face?.avatar ?? "") {
         case .standard:
             if agent == Agents.defaultID {
@@ -395,8 +395,8 @@ enum DetailText {
 /// 对话里点助手头像弹出的 Agent 详情：头像和昵称放最上面、能改（轻点头像换，名字直接改），
 /// 下面只读：哪家 agent、什么版本、跑在 VS Code 还是终端、插件、会话、所在设备（IP、系统、CPU、内存）。
 /// 头像昵称存在电脑上，手机、iPad、Mac 都一样；可以只给这个会话用，也可以给这家 agent 的所有会话用
-struct AgentInfoSheet: View {
-    @Environment(AppModel.self) private var model
+struct AgentInfoSheet: KLView {
+    @EnvModel private var model
     let key: String
     /// 打开时就知道的 agent（详情还没拉回来时先按它画头像）
     var agent: String
@@ -415,7 +415,7 @@ struct AgentInfoSheet: View {
     /// 现在用的头像、昵称（会话自己的 → 这家 agent 默认的）
     private var face: AgentFace? { model.faces.face(key: key, agent: agentId) }
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("Agent 详情")) {
             header
             if picking {
@@ -455,7 +455,7 @@ struct AgentInfoSheet: View {
         .onAppear { if ProcessInfo.processInfo.environment["TARS_DEMO_PICK"] == "1" { picking = true } }   // 截图版看头像选择
         #endif
         .onDisappear { if name != savedName { Task { await save(avatar: nil, image: nil) } } }
-        .animation(.snappy, value: picking)
+        .animation(.klSnappy, value: picking)
     }
 
     private var shownName: String {
@@ -467,7 +467,7 @@ struct AgentInfoSheet: View {
 
     private var header: some View {
         VStack(spacing: 10) {
-            Button { withAnimation(.snappy) { picking.toggle() } } label: {
+            Button { withAnimation(.klSnappy) { picking.toggle() } } label: {
                 AgentFaceView(agent: agentId, face: AgentFace(name: name, avatar: face?.avatar ?? ""), size: 76)
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: picking ? "chevron.up" : "pencil")
@@ -487,7 +487,7 @@ struct AgentInfoSheet: View {
                 .focused($naming)
                 .submitLabel(.done)
                 .onSubmit { Task { await save(avatar: nil, image: nil) } }
-                .onChange(of: naming) { _, on in if !on, name != savedName { Task { await save(avatar: nil, image: nil) } } }
+                .klOnChange(of: naming) { _, on in if !on, name != savedName { Task { await save(avatar: nil, image: nil) } } }
                 .frame(maxWidth: 280)
                 .padding(.vertical, 6)
                 .background(Color.primary.opacity(naming ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -621,16 +621,16 @@ struct AgentInfoSheet: View {
 }
 
 /// 一行能拷贝的信息（进程号、会话 ID、目录、IP）：长按 / 右键拷贝，Mac 上还能直接选中文字
-struct CopyRow: View {
+struct CopyRow: KLView {
     let title: String
     let value: String
     var mono = false
 
-    var body: some View {
+    var klBody: some View {
         SheetInfoRow(title: title) {
             Text(value)
                 .font(mono ? .ui(.footnote).monospaced() : nil)
-                .fontDesign(nil)
+                .klFontDesign(nil)
                 .textSelection(.enabled)
         }
         .contextMenu { Button(Clipboard.verb) { Clipboard.copy(value) } }
@@ -640,7 +640,7 @@ struct CopyRow: View {
 // MARK: 选头像
 
 /// 头像选择：上传照片、agent 自己的标志、纸鸢、昵称首字、表情，下面一排底色。点了马上存
-struct FacePicker: View {
+struct FacePicker: KLView {
     let agent: String
     let current: FaceSpec
     let name: String
@@ -648,7 +648,7 @@ struct FacePicker: View {
     let choose: (FaceSpec?, Data?) -> Void
     @State private var tone: FaceTone = .ink
     #if os(iOS)
-    @State private var photo: PhotosPickerItem?
+    @State private var photo: KLPhotoItem?
     #else
     @State private var importing = false
     #endif
@@ -656,7 +656,7 @@ struct FacePicker: View {
     private static let emojis = ["🦊", "🐱", "🐼", "🐨", "🦉", "🐙", "🐳", "🐧", "🦁", "🐯", "🐶", "🐰",
                                  "🐢", "🐝", "🦄", "🐲", "🤖", "👾", "🚀", "⚡️", "🌙", "🔥", "🍀", "☕️"]
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 6), spacing: 12) {
                 upload
@@ -693,7 +693,7 @@ struct FacePicker: View {
         .padding(.bottom, 14)
         .onAppear { tone = current.tone ?? (agent == Agents.defaultID ? .brand : .ink) }
         #if os(iOS)
-        .onChange(of: photo) { _, item in
+        .klOnChange(of: photo) { _, item in
             guard let item else { return }
             photo = nil
             Task {
@@ -719,7 +719,7 @@ struct FacePicker: View {
             Text("上传").font(.ui(.caption2)).foregroundStyle(.secondary).lineLimit(1)
         }
         #if os(iOS)
-        PhotosPicker(selection: $photo, matching: .images) { label }
+        KLPhotosPicker(selection: $photo) { label }
             .buttonStyle(.plain)
             .accessibilityLabel(L("从照片中选择"))
         #else
@@ -747,15 +747,15 @@ struct FacePicker: View {
 
 /// 某台机器（本机 / Remote-SSH 远端）的详情：网络、系统、硬件、装了哪些 agent、Kiteline 组件。
 /// 设置里的机器列表、列表组头的 CPU / 内存、Mac 设置 → 来源都能点开
-struct MachineInfoSheet: View {
-    @Environment(AppModel.self) private var model
+struct MachineInfoSheet: KLView {
+    @EnvModel private var model
     let sourceId: String
     /// 拉回来之前标题先写的名字
     var name: String = ""
     @State private var detail: MachineDetail?
     @State private var error: String?
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: detail?.name ?? (name.isEmpty ? L("设备详情") : name)) {
             if let detail {
                 MachineHeader(detail: detail)
@@ -782,8 +782,8 @@ struct MachineInfoSheet: View {
 
 /// 设备别名：记在设备所在的那台电脑上（/api/sources/rename），手机、电脑、小程序看到的都一样。
 /// 设备所在的电脑太旧（没有这个接口）时不给改，提示先更新
-private struct SourceAliasRow: View {
-    @Environment(AppModel.self) private var model
+private struct SourceAliasRow: KLView {
+    @EnvModel private var model
     let sourceId: String
     let fallback: String
     @State private var editing = false
@@ -792,7 +792,7 @@ private struct SourceAliasRow: View {
 
     private var current: String { model.sources.first { $0.id == sourceId }?.name ?? fallback }
 
-    var body: some View {
+    var klBody: some View {
         Button {
             guard model.canRename(sourceId) else {
                 model.flash(L("这台电脑上的 Kiteline 版本较旧，请先更新后再设置别名"))
@@ -833,10 +833,10 @@ private struct SourceAliasRow: View {
     }
 }
 
-private struct MachineHeader: View {
+private struct MachineHeader: KLView {
     let detail: MachineDetail
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 14) {
             TarsIcon(symbol: detail.kind == "ssh" ? "server.rack" : "desktopcomputer", size: 52)
             VStack(alignment: .leading, spacing: 4) {
@@ -857,8 +857,8 @@ private struct MachineHeader: View {
 }
 
 /// 设备详情的几块（Agent 详情里也用：compact 时只放一块「设备」，是网络、系统、硬件里最常看的几行）
-struct MachineSections: View {
-    @Environment(AppModel.self) private var model
+struct MachineSections: KLView {
+    @EnvModel private var model
     let detail: MachineDetail
     var compact = false
 
@@ -870,7 +870,7 @@ struct MachineSections: View {
         var mono = false
     }
 
-    var body: some View {
+    var klBody: some View {
         let info = detail.info
         if compact {
             SheetSection(title: L("设备")) {
@@ -1001,31 +1001,31 @@ struct MachineSections: View {
 // MARK: Mac 主窗口用（Sources/）
 
 /// 设备详情面板（设置 → 来源、侧栏组头点开的）
-public struct TarsMachineInfoView: View {
+public struct TarsMachineInfoView: KLView {
     let sourceId: String
     public init(sourceId: String) { self.sourceId = sourceId }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            MachineInfoSheet(sourceId: sourceId).environment(model).lookRoot()
+            MachineInfoSheet(sourceId: sourceId).environment(\.appModelSlot, model).lookRoot()
         }
     }
 }
 
 /// Agent 详情面板（侧栏右键「Agent 详情…」）
-public struct TarsAgentInfoView: View {
+public struct TarsAgentInfoView: KLView {
     let key: String
     public init(key: String) { self.key = key }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            AgentInfoSheet(key: key, agent: model.session(key)?.agent ?? Agents.defaultID).environment(model).lookRoot()
+            AgentInfoSheet(key: key, agent: model.session(key)?.agent ?? Agents.defaultID).environment(\.appModelSlot, model).lookRoot()
         }
     }
 }
 
 /// 侧栏会话卡片的头像：这个会话自己设了头像就画它，没设画 fallback（标题首字）
-public struct TarsSessionFace<Fallback: View>: View {
+public struct TarsSessionFace<Fallback: View>: KLView {
     let key: String
     let size: CGFloat
     let corner: CGFloat
@@ -1038,9 +1038,9 @@ public struct TarsSessionFace<Fallback: View>: View {
         self.fallback = fallback()
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model, let face = model.faces.sessions[key], !face.avatar.isEmpty {
-            AgentFaceView(agent: model.session(key)?.agent ?? Agents.defaultID, face: face, size: size, corner: corner).environment(model)
+            AgentFaceView(agent: model.session(key)?.agent ?? Agents.defaultID, face: face, size: size, corner: corner).environment(\.appModelSlot, model)
         } else {
             fallback
         }

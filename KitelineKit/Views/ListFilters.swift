@@ -4,7 +4,7 @@ import SwiftUI
 
 /// 一排筛选胶囊：放不下时横着划，划的时候左边贴到屏幕边（外面留的边距是 bleed）；
 /// 右边还有别的东西（比如「显示方式」）时 trailingBleed 传 0，划到它跟前就收住
-public struct FilterBar<Content: View>: View {
+public struct FilterBar<Content: View>: KLView {
     let bleed: CGFloat
     let trailingBleed: CGFloat
     let content: Content
@@ -15,7 +15,7 @@ public struct FilterBar<Content: View>: View {
         self.content = content()
     }
 
-    public var body: some View {
+    public var klBody: some View {
         let row = HStack(spacing: 6) { content }
             .padding(.leading, bleed).padding(.trailing, trailingBleed)
         #if os(macOS)
@@ -67,6 +67,7 @@ private struct HorizontalStrip<Content: View>: NSViewRepresentable {
     }
 
     /// 宽度跟外面给的走（胶囊多了也不往上报总宽），高度是一排胶囊的高
+    @available(macOS 13, *)
     func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: StripScrollView, context: Context) -> CGSize? {
         guard let host = scroll.documentView as? NSHostingView<Content> else { return nil }
         let fit = host.fittingSize
@@ -108,7 +109,7 @@ final class StripScrollView: NSScrollView {
 #endif
 
 /// 一个筛选胶囊：状态圆点（或小图标，如「标记」的星星）+ 名字 + 个数；选中的填品牌色，个数是 0 的淡一点
-public struct FilterChip: View {
+public struct FilterChip: KLView {
     let title: String
     let count: Int
     let dot: Color?
@@ -127,7 +128,7 @@ public struct FilterChip: View {
         self.action = action
     }
 
-    public var body: some View {
+    public var klBody: some View {
         #if os(macOS)
         // Mac：按钮样式规范（KiteButtonStyle）：选中 = 主题色亮起，其余灰底描边
         Button(action: action) {
@@ -175,7 +176,7 @@ public struct FilterChip: View {
 }
 
 /// 筛着某台机器时排在最前面的「本机 ✕」：点一下就不筛了
-public struct SourceTokenChip: View {
+public struct SourceTokenChip: KLView {
     let name: String
     let clear: () -> Void
 
@@ -184,7 +185,7 @@ public struct SourceTokenChip: View {
         self.clear = clear
     }
 
-    public var body: some View {
+    public var klBody: some View {
         #if os(macOS)
         Button(action: clear) {
             HStack(spacing: KiteMetric.gap) {
@@ -216,7 +217,7 @@ public struct SourceTokenChip: View {
 
 /// 一排「只看某一个」的胶囊（设备、项目）：最前面「全部设备」，后面每项带个数，直接点选，再点一下选中的就回到全部。
 /// 选中的淡品牌色底加细边（和上面状态筛选的实心胶囊区分开）；放不下时横着划
-public struct ScopeBar: View {
+public struct ScopeBar: KLView {
     public struct Option: Identifiable, Hashable {
         public let id: String
         public let title: String
@@ -244,7 +245,7 @@ public struct ScopeBar: View {
         self._selection = selection
     }
 
-    public var body: some View {
+    public var klBody: some View {
         FilterBar(bleed: bleed) {
             ScopeChip(title: allTitle, symbol: symbol, selected: selection.isEmpty) { pick("") }
             ForEach(options) { option in
@@ -257,12 +258,12 @@ public struct ScopeBar: View {
 
     private func pick(_ id: String) {
         Haptics.tap()
-        withAnimation(.snappy) { selection = id }
+        withAnimation(.klSnappy) { selection = id }
     }
 }
 
 /// ScopeBar 里的一个胶囊：小图标（「全部」那个才有）+ 名字 + 个数
-public struct ScopeChip: View {
+public struct ScopeChip: KLView {
     let title: String
     var count: Int? = nil
     var symbol: String? = nil
@@ -277,7 +278,7 @@ public struct ScopeChip: View {
         self.action = action
     }
 
-    public var body: some View {
+    public var klBody: some View {
         #if os(macOS)
         // Mac：同 FilterChip，按钮样式规范（KiteButtonStyle）：选中 = 主题色亮起
         Button(action: action) {
@@ -322,10 +323,10 @@ public struct ScopeChip: View {
 
 /// 「显示方式」菜单的按钮：上面写着现在怎么分、怎么排；改过默认的用品牌色
 /// 「建群」按钮：会话标题行里「显示方式」左边，样子同它（默认态）
-public struct NewGroupLabel: View {
+public struct NewGroupLabel: KLView {
     public init() {}
 
-    public var body: some View {
+    public var klBody: some View {
         HStack(spacing: 5) {
             Image(systemName: "person.2.badge.plus").font(.app(size: 12, weight: .semibold))
             Text(L("建群")).lineLimit(1)
@@ -346,12 +347,12 @@ public struct NewGroupLabel: View {
 }
 
 /// 「+ 新建」：标签组页签那一行右边，样子同「建群」
-public struct TabPlusLabel: View {
+public struct TabPlusLabel: KLView {
     let title: String
 
     public init(title: String) { self.title = title }
 
-    public var body: some View {
+    public var klBody: some View {
         HStack(spacing: 5) {
             Image(systemName: "plus").font(.app(size: 12, weight: .semibold))
             Text(title).lineLimit(1)
@@ -370,7 +371,7 @@ public struct TabPlusLabel: View {
     }
 }
 
-public struct ViewMenuLabel: View {
+public struct ViewMenuLabel: KLView {
     let summary: String
     let isDefault: Bool
     /// 窄栏里只画图标（写着的分组、排序放到悬停说明里）：字被挤成一个竖线（11-21 自测）
@@ -382,7 +383,7 @@ public struct ViewMenuLabel: View {
         self.compact = compact
     }
 
-    public var body: some View {
+    public var klBody: some View {
         HStack(spacing: 5) {
             Image(systemName: "line.3.horizontal.decrease").font(.app(size: 12, weight: .semibold))
             if !compact { Text(summary).lineLimit(1) }
@@ -402,8 +403,8 @@ public struct ViewMenuLabel: View {
 }
 
 /// 标记了的会话标题后的主题色星星：只是标识，点到它同点卡片（取消标记在右滑里，免得点开会话时误触）
-struct MarkStar: View {
-    var body: some View {
+struct MarkStar: KLView {
+    var klBody: some View {
         Image(systemName: "star.fill")
             .font(.app(size: 12, weight: .semibold))
             .foregroundStyle(Theme.claude)

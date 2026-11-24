@@ -118,14 +118,15 @@ final class AppState {
         return true
     }
 
-    /// pid 活着、且可执行文件名和本进程一样（TARS）。读不到路径（别的用户的进程等）一律不算
+    /// pid 活着、且可执行文件名是 Kiteline（11-24 前的版本叫 TARS，升级那一刻新旧两个名字都可能在跑，都算）。
+    /// 读不到路径（别的用户的进程等）一律不算
     private static func isKitelineProcess(_ pid: Int32) -> Bool {
         guard kill(pid, 0) == 0 || errno == EPERM else { return false }
         var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return false }
         let other = URL(fileURLWithPath: String(cString: buf)).lastPathComponent
         let mine = Bundle.main.executableURL?.lastPathComponent ?? ProcessInfo.processInfo.processName
-        return other == mine
+        return other == mine || ["Kiteline", "TARS"].contains(other)
     }
 
     func shutdown() {
@@ -648,6 +649,14 @@ extension AppState: SourceConnectionDelegate {
             TermRelay.shared.run(event.raw, from: source)
         case "term_run_cancel":
             TermRelay.shared.cancel(event.raw, from: source)
+        case "live":
+            // 正在生成的文字（逐字显示，见 watcher 的 LiveTap）：原样转给手机和主窗口，键换成会话 key
+            guard let sessionId = event.raw["sessionId"] as? String else { return }
+            var payload = event.raw
+            payload.removeValue(forKey: "event")
+            payload.removeValue(forKey: "sessionId")
+            payload["key"] = "\(source.config.id)#\(sessionId)"
+            DispatchQueue.main.async { self.mobile.publish(event: "live", payload: payload) }
         case "entries", "reset":
             // 对话增量直接转给手机，键与会话列表里的 key 一致
             guard let sessionId = event.raw["sessionId"] as? String else { return }

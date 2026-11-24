@@ -3,25 +3,26 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// 资源管理器：项目文件树（点文件夹展开，同 VS Code）+ 文件操作（新建、改名、复制剪切粘贴、创建副本、删除到废纸篓、上传、拷贝路径、在对话中引用）
-@MainActor @Observable
-final class ExplorerStore {
+@MainActor 
+final class ExplorerStore: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     let key: String
-    @ObservationIgnored weak var model: AppModel?
+    weak var model: AppModel?
     /// 目录 → 里面的东西（展开过才有）
-    var listings: [String: [CodeEntry]] = [:]
-    var expanded: Set<String> = [""]
-    var loading: Set<String> = []
-    var errors: [String: String] = [:]
-    var rootName = ""
+    @Tracked var listings: [String: [CodeEntry]] = [:]
+    @Tracked var expanded: Set<String> = [""]
+    @Tracked var loading: Set<String> = []
+    @Tracked var errors: [String: String] = [:]
+    @Tracked var rootName = ""
     /// 复制 / 剪切下来、等着粘贴的
-    var clipboard: (paths: [String], cut: Bool)?
+    @Tracked var clipboard: (paths: [String], cut: Bool)?
     /// 搜索文件名
-    var query = ""
-    var found: [String]?
+    @Tracked var query = ""
+    @Tracked var found: [String]?
     /// 文件操作后告诉 IDE（改了名的标签跟着改、删了的关掉）
-    @ObservationIgnored var onRenamed: ((String, String) -> Void)?
-    @ObservationIgnored var onDeleted: (([String]) -> Void)?
-    @ObservationIgnored var onChanged: (() -> Void)?
+    var onRenamed: ((String, String) -> Void)?
+    var onDeleted: (([String]) -> Void)?
+    var onChanged: (() -> Void)?
 
     init(key: String, model: AppModel) {
         self.key = key
@@ -64,7 +65,7 @@ final class ExplorerStore {
                 guard !retried.contains(folder) else { return }
                 retried.insert(folder)
                 Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .milliseconds(300))
+                    try? await Task.sleep(milliseconds: 300)
                     await self?.load(folder)
                 }
                 return
@@ -72,7 +73,7 @@ final class ExplorerStore {
             errors[folder] = error.localizedDescription
         }
     }
-    private var retried: Set<String> = []
+    @Tracked private var retried: Set<String> = []
 
     func toggle(_ folder: String) {
         if expanded.contains(folder) {
@@ -174,13 +175,13 @@ final class ExplorerStore {
 }
 
 /// 文件树
-struct ExplorerTree: View {
-    @Environment(AppModel.self) private var model
+struct ExplorerTree: KLView {
+    @EnvModel private var model
     #if os(macOS)
     /// 在 Mac 新版界面的侧栏里（边距照 SideMetric）
     @Environment(\.sideColumn) private var sideColumn
     #endif
-    @Bindable var explorer: ExplorerStore
+    @KLBindable var explorer: ExplorerStore
     /// 当前打开的文件（高亮）
     var activePath: String?
     var openFile: (String) -> Void
@@ -190,9 +191,9 @@ struct ExplorerTree: View {
     @State private var uploadTarget: String?
     @State private var importing = false
     @State private var photoTarget: String?
-    @State private var photos: [PhotosPickerItem] = []
+    @State private var photos: [KLPhotoItem] = []
 
-    var body: some View {
+    var klBody: some View {
         List {
             if let found = explorer.found {
                 Section {
@@ -256,12 +257,12 @@ struct ExplorerTree: View {
         .listStyle(.plain)
         .environment(\.defaultMinListRowHeight, 38)
         // 顶上别留空（11-22 反馈：iPad 新版项目栏里文件页签和「ccpulse」之间空一截）
-        .contentMargins(.top, 0, for: .scrollContent)
+        .klContentMargins(.top, 0, for: .scrollContent)
         .listSectionSpacing(.compact)
         #endif
         .panelSearch($explorer.query, prompt: L("按文件名搜索"))
         .task(id: explorer.query) {
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(milliseconds: 300)
             guard !Task.isCancelled else { return }
             await explorer.search()
         }
@@ -277,8 +278,8 @@ struct ExplorerTree: View {
             }
             Task { await explorer.upload(files, into: folder) }
         }
-        .photosPicker(isPresented: Binding(get: { photoTarget != nil }, set: { if !$0 { photoTarget = nil } }), selection: $photos, matching: .images)
-        .onChange(of: photos) { _, items in
+        .klPhotosPicker(isPresented: Binding(get: { photoTarget != nil }, set: { if !$0 { photoTarget = nil } }), selection: $photos)
+        .klOnChange(of: photos) { _, items in
             guard !items.isEmpty, let folder = photoTarget ?? uploadTarget else { return }
             photos = []
             Task {
@@ -334,8 +335,8 @@ struct ExplorerTree: View {
             Button { rename(row.path) } label: { Label("重命名", systemImage: "pencil") }.tint(.gray)
         }
         #endif
-        .draggable(row.path)
-        .dropDestination(for: String.self) { items, _ in
+        .klDraggable(row.path)
+        .klDropDestination(for: String.self) { items, _ in
             guard e.isDir else { return false }
             let moving = items.filter { $0 != row.path && CodePaths.folder($0) != row.path }
             guard !moving.isEmpty else { return false }
@@ -446,12 +447,12 @@ struct ExplorerTree: View {
 }
 
 /// 文件 / 文件夹的图标：按扩展名挑一个 SF Symbol，单色（文件夹用强调色）
-struct FileGlyph: View {
+struct FileGlyph: KLView {
     let name: String
     let dir: Bool
     var open = false
 
-    var body: some View {
+    var klBody: some View {
         Image(systemName: dir ? (open ? "folder" : "folder.fill") : Self.symbol(name))
             .font(.system(size: 13, weight: .regular))
             .foregroundStyle(dir ? Theme.claude : Color.secondary)

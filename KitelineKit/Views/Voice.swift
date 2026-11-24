@@ -6,19 +6,19 @@ import AppKit
 
 /// 录音：16kHz 单声道 WAV（和网页版一样，Mac 上的语音识别一定认得）。iPhone、Mac（听写按钮）共用
 @MainActor
-@Observable
-final class VoiceRecorder {
-    private(set) var recording = false
+final class VoiceRecorder: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
+    @Tracked private(set) var recording = false
     /// 最近一段时间的音量（0…1），画声波用，最新的在最后
-    private(set) var levels: [Double] = Array(repeating: 0, count: 26)
-    private(set) var started = Date()
-    private var recorder: AVAudioRecorder?
-    private var meter: Task<Void, Never>?
+    @Tracked private(set) var levels: [Double] = Array(repeating: 0, count: 26)
+    @Tracked private(set) var started = Date()
+    @Tracked private var recorder: AVAudioRecorder?
+    @Tracked private var meter: Task<Void, Never>?
     private let file = FileManager.default.temporaryDirectory.appendingPathComponent("tars-voice.wav")
 
     /// 第一次用会弹系统的麦克风授权；没给权限返回 false
     func start() async -> Bool {
-        guard await AVAudioApplication.requestRecordPermission() else { return false }
+        guard await KLMicPermission.request() else { return false }
         // 录音时不朗读：正在读的停下，任务完成之类的播报等说完再读
         Speaker.shared.pauseForMic()
         do {
@@ -45,7 +45,7 @@ final class VoiceRecorder {
                     // -50dB 以下当静音，0dB 满格
                     let level = max(0, min(1, (Double(recorder.averagePower(forChannel: 0)) + 50) / 50))
                     self.levels = Array(self.levels.dropFirst()) + [level]
-                    try? await Task.sleep(for: .milliseconds(80))
+                    try? await Task.sleep(milliseconds: 80)
                 }
             }
             return true
@@ -79,19 +79,19 @@ final class VoiceRecorder {
 #if os(iOS)
 /// 一次「按住说话」：手指在哪、录了多久。对话页按它画微信那样的全屏录音层
 @MainActor
-@Observable
-final class VoiceSession {
+final class VoiceSession: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     enum Zone { case send, cancel, text }
 
-    var active = false
-    var zone: Zone = .send
+    @Tracked var active = false
+    @Tracked var zone: Zone = .send
     let recorder = VoiceRecorder()
     /// 录音层上「✕」「文」两个按钮在屏幕上的位置（手指滑过去就切换）
-    var cancelFrame: CGRect = .zero
-    var textFrame: CGRect = .zero
+    @Tracked var cancelFrame: CGRect = .zero
+    @Tracked var textFrame: CGRect = .zero
     /// 转好的文字：输入栏收到后放进输入框
-    var transcript: String?
-    var converting = false
+    @Tracked var transcript: String?
+    @Tracked var converting = false
 
     static let maxSeconds = 60.0
 
@@ -104,8 +104,8 @@ final class VoiceSession {
 }
 
 /// 「按住 说话」：按住录，松开发；手指滑到 ✕ 取消，滑到「文」只转成文字放进输入框
-struct HoldToTalk: View {
-    @Environment(AppModel.self) private var model
+struct HoldToTalk: KLView {
+    @EnvModel private var model
     let key: String
     let voice: VoiceSession
     /// 输入栏里附着的图、文件，跟这段话一起发
@@ -117,7 +117,7 @@ struct HoldToTalk: View {
     @State private var waitingPermission = false
     @Environment(\.scenePhase) private var phase
 
-    var body: some View {
+    var klBody: some View {
         Text(voice.active ? "松开 结束" : "按住 说话")
             .font(.appFixed(size: 16, weight: .semibold))
             .foregroundStyle(.primary.opacity(0.85))
@@ -140,11 +140,11 @@ struct HoldToTalk: View {
             .task(id: voice.active) {
                 // 最长 60 秒：到点按当前手势结束
                 guard voice.active else { return }
-                try? await Task.sleep(for: .seconds(VoiceSession.maxSeconds))
+                try? await Task.sleep(seconds: VoiceSession.maxSeconds)
                 if voice.active { finish() }
             }
             // 按着时被系统打断（来电、拉下控制中心、切到后台收不到松手）或页面关了：这段不要，麦克风放掉，朗读接着来
-            .onChange(of: phase) { _, phase in if phase != .active { abandon() } }
+            .klOnChange(of: phase) { _, phase in if phase != .active { abandon() } }
             .onDisappear { abandon() }
     }
 
@@ -214,10 +214,10 @@ struct HoldToTalk: View {
 }
 
 /// 按住说话时盖住整个对话页的录音层（同微信）：中间绿色声波气泡，左「✕」取消、右「文」转文字，底部大弧形「松开 发送」
-struct VoiceOverlay: View {
+struct VoiceOverlay: KLView {
     let voice: VoiceSession
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geo in
             let width = geo.size.width
             ZStack(alignment: .bottom) {
@@ -287,7 +287,7 @@ struct VoiceOverlay: View {
                     .offset(y: -26)
             }
         }
-        .animation(.snappy(duration: 0.2), value: voice.zone)
+        .animation(.klSnappy(duration: 0.2), value: voice.zone)
     }
 
     private func target(_ zone: VoiceSession.Zone, symbol: String?, label: String?) -> some View {
@@ -302,10 +302,10 @@ struct VoiceOverlay: View {
         }
         .foregroundStyle(on ? Color.black.opacity(0.8) : Color.white.opacity(0.75))
         .frame(width: on ? 86 : 72, height: on ? 86 : 72)
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+        .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             if zone == .cancel { voice.cancelFrame = frame } else { voice.textFrame = frame }
         }
-        .animation(.snappy(duration: 0.18), value: on)
+        .animation(.klSnappy(duration: 0.18), value: on)
     }
 
     /// 底部大弧形：手指还在上面（发送）时亮，滑走变暗
@@ -328,8 +328,8 @@ struct VoiceOverlay: View {
 
 /// 「按住 说话」只转文字（新任务这类还没有会话、不能直接发语音的地方）：按住录，松开把话转成文字交给 done，
 /// 改好再点「开始」；手指移出按钮再松开 = 取消。录音中按钮本身显示声波和时长，不盖全屏
-struct HoldToDictate: View {
-    @Environment(AppModel.self) private var model
+struct HoldToDictate: KLView {
+    @EnvModel private var model
     let done: (String) -> Void
     @State private var recorder = VoiceRecorder()
     @State private var active = false
@@ -339,7 +339,7 @@ struct HoldToDictate: View {
     @State private var frame: CGRect = .zero
     @Environment(\.scenePhase) private var phase
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             if converting {
                 ProgressView().controlSize(.small)
@@ -368,7 +368,7 @@ struct HoldToDictate: View {
         .frame(maxWidth: .infinity, minHeight: 44)
         .background(active ? Theme.holdPressed : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(Rectangle())
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+        .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
@@ -382,13 +382,13 @@ struct HoldToDictate: View {
         .task(id: active) {
             // 最长 60 秒：到点按松开处理
             guard active else { return }
-            try? await Task.sleep(for: .seconds(VoiceSession.maxSeconds))
+            try? await Task.sleep(seconds: VoiceSession.maxSeconds)
             if active { finish() }
         }
         // 按着说的时候别把弹出的页面拖下去
         .interactiveDismissDisabled(active || converting)
         // 按着时被系统打断（来电、拉下控制中心、切到后台收不到松手）或页面关了：这段不要，麦克风放掉，朗读接着来
-        .onChange(of: phase) { _, phase in if phase != .active { abandon() } }
+        .klOnChange(of: phase) { _, phase in if phase != .active { abandon() } }
         .onDisappear { abandon() }
     }
 
@@ -439,8 +439,8 @@ struct HoldToDictate: View {
 }
 
 /// 正在把语音转成文字：输入栏上方的小提示
-struct ConvertingHint: View {
-    var body: some View {
+struct ConvertingHint: KLView {
+    var klBody: some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
             Text("正在转写…").font(.ui(.footnote)).foregroundStyle(.secondary)
@@ -466,11 +466,11 @@ struct Triangle: Shape {
 
 /// 回放发过的语音（Mac 存着录音）
 @MainActor
-@Observable
-final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
+final class VoicePlayer: NSObject, AVAudioPlayerDelegate, KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = VoicePlayer()
-    private(set) var playing: String?
-    private var player: AVAudioPlayer?
+    @Tracked private(set) var playing: String?
+    @Tracked private var player: AVAudioPlayer?
 
     func toggle(_ id: String, api: MacAPI) {
         if playing == id { stop(); return }
@@ -505,8 +505,8 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
 #if os(macOS)
 /// Mac 上的「听写」（手机上是「按住 说话」）：点一下开始录，说完再点一下（或满 60 秒）把话转成文字交给 done；
 /// 录音时按钮里显示声波和时长，旁边的 ✕ 放弃这段。转写同手机，交给本机的语音识别（普通话走本机模型）
-struct MacDictateButton: View {
-    @Environment(AppModel.self) private var model
+struct MacDictateButton: KLView {
+    @EnvModel private var model
     /// 只画一个麦克风圆圈（放在单行输入框旁边）；录音、转写时照常显示声波和文字
     var compact = false
     let done: (String) -> Void
@@ -516,7 +516,7 @@ struct MacDictateButton: View {
 
     static let maxSeconds = 60.0
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 4) {
             if converting {
                 HStack(spacing: 6) {
@@ -574,7 +574,7 @@ struct MacDictateButton: View {
         .font(.ui(.subheadline))
         .task(id: recorder.recording) {
             guard recorder.recording else { return }
-            try? await Task.sleep(for: .seconds(Self.maxSeconds))
+            try? await Task.sleep(seconds: Self.maxSeconds)
             if recorder.recording { finish() }
         }
         // 录着音把面板关了：这段不要，麦克风也放掉
@@ -583,13 +583,13 @@ struct MacDictateButton: View {
 
     private func start() {
         // 拒绝过：系统不会再弹授权框，直接打开「隐私与安全性 → 麦克风」
-        guard AVAudioApplication.shared.recordPermission != .denied else { askInSettings(); return }
+        guard !KLMicPermission.denied else { askInSettings(); return }
         starting = true
         Task {
             let ok = await recorder.start()
             starting = false
             guard !ok else { return }
-            if AVAudioApplication.shared.recordPermission == .denied { askInSettings() } else { model.flash(L("录音未能开始，请重试")) }
+            if KLMicPermission.denied { askInSettings() } else { model.flash(L("录音未能开始，请重试")) }
         }
     }
 
@@ -623,14 +623,14 @@ private struct DictateChipStyle: ButtonStyle {
         Face(configuration: configuration, active: active, circle: circle)
     }
 
-    private struct Face: View {
+    private struct Face: KLView {
         let configuration: Configuration
         let active: Bool
         let circle: Bool
         @State private var hovering = false
         @Environment(\.isEnabled) private var enabled
 
-        var body: some View {
+        var klBody: some View {
             Group {
                 if circle {
                     configuration.label
@@ -646,11 +646,11 @@ private struct DictateChipStyle: ButtonStyle {
     }
 }
 
-private struct DictateChip: ViewModifier {
+private struct DictateChip: KLViewModifier {
     let active: Bool
     let hovering: Bool
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .foregroundStyle(active ? Color.primary : MacPalette.text2)
             .padding(.horizontal, 10).frame(height: 26)

@@ -442,7 +442,7 @@ enum CodeAPI {
             guard let job = started["job"] as? String else { return try check(started) }
             let deadline = Date().addingTimeInterval(330)
             while Date() < deadline {
-                try await Task.sleep(for: .milliseconds(700))
+                try await Task.sleep(milliseconds: 700)
                 let state = try await model.api.get("/api/repo", ["key": key, "op": "job", "job": job])
                 guard state["done"] as? Bool == true else { continue }
                 if state["failed"] as? Bool == true {

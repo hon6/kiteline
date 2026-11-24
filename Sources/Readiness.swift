@@ -1,4 +1,5 @@
 import AppKit
+import KitelineKit
 import ApplicationServices
 import Foundation
 import ServiceManagement
@@ -82,7 +83,7 @@ enum Readiness {
                               fix: "在电脑上 VS Code 弹出「是否允许 Claude Code 扩展打开此 URI」时，勾选「不再询问」并点击「打开」；或在 VS Code 的用户设置（JSON）中加入 \"extensions.confirmedUriHandlerExtensionIds\": [\"anthropic.claude-code\"]"))
         }
 
-        let login = SMAppService.mainApp.status == .enabled
+        let login = KLLoginItem.enabled
         items.append(Item(id: "login", title: "登录时自动启动", level: login ? "ok" : "warn",
                           detail: login ? "已开启：电脑重启后 Kiteline 将自动启动" : "未开启：电脑重启后需手动打开 Kiteline，手机才能连接",
                           fix: "在电脑上打开「Kiteline 设置 → 通用」，开启「登录时自动打开 Kiteline」"))

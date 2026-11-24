@@ -22,12 +22,12 @@ struct NameAsk: Identifiable {
     var action: (String) -> Void
 }
 
-private struct CodeAsksModifier: ViewModifier {
+private struct CodeAsksModifier: KLViewModifier {
     @Binding var ask: CodeAsk?
     @Binding var name: NameAsk?
     @State private var draft = ""
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .confirmPanel(ask?.message ?? "", isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } }),
                           confirm: ask?.confirm ?? "", destructive: ask?.destructive ?? false, cancel: L("取消")) {
@@ -51,7 +51,7 @@ private struct CodeAsksModifier: ViewModifier {
             } message: {
                 if let message = name?.message { Text(message) }
             }
-            .onChange(of: name?.id) { _, _ in draft = name?.text ?? "" }
+            .klOnChange(of: name?.id) { _, _ in draft = name?.text ?? "" }
     }
 }
 
@@ -62,10 +62,10 @@ extension View {
 }
 
 /// 改动状态字母（同 VS Code：M 改、A 增、D 删、R 名、U 未跟踪、! 冲突）
-struct ChangeBadge: View {
+struct ChangeBadge: KLView {
     let status: String
 
-    var body: some View {
+    var klBody: some View {
         Text(ChangeMark.label(status))
             .font(.system(size: 11, weight: .bold, design: .monospaced))
             .foregroundStyle(color)
@@ -86,11 +86,11 @@ struct ChangeBadge: View {
 }
 
 /// 分支 / 标签 / 远端分支的小胶囊（提交图、提交详情里用）。当前分支用强调色实底，其余描边
-struct RefChip: View {
+struct RefChip: KLView {
     let ref: RefLabel
     var sessions = 0
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 3) {
             Image(systemName: symbol).font(.system(size: 8.5, weight: .bold))
             Text(ref.name).lineLimit(1)
@@ -142,11 +142,11 @@ enum GraphPalette {
 }
 
 /// 会话的小头像（首字 + 状态点），分支与会话页、提交图里标在分支上
-struct SessionChip: View {
+struct SessionChip: KLView {
     let session: SessionInfo
     var showTitle = true
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 5) {
             SessionDot(session: session, size: 7)
             if showTitle { Text(session.title).lineLimit(1) }

@@ -1,21 +1,21 @@
 import SwiftUI
 
 /// 分支与会话：最上面一眼看清「几个会话、各在哪个分支 / 工作树上」，下面是本地分支、远端分支、标签、贮藏、工作树和各自的操作
-struct GitBranchesView: View {
-    @Environment(AppModel.self) private var model
+struct GitBranchesView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
-    @Bindable var store: RepoStore
+    @KLBindable var store: RepoStore
     var openCommit: (String) -> Void
     @State private var ask: CodeAsk?
     @State private var nameAsk: NameAsk?
     @State private var query = ""
 
-    var body: some View {
+    var klBody: some View {
         Group {
             if let o = store.overview, o.repo != nil {
                 list(o)
             } else if let o = store.overview {
-                ContentUnavailableView(L("不是 Git 仓库"), systemImage: "arrow.triangle.branch", description: Text(o.reason ?? ""))
+                KLUnavailableView(L("不是 Git 仓库"), systemImage: "arrow.triangle.branch", description: Text(o.reason ?? ""))
             } else if let error = store.loadError {
                 LoadFailed(error: error) { await store.refresh() }
             } else {

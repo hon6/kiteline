@@ -304,13 +304,13 @@ private final class PreviewSource: NSObject, QLPreviewControllerDataSource {
 #endif
 
 /// 消息里的一个文件：图标 + 文件名 + 类型 / 大小（我发过去的附件、还没发出去的、待发的）
-struct FileChip: View {
+struct FileChip: KLView {
     let name: String
     var size: Int? = nil
     /// 画在我的气泡里（主题色底、浅色字）
     var mine = false
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             Image(systemName: FileLink.symbol(name))
                 .font(.system(size: 20, weight: .regular))
@@ -334,12 +334,12 @@ struct FileChip: View {
 }
 
 /// 我发过去的文件（消息里的 [附件] 行）：轻点取回预览，长按菜单里能转发
-struct AttachedFiles: View {
-    @Environment(AppModel.self) private var model
+struct AttachedFiles: KLView {
+    @EnvModel private var model
     let key: String
     let paths: [String]
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(paths, id: \.self) { path in
                 FileChip(name: FileLink.displayName(path), mine: true)
@@ -386,13 +386,13 @@ extension AppModel {
 }
 
 /// 一条消息里提到好几个文件：选一个转发 / 打开
-struct FilePickSheet: View {
-    @Environment(AppModel.self) private var model
+struct FilePickSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let key: String
     let paths: [String]
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("消息中的文件")) {
             SheetSection(footer: L("轻点打开预览；右侧按钮直接转发到其他 App。")) {
                 ForEach(Array(paths.enumerated()), id: \.offset) { index, path in

@@ -7,13 +7,13 @@ import SwiftUI
 // 画面只在这些视图显示时向电脑要（BrowserStore.watch），小窗要缩略档、放大要大画面档
 
 /// 对话页上的浮层：小窗、半个会话、整个会话。「整个应用 / 全屏」时这里不画（画在 BrowserAppLayer）
-struct BrowserDock: View {
-    @Environment(AppModel.self) private var model
+struct BrowserDock: KLView {
+    @EnvModel private var model
     let key: String
     let info: BrowserInfo?
     var available: CGFloat
 
-    var body: some View {
+    var klBody: some View {
         let store = model.browsers
         if let info, store.visible(key, info) {
             GeometryReader { geo in
@@ -57,10 +57,10 @@ struct BrowserDock: View {
 }
 
 /// 盖在整个窗口上的（整个应用 / 全屏）：挂在主界面根上
-struct BrowserAppLayer: View {
-    @Environment(AppModel.self) private var model
+struct BrowserAppLayer: KLView {
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         let store = model.browsers
         if let key = store.focus, let info = model.session(key)?.browser, store.visible(key, info) {
             BrowserViewer(key: key, info: info, size: store.size(key))
@@ -69,7 +69,7 @@ struct BrowserAppLayer: View {
                 .background(BrowserChrome.shell.ignoresSafeArea())
                 .transition(.opacity)
                 #if os(macOS)
-                .onChange(of: store.size(key), initial: true) { _, size in MacFullScreen.set(size == .fullscreen) }
+                .klOnChange(of: store.size(key), initial: true) { _, size in MacFullScreen.set(size == .fullscreen) }
                 .onDisappear { MacFullScreen.set(false) }
                 #endif
         }
@@ -98,8 +98,8 @@ enum MacFullScreen {
 
 // MARK: - 小窗
 
-struct BrowserMini: View {
-    @Environment(AppModel.self) private var model
+struct BrowserMini: KLView {
+    @EnvModel private var model
     let key: String
     let info: BrowserInfo
     /// 对话页的大小：拖动时不许拖出去
@@ -121,7 +121,7 @@ struct BrowserMini: View {
     /// 现在占多宽（收起时是小圆钮）
     var boxWidth: CGFloat { isCollapsed ? 40 : width }
 
-    var body: some View {
+    var klBody: some View {
         let store = model.browsers
         let collapsed = isCollapsed
         Group {
@@ -129,16 +129,16 @@ struct BrowserMini: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.snappy) { if collapsed { store.expand(key) } else { store.setSize(key, .half) } }   // 浏览器关了：放大后直接放录像
+            withAnimation(.klSnappy) { if collapsed { store.expand(key) } else { store.setSize(key, .half) } }   // 浏览器关了：放大后直接放录像
         }
         .contextMenu {
-            if collapsed { Button { withAnimation(.snappy) { store.expand(key) } } label: { Label("展开小窗", systemImage: "pip") } }
+            if collapsed { Button { withAnimation(.klSnappy) { store.expand(key) } } label: { Label("展开小窗", systemImage: "pip") } }
             ForEach(BrowserSize.choices.filter { $0 != .mini }) { size in
-                Button { withAnimation(.snappy) { store.expand(key); store.setSize(key, size) } } label: { Label(size.label, systemImage: size.icon) }
+                Button { withAnimation(.klSnappy) { store.expand(key); store.setSize(key, size) } } label: { Label(size.label, systemImage: size.icon) }
             }
         }
         .shadow(color: .black.opacity(0.24), radius: 14, y: 6)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .padding(.top, 56).padding(.trailing, 10)
         // 小窗能拖到对话页里任何地方（别挡住要看的内容），位置记住，各会话共用；收起后的小圆钮也一样
         .offset(clamped(CGSize(width: store.miniOffset.width + drag.width, height: store.miniOffset.height + drag.height)))
@@ -157,14 +157,14 @@ struct BrowserMini: View {
         .accessibilityAddTraits(.isButton)
         // 旁白双击 = 同轻点（放大 / 展开）。不写的话合并后的元素会把里面第一个按钮（× 收起）当成默认动作
         .accessibilityAction {
-            withAnimation(.snappy) { if collapsed { store.expand(key) } else { store.setSize(key, .half) } }
+            withAnimation(.klSnappy) { if collapsed { store.expand(key) } else { store.setSize(key, .half) } }
         }
         // 收起时、浏览器关了不要画面（省流量）；展开再要
         .task(id: collapsed || info.closed) {
             if collapsed || info.closed { store.unwatch(key, token: token) } else { store.watch(key, token: token, level: "thumb") }
         }
         .onDisappear { store.unwatch(key, token: token) }
-        .animation(.snappy, value: collapsed)
+        .animation(.klSnappy, value: collapsed)
     }
 
     /// 浏览器关了、留着录像：「回放」卡片（轻点看回放，× 不再显示）
@@ -232,7 +232,7 @@ struct BrowserMini: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12).hairlineBorder(BrowserChrome.edge, width: 1) }
         .overlay(alignment: .topTrailing) {
-            Button { withAnimation(.snappy) { store.dismiss(key, info) } } label: {
+            Button { withAnimation(.klSnappy) { store.dismiss(key, info) } } label: {
                 Image(systemName: "xmark").font(.app(size: 9, weight: .bold))
                     .frame(width: 20, height: 20)
                     .background(Circle().fill(.black.opacity(0.45)))
@@ -256,8 +256,8 @@ extension BrowserMini {
 }
 
 /// 左上角「实时」小标记
-private struct LiveBadge: View {
-    var body: some View {
+private struct LiveBadge: KLView {
+    var klBody: some View {
         HStack(spacing: 4) {
             Circle().fill(Color.red).frame(width: 6, height: 6)   // 静态红点：小窗常驻，别放循环动画（多列分屏时吃 CPU）
             Text("实时").font(.app(size: 9, weight: .semibold))
@@ -269,9 +269,9 @@ private struct LiveBadge: View {
 }
 
 /// 系统 26 起是液态玻璃，更早的是磨砂 + 细边（Mac 不编 Glass.swift，和执行过程按钮同一写法）
-struct BrowserGlass<S: Shape>: View {
+struct BrowserGlass<S: Shape>: KLView {
     let shape: S
-    var body: some View {
+    var klBody: some View {
         if #available(iOS 26.0, macOS 26.0, *) {
             shape.fill(.clear).glassEffect(.regular, in: shape)
         } else {
@@ -306,8 +306,8 @@ enum BrowserChrome {
     }
 }
 
-struct BrowserViewer: View {
-    @Environment(AppModel.self) private var model
+struct BrowserViewer: KLView {
+    @EnvModel private var model
     let key: String
     let info: BrowserInfo
     let size: BrowserSize
@@ -320,7 +320,7 @@ struct BrowserViewer: View {
     @State private var replay: BrowserReplay?
     @FocusState private var typingFocused: Bool
 
-    var body: some View {
+    var klBody: some View {
         let store = model.browsers
         GeometryReader { geo in
             let wide = geo.size.width >= 720
@@ -384,14 +384,14 @@ struct BrowserViewer: View {
             #if os(macOS)
             // 退出全屏：一直在顶栏上（全屏时系统的标题栏没了，只能靠它）
             if size == .fullscreen || size == .app {
-                Button { withAnimation(.snappy) { store.setSize(key, .session) } } label: {
+                Button { withAnimation(.klSnappy) { store.setSize(key, .session) } } label: {
                     Image(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 30, height: 30)
                 }
                 .buttonStyle(.plain)
                 .help(size == .fullscreen ? L("退出全屏") : L("回到会话里"))
                 .accessibilityLabel(size == .fullscreen ? L("退出全屏") : L("回到会话里"))
             }
-            Button { withAnimation(.snappy) { store.setSize(key, .mini) } } label: {
+            Button { withAnimation(.klSnappy) { store.setSize(key, .mini) } } label: {
                 Image(systemName: "pip.enter").frame(width: 30, height: 30)
             }
             .buttonStyle(.plain)
@@ -467,7 +467,7 @@ struct BrowserViewer: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
-                .menuStyle(.button).buttonStyle(.plain)
+                .klMenuButtonStyle().buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 10)
@@ -498,7 +498,7 @@ struct BrowserViewer: View {
         if row {
             HStack(spacing: 2) {
                 ForEach(sizes) { option in
-                    Button { withAnimation(.snappy) { store.setSize(key, option) } } label: {
+                    Button { withAnimation(.klSnappy) { store.setSize(key, option) } } label: {
                         Image(systemName: option.icon).font(.app(size: 13))
                             .frame(width: cell.width, height: cell.height)
                             .background(RoundedRectangle(cornerRadius: 6).fill(option == size ? Theme.claude.opacity(0.14) : .clear))
@@ -518,14 +518,14 @@ struct BrowserViewer: View {
         } else {
             Menu {
                 ForEach(sizes) { option in
-                    Button { withAnimation(.snappy) { store.setSize(key, option) } } label: {
+                    Button { withAnimation(.klSnappy) { store.setSize(key, option) } } label: {
                         Label(option.label, systemImage: option == size ? "checkmark" : option.icon)
                     }
                 }
             } label: {
                 Image(systemName: size.icon).frame(width: 30, height: 30)
             }
-            .menuStyle(.button).buttonStyle(.plain)
+            .klMenuButtonStyle().buttonStyle(.plain)
             .accessibilityLabel(L("画面大小"))
         }
     }
@@ -612,7 +612,7 @@ struct BrowserViewer: View {
     /// 要边看对话边操作，接管后再点回半屏就行（接管不会断）
     private func beginControl() {
         #if os(iOS)
-        if size != .fullscreen { withAnimation(.snappy) { model.browsers.setSize(key, .fullscreen) } }
+        if size != .fullscreen { withAnimation(.klSnappy) { model.browsers.setSize(key, .fullscreen) } }
         #endif
         Task { await model.browsers.takeOver(key) }
     }
@@ -720,14 +720,14 @@ struct BrowserViewer: View {
 }
 
 /// 接管时盖在画面上：点 = 点击；拖 = 按下 → 移动 → 松开（滑块、拖拽）；位置按画面比例换算成网页坐标
-private struct BrowserTouchLayer: View {
-    @Environment(AppModel.self) private var model
+private struct BrowserTouchLayer: KLView {
+    @EnvModel private var model
     let key: String
     let size: CGSize
     @State private var dragging = false
     @State private var lastMove = Date.distantPast
 
-    var body: some View {
+    var klBody: some View {
         Color.clear.contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -763,8 +763,8 @@ private struct BrowserTouchLayer: View {
 }
 
 /// agent 的浏览器指令（新的在下面，自动滚到最新）
-struct BrowserActionList: View {
-    @Environment(AppModel.self) private var model
+struct BrowserActionList: KLView {
+    @EnvModel private var model
     let key: String
     var replay: BrowserReplay? = nil
     var closed = false
@@ -775,7 +775,7 @@ struct BrowserActionList: View {
         return rows.last { ($0.time ?? 0) > 0 && ($0.time ?? 0) <= moment }?.id
     }
 
-    var body: some View {
+    var klBody: some View {
         let rows = model.browsers.actions[key] ?? []
         let mark = highlighted(rows)
         VStack(alignment: .leading, spacing: 0) {
@@ -801,10 +801,10 @@ struct BrowserActionList: View {
                         }
                         .padding(.bottom, 8)
                     }
-                    .onChange(of: rows.count, initial: true) { _, _ in
+                    .klOnChange(of: rows.count, initial: true) { _, _ in
                         if let last = rows.last, replay?.active != true { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
-                    .onChange(of: mark) { _, id in
+                    .klOnChange(of: mark) { _, id in
                         if let id, replay?.active == true { withAnimation { proxy.scrollTo(id, anchor: .center) } }
                     }
                 }
@@ -813,11 +813,11 @@ struct BrowserActionList: View {
     }
 }
 
-private struct BrowserActionRow: View {
+private struct BrowserActionRow: KLView {
     let action: BrowserAction
     let latest: Bool
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(time).font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
             Text(action.text)
@@ -850,11 +850,11 @@ struct BrowserFullscreenKey: PreferenceKey {
 #if KITELINE_MAC
 extension KitelineKit {
     /// Mac 主窗口根上挂这个：会话浏览器放到「整个应用 / 全屏」时盖满窗口
-    public struct BrowserAppView: View {
+    public struct BrowserAppView: KLView {
         public init() {}
-        public var body: some View {
+        public var klBody: some View {
             if let model = KitelineKit.model {
-                BrowserAppLayer().environment(model)
+                BrowserAppLayer().environment(\.appModelSlot, model)
             }
         }
     }

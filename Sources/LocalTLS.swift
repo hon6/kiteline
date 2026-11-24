@@ -140,7 +140,7 @@ enum LocalTLS {
                  "-extfile", ext.path, "-extensions", "v3"])
         try? fm.removeItem(at: leafP12)
         try run(["pkcs12", "-export", "-inkey", leafKey.path, "-in", leafCert.path, "-certfile", caCert.path,
-                 "-out", leafP12.path, "-passout", "pass:\(p12Password)", "-name", "TARS"])
+                 "-out", leafP12.path, "-passout", "pass:\(p12Password)", "-name", "Kiteline"])
         try sans.write(to: leafSANs, atomically: true, encoding: .utf8)
         try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: leafKey.path)
         Log.write("已签发本机 HTTPS 证书：\(sans)")

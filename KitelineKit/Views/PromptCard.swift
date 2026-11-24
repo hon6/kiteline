@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Claude 停下来等你时，输入框上方的卡片：权限确认、批准计划、回答提问
-struct PromptCard: View {
-    @Environment(AppModel.self) private var model
+struct PromptCard: KLView {
+    @EnvModel private var model
     #if os(iOS)
     /// 横着的 iPhone：卡片收紧——字小一档、按钮常规大小、计划里的标题按正文大小（10-27：省地方多看内容）
     @Environment(\.verticalSizeClass) private var verticalSize
@@ -13,7 +13,7 @@ struct PromptCard: View {
     let session: SessionInfo
     let chat: ChatStore
 
-    var body: some View {
+    var klBody: some View {
         let tool = chat.openTool
         let signature = "\(session.key)|\(tool?.id ?? "-")|\(session.blocking ?? "")"
         if session.isWaiting, session.canReply, chat.answeredPrompt != signature {
@@ -54,8 +54,8 @@ struct PromptCard: View {
 
 /// 卡片上的按键：发给 Mac，成功后这张卡片先收起，等 Mac 的状态更新。
 /// 按钮由电脑端给（插件的 pendingOptions）就照它画：拒绝 + 主按钮并排，其余排在下面；没给就是调用处写的老三样
-private struct KeyButtons: View {
-    @Environment(AppModel.self) private var model
+private struct KeyButtons: KLView {
+    @EnvModel private var model
     let session: SessionInfo
     let chat: ChatStore
     let signature: String
@@ -77,7 +77,7 @@ private struct KeyButtons: View {
                                                       + (extra.map { [PendingOption(key: $0.key, label: $0.label, style: "normal")] } ?? [])))
     }
 
-    var body: some View {
+    var klBody: some View {
         let cancel = options.firstIndex { $0.style == "destructive" }
         let confirm = options.firstIndex { $0.style == "primary" }
         VStack(spacing: 8) {
@@ -115,7 +115,7 @@ private struct KeyButtons: View {
         #if SNAPSHOT
         .task {
             guard let want = Snapshot.press else { return }
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(seconds: 2)
             if let pick = options.first(where: { $0.key == want }) { press(pick) }
         }
         #endif
@@ -131,35 +131,35 @@ private struct KeyButtons: View {
         Haptics.tap()
         Task {
             if await model.press(session.key, option.key, label: L("已选择：%@", "\(option.label)")) {
-                withAnimation(.snappy) { chat.answeredPrompt = signature }
+                withAnimation(.klSnappy) { chat.answeredPrompt = signature }
             }
             busy = false
         }
     }
 }
 
-private struct CardTitle: View {
+private struct CardTitle: KLView {
     let symbol: String
     let text: String
-    var body: some View {
+    var klBody: some View {
         Label { Text(text).font(PromptFonts.title) } icon: { Image(systemName: symbol).symbolRenderingMode(.hierarchical).foregroundStyle(Theme.claude) }
     }
 }
 
-private struct PermissionCard: View {
+private struct PermissionCard: KLView {
     let session: SessionInfo
     let chat: ChatStore
     let tool: ChatItem
     let signature: String
 
-    var body: some View {
+    var klBody: some View {
         let input = tool.input
         let command = ["command", "file_path", "url", "pattern"].lazy.compactMap { input?[$0]?.string }.first { !$0.isEmpty }
         VStack(alignment: .leading, spacing: 10) {
             CardTitle(symbol: "exclamationmark.triangle.fill", text: L("%@ 想使用 %@", "\(session.speaker)", "\(Tools.displayName(tool.name))"))
             Text(session.blocking ?? input?["description"]?.string ?? L("需要你的授权")).font(.ui(.subheadline)).foregroundStyle(.secondary)
             if let command {
-                Text(command).font(.app(size: 13, design: .monospaced)).fontDesign(nil).lineLimit(5)
+                Text(command).font(.app(size: 13, design: .monospaced)).klFontDesign(nil).lineLimit(5)
                     .padding(10).padding(.trailing, CopyCorner.reserve).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Theme.code, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .copyCorner(command, inset: 5)
@@ -170,7 +170,7 @@ private struct PermissionCard: View {
     }
 }
 
-private struct PlanCard: View {
+private struct PlanCard: KLView {
     /// 横着的 iPhone：计划框矮一点
     @Environment(\.markdownFlatHeadings) private var flat
     let session: SessionInfo
@@ -178,7 +178,7 @@ private struct PlanCard: View {
     let plan: String
     let signature: String
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             CardTitle(symbol: "map.fill", text: L("%@ 已拟定计划，等待你批准", "\(session.speaker)"))
             if !plan.isEmpty {
@@ -190,12 +190,12 @@ private struct PlanCard: View {
     }
 }
 
-private struct ConfirmCard: View {
+private struct ConfirmCard: KLView {
     let session: SessionInfo
     let chat: ChatStore
     let signature: String
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             CardTitle(symbol: "exclamationmark.triangle.fill", text: L("需要确认"))
             Text(session.blocking ?? session.reason ?? "").font(.ui(.subheadline)).foregroundStyle(.secondary)
@@ -205,8 +205,8 @@ private struct ConfirmCard: View {
 }
 
 /// Claude 用 AskUserQuestion 问你：单选 / 多选，也可以自己写
-private struct QuestionCard: View {
-    @Environment(AppModel.self) private var model
+private struct QuestionCard: KLView {
+    @EnvModel private var model
     let session: SessionInfo
     let chat: ChatStore
     let tool: ChatItem
@@ -217,7 +217,7 @@ private struct QuestionCard: View {
 
     private var questions: [JSONValue] { tool.input?["questions"]?.array ?? [] }
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             CardTitle(symbol: "questionmark.bubble.fill", text: L("%@ 提问", "\(session.speaker)"))
             CappedScroll(maxHeight: 380) {
@@ -300,7 +300,7 @@ private struct QuestionCard: View {
                 .buttonStyle(.steady(.plain))
             }
             HStack(spacing: 6) {
-                TextField("其他（自定义）", text: Binding(get: { answers[index].other }, set: { value in
+                KLTextField("其他（自定义）", text: Binding(get: { answers[index].other }, set: { value in
                     update(index) { a in
                         a.other = value
                         if !multi, !value.trimmingCharacters(in: .whitespaces).isEmpty { a.picked = [] }
@@ -308,7 +308,7 @@ private struct QuestionCard: View {
                 }), axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(PromptFonts.option)
-                .lineLimit(1...4)
+                .klLineLimit(1...4)
                 .focused($otherFocused, equals: index)
                 #if os(macOS)
                 // Mac：框右边一个麦克风，点一下开始听写，转好的字接在后面
@@ -350,7 +350,7 @@ private struct QuestionCard: View {
         }
         Task {
             if await model.answer(session.key, tool: tool, answers: payload) {
-                withAnimation(.snappy) { chat.answeredPrompt = signature }
+                withAnimation(.klSnappy) { chat.answeredPrompt = signature }
             }
             busy = false
         }
@@ -364,7 +364,7 @@ private struct QuestionCard: View {
         busy = true
         Task {
             if await model.press(session.key, "esc", label: L("已跳过")) {
-                withAnimation(.snappy) { chat.answeredPrompt = signature }
+                withAnimation(.klSnappy) { chat.answeredPrompt = signature }
             }
             busy = false
         }
@@ -380,19 +380,19 @@ extension PromptCard {
 }
 
 /// 内容少时按内容高度显示，多了才在 maxHeight 以内滚动
-struct CappedScroll<Content: View>: View {
+struct CappedScroll<Content: View>: KLView {
     let maxHeight: CGFloat
     @ViewBuilder let content: Content
     @State private var height: CGFloat = 0
     /// 分屏里一块很矮时，对话页给的上限（见 ChatView.promptCap）
     @Environment(\.promptCap) private var cap
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
-            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            content.klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         }
         .frame(height: min(max(height, 1), min(maxHeight, cap)))
-        .scrollBounceBehavior(.basedOnSize)
+        .klScrollBounceBehavior(.basedOnSize)
     }
 }
 
@@ -418,12 +418,12 @@ extension EnvironmentValues {
 }
 
 /// 卡片底下的两个大按钮：放得下就左右并排；太窄（分列时窄的一列）就上下叠，主按钮在上，免得字被挤成一列
-private struct ButtonPair<Secondary: View, Primary: View>: View {
+private struct ButtonPair<Secondary: View, Primary: View>: KLView {
     @ViewBuilder let secondary: Secondary
     @ViewBuilder let primary: Primary
 
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
+    var klBody: some View {
+        KLViewThatFits(in: .horizontal) {
             HStack(spacing: 10) { secondary; primary }
             VStack(spacing: 8) { primary; secondary }
         }

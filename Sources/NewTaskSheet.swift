@@ -4,7 +4,7 @@ import KitelineKit
 import UniformTypeIdentifiers
 
 /// Mac 上的「新任务」：选项目 + 写要求，在这个项目的 VS Code 窗口里新建一个 Claude Code 会话
-struct NewTaskSheet: View {
+struct NewTaskSheet: KLView {
     struct Project: Identifiable, Hashable {
         var sourceId: String
         var sourceName: String
@@ -148,7 +148,7 @@ struct NewTaskSheet: View {
         return CGFloat(min(max(rows, 2), 6)) * 43 * max(1, Look.shared.textScale) + 10
     }
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             // 标题「新任务」在面板的标题栏里（同别的弹窗）；这一行是说明和搜索
             HStack(alignment: .center, spacing: 12) {
@@ -166,14 +166,14 @@ struct NewTaskSheet: View {
                     }
                     if !loading {
                         if projects.isEmpty {
-                            Text("暂无使用过 Claude Code 的项目").foregroundStyle(.secondary).selectionDisabled()
+                            Text("暂无使用过 Claude Code 的项目").foregroundStyle(.secondary).klSelectionDisabled()
                         } else if shown.isEmpty {
-                            Text("没有匹配的项目").foregroundStyle(.secondary).selectionDisabled()
+                            Text("没有匹配的项目").foregroundStyle(.secondary).klSelectionDisabled()
                         }
-                        otherFolderRow.selectionDisabled()
+                        otherFolderRow.klSelectionDisabled()
                     }
                 }
-                .onChange(of: reveal) { _, id in
+                .klOnChange(of: reveal) { _, id in
                     guard let id else { return }
                     reveal = nil
                     DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) }
@@ -186,7 +186,7 @@ struct NewTaskSheet: View {
             .overlay { if loading { SkeletonShape(style: .list(4, trail: .none)).padding(12).frame(maxHeight: .infinity, alignment: .top).transition(.opacity) } }
             .animation(.skeletonFade, value: loading)   // 读回来时骨架淡出、内容淡入
             // 选中的被筛掉了就不选；筛得只剩一个时直接选上
-            .onChange(of: shown.map(\.id)) { _, ids in
+            .klOnChange(of: shown.map(\.id)) { _, ids in
                 if let current = selection, !ids.contains(current) { selection = nil }
                 if selection == nil, ids.count == 1 { selection = ids[0] }
             }
@@ -269,7 +269,7 @@ struct NewTaskSheet: View {
         .frame(minWidth: 520, idealWidth: 600, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(L("新任务"))   // 放进面板的标题栏
         .onAppear(perform: load)
-        .onChange(of: selected?.sourceId) { _, sourceId in
+        .klOnChange(of: selected?.sourceId) { _, sourceId in
             // 换了电脑：先回到 Claude Code，问一次那台电脑上还能选哪几家（问过的记着）
             if let sourceId, !agentChoices.contains(where: { $0.id == agent }) { agent = "claude-code" }
             guard let sourceId, launchable[sourceId] == nil else { return }
@@ -380,7 +380,7 @@ struct NewTaskSheet: View {
                     Button(ServerLang.machine(source.displayName)) { browse(source) }
                 }
             } label: { label }
-            .menuStyle(.button)
+            .klMenuButtonStyle()
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
         } else {

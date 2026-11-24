@@ -2,18 +2,19 @@ import SwiftUI
 
 /// 一个仓库在界面上的状态：概览（改动、分支、远端、标签、贮藏、工作树、会话在哪个分支）、正在做的操作、出错信息。
 /// 源代码管理、提交历史、分支与会话几页共用一份，做完操作统一刷新
-@MainActor @Observable
-final class RepoStore {
+@MainActor 
+final class RepoStore: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     let key: String
-    @ObservationIgnored weak var model: AppModel?
-    var overview: RepoOverview?
-    var loadError: String?
+    weak var model: AppModel?
+    @Tracked var overview: RepoOverview?
+    @Tracked var loadError: String?
     /// 正在做的操作（按钮转圈、别的操作先等等）
-    var busy: String?
+    @Tracked var busy: String?
     /// Git 报错：弹窗显示，原话可展开
-    var failure: GitError?
+    @Tracked var failure: GitError?
     /// 历史页、分支页做完操作后要重新拉提交图
-    var revision = 0
+    @Tracked var revision = 0
 
     init(key: String, model: AppModel) {
         self.key = key
@@ -110,11 +111,11 @@ final class RepoStore {
 }
 
 /// 会话的状态点：运行中（强调色）/ 待确认（橙）/ 空闲（灰）
-struct SessionDot: View {
+struct SessionDot: KLView {
     let session: SessionInfo
     var size: CGFloat = 8
 
-    var body: some View {
+    var klBody: some View {
         Circle().fill(color).frame(width: size, height: size)
     }
 
@@ -135,10 +136,10 @@ extension SessionInfo {
 }
 
 /// Git 报错的弹窗内容：一句话 + 可展开的原话
-struct GitFailureAlert: ViewModifier {
-    @Bindable var store: RepoStore
+struct GitFailureAlert: KLViewModifier {
+    @KLBindable var store: RepoStore
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content.alert(store.failure?.message ?? "", isPresented: Binding(get: { store.failure != nil }, set: { if !$0 { store.failure = nil } })) {
             if let detail = store.failure?.detail, !detail.isEmpty {
                 Button("拷贝 Git 输出") { Clipboard.copy(detail) }

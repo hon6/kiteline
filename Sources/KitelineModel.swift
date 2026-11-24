@@ -141,6 +141,7 @@ struct SourceItem: Identifiable, Equatable {
 /// 原来放在 KitelineModel 里，每次回写整个窗口都跟着重算、又触发回写，转了几百圈系统直接退出（10-27 崩过一次）
 final class SidebarState: ObservableObject {
     static let shared = SidebarState()
+    #if KL_MODERN
     @Published private(set) var visibility: NavigationSplitViewVisibility = .doubleColumn
 
     var binding: Binding<NavigationSplitViewVisibility> {
@@ -150,6 +151,19 @@ final class SidebarState: ObservableObject {
     var collapsed: Bool { visibility == .detailOnly }
     func toggle() { visibility = collapsed ? .doubleColumn : .detailOnly }
     func show() { if collapsed { visibility = .doubleColumn } }
+    #else
+    /// 收起了（只剩右边）。存成 Bool：NavigationSplitViewVisibility 要 macOS 13
+    @Published private(set) var collapsed = false
+
+    @available(macOS 13, *)
+    var binding: Binding<NavigationSplitViewVisibility> {
+        Binding(get: { self.collapsed ? .detailOnly : .doubleColumn },
+                set: { value in let collapsed = value == .detailOnly; if collapsed != self.collapsed { self.collapsed = collapsed } })
+    }
+
+    func toggle() { collapsed.toggle() }
+    func show() { if collapsed { collapsed = false } }
+    #endif
 }
 
 /// 界面状态中枢：AppState 有变化时刷新，SwiftUI 视图都观察它

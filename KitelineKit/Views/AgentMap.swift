@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Agent map（同 VS Code 里那张图，从底部弹出）：左边主 agent，连线到它派出的子 agent（子 agent 还能再派）；
 /// 下面是后台跑着的命令。点子 agent 看它的任务、工具调用、交回的结果和完整记录；点后台任务看输出。
-struct AgentMapSheet: View {
-    @Environment(AppModel.self) private var model
+struct AgentMapSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let key: String
     @State private var reply: AgentsReply?
@@ -14,11 +14,11 @@ struct AgentMapSheet: View {
     /// Mac：往里点是往前（新页面从右边滑进来），返回是往后（从左边滑回来）
     @State private var forward = true
 
-    var body: some View {
+    var klBody: some View {
         #if os(macOS)
         // Mac 小窗不用系统的导航（推进去没有滑动、工具栏里也不画返回键）：自己叠页面，左右滑动切换；
         // 宽度固定、高度跟着当前页面的内容走（11-05 反馈：点子 agent 在弹窗里左滑出新内容，弹窗高度自适应）
-        NavigationStack {
+        KLNavigationStack {
             ZStack(alignment: .top) {
                 if let page = path.last {
                     subpage(page).id(page).transition(slide)
@@ -29,6 +29,17 @@ struct AgentMapSheet: View {
             .frame(maxWidth: .infinity, alignment: .top)
             .clipped()
             .toolbar {
+                #if os(macOS) && !KL_MODERN
+                // 兼容包：macOS 12 的工具栏里不能写 if（buildIf 要 13）：条目常在，返回按钮按条件出现
+                ToolbarItem(placement: .navigation) {
+                    if !path.isEmpty {
+                        Button { back() } label: { Image(systemName: "chevron.left") }
+                            .keyboardShortcut("[", modifiers: .command)
+                            .help(L("返回"))
+                            .panelToolbarItem()
+                    }
+                }
+                #else
                 if !path.isEmpty {
                     ToolbarItem(placement: .navigation) {
                         Button { back() } label: { Image(systemName: "chevron.left") }
@@ -37,6 +48,7 @@ struct AgentMapSheet: View {
                             .panelToolbarItem()
                     }
                 }
+                #endif
             }
             .doneButton { dismiss() }
         }
@@ -52,8 +64,8 @@ struct AgentMapSheet: View {
                 .task { await refresh() }
         }
         .environment(\.openAgentPage, routed { path.append($0) })
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .klPresentationDetents([.medium, .large])
+        .klPresentationDragIndicator(.visible)
         #endif
     }
 
@@ -107,7 +119,7 @@ struct AgentMapSheet: View {
     private func push(_ page: AgentPage) {
         #if os(macOS)
         forward = true
-        withAnimation(.snappy(duration: 0.28)) { path.append(page) }
+        withAnimation(.klSnappy(duration: 0.28)) { path.append(page) }
         #else
         path.append(page)
         #endif
@@ -116,14 +128,14 @@ struct AgentMapSheet: View {
     private func back() {
         guard !path.isEmpty else { return }
         forward = false
-        withAnimation(.snappy(duration: 0.28)) { _ = path.removeLast() }
+        withAnimation(.klSnappy(duration: 0.28)) { _ = path.removeLast() }
     }
 
     /// 开着时每 4 秒刷新一次：子 agent 做完、后台命令结束能马上看到
     private func refresh() async {
         while !Task.isCancelled {
             await load()
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(seconds: 4)
         }
     }
 
@@ -178,14 +190,14 @@ struct AgentNode {
 }
 
 /// 一个节点 + 下面缩进的孩子们（递归）：手机屏幕窄，树竖着长，一屏看全
-struct AgentBranch: View {
+struct AgentBranch: KLView {
     let node: AgentNode
     let children: [SubagentInfo]
     let all: [SubagentInfo]
     let key: String
     @Environment(\.openAgentPage) private var open
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let agent = node.agent {
                 Button { if TouchTravel.isTap { open(.agent(agent)) } } label: { AgentCard(node: node) }
@@ -228,10 +240,10 @@ struct TreeGuide: Shape {
     }
 }
 
-struct AgentCard: View {
+struct AgentCard: KLView {
     let node: AgentNode
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: 8) {
             StatusDot(running: node.running, failed: node.failed).padding(.top, 5)
             VStack(alignment: .leading, spacing: 3) {
@@ -247,11 +259,11 @@ struct AgentCard: View {
 }
 
 /// 状态点：在跑绿色（会呼吸），做完灰色，出错红色
-struct StatusDot: View {
+struct StatusDot: KLView {
     let running: Bool
     var failed = false
 
-    var body: some View {
+    var klBody: some View {
         if running && !failed {
             PulseDot(color: Theme.added, size: 8, low: 0.35, period: 0.9)
         } else {
@@ -262,10 +274,10 @@ struct StatusDot: View {
     }
 }
 
-struct TaskCard: View {
+struct TaskCard: KLView {
     let task: BackgroundTask
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: 8) {
             StatusDot(running: task.running, failed: task.status == "failed").padding(.top, 5)
             VStack(alignment: .leading, spacing: 3) {
@@ -283,7 +295,7 @@ struct TaskCard: View {
 
 // MARK: 子 agent 详情
 
-struct AgentDetailView: View {
+struct AgentDetailView: KLView {
     let key: String
     let agent: SubagentInfo
     let all: [SubagentInfo]
@@ -291,7 +303,7 @@ struct AgentDetailView: View {
     @State private var showPrompt = false
     @State private var showTools = false
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
@@ -323,9 +335,9 @@ struct AgentDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(agent.tools.enumerated()), id: \.offset) { _, tool in
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(tool.name).font(.ui(.caption).weight(.semibold).monospaced()).fontDesign(nil)
+                                Text(tool.name).font(.ui(.caption).weight(.semibold).monospaced()).klFontDesign(nil)
                                 Text((tool.brief ?? "").replacingOccurrences(of: "\(tool.name): ", with: ""))
-                                    .font(.ui(.caption).monospaced()).fontDesign(nil).foregroundStyle(.secondary).lineLimit(2)
+                                    .font(.ui(.caption).monospaced()).klFontDesign(nil).foregroundStyle(.secondary).lineLimit(2)
                             }
                         }
                     }
@@ -350,15 +362,15 @@ struct AgentDetailView: View {
 }
 
 /// 子 agent 的完整记录：和对话页一样的排版，只读
-struct SubagentTranscriptView: View {
-    @Environment(AppModel.self) private var model
+struct SubagentTranscriptView: KLView {
+    @EnvModel private var model
     let key: String
     let agent: SubagentInfo
     @State private var error: String?
 
     private var chatKey: String { "\(key)|agent:\(agent.id)" }
 
-    var body: some View {
+    var klBody: some View {
         let chat = model.chat(chatKey)
         let rows = chat.rows(session: nil)
         ScrollView {
@@ -372,7 +384,7 @@ struct SubagentTranscriptView: View {
             .font(ChatType.body)
             .lineSpacing(ChatType.lineSpacing)
         }
-        .defaultScrollAnchor(.bottom)
+        .klDefaultScrollAnchor(.bottom)
         .background(Theme.chatBackground)
         .environment(\.chatReadOnly, true)
         .navigationTitle(agent.description)
@@ -402,15 +414,15 @@ struct SubagentTranscriptView: View {
 
 // MARK: 后台任务详情
 
-struct TaskDetailView: View {
-    @Environment(AppModel.self) private var model
+struct TaskDetailView: KLView {
+    @EnvModel private var model
     let key: String
     @State var task: BackgroundTask
     @State private var output = ""
     @State private var truncated = false
     @State private var error: String?
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
@@ -438,7 +450,7 @@ struct TaskDetailView: View {
             // 还在跑：每 3 秒刷一下输出
             repeat {
                 await load()
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(seconds: 3)
             } while task.running && !Task.isCancelled
         }
     }

@@ -1,11 +1,11 @@
 import SwiftUI
 
 /// 代码 IDE 的入口页：宽（Mac 面板、iPad）就是 VS Code 那样的工作区，窄（iPhone）是分页的「文件 / 改动 / 历史 / 分支」，点进去一层层推
-struct CodeRootView: View {
+struct CodeRootView: KLView {
     let key: String
     let start: CodeStart
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geo in
             if geo.size.width >= 760 {
                 CodeIDEView(key: key, start: start)
@@ -19,8 +19,8 @@ struct CodeRootView: View {
 }
 
 /// 手机上的代码首页：上面分段切「文件 / 源代码管理 / 历史 / 分支」，点文件、改动、提交推下一页
-struct CodeHomeView: View {
-    @Environment(AppModel.self) private var model
+struct CodeHomeView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     let start: CodeStart
@@ -28,7 +28,7 @@ struct CodeHomeView: View {
     @State private var repo: RepoStore?
     @State private var explorer: ExplorerStore?
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             LookSegmented(selection: $tab, options: [(0, L("文件")), (1, changesLabel), (2, L("历史")), (3, L("分支"))])
                 .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 4)
@@ -88,8 +88,8 @@ extension View {
 }
 
 /// 手机上编辑一个文件：默认只读（不会一点就弹键盘），点「编辑」再改；改了没保存，返回时问一声
-struct CodeFileScreen: View {
-    @Environment(AppModel.self) private var model
+struct CodeFileScreen: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dismiss) private var dismiss
@@ -113,7 +113,7 @@ struct CodeFileScreen: View {
     private var options: EditorOptions { EditorOptions(dark: scheme == .dark, fontSize: fontSize, wrap: wrap, minimap: false) }
     private var ext: String { (path as NSString).pathExtension.lowercased() }
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             if let session, let file = session.file {
                 if !session.isText {
@@ -153,9 +153,9 @@ struct CodeFileScreen: View {
             editor.onSave = { _ in Task { await save() } }
             if session == nil { await load() }
         }
-        .onChange(of: options) { _, value in editor.setOptions(value) }
+        .klOnChange(of: options) { _, value in editor.setOptions(value) }
         // 没读到（刚连上电脑之前、网络断过）：连上了自动再读
-        .onChange(of: model.connected) { _, connected in
+        .klOnChange(of: model.connected) { _, connected in
             if connected, session?.file == nil { Task { await load() } }
         }
         .confirmationDialog(L("「%@」有未保存的修改", CodePaths.name(path)), isPresented: $leaving, titleVisibility: .visible) {
@@ -170,7 +170,7 @@ struct CodeFileScreen: View {
             Button("取消", role: .cancel) {}
         }
         .sheetPanel(isPresented: $showEdits) {
-            NavigationStack {
+            KLNavigationStack {
                 ScrollView { FileChanges(key: key, path: path).padding(14) }
                     .navigationTitle(L("Claude 的改动记录"))
                     .doneButton { showEdits = false }
@@ -270,7 +270,7 @@ struct CodeFileScreen: View {
         await session.load(into: editor, id: id, readOnly: !editing, options: options, line: line)
         // 刚连上 / 网络换路时第一次可能失败：自动再试一次，别让人先看到「加载失败」
         if session.error != nil, session.file == nil {
-            try? await Task.sleep(for: .milliseconds(1200))
+            try? await Task.sleep(milliseconds: 1200)
             await session.load(into: editor, id: id, readOnly: !editing, options: options, line: line)
         }
     }
@@ -283,8 +283,8 @@ struct CodeFileScreen: View {
 }
 
 /// 一个文件的改动对比（VS Code 的 diff 编辑器）：手机上下合在一起，宽屏并排；按区块暂存 / 取消暂存 / 丢弃
-struct GitDiffScreen: View {
-    @Environment(AppModel.self) private var model
+struct GitDiffScreen: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @Environment(\.colorScheme) private var scheme
     let key: String
@@ -303,7 +303,7 @@ struct GitDiffScreen: View {
 
     private var split: Bool { chosenSplit ?? (width >= 900) }
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 if let payload {
@@ -312,7 +312,7 @@ struct GitDiffScreen: View {
                                 openFile: payload.mode == "commit" ? nil : { open(.codeFile(key: key, path: path)) }) { await load() }
                     Divider()
                     if payload.binary {
-                        ContentUnavailableView(L("二进制文件"), systemImage: "doc", description: Text("无法显示二进制文件的差异。"))
+                        KLUnavailableView(L("二进制文件"), systemImage: "doc", description: Text("无法显示二进制文件的差异。"))
                     } else if payload.original == nil {
                         ScrollView { Text(payload.diff).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).padding() }
                     } else {
@@ -324,7 +324,7 @@ struct GitDiffScreen: View {
                     SkeletonPage(style: .code(20))
                 }
             }
-            .onChange(of: geo.size.width, initial: true) { _, value in
+            .klOnChange(of: geo.size.width, initial: true) { _, value in
                 let before = split
                 width = value
                 if split != before { render() }
@@ -335,11 +335,11 @@ struct GitDiffScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task { await load() }
-        .onChange(of: model.connected) { _, connected in
+        .klOnChange(of: model.connected) { _, connected in
             if connected, payload == nil { Task { await load() } }
         }
-        .onChange(of: chosenSplit) { _, _ in render() }
-        .onChange(of: scheme) { _, _ in render() }
+        .klOnChange(of: chosenSplit) { _, _ in render() }
+        .klOnChange(of: scheme) { _, _ in render() }
     }
 
     private func load() async {
@@ -364,8 +364,8 @@ struct GitDiffScreen: View {
 }
 
 /// 对比页顶上一条：哪种改动、上一处 / 下一处、并排切换、按区块或整个文件暂存 / 丢弃
-struct DiffToolbar: View {
-    @Environment(AppModel.self) private var model
+struct DiffToolbar: KLView {
+    @EnvModel private var model
     let key: String
     let payload: DiffPayload
     let editor: EditorController
@@ -378,7 +378,7 @@ struct DiffToolbar: View {
 
     private var store: RepoStore { CodeStores.repo(key, model) }
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             Text(modeLabel).font(.ui(.caption).weight(.semibold)).foregroundStyle(.secondary)
                 .padding(.horizontal, 7).padding(.vertical, 2).background(Theme.tile, in: Capsule())
@@ -477,13 +477,13 @@ struct DiffToolbar: View {
 }
 
 /// 一个提交的详情页（手机上从历史推进来）
-struct CommitScreen: View {
-    @Environment(AppModel.self) private var model
+struct CommitScreen: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     let hash: String
 
-    var body: some View {
+    var klBody: some View {
         let store = CodeStores.repo(key, model)
         CommitDetailView(store: store, hash: hash, openDiff: { file, _ in
             open(.codeDiff(key: key, path: file.path, mode: "commit", commit: hash, oldPath: file.oldPath))
@@ -493,13 +493,13 @@ struct CommitScreen: View {
 }
 
 /// 一个文件的历史（手机）
-struct FileHistoryScreen: View {
-    @Environment(AppModel.self) private var model
+struct FileHistoryScreen: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     let path: String
 
-    var body: some View {
+    var klBody: some View {
         let store = CodeStores.repo(key, model)
         GitHistoryView(store: store, openCommit: { open(.commit(key: key, hash: $0)) }, path: path)
             .navigationTitle(L("「%@」的历史", CodePaths.name(path)))

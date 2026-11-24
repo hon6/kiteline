@@ -57,7 +57,7 @@ enum WidgetSync {
         let wait = urgent ? 0 : max(0, 20 - Date().timeIntervalSince(savedAt))
         pending?.cancel()
         pending = Task { @MainActor in
-            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            if wait > 0 { try? await Task.sleep(seconds: wait) }
             guard !Task.isCancelled else { return }
             next.at = Date().timeIntervalSince1970 * 1000
             last = next
@@ -92,12 +92,12 @@ enum WidgetSync {
 }
 
 /// 挂在主界面上：会话、额度、用量一变就交给 WidgetSync（只这个小视图跟着重算，不牵动整页）
-struct WidgetProbe: View {
-    @Environment(AppModel.self) private var model
+struct WidgetProbe: KLView {
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         let snapshot = WidgetSync.snapshot(model)
-        Color.clear.onChange(of: snapshot, initial: true) { _, _ in WidgetSync.update(model) }
+        Color.clear.klOnChange(of: snapshot, initial: true) { _, _ in WidgetSync.update(model) }
     }
 }
 #endif

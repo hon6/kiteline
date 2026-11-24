@@ -7,14 +7,14 @@ import Translation
 /// - 平时一个小「译」图标；鼠标移上去展开成「翻译」「设置」两个按钮（浮在上面，不挤动排版）
 /// - 翻好以后变成「原文」+「设置」：点「原文」换回原来的语言，再点「译文」换回来
 /// - 第一次点先弹设置（从什么语言翻成什么语言），之后每次点直接翻
-struct TranslateBadge: View {
+struct TranslateBadge: KLView {
     let id: String
     let text: String
     @State private var translator = Translator.shared
     @State private var hovering = false
     @State private var setting = false
 
-    var body: some View {
+    var klBody: some View {
         let state = translator.state(id)
         HStack(spacing: 2) {
             switch state {
@@ -98,12 +98,12 @@ struct TranslateBadge: View {
 }
 
 /// 翻译设置：第一次点角标时弹出（确认后翻这一条），翻好后点「设置」也是它（改完重新翻）；设置页里是同样几项
-struct TranslateSetupSheet: View {
+struct TranslateSetupSheet: KLView {
     var confirmTitle = L("翻译")
     let confirm: () -> Void
     @PanelDismiss private var dismiss
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("翻译设置"), cancel: true) {
             TranslateOptions()
         } bottom: {
@@ -125,10 +125,10 @@ struct TranslateSetupSheet: View {
 }
 
 /// 面板里的几项：原文语言、译成、翻译服务、消息下显示角标
-private struct TranslateOptions: View {
+private struct TranslateOptions: KLView {
     @State private var translator = Translator.shared
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetSection(footer: L("「自动检测」会按消息内容判断原文语言；与目标语言相同的内容保持不变。")) {
                 pickerRow(L("原文语言"), selection: $translator.source, languages: [.auto] + Translator.Language.all)
@@ -166,13 +166,13 @@ private struct TranslateOptions: View {
 }
 
 /// 设置面板里的一种翻译方式：选中打勾、名字 + 本机 / 联网标签、说明；系统翻译另带语言包状态
-private struct EngineRow: View {
+private struct EngineRow: KLView {
     let engine: Translator.Engine
     let selected: Bool
     let pick: () -> Void
     @State private var translator = Translator.shared
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(selected ? Theme.wechatGreen : Color.secondary)
@@ -200,11 +200,11 @@ private struct EngineRow: View {
 
 /// 系统翻译的语言包：已就绪 / 未下载（「下载语言包」调系统的下载窗口）/ 不支持这组语言。
 /// 原文是「自动检测」时按最常见的一组算：翻成中文就看「英语 → 目标」，翻成英语就看「简体中文 → 英语」
-struct ApplePackStatus: View {
+struct ApplePackStatus: KLView {
     let source: String
     let target: String
 
-    var body: some View {
+    var klBody: some View {
         #if canImport(Translation)
         if #available(iOS 18, macOS 15, *) { ApplePackStatusView(source: source, target: target) }
         #endif
@@ -213,7 +213,7 @@ struct ApplePackStatus: View {
 
 #if canImport(Translation)
 @available(iOS 18, macOS 15, *)
-private struct ApplePackStatusView: View {
+private struct ApplePackStatusView: KLView {
     let source: String
     let target: String
     @State private var status: LanguageAvailability.Status?
@@ -222,7 +222,7 @@ private struct ApplePackStatusView: View {
 
     private var from: String { source != "auto" ? source : (target.hasPrefix("en") ? "zh-Hans" : "en") }
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 6) {
             switch status {
             case .installed:
@@ -263,11 +263,11 @@ private struct ApplePackStatusView: View {
 #endif
 
 /// 设置页里的「翻译」一组（Mac：设置 → 通用；iPhone：设置 → 翻译）
-public struct TarsTranslateSection: View {
+public struct TarsTranslateSection: KLView {
     @State private var translator = Translator.shared
     public init() {}
 
-    public var body: some View {
+    public var klBody: some View {
         Section {
             Picker(L("原文语言"), selection: $translator.source) {
                 ForEach([Translator.Language.auto] + Translator.Language.all) { Text(verbatim: $0.name).tag($0.code) }
@@ -279,7 +279,7 @@ public struct TarsTranslateSection: View {
                 ForEach(Translator.Engine.choices) { Text(verbatim: $0.title).tag($0) }
             }
             if Translator.Engine.appleAvailable {
-                LabeledContent(L("系统翻译语言包")) { ApplePackStatus(source: translator.source, target: translator.target) }
+                KLLabeledContent(L("系统翻译语言包")) { ApplePackStatus(source: translator.source, target: translator.target) }
             }
             Toggle(L("自动翻译助手的回复"), isOn: $translator.auto)
             Toggle(L("在每条消息下显示「翻译」"), isOn: $translator.showBadge)
@@ -291,15 +291,15 @@ public struct TarsTranslateSection: View {
                  + (translator.engine == .apple ? "" : L("。翻译时消息文字会发送到该服务。")))
                 .font(.app(size: 11)).foregroundStyle(.secondary)
         }
-        .onChange(of: translator.source) { translator.configured = true }
-        .onChange(of: translator.target) { translator.configured = true }
+        .klOnChange(of: translator.source) { translator.configured = true }
+        .klOnChange(of: translator.target) { translator.configured = true }
     }
 }
 
 #if os(iOS)
 /// iPhone：设置 → 翻译
-struct TranslateSettingsPage: View {
-    var body: some View {
+struct TranslateSettingsPage: KLView {
+    var klBody: some View {
         List { TarsTranslateSection() }
             .navigationTitle(L("翻译"))
             .navigationBarTitleDisplayMode(.inline)
@@ -315,16 +315,16 @@ extension View {
     }
 }
 
-private struct TranslateHost: ViewModifier {
+private struct TranslateHost: KLViewModifier {
     let id: String
     let text: String
     let auto: Bool
     @State private var translator = Translator.shared
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .onAppear { if auto { translator.autoTranslate(id, text: text) } }
-            .onChange(of: translator.auto) { _, on in if auto && on { translator.autoTranslate(id, text: text) } }
+            .klOnChange(of: translator.auto) { _, on in if auto && on { translator.autoTranslate(id, text: text) } }
             .sheetPanel(isPresented: Binding(get: { translator.askingFor?.id == id },
                                              set: { if !$0, translator.askingFor?.id == id { translator.askingFor = nil } })) {
                 TranslateSetupSheet { translator.confirmAsk() }
@@ -335,12 +335,12 @@ private struct TranslateHost: ViewModifier {
 
 /// 系统翻译的常驻宿主：根视图上挂一个（看不见），所有消息的系统翻译排队交给它（见 Translator.performApple）。
 /// 多个窗口各挂一个时只有第一个干活
-public struct TranslateAppleHost: View {
+public struct TranslateAppleHost: KLView {
     @State private var translator = Translator.shared
     @State private var me = UUID()
     public init() {}
 
-    public var body: some View {
+    public var klBody: some View {
         Color.clear
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
@@ -349,10 +349,10 @@ public struct TranslateAppleHost: View {
             .onDisappear { translator.hostGone(me) }
     }
 
-    private struct AppleTask: ViewModifier {
+    private struct AppleTask: KLViewModifier {
         let active: Bool
         @State private var translator = Translator.shared
-        func body(content: Content) -> some View {
+        func klBody(content: Content) -> some View {
             #if canImport(Translation)
             if #available(iOS 18, macOS 15, *) {
                 content.translationTask(active ? translator.appleConfig as? TranslationSession.Configuration : nil) { session in
@@ -379,8 +379,36 @@ extension Translator {
     }
 }
 
+#if os(iOS) || KL_MODERN
+typealias BubbleFooterLayout = BubbleFooterLayoutImpl
+#else
 /// 一条消息 + 下面那行小字（时间、朗读、翻译）：小字那行和气泡一样宽，翻译角标靠气泡右边（我的消息靠左边）
-struct BubbleFooterLayout: Layout {
+struct BubbleFooterLayout<Content: View>: KLView {
+    var spacing: CGFloat = 6
+    var trailing = false
+    let content: () -> Content
+
+    init(spacing: CGFloat = 6, trailing: Bool = false, @ViewBuilder content: @escaping () -> Content) {
+        self.spacing = spacing; self.trailing = trailing; self.content = content
+    }
+
+    var klBody: some View {
+        #if os(macOS)
+        if #available(macOS 13, *) {
+            BubbleFooterLayoutImpl(spacing: spacing, trailing: trailing) { content() }
+        } else {
+            // macOS 12：气泡在上、小字在下，靠气泡同一侧对齐
+            VStack(alignment: trailing ? .trailing : .leading, spacing: spacing) { content() }
+        }
+        #else
+        BubbleFooterLayoutImpl(spacing: spacing, trailing: trailing) { content() }
+        #endif
+    }
+}
+#endif
+
+@available(macOS 13, iOS 16, *)
+struct BubbleFooterLayoutImpl: Layout {
     var spacing: CGFloat = 6
     var trailing = false
 

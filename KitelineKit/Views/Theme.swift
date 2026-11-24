@@ -82,12 +82,12 @@ extension NSColor {
 #endif
 
 /// 圆角方块头像：有图显示图，没有就显示首字（和图标同一种双色：橙色字 + 淡橙底）
-struct Avatar: View {
+struct Avatar: KLView {
     var text: String
     var image: Image?
     var size: CGFloat = 48
 
-    var body: some View {
+    var klBody: some View {
         ZStack {
             if let image {
                 image.resizable().scaledToFill()
@@ -104,12 +104,12 @@ struct Avatar: View {
 
 /// 全 App 统一的图标：品牌橙的图形放在淡橙色圆角方块里——只有这一种双色样式。
 /// 危险操作（中断、删除）传 tint: Theme.removed
-struct TarsIcon: View {
+struct TarsIcon: KLView {
     let symbol: String
     var size: CGFloat = 28
     var tint: Color = Theme.claude
 
-    var body: some View {
+    var klBody: some View {
         Image(systemName: symbol)
             .symbolRenderingMode(.hierarchical)
             .font(.system(size: size * 0.48, weight: .semibold))
@@ -120,13 +120,13 @@ struct TarsIcon: View {
 }
 
 /// 读取失败：图标 + 原因 + 「重试」（照系统空状态的样子）。原来只在页面正中放一行灰字，也没法重试
-struct LoadFailed: View {
+struct LoadFailed: KLView {
     let error: String
     let retry: () async -> Void
     @State private var busy = false
 
-    var body: some View {
-        ContentUnavailableView {
+    var klBody: some View {
+        KLUnavailableView {
             Label("加载失败", systemImage: "exclamationmark.triangle")
         } description: {
             Text(error)
@@ -216,13 +216,13 @@ extension InsettableShape {
     }
 }
 
-private struct HairlineBorder<Outline: InsettableShape, Style: ShapeStyle>: View {
+private struct HairlineBorder<Outline: InsettableShape, Style: ShapeStyle>: KLView {
     let shape: Outline
     let style: Style
     let width: CGFloat
     @Environment(\.displayScale) private var scale
 
-    var body: some View {
+    var klBody: some View {
         let pixels = width * scale
         if pixels < 1 {
             shape.strokeBorder(style.opacity(pixels), lineWidth: 1 / scale)
@@ -247,16 +247,16 @@ extension View {
 
 #if os(iOS)
 /// 卡片按钮平时是大号的；横着的 iPhone 高度只有三百多点，用常规大小（10-27）
-private struct CardButtonSize: ViewModifier {
+private struct CardButtonSize: KLViewModifier {
     @Environment(\.verticalSizeClass) private var vertical
     let prominent: Bool
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         let size: ControlSize = vertical == .compact ? .regular : .large
         if prominent {
-            content.buttonStyle(.steady(.borderedProminent)).buttonBorderShape(.capsule).controlSize(size).tint(Theme.wechatGreen)
+            content.buttonStyle(.steady(.borderedProminent)).klButtonBorderShape(.capsule).controlSize(size).tint(Theme.wechatGreen)
         } else {
-            content.buttonStyle(.steady(.bordered)).buttonBorderShape(.capsule).controlSize(size)
+            content.buttonStyle(.steady(.bordered)).klButtonBorderShape(.capsule).controlSize(size)
         }
     }
 }
@@ -270,12 +270,12 @@ private struct CardButtonStyle: ButtonStyle {
         Face(configuration: configuration, prominent: prominent)
     }
 
-    private struct Face: View {
+    private struct Face: KLView {
         let configuration: Configuration
         let prominent: Bool
         @Environment(\.isEnabled) private var enabled
 
-        var body: some View {
+        var klBody: some View {
             configuration.label
                 .foregroundStyle(prominent ? Color.white : Color.primary)
                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -359,22 +359,20 @@ extension View {
 
     /// 面板的「完成」，Esc 也能关：放在右上角（Mac 的面板是能拖动的小窗，「完成」和标题都在小窗的工具栏里，同 FitSheet）
     func doneButton(_ action: @escaping () -> Void) -> some View {
-        toolbar {
-            ToolbarItem(placement: .confirmationAction) { Button("完成", action: action).keyboardShortcut(.cancelAction).panelToolbarButton() }.panelBare()
-        }
+        klBareToolbarItem(.confirmationAction) { Button("完成", action: action).keyboardShortcut(.cancelAction).panelToolbarButton() }
     }
 }
 
 #if os(macOS)
 /// Mac 面板顶上的搜索框（见 panelSearch）。在新版界面的侧栏里（sideColumn）照侧栏的尺寸规范：离栏边 8、高 28、圆角 6、底色透明（同导航栏的搜索框）
-struct MacSearchField: View {
+struct MacSearchField: KLView {
     @Binding var text: String
     let prompt: String
     var focus = false
     @FocusState private var focused: Bool
     @Environment(\.sideColumn) private var side
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: SideMetric.gap) {
             Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
             TextField(prompt, text: $text).textFieldStyle(.plain).focused($focused)
@@ -443,10 +441,10 @@ extension EnvironmentValues {
 }
 #endif
 
-struct HoverHighlight: ViewModifier {
+struct HoverHighlight: KLViewModifier {
     @State private var hovering = false
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         #if os(macOS)
         content
             .background(hovering ? Color.primary.opacity(0.05) : Color.clear)
@@ -512,13 +510,13 @@ public struct KiteButtonStyle: ButtonStyle {
         KiteButtonBody(configuration: configuration, style: self)
     }
 
-    private struct KiteButtonBody: View {
+    private struct KiteButtonBody: KLView {
         let configuration: ButtonStyleConfiguration
         let style: KiteButtonStyle
         @State private var hovering = false
         @Environment(\.isEnabled) private var enabled
 
-        var body: some View {
+        var klBody: some View {
             let height = style.size == .compact ? KiteMetric.compact : KiteMetric.regular
             let pad = style.size == .compact ? KiteMetric.padCompact : KiteMetric.padRegular
             let pressed = configuration.isPressed
@@ -573,13 +571,13 @@ extension View {
 }
 
 /// 按钮里的角标（待推送 2、待拉取 3）：普通按钮里主题色底白字，亮起的按钮里反过来白底主题色字
-public struct KiteBadge: View {
+public struct KiteBadge: KLView {
     let count: Int
     @Environment(\.kiteProminent) private var prominent
 
     public init(_ count: Int) { self.count = count }
 
-    public var body: some View {
+    public var klBody: some View {
         Text("\(count)")
             .font(.app(size: 10, weight: .bold)).monospacedDigit()
             .foregroundStyle(prominent ? Theme.claude : Color.white)
@@ -589,7 +587,7 @@ public struct KiteBadge: View {
 }
 
 /// 按钮里的内容：可选图标 + 文字 + 可选角标，间距统一 6
-public struct KiteLabel: View {
+public struct KiteLabel: KLView {
     let title: String?
     let symbol: String?
     let badge: Int
@@ -600,7 +598,7 @@ public struct KiteLabel: View {
         self.badge = badge
     }
 
-    public var body: some View {
+    public var klBody: some View {
         HStack(spacing: KiteMetric.gap) {
             if let symbol { Image(systemName: symbol) }
             if let title { Text(title) }
@@ -617,11 +615,11 @@ extension View {
     }
 }
 
-private struct KiteLook: ViewModifier {
+private struct KiteLook: KLViewModifier {
     let prominent: Bool
     let size: KiteSize
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: KiteMetric.radius, style: .continuous)
         content
             .font(.app(size: size == .compact ? 12 : 13, weight: .semibold))
@@ -668,11 +666,11 @@ public let kiteScrollIndicators: Bool = {
     #endif
 }()
 
-public struct KiteHScroll<Content: View>: View {
+public struct KiteHScroll<Content: View>: KLView {
     let content: Content
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
 
-    public var body: some View {
+    public var klBody: some View {
         #if os(macOS)
         // 滚动条画在按钮下面多出来的 10 点里，再把这 10 点从外面收回去：不占这一排的高度，也不盖在按钮的字上
         //（11-21 自测：粗滚动条横穿输入框下面那排按钮的正中间）

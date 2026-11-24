@@ -360,7 +360,7 @@ enum Offline {
         }
         pending[name]?.cancel()
         pending[name] = Task {
-            try? await Task.sleep(for: .seconds(wait))
+            try? await Task.sleep(seconds: wait)
             guard !Task.isCancelled else { return }
             savedAt[name] = Date()
             Task.detached(priority: .utility) { write() }
@@ -487,23 +487,23 @@ enum Offline {
 // MARK: 网络监测：延迟、下行速率，网差时顶上显示一条
 
 @MainActor
-@Observable
-final class NetMonitor {
+final class NetMonitor: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     enum Quality { case good, poor, offline }
 
-    private(set) var rtt: Double?
-    private(set) var kbps: Double?
-    private var kbpsAt = Date.distantPast
-    private(set) var fails = 0
-    private(set) var quality: Quality = .good
-    private var task: Task<Void, Never>?
+    @Tracked private(set) var rtt: Double?
+    @Tracked private(set) var kbps: Double?
+    @Tracked private var kbpsAt = Date.distantPast
+    @Tracked private(set) var fails = 0
+    @Tracked private(set) var quality: Quality = .good
+    @Tracked private var task: Task<Void, Never>?
 
     func start(_ api: MacAPI) {
         task?.cancel()
         task = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.loop(api)
-                try? await Task.sleep(for: .seconds(8))
+                try? await Task.sleep(seconds: 8)
             }
         }
     }

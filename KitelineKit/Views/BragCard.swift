@@ -191,8 +191,8 @@ enum MorningBrag {
 // MARK: - 分享页
 
 /// 「分享战绩」：选时间段、选主题、换一句、要不要露花费，然后发微信 / 存相册。sessionKey 给了就是这个会话（任务）的
-struct BragShareSheet: View {
-    @Environment(AppModel.self) private var model
+struct BragShareSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     var sessionKey: String?
     /// 一打开就看这一段（早上自动弹出、今日动态里点的都是昨天）
@@ -218,8 +218,8 @@ struct BragShareSheet: View {
     /// 选项一变就重画
     private var renderKey: String { "\(payload?.count ?? 0)|\(range?.rawValue ?? "")|\(theme.rawValue)|\(lineIndex)|\(showCost)" }
 
-    var body: some View {
-        NavigationStack {
+    var klBody: some View {
+        KLNavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
                     if sessionKey == nil {
@@ -391,7 +391,7 @@ struct BragShareSheet: View {
             try await PHPhotoLibrary.shared().performChanges { PHAssetChangeRequest.creationRequestForAsset(from: image) }
             model.flash(L("已存到相册，在微信朋友圈选择这张图即可"))
             if let url = URL(string: "weixin://") {
-                try? await Task.sleep(for: .milliseconds(900))
+                try? await Task.sleep(milliseconds: 900)
                 await UIApplication.shared.open(url)
             }
         } catch {
@@ -405,8 +405,8 @@ struct BragShareSheet: View {
 
 /// 一眼看到的战绩：Token、新增代码、在线时长、最多同时几个 Agent；点了打开分享页（同一段时间）。
 /// 11-11：首页和今日动态都要有个平时能点进去看、能分享的地方
-struct BragStrip: View {
-    @Environment(AppModel.self) private var model
+struct BragStrip: KLView {
+    @EnvModel private var model
     var range: BragRange = .today
     /// 首页上用浅灰底（同上面的今日用量卡片），别的页面用白卡片
     var onTile = false
@@ -414,7 +414,7 @@ struct BragStrip: View {
     @State private var loaded = false
     @State private var show = false
 
-    var body: some View {
+    var klBody: some View {
         Button { show = true } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
@@ -445,10 +445,10 @@ struct BragStrip: View {
             // 进来先拉一次，之后每 5 分钟（同首页用量）；电脑端有 60 秒缓存
             while !Task.isCancelled {
                 await load()
-                try? await Task.sleep(for: .seconds(300))
+                try? await Task.sleep(seconds: 300)
             }
         }
-        .sheetPanel(isPresented: $show) { BragShareSheet(initialRange: range).environment(model) }
+        .sheetPanel(isPresented: $show) { BragShareSheet(initialRange: range).environment(\.appModelSlot, model) }
     }
 
     private var title: String {

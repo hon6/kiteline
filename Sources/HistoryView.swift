@@ -151,7 +151,7 @@ final class HistoryModel: ObservableObject {
 }
 
 /// 主窗口右侧的「历史会话」：所有项目的对话（包括已结束的），可按设备、项目筛，按标题、项目名和对话内容搜
-struct HistoryView: View {
+struct HistoryView: KLView {
     @ObservedObject var model = HistoryModel.shared
     /// 分组：none 按日期 / source 按来源 / project 按项目（和手机上一样）
     @AppStorage("historyGrouping", store: AppConfig.defaults) private var grouping = "none"
@@ -162,7 +162,7 @@ struct HistoryView: View {
     /// 只看某个项目（项目名 = 目录最后一级，几台设备上同名的算一个；空 = 全部项目）
     @AppStorage("historyProject", store: AppConfig.defaults) private var projectFilter = ""
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -170,7 +170,7 @@ struct HistoryView: View {
                     .textFieldStyle(.plain)
                     .onSubmit { model.search() }
                     // 打字停一下就搜，清空了马上回到列表
-                    .onChange(of: model.query) { _, value in
+                    .klOnChange(of: model.query) { _, value in
                         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { model.search() } else { model.searchSoon() }
                     }
                 // 头一回读的时候下面有骨架和「正在读取」，这里不再转一个
@@ -191,7 +191,7 @@ struct HistoryView: View {
                 // 头一回读：各设备的列表要一会儿才回来，空白容易当成出问题了
                 SkeletonPage("正在读取各设备上的历史会话…", style: .history)
             } else if model.sessions.isEmpty {
-                ContentUnavailableView {
+                KLUnavailableView {
                     Label("暂无历史会话", systemImage: "clock.arrow.circlepath")
                 } description: {
                     Text("在电脑上和 Agent 聊过的会话会出现在这里")
@@ -200,10 +200,10 @@ struct HistoryView: View {
                 }
                 .frame(maxHeight: .infinity)
             } else if filtered(model.sessions).isEmpty, !model.sessions.isEmpty {
-                ContentUnavailableView {
+                KLUnavailableView {
                     Label("暂无\(filterName)", systemImage: "line.3.horizontal.decrease")
                 } actions: {
-                    Button("显示全部") { withAnimation(.snappy) { clearFilters() } }
+                    Button("显示全部") { withAnimation(.klSnappy) { clearFilters() } }
                 }
                 .frame(maxHeight: .infinity)
             } else {
@@ -218,7 +218,7 @@ struct HistoryView: View {
         })
         // 切过来、来源连上 / 断开时重新拉（不定时拉：列表一变会回到顶上，翻着看时别打扰）
         .liveReload { model.setProject(projectFilter, fetch: false); model.load() }
-        .onChange(of: projectFilter) { _, name in model.setProject(name) }
+        .klOnChange(of: projectFilter) { _, name in model.setProject(name) }
     }
 
     // MARK: 筛选、显示方式（和手机上、会话列表一样：状态筛选条在左，「显示方式」菜单在右；下面是设备、项目两排胶囊）
@@ -306,7 +306,7 @@ struct HistoryView: View {
                     ForEach(Self.statusOptions, id: \.0) { option in
                         FilterChip(title: option.1, count: base.filter { matches($0, option.0) }.count, dot: option.2,
                                    selected: statusFilter == option.0) {
-                            withAnimation(.snappy) { statusFilter = statusFilter == option.0 && option.0 != "all" ? "all" : option.0 }
+                            withAnimation(.klSnappy) { statusFilter = statusFilter == option.0 && option.0 != "all" ? "all" : option.0 }
                         }
                     }
                 }
@@ -338,7 +338,7 @@ struct HistoryView: View {
             ViewMenuLabel(summary: grouping == "none" ? L("显示方式") : Self.groupOptions.first { $0.0 == grouping }?.1 ?? L("显示方式"),
                           isDefault: grouping == "none")
         }
-        .menuStyle(.button)
+        .klMenuButtonStyle()
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
@@ -401,7 +401,7 @@ struct HistoryView: View {
                     // 搜到了，只是不在筛着的设备、项目、状态里
                     HStack(spacing: 10) {
                         Text("\(filterName)中未找到「\(model.query)」，其他会话中有 \(all.count) 个").foregroundStyle(.secondary)
-                        Button("在全部会话中搜索") { withAnimation(.snappy) { clearFilters() } }.controlSize(.small)
+                        Button("在全部会话中搜索") { withAnimation(.klSnappy) { clearFilters() } }.controlSize(.small)
                     }
                 }
             }
@@ -458,12 +458,12 @@ struct HistoryView: View {
     }
 }
 
-struct PastRow: View {
+struct PastRow: KLView {
     let item: PastItem
     /// 新版界面项目栏里的「最近的会话」不画头像（同会话列表），第二行也不写项目名（都是这个项目的，只写设备）
     var avatar = true
 
-    var body: some View {
+    var klBody: some View {
         // 新版界面（不画头像）照侧栏规范：字号同上面的会话行（标题 12、第二行 11），时间和标题顶对齐，上下边距同会话行
         HStack(alignment: avatar ? .center : .top, spacing: avatar ? 10 : SideMetric.gap) {
             if avatar { SessionAvatar(key: item.key, title: item.displayTitle, activity: item.live ? .busy : .unknown, size: 30) }

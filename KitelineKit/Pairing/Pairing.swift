@@ -70,10 +70,10 @@ enum Pairing {
         let client = MacClient(expecting: link.fingerprint)
         defer { client.close() }
         let base = try await reach(client, link, token: master)
-        let info = try await client.json(base.appending(path: "api/info"), token: master)
+        let info = try await client.json(base.klAppending(path: "api/info"), token: master)
         var token = master
         if !master.hasPrefix("d") {
-            let reply = try await client.json(base.appending(path: "api/devices/register"), method: "POST",
+            let reply = try await client.json(base.klAppending(path: "api/devices/register"), method: "POST",
                                               token: master, body: ["name": deviceName])
             token = reply["token"] as? String ?? master
         }
@@ -88,14 +88,14 @@ enum Pairing {
         let results = AsyncStream<Result<URL, Error>> { continuation in
             let lan = Task {
                 do {
-                    _ = try await client.json(link.base.appending(path: "api/ping"), token: token)
+                    _ = try await client.json(link.base.klAppending(path: "api/ping"), token: token)
                     continuation.yield(.success(link.base))
                 } catch { continuation.yield(.failure(error)) }
             }
             let relay = Task {
                 do {
                     guard let local = await forward(remote) else { throw PairingError(L("远程访问未能启动")) }
-                    _ = try await client.json(local.appending(path: "api/ping"), token: token)
+                    _ = try await client.json(local.klAppending(path: "api/ping"), token: token)
                     continuation.yield(.success(local))
                 } catch { continuation.yield(.failure(error)) }
             }
@@ -185,11 +185,11 @@ enum Pairing {
     static func pair(base: URL, code: String, fingerprint: String?, viaRelay: Bool = false) async throws -> PairedMac {
         let client = MacClient(expecting: fingerprint, timeout: viaRelay ? 75 : 8)
         defer { client.close() }
-        let reply = try await client.json(base.appending(path: "pair"), method: "POST", body: ["code": code, "name": deviceName])
+        let reply = try await client.json(base.klAppending(path: "pair"), method: "POST", body: ["code": code, "name": deviceName])
         guard let token = reply["token"] as? String else { throw PairingError(L("电脑未返回令牌，请重试")) }
-        _ = try? await client.json(base.appending(path: "api/devices/rename"), method: "POST", token: token,
+        _ = try? await client.json(base.klAppending(path: "api/devices/rename"), method: "POST", token: token,
                                    body: ["name": deviceName])
-        let info = try await client.json(base.appending(path: "api/info"), token: token)
+        let info = try await client.json(base.klAppending(path: "api/info"), token: token)
         return PairedMac(name: info["host"] as? String ?? L("电脑"), addresses: addresses(base, info),
                          token: token, caCertificate: client.captured,
                          remote: await remote(client, base, token: token))
@@ -198,7 +198,7 @@ enum Pairing {
     /// 开通远程访问：报上这台手机的点对点公钥，拿回 Mac 的公钥和中继。Mac 没开远程访问返回 nil，不影响配对
     static func remote(_ client: MacClient, _ base: URL, token: String) async -> RemoteInfo? {
         guard let phoneId = await MainActor.run(body: { PhoneP2P.publicId() }),
-              let reply = try? await client.json(base.appending(path: "api/p2p/join"), method: "POST", token: token, body: ["id": phoneId])
+              let reply = try? await client.json(base.klAppending(path: "api/p2p/join"), method: "POST", token: token, body: ["id": phoneId])
         else { return nil }
         return RemoteInfo(reply)
     }

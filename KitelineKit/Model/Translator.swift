@@ -16,8 +16,9 @@ import Translation
 /// 「自动」按 系统翻译 → Google → MyMemory 的顺序，前一个不可用就换下一个。
 ///
 /// 只翻文字：代码块原样保留，行内代码、链接换成占位符翻完再放回去，列表、标题、引用的前缀不动。
-@MainActor @Observable
-final class Translator {
+@MainActor 
+final class Translator: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = Translator()
 
     // MARK: 设置
@@ -85,17 +86,17 @@ final class Translator {
         static let configured = "translate.configured", badge = "translate.badge", auto = "translate.auto"
     }
     /// Mac 上换成 App 的偏好（测试实例是隔离的那份，见 KitelineKit.useTranslatorDefaults），iPhone 用标准的
-    @ObservationIgnored private var defaults = UserDefaults.standard
+    private var defaults = UserDefaults.standard
 
-    var source: String { didSet { defaults.set(source, forKey: Key.source); cache.removeAll() } }
-    var target: String { didSet { defaults.set(target, forKey: Key.target); cache.removeAll() } }
-    var engine: Engine { didSet { defaults.set(engine.rawValue, forKey: Key.engine); cache.removeAll() } }
+    @Tracked var source: String { didSet { defaults.set(source, forKey: Key.source); cache.removeAll() } }
+    @Tracked var target: String { didSet { defaults.set(target, forKey: Key.target); cache.removeAll() } }
+    @Tracked var engine: Engine { didSet { defaults.set(engine.rawValue, forKey: Key.engine); cache.removeAll() } }
     /// 设过一次（第一次点角标弹的设置点了「翻译」）：之后点角标直接翻
-    var configured: Bool { didSet { defaults.set(configured, forKey: Key.configured) } }
+    @Tracked var configured: Bool { didSet { defaults.set(configured, forKey: Key.configured) } }
     /// 每条消息下面显示「翻译」角标（默认开；关了长按 / 右键菜单里照样有「翻译」）
-    var showBadge: Bool { didSet { defaults.set(showBadge, forKey: Key.badge) } }
+    @Tracked var showBadge: Bool { didSet { defaults.set(showBadge, forKey: Key.badge) } }
     /// 自动翻译：助手的回复出现在屏幕上时自动翻（和目标语言相同的不翻；点过「原文」的、翻失败的不再自动翻）
-    var auto: Bool { didSet { defaults.set(auto, forKey: Key.auto); if auto { configured = true } } }
+    @Tracked var auto: Bool { didSet { defaults.set(auto, forKey: Key.auto); if auto { configured = true } } }
 
     var summary: String {
         "\(Language.name(source)) → \(Language.name(target)) · \(engine.title)"
@@ -130,14 +131,14 @@ final class Translator {
         case failed(String)
     }
     /// 消息 id → 状态。只有点过翻译的才有
-    private(set) var states: [String: State] = [:]
+    @Tracked private(set) var states: [String: State] = [:]
     /// 翻译好了、但切回了原文的
-    private(set) var showingOriginal: Set<String> = []
+    @Tracked private(set) var showingOriginal: Set<String> = []
     /// 第一次点角标：弹设置，确认后翻这一条
-    var askingFor: (id: String, text: String)?
+    @Tracked var askingFor: (id: String, text: String)?
     /// 原文 + 语言 + 服务 → 译文（同一句不重复翻；改了设置清空）
-    private var cache: [String: String] = [:]
-    private var tasks: [String: Task<Void, Never>] = [:]
+    @Tracked private var cache: [String: String] = [:]
+    @Tracked private var tasks: [String: Task<Void, Never>] = [:]
 
     /// 气泡里该显示的文字：翻译好且没切回原文时是译文，否则 nil（照常显示原文）
     func shown(_ id: String) -> String? {
@@ -147,7 +148,7 @@ final class Translator {
     func state(_ id: String) -> State? { states[id] }
 
     /// 自测用：每条翻译试过哪些服务、为什么换下一个
-    @ObservationIgnored private var notes: [String: [String]] = [:]
+    private var notes: [String: [String]] = [:]
 
     /// 自测用（KitelineKit.translateStates）
     var debugStates: String {
@@ -204,9 +205,9 @@ final class Translator {
     }
 
     /// 认过语言、和目标相同不用翻的（自动翻译不再反复认）
-    @ObservationIgnored private var sameAsTarget: Set<String> = []
+    private var sameAsTarget: Set<String> = []
     /// 自动翻译同时最多跑 3 条（一屏十几条回复同时请求，联网服务会被限流）
-    @ObservationIgnored private let autoGate = TranslateGate(3)
+    private let autoGate = TranslateGate(3)
 
     /// 自动翻译：消息出现在屏幕上时调用。只翻和目标语言不同的；翻过、正在翻、点过「原文」、失败过的都不动
     func autoTranslate(_ id: String, text: String) {
@@ -299,7 +300,7 @@ final class Translator {
     }
 
     /// 交给连着的电脑翻（POST /api/translate，电脑有 translate 功能时 AppModel 填上）：(原文, 原文语言, 目标语言, 只许本机翻) → 译文
-    @ObservationIgnored var hostTranslate: ((String, String, String, Bool) async throws -> String)?
+    var hostTranslate: ((String, String, String, Bool) async throws -> String)?
 
     /// 联网服务连不上 / 被限流 / 额度用完后暂停到什么时候（期间先用别的服务）
     private static var downUntil: [Engine: Date] = [:]
@@ -319,14 +320,14 @@ final class Translator {
         /// 语言包已下载：不再调 prepareTranslation（只在要下载时才需要）
         let installed: Bool
     }
-    @ObservationIgnored private var appleQueue: [AppleJob] = []
-    @ObservationIgnored private var appleBusy = false
+    private var appleQueue: [AppleJob] = []
+    private var appleBusy = false
     /// 常驻宿主当前的配置（TranslationSession.Configuration；系统版本不够时这个类型不存在，只能放成 Any）和它的语言
-    private(set) var appleConfig: Any?
-    @ObservationIgnored private var appleLangs: (from: String, to: String)?
+    @Tracked private(set) var appleConfig: Any?
+    private var appleLangs: (from: String, to: String)?
     /// 挂着的宿主（多个窗口各有一个），只有第一个真正干活
-    private(set) var appleHosts: [UUID] = []
-    @ObservationIgnored private var kickToken = UUID()
+    @Tracked private(set) var appleHosts: [UUID] = []
+    private var kickToken = UUID()
 
     func hostAppeared(_ host: UUID) { if !appleHosts.contains(host) { appleHosts.append(host) }; kickApple() }
     func hostGone(_ host: UUID) { appleHosts.removeAll { $0 == host }; if !appleHosts.isEmpty { kickApple() } }
@@ -354,7 +355,7 @@ final class Translator {
         let token = UUID()
         kickToken = token
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(15))
+            try? await Task.sleep(seconds: 15)
             guard let self, self.kickToken == token, !self.appleBusy else { return }
             let stuck = self.appleQueue
             self.appleQueue = []

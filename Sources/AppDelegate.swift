@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = NSHostingController(rootView: MenuBarPanel(
             openMain: { key in MainWindowController.shared.show(select: key) },
             close: { [weak self] in self?.popover.performClose(nil) }).tarsLook(wrapButtons: true))
-        panel.sizingOptions = [.preferredContentSize]
+        if #available(macOS 13, *) { panel.sizingOptions = [.preferredContentSize] }
         popover.contentViewController = panel
         popover.behavior = .transient
         popover.animates = true
@@ -121,9 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let key = "loginItemDefaulted"
         guard !AppConfig.isolated, !AppConfig.defaults.bool(forKey: key) else { return }
         AppConfig.defaults.set(true, forKey: key)
-        guard SMAppService.mainApp.status != .enabled else { return }
+        guard !KLLoginItem.enabled else { return }
         do {
-            try SMAppService.mainApp.register()
+            try KLLoginItem.register()
             Log.write("已默认打开登录时自动打开")
         } catch {
             Log.write("打开登录时自动打开失败：\(error.localizedDescription)")

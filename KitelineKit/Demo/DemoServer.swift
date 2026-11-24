@@ -18,14 +18,14 @@ enum Demo {
 
     static func set(_ value: Bool) { lock.withLock { on = value } }
 
-    static func isDemo(_ mac: PairedMac) -> Bool { mac.addresses.first?.host() == host }
+    static func isDemo(_ mac: PairedMac) -> Bool { mac.addresses.first?.klHost == host }
 }
 
 /// 截下发给演示 Mac 的请求，交给 DemoServer。实时事件（/api/events）一直开着，有新事件就往下写
 final class DemoProtocol: URLProtocol, @unchecked Sendable {
     private var stream: UUID?
 
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.host() == Demo.host }
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.klHost == Demo.host }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {

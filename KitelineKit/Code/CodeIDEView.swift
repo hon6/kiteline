@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// 宽屏的代码 IDE（Mac 面板、iPad）：左边活动栏（资源管理器 / 源代码管理 / 分支与会话 / 历史），侧栏，右边标签页编辑区和状态栏 —— 照 VS Code 的布局
-struct CodeIDEView: View {
-    @Environment(AppModel.self) private var model
+struct CodeIDEView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @Environment(\.colorScheme) private var scheme
     let key: String
@@ -14,7 +14,21 @@ struct CodeIDEView: View {
 
     private var options: EditorOptions { EditorOptions(dark: scheme == .dark, fontSize: fontSize, wrap: wrap, minimap: minimap) }
 
-    var body: some View {
+    /// 工具栏上的当前分支（和远端差几个提交）
+    private func branchButton(_ ws: CodeWorkspace, _ overview: RepoOverview) -> some View {
+        Button { ws.activity = .branches } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.triangle.branch")
+                Text(overview.branch ?? "HEAD").lineLimit(1)
+                if overview.ahead > 0 { Text("↑\(overview.ahead)").monospacedDigit() }
+                if overview.behind > 0 { Text("↓\(overview.behind)").monospacedDigit() }
+            }
+        }
+        .help(L("分支与会话"))
+        .panelToolbarItem()
+    }
+
+    var klBody: some View {
         VStack(spacing: 0) {
             #if os(macOS)
             // 顶上一条细线把内容和标题栏隔开：内容不贴着工具栏的边，macOS 26 的侧栏列表、背景色就不会伸进标题栏（标题栏左右一种颜色）
@@ -32,20 +46,16 @@ struct CodeIDEView: View {
         #endif
         .toolbar {
             // 当前分支（和远端差几个提交）：点开分支与会话
-            if let ws, let overview = ws.repo.overview, overview.repo != nil {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { ws.activity = .branches } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.triangle.branch")
-                            Text(overview.branch ?? "HEAD").lineLimit(1)
-                            if overview.ahead > 0 { Text("↑\(overview.ahead)").monospacedDigit() }
-                            if overview.behind > 0 { Text("↓\(overview.behind)").monospacedDigit() }
-                        }
-                    }
-                    .help(L("分支与会话"))
-                    .panelToolbarItem()
-                }
+            #if os(macOS) && !KL_MODERN
+            // 兼容包：macOS 12 的工具栏里不能写 if（ToolbarContentBuilder.buildIf 要 13，12 上一打开就崩）：条目常在，按钮按条件出现
+            ToolbarItem(placement: .primaryAction) {
+                if let ws, let overview = ws.repo.overview, overview.repo != nil { branchButton(ws, overview) }
             }
+            #else
+            if let ws, let overview = ws.repo.overview, overview.repo != nil {
+                ToolbarItem(placement: .primaryAction) { branchButton(ws, overview) }
+            }
+            #endif
         }
         // Mac 面板关掉（红色按钮、⌘W）前：有没保存的文件先问
         .panelCloseGuard {
@@ -60,7 +70,7 @@ struct CodeIDEView: View {
             ws = workspace
             await workspace.begin(start)
         }
-        .onChange(of: options) { _, value in
+        .klOnChange(of: options) { _, value in
             ws?.options = value
             ws?.editor.setOptions(value)
         }
@@ -115,36 +125,37 @@ struct CodeTab: Identifiable, Hashable {
 }
 
 /// 宽屏 IDE 的状态：开着的标签、哪个在前面、侧栏显示什么
-@MainActor @Observable
-final class CodeWorkspace {
+@MainActor 
+final class CodeWorkspace: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     /// sessions：Mac 主窗口的二级侧边栏才有（这个项目的会话，内容由主程序画）
     /// history：Mac 新版界面的文件侧栏才有（提交历史列在侧栏里，点了某次提交在中间开标签）
     enum Activity: String { case explorer, scm, branches, sessions, history }
 
     let key: String
-    @ObservationIgnored weak var model: AppModel?
+    weak var model: AppModel?
     let editor = EditorController()
     let repo: RepoStore
     let explorer: ExplorerStore
-    var tabs: [CodeTab] = []
-    var active: String?
-    var activity: Activity = .explorer
-    var files: [String: FileSession] = [:]
-    var diffs: [String: DiffPayload] = [:]
-    var diffErrors: [String: String] = [:]
-    var split = true
+    @Tracked var tabs: [CodeTab] = []
+    @Tracked var active: String?
+    @Tracked var activity: Activity = .explorer
+    @Tracked var files: [String: FileSession] = [:]
+    @Tracked var diffs: [String: DiffPayload] = [:]
+    @Tracked var diffErrors: [String: String] = [:]
+    @Tracked var split = true
     /// 关标签时有没保存的：问一声
-    var closing: CodeTab?
+    @Tracked var closing: CodeTab?
     /// 关整个 IDE（Mac 面板）时有没保存的：问一声
-    var quitting = false
-    @ObservationIgnored var options = EditorOptions(dark: true, fontSize: 13, wrap: false, minimap: true)
+    @Tracked var quitting = false
+    var options = EditorOptions(dark: true, fontSize: 13, wrap: false, minimap: true)
     /// 已经在网页里打开过的文件标签（切回来时只要 show）
-    @ObservationIgnored private var loaded: Set<String> = []
+    private var loaded: Set<String> = []
     /// Mac 主窗口的二级侧边栏：侧栏和编辑区分开放（编辑区在右边，和会话换着显示）。开了标签报 true（右边换成编辑区），
     /// 标签全关了报 false（右边回到会话）
-    @ObservationIgnored var onShowCode: ((Bool) -> Void)?
+    var onShowCode: ((Bool) -> Void)?
     /// 二级侧边栏用的那份只初始化一次（侧栏、编辑区两块都会来叫）
-    @ObservationIgnored private var started = false
+    private var started = false
 
     /// 二级侧边栏：第一次显示时读仓库概况和根目录（之后切走再回来不重读，标签、展开的目录都留着）
     func start() async {
@@ -316,14 +327,14 @@ final class CodeWorkspace {
 }
 
 /// 宽屏 IDE 的整体布局
-struct IDELayout: View {
+struct IDELayout: KLView {
     /// 画哪一部分：all 整个 IDE（Mac 面板、iPad）；side 只画活动栏和侧栏、editor 只画编辑区——
     /// Mac 主窗口的二级侧边栏把这两块分开放（侧栏在左边栏右边那一列，编辑区在最右边和会话换着显示）
     enum Part { case all, side, editor }
 
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @PanelDismiss private var closePanel
-    @Bindable var ws: CodeWorkspace
+    @KLBindable var ws: CodeWorkspace
     let options: EditorOptions
     var part: Part = .all
     /// 二级侧边栏：活动栏多一项「会话」（这个项目的会话，主程序画好送进来）和它右下角的数
@@ -336,7 +347,7 @@ struct IDELayout: View {
     @State private var sidebarWidth: CGFloat = 280
     @State private var dragStart: CGFloat?
 
-    var body: some View {
+    var klBody: some View {
         switch part {
         case .all: whole
         case .side:
@@ -390,10 +401,10 @@ struct IDELayout: View {
         .modifier(closingDialog)
     }
 
-    struct ClosingDialog: ViewModifier {
-        @Bindable var ws: CodeWorkspace
+    struct ClosingDialog: KLViewModifier {
+        @KLBindable var ws: CodeWorkspace
 
-        func body(content: Content) -> some View {
+        func klBody(content: Content) -> some View {
             content.confirmationDialog(L("「%@」有未保存的修改", ws.closing?.title ?? ""), isPresented: Binding(get: { ws.closing != nil }, set: { if !$0 { ws.closing = nil } }), titleVisibility: .visible) {
                 Button("保存") {
                     guard let tab = ws.closing, case .file(let path) = tab.kind else { return }
@@ -578,7 +589,7 @@ struct IDELayout: View {
                         diffBar(payload)
                         Divider()
                         if payload.binary {
-                            ContentUnavailableView(L("二进制文件"), systemImage: "doc", description: Text("无法显示二进制文件的差异。"))
+                            KLUnavailableView(L("二进制文件"), systemImage: "doc", description: Text("无法显示二进制文件的差异。"))
                         } else {
                             ScrollView { Text(payload.diff).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).padding() }
                         }
@@ -728,8 +739,8 @@ struct IDELayout: View {
 }
 
 /// 编辑区「…」菜单
-private struct IDEFileMenu: View {
-    @Environment(AppModel.self) private var model
+private struct IDEFileMenu: KLView {
+    @EnvModel private var model
     let ws: CodeWorkspace
     let path: String
     let tab: CodeTab
@@ -737,7 +748,7 @@ private struct IDEFileMenu: View {
     @AppStorage(EditorPrefs.wrapKey) private var wrap = false
     @AppStorage(EditorPrefs.minimapKey) private var minimap = true
 
-    var body: some View {
+    var klBody: some View {
         Button("撤销") { ws.editor.command("undo") }
         Button("重做") { ws.editor.command("redo") }
         Button("全部折叠") { ws.editor.command("foldAll") }
@@ -780,8 +791,8 @@ extension RepoChange {
 
 /// Mac 主窗口的二级侧边栏（11-20）：项目的代码页拆成两块用——side 是活动栏加文件 / Git / 会话那一栏，editor 是标签页编辑区。
 /// 两块共用同一份 CodeWorkspace（CodeStores.workspace，按会话 key 记着：切到别的项目再回来，开着的标签、展开的目录都在）
-struct CodePart: View {
-    @Environment(AppModel.self) private var model
+struct CodePart: KLView {
+    @EnvModel private var model
     @Environment(\.colorScheme) private var scheme
     let key: String
     let part: IDELayout.Part
@@ -796,7 +807,7 @@ struct CodePart: View {
 
     private var options: EditorOptions { EditorOptions(dark: scheme == .dark, fontSize: fontSize, wrap: wrap, minimap: minimap) }
 
-    var body: some View {
+    var klBody: some View {
         let ws = CodeStores.workspace(key, model)
         IDELayout(ws: ws, options: options, part: part, sessions: sessions, sessionCount: sessionCount, barOnTop: barOnTop, openTab: openTab)
             .task(id: key) {
@@ -804,7 +815,7 @@ struct CodePart: View {
                 if let onShowCode { ws.onShowCode = onShowCode }
                 await ws.start()
             }
-            .onChange(of: options) { _, value in
+            .klOnChange(of: options) { _, value in
                 ws.options = value
                 ws.editor.setOptions(value)
             }

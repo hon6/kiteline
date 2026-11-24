@@ -181,15 +181,15 @@ private struct GroupMessageEvent: Decodable {
 
 /// 各群概要 + 打开过的群的消息
 @MainActor
-@Observable
-final class GroupBoard {
-    private(set) var items: [GroupInfo] = []
+final class GroupBoard: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
+    @Tracked private(set) var items: [GroupInfo] = []
     /// 取到过一次群列表（之前 items 空着不代表没有群）
-    private(set) var loaded = false
+    @Tracked private(set) var loaded = false
     /// 群 id → 全部消息（打开群时取一次，之后跟着 group_msg 事件加）
-    private(set) var messages: [String: [GroupMessage]] = [:]
+    @Tracked private(set) var messages: [String: [GroupMessage]] = [:]
     /// 自己发出去、电脑还没回的（先显示在群里，发送中）
-    private(set) var sending: [String: [String]] = [:]
+    @Tracked private(set) var sending: [String: [String]] = [:]
 
     func group(_ id: String) -> GroupInfo? { items.first { $0.id == id } }
 

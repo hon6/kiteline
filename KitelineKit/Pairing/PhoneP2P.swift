@@ -24,8 +24,8 @@ extension RemoteInfo {
 /// 端口开一次就不变；p2p/ 里常驻一条到 Mac 的连接，换网络时在这条连接里换路（不断开），断了自己重连。
 /// 内核是 p2p/（iroh）；模拟器、Mac 截图版里没有。
 @MainActor
-@Observable
-final class PhoneP2P {
+final class PhoneP2P: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = PhoneP2P()
 
     enum State: Equatable {
@@ -55,17 +55,17 @@ final class PhoneP2P {
         }
     }
 
-    private(set) var state: State = .off
+    @Tracked private(set) var state: State = .off
     /// 每秒读一次（App 在前台、远程访问开着时）
-    private(set) var link = Link()
+    @Tracked private(set) var link = Link()
     /// 现在连的是哪台 Mac、哪个中继
-    private var current: RemoteInfo?
+    @Tracked private var current: RemoteInfo?
     /// 端点是用哪个中继开的（换了中继要重开端点；只换 Mac 的地址不用）
-    private var startedRelay: String?
+    @Tracked private var startedRelay: String?
     /// 另加的 Kiteline 电脑的通道（kiteline_p2p_channel）：那台电脑的点对点公钥 → 本机端口。
     /// 和主电脑共用同一个端点（到中继一条连接），每台电脑一条连接、一个端口
-    private(set) var channelPorts: [String: Int] = [:]
-    private var channelInfo: [String: RemoteInfo] = [:]
+    @Tracked private(set) var channelPorts: [String: Int] = [:]
+    @Tracked private var channelInfo: [String: RemoteInfo] = [:]
 
     var localURL: URL? {
         if case .ready(let port) = state { return URL(string: "https://127.0.0.1:\(port)") }
@@ -92,7 +92,7 @@ final class PhoneP2P {
     }
 
     /// 正在开的那一次：别处同时来要（App、诊断、手表）就等它的结果，不再各开一次、也不白白拿到 nil
-    private var inflight: Task<URL?, Never>?
+    @Tracked private var inflight: Task<URL?, Never>?
 
     /// 连上 Mac：返回 App 该用的地址（https://127.0.0.1:端口），失败返回 nil。
     /// 端点已经开着、中继没变时只换目标，端口不变、马上返回；上次失败了再调就重开，不用等 App 重启
@@ -167,7 +167,7 @@ final class PhoneP2P {
     }
 
     /// 端点还没开就开一个（几台电脑同时要通道时只开一次）
-    private var opening: Task<Bool, Never>?
+    @Tracked private var opening: Task<Bool, Never>?
     private func openEndpoint(relay: String) async -> Bool {
         #if canImport(TarsP2P) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
         if startedRelay != nil { return true }

@@ -65,12 +65,21 @@ public sealed class OnboardingWindow : Window
     {
         if (Program.Headless || Prefs.Bool(ShownKey)) return;
         Prefs.Set(ShownKey, true);
-        try
+        // 读电脑状态偶尔失败（主机刚起来、接口出错）：隔一会儿再试；三次都读不到也照样弹——
+        // 以前一出错就放弃，又已记成「弹过」，新装的电脑从此看不到引导（11-24 全新安装实测）
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            var status = await AppModel.Shared.Api.Get("/api/desktop/status");
-            if (status.Arr("devices").Items().Any()) return;
+            try
+            {
+                var status = await AppModel.Shared.Api.Get("/api/desktop/status");
+                if (status.Arr("devices").Items().Any()) return;
+                break;
+            }
+            catch
+            {
+                await System.Threading.Tasks.Task.Delay(1500);
+            }
         }
-        catch { return; }
         Open();
     }
 

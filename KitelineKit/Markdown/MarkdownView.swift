@@ -6,7 +6,7 @@ extension EnvironmentValues {
     @Entry var markdownFlatHeadings = false
 }
 
-struct MarkdownView: View {
+struct MarkdownView: KLView {
     @Environment(\.markdownFlatHeadings) private var flat
     @Environment(\.markdownSelectable) private var selectable
     @Environment(\.richTone) private var tone
@@ -17,7 +17,7 @@ struct MarkdownView: View {
     init(_ text: String, fill: Bool = true) { blocks = Markdown.blocks(text); self.fill = fill }
     init(blocks: [MarkdownBlock]) { self.blocks = blocks }
 
-    var body: some View {
+    var klBody: some View {
         let _ = PerfTrace.body("MarkdownView")
         // 块与块之间的空照浏览器的外边距合并：取上一块的下边距和这一块的上边距里大的那个（第一块顶上不留）
         VStack(alignment: .leading, spacing: 0) {
@@ -42,7 +42,7 @@ struct MarkdownView: View {
         }
         .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
         // 行内代码（Menlo）别被「外观 → 字体」换掉：根视图上的 fontDesign 连明确写的等宽字也会改；正文本来就明确用了选的字体
-        .fontDesign(nil)
+        .klFontDesign(nil)
     }
 
     // 排版大体照 VS Code 里的 Claude Code（见 ChatType）：列表、引用上下 1em；代码块上下 10；
@@ -103,7 +103,7 @@ struct MarkdownView: View {
                 .fixedSize(horizontal: false, vertical: true)
         case .code(let code):
             Text(code)
-                .font(ChatType.code).fontDesign(nil)
+                .font(ChatType.code).klFontDesign(nil)
                 .lineSpacing(ChatType.lineSpacing(ChatType.codeSize))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, ChatType.px(12))
@@ -153,10 +153,78 @@ struct MarkdownView: View {
     }
 }
 
+#if os(iOS) || KL_MODERN
+private typealias TableLayout = TableLayoutImpl
+#else
 /// Markdown 表格的排版。子视图依次是：表头 columns 个格子、一条分隔线、每行 columns 个格子。
 /// 每次都按给的宽度现算列宽和行高（不缓存），报出去的尺寸和实际画的一定一致。
 /// 列宽：放得下就按内容宽；放不下时先把列距从 hSpacing 收到 minHSpacing，还放不下，内容窄的列保持原宽，其余列平分剩下的宽度（同 Grid 的样子）。
-private struct TableLayout: Layout {
+private struct TableLayout<Content: View>: KLView {
+    let columns: Int
+    var hSpacing: CGFloat = 10
+    var minHSpacing: CGFloat = 10
+    var vSpacing: CGFloat = 6
+    let content: () -> Content
+
+    init(columns: Int, hSpacing: CGFloat = 10, minHSpacing: CGFloat = 10, vSpacing: CGFloat = 6, @ViewBuilder content: @escaping () -> Content) {
+        self.columns = columns; self.hSpacing = hSpacing; self.minHSpacing = minHSpacing; self.vSpacing = vSpacing; self.content = content
+    }
+
+    var klBody: some View {
+        #if os(macOS) && !KL_MODERN
+        if #available(macOS 13, *) {
+            TableLayoutImpl(columns: columns, hSpacing: hSpacing, minHSpacing: minHSpacing, vSpacing: vSpacing) { content() }
+        } else {
+            // macOS 12：子视图依次是表头 columns 格、分隔线、每行 columns 格，按行排成 HStack，各列平分宽度
+            KLChildren(content) { children in
+                let cells = Array(children)
+                let columns = max(1, self.columns)
+                VStack(alignment: .leading, spacing: vSpacing) {
+                    HStack(alignment: .top, spacing: hSpacing) {
+                        ForEach(cells.prefix(columns)) { $0.frame(maxWidth: .infinity, alignment: .leading) }
+                    }
+                    if cells.count > columns { cells[columns] }
+                    let rows = Array(cells.dropFirst(columns + 1))
+                    ForEach(Array(stride(from: 0, to: rows.count, by: columns)), id: \.self) { start in
+                        HStack(alignment: .top, spacing: hSpacing) {
+                            ForEach(rows[start..<min(start + columns, rows.count)]) { $0.frame(maxWidth: .infinity, alignment: .leading) }
+                        }
+                    }
+                }
+            }
+        }
+        #elseif os(iOS) || KL_MODERN
+        TableLayoutImpl(columns: columns, hSpacing: hSpacing, minHSpacing: minHSpacing, vSpacing: vSpacing) { content() }
+        
+        #else
+        if #available(macOS 13, iOS 16, *) {
+            TableLayoutImpl(columns: columns, hSpacing: hSpacing, minHSpacing: minHSpacing, vSpacing: vSpacing) { content() }
+        } else {
+            // macOS 12：子视图依次是表头 columns 格、分隔线、每行 columns 格，按行排成 HStack，各列平分宽度
+            KLChildren(content) { children in
+                let cells = Array(children)
+                let columns = max(1, self.columns)
+                VStack(alignment: .leading, spacing: vSpacing) {
+                    HStack(alignment: .top, spacing: hSpacing) {
+                        ForEach(cells.prefix(columns)) { $0.frame(maxWidth: .infinity, alignment: .leading) }
+                    }
+                    if cells.count > columns { cells[columns] }
+                    let rows = Array(cells.dropFirst(columns + 1))
+                    ForEach(Array(stride(from: 0, to: rows.count, by: columns)), id: \.self) { start in
+                        HStack(alignment: .top, spacing: hSpacing) {
+                            ForEach(rows[start..<min(start + columns, rows.count)]) { $0.frame(maxWidth: .infinity, alignment: .leading) }
+                        }
+                    }
+                }
+            }
+        }
+        #endif
+    }
+}
+#endif
+
+@available(macOS 13, iOS 16, *)
+private struct TableLayoutImpl: Layout {
     let columns: Int
     var hSpacing: CGFloat = 10
     var minHSpacing: CGFloat = 10
@@ -183,7 +251,7 @@ private struct TableLayout: Layout {
         for r in m.heights.indices {
             var x = bounds.minX
             for c in 0..<columns {
-                // 同 Grid(alignment: .leading)：格子靠左、在这一行里上下居中
+                // 同 KLGrid(alignment: .leading)：格子靠左、在这一行里上下居中
                 subviews[cellIndex(r, c)].place(at: CGPoint(x: x, y: y + m.heights[r] / 2), anchor: .leading,
                                                 proposal: ProposedViewSize(width: m.widths[c], height: nil))
                 x += m.widths[c] + m.gap

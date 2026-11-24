@@ -8,8 +8,8 @@ import SwiftUI
 /// 底下是和对话页一样的输入栏：语音 / 键盘切换、输入框、「+」（相册、拍摄），写了字换成绿色「发送」，点了就开始。
 /// 发出去以后中间出现这条消息和进展，新会话一出现就换成那个会话的对话页（MainView 的 pendingOpen）。
 /// Mac 的面板（待办「创建会话」、项目详情的新任务）照旧用 ProjectPages.swift 的 NewTaskView。
-struct NewSessionPage: View {
-    @Environment(AppModel.self) private var model
+struct NewSessionPage: KLView {
+    @EnvModel private var model
     @Environment(\.dismiss) private var dismiss
     let seed: NewTaskSeed
 
@@ -43,7 +43,7 @@ struct NewSessionPage: View {
 
     // 输入栏（同对话页的 Composer）
     @State private var attachments: [ComposeAttachment] = []
-    @State private var picks: [PhotosPickerItem] = []
+    @State private var picks: [KLPhotoItem] = []
     @State private var panelOpen = false
     @State private var showCamera = false
     @State private var clipboardImage = false
@@ -80,7 +80,7 @@ struct NewSessionPage: View {
     private var locked: Bool { sent != nil && sent?.phase != .done }
     private var talking: Bool { voiceMode && RemoteConfig.shared.isOn(.voice) }
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(spacing: 14) {
                 if let picked { projectCard(picked) } else { pickSection }
@@ -94,18 +94,18 @@ struct NewSessionPage: View {
             .frame(minHeight: picked != nil && sent == nil ? viewport : 0, alignment: .center)
         }
         // 去掉标题栏、输入栏、键盘那几块：键盘弹出来时卡片跟着挪到键盘上方的正中
-        .onGeometryChange(for: CGFloat.self) { max(0, $0.size.height - $0.safeAreaInsets.top - $0.safeAreaInsets.bottom) } action: { viewport = $0 }
-        .scrollDismissesKeyboard(.interactively)
+        .klOnGeometryChange(for: CGFloat.self) { max(0, $0.size.height - $0.safeAreaInsets.top - $0.safeAreaInsets.bottom) } action: { viewport = $0 }
+        .klScrollDismissesKeyboard(.interactively)
         .background(Theme.chatBackground)
         // 点对话区：收起键盘和「+」面板（同对话页）
         .simultaneousGesture(TapGesture().onEnded {
             Keyboard.hide()
-            if panelOpen { withAnimation(.snappy(duration: 0.2)) { panelOpen = false } }
+            if panelOpen { withAnimation(.klSnappy(duration: 0.2)) { panelOpen = false } }
         })
         .safeAreaInset(edge: .bottom, spacing: 0) { inputBar }
         .navigationTitle(seed.scheduleOnly ? "新建定时任务" : "新会话")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(item: $browsing) { source in
+        .klNavigationDestination(item: $browsing) { source in
             FolderPicker(sourceId: source.id, machine: source.name,
                          start: FolderStart.usual((projects ?? []).filter { $0.sourceId == source.id }.map(\.cwd))) { path in
                 adopt(path, source: source)
@@ -116,11 +116,11 @@ struct NewSessionPage: View {
         .onAppear { checkClipboard() }
         .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in checkClipboard() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in checkClipboard() }
-        .onChange(of: focused) { _, on in
-            if on, panelOpen { withAnimation(.snappy(duration: 0.2)) { panelOpen = false } }
+        .klOnChange(of: focused) { _, on in
+            if on, panelOpen { withAnimation(.klSnappy(duration: 0.2)) { panelOpen = false } }
             if on { checkClipboard() }
         }
-        .onChange(of: picks) { _, items in
+        .klOnChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             picks = []
             panelOpen = false
@@ -135,7 +135,7 @@ struct NewSessionPage: View {
         .task(id: sent.map { "\($0.id)-\($0.phase)" }) {
             // 等新会话最多 3 分钟（同 awaitNewSession）：还没出现就说明一下，不一直转圈
             guard let id = sent?.id, sent?.phase == .waiting else { return }
-            try? await Task.sleep(for: .seconds(180))
+            try? await Task.sleep(seconds: 180)
             guard !Task.isCancelled, sent?.id == id, sent?.phase == .waiting else { return }
             sent?.status = L("尚未检测到新会话，可稍后在会话列表中查看")
             sent?.phase = .done
@@ -208,8 +208,8 @@ struct NewSessionPage: View {
             }
         }
         if !seed.scheduleOnly {
-            row { Toggle("定时执行", isOn: $scheduleOn.animation(.snappy)) }
-                .onChange(of: scheduleOn) { _, on in if on { panelOpen = false } }
+            row { Toggle("定时执行", isOn: $scheduleOn.animation(.klSnappy)) }
+                .klOnChange(of: scheduleOn) { _, on in if on { panelOpen = false } }
         }
         if scheduled {
             row {
@@ -455,13 +455,13 @@ struct NewSessionPage: View {
                 } else if !scheduled {   // 定时任务只带文字：不给「+」
                     RoundIcon(symbol: "plus", label: panelOpen ? L("收起更多功能") : L("更多功能")) {
                         focused = false
-                        withAnimation(.snappy(duration: 0.25)) { panelOpen.toggle() }
+                        withAnimation(.klSnappy(duration: 0.25)) { panelOpen.toggle() }
                     }
                 }
             }
             .padding(.horizontal, Bar.edge - Bar.iconInset)
             .padding(.vertical, Bar.spacing)
-            .animation(.snappy(duration: 0.2), value: empty)
+            .animation(.klSnappy(duration: 0.2), value: empty)
             if panelOpen { panel.transition(.move(edge: .bottom).combined(with: .opacity)) }
         }
         .background(Theme.inputBar)
@@ -470,18 +470,18 @@ struct NewSessionPage: View {
     }
 
     private var field: some View {
-        TextField(locked ? L("会话开始后可继续发送")
+        KLTextField(locked ? L("会话开始后可继续发送")
                   : picked == nil ? L("选好项目后，描述要完成的任务")
                   : (otherAgent.map { L("描述要 %@ 完成的任务", $0.name) } ?? L("描述要 Claude 完成的任务")),
                   text: text, axis: .vertical)
-            .lineLimit(1...6)
+            .klLineLimit(1...6)
             .focused($focused)
             .submitLabel(.send)
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .frame(minHeight: 40)
             .background(Theme.field, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .onChange(of: draft) { old, new in
+            .klOnChange(of: draft) { old, new in
                 // 换行键 = 发送（同对话页）：只认「在末尾多打了一个换行」，粘贴进来的多行文字不算
                 if new == old + "\n" {
                     model.setDraft(draftKey, old)
@@ -534,12 +534,12 @@ struct NewSessionPage: View {
                 }
             }
             .labelStyle(.titleAndIcon)
-            .buttonBorderShape(.capsule)
+            .klButtonBorderShape(.capsule)
             .controlSize(.small)
             .tint(Theme.wechatGreen)
             Button {
                 ClipboardImage.handled = ClipboardImage.changeCount
-                withAnimation(.snappy) { clipboardImage = false }
+                withAnimation(.klSnappy) { clipboardImage = false }
             } label: {
                 Image(systemName: "xmark").font(.ui(.footnote).weight(.semibold)).foregroundStyle(.secondary)
                     .frame(width: 30, height: 30).contentShape(Rectangle())
@@ -555,7 +555,7 @@ struct NewSessionPage: View {
     private var panel: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
         return LazyVGrid(columns: columns, spacing: 18) {
-            PhotosPicker(selection: $picks, maxSelectionCount: max(1, 6 - attachments.count), matching: .images) {
+            KLPhotosPicker(selection: $picks, maxSelectionCount: max(1, 6 - attachments.count)) {
                 PanelTile(symbol: "photo", title: L("相册"))
             }
             .buttonStyle(.steady(.plain))
@@ -572,7 +572,7 @@ struct NewSessionPage: View {
 
     private func checkClipboard() {
         let offer = ClipboardImage.offer
-        if offer != clipboardImage { withAnimation(.snappy) { clipboardImage = offer } }
+        if offer != clipboardImage { withAnimation(.klSnappy) { clipboardImage = offer } }
     }
 
     // MARK: 数据
@@ -629,7 +629,7 @@ struct NewSessionPage: View {
             model.setDraft(key, model.drafts[Self.looseDraft] ?? "")
             model.setDraft(Self.looseDraft, "")
         }
-        withAnimation(.snappy) { picked = p }
+        withAnimation(.klSnappy) { picked = p }
         self.fixed = fixed
         focusSoon()
     }
@@ -645,7 +645,7 @@ struct NewSessionPage: View {
             }
         }
         focused = false
-        withAnimation(.snappy) { picked = nil }
+        withAnimation(.klSnappy) { picked = nil }
     }
 
     /// 待办、链接带来的内容：进来时填进当前这份草稿（已经有草稿就不盖掉）；还没选项目的，选好时跟过去
@@ -658,7 +658,7 @@ struct NewSessionPage: View {
     private func focusSoon() {
         guard !talking else { return }
         Task {
-            try? await Task.sleep(for: .milliseconds(450))   // 等推进来的动画走完再弹键盘
+            try? await Task.sleep(milliseconds: 450)   // 等推进来的动画走完再弹键盘
             focused = true
         }
     }
@@ -709,7 +709,7 @@ struct NewSessionPage: View {
         Haptics.tap()
         focused = false
         panelOpen = false
-        withAnimation(.snappy) {
+        withAnimation(.klSnappy) {
             sent = Sent(text: prompt, previews: images.map(\.preview),
                         status: scheduled ? L("正在创建…") : (project.open || project.live > 0 || otherAgent != nil ? L("正在新建会话…") : L("正在打开 VS Code…")))
         }
@@ -722,7 +722,7 @@ struct NewSessionPage: View {
     private func restore(_ prompt: String, _ images: [ComposeAttachment], _ key: String) {
         model.setDraft(key, prompt)
         attachments = images
-        withAnimation(.snappy) { sent = nil }
+        withAnimation(.klSnappy) { sent = nil }
     }
 
     private func go(project: ProjectInfo, prompt: String, images: [ComposeAttachment], draftKey key: String, override: Bool) async {
@@ -764,7 +764,7 @@ struct NewSessionPage: View {
             if let branch = reply["branch"] as? String { status = L("已在独立分支 %@ 开始，等待新会话出现…", branch) }
             else if reply["submitted"] as? Bool == true { status = L("已开始，等待新会话出现…") }
             else { status = reply["message"] as? String ?? L("已新建会话"); phase = .done }
-            withAnimation(.snappy) {
+            withAnimation(.klSnappy) {
                 sent?.status = status
                 sent?.phase = phase
             }

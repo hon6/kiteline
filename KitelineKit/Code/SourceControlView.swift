@@ -2,15 +2,15 @@ import SwiftUI
 
 /// 源代码管理（同 VS Code 左边那一栏）：当前分支和同步、进行中的合并 / 变基、提交信息、冲突 / 暂存 / 未暂存的改动。
 /// 宽屏是 IDE 的侧栏，手机是一页；点改动看对比、点文件打开都交给外面（宽屏开标签，手机推一页）
-struct SourceControlPanel: View {
+struct SourceControlPanel: KLView {
     /// 提交信息框的字号、圆角：Mac 照侧栏规范（SideMetric 只在 Mac 上有），手机照常
     #if os(macOS)
     static let fieldFont: CGFloat = SideMetric.Text.body, fieldRadius: CGFloat = SideMetric.radius
     #else
     static let fieldFont: CGFloat = 15, fieldRadius: CGFloat = 8
     #endif
-    @Environment(AppModel.self) private var model
-    @Bindable var store: RepoStore
+    @EnvModel private var model
+    @KLBindable var store: RepoStore
     var openDiff: (RepoChange, String) -> Void
     var openFile: (String) -> Void
     var openBranches: () -> Void
@@ -20,7 +20,7 @@ struct SourceControlPanel: View {
     @State private var nameAsk: NameAsk?
     @FocusState private var editing: Bool
 
-    var body: some View {
+    var klBody: some View {
         Group {
             if let overview = store.overview {
                 if overview.repo == nil {
@@ -38,7 +38,7 @@ struct SourceControlPanel: View {
     }
 
     private func notRepo(_ overview: RepoOverview) -> some View {
-        ContentUnavailableView {
+        KLUnavailableView {
             Label("不是 Git 仓库", systemImage: "arrow.triangle.branch")
         } description: {
             Text(overview.reason ?? L("此目录还没有使用 Git 管理。"))
@@ -164,13 +164,13 @@ struct SourceControlPanel: View {
 
     private func commitBox(_ o: RepoOverview) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField(L("提交信息（在「%@」上提交）", o.branch ?? "HEAD"), text: $message, axis: .vertical)
-                .lineLimit(2...8)
+            KLTextField(L("提交信息（在「%@」上提交）", o.branch ?? "HEAD"), text: $message, axis: .vertical)
+                .klLineLimit(2...8)
                 .font(.app(size: Self.fieldFont))
                 .textFieldStyle(.plain)
-                .focusEffectDisabled()   // 去掉系统自带的那圈焦点框（它比下面自己画的边框大一圈，看起来像两层边）
+                .klFocusEffectDisabled()   // 去掉系统自带的那圈焦点框（它比下面自己画的边框大一圈，看起来像两层边）
                 #if os(macOS)
-                .scrollContentBackground(.hidden)   // 多行输入框自己带一块更深的底，会在我们的底里再套出一个框
+                .klScrollContentBackground(.hidden)   // 多行输入框自己带一块更深的底，会在我们的底里再套出一个框
                 #endif
                 .focused($editing)
                 .padding(.horizontal, 8).padding(.vertical, 6)
@@ -206,7 +206,7 @@ struct SourceControlPanel: View {
                 } label: {
                     Image(systemName: "chevron.down").frame(width: 12)
                 }
-                .menuStyle(.button)
+                .klMenuButtonStyle()
                 .menuIndicator(.hidden)
                 .kiteButton()
                 .fixedSize()
@@ -253,15 +253,15 @@ struct SourceControlPanel: View {
 }
 
 /// 分支和同步：⎇ 当前分支（点开分支与会话）、领先 / 落后、获取 / 拉取 / 推送、更多
-struct BranchSyncBar: View {
-    @Environment(AppModel.self) private var model
+struct BranchSyncBar: KLView {
+    @EnvModel private var model
     let store: RepoStore
     let overview: RepoOverview
     var openBranches: () -> Void
     @Binding var ask: CodeAsk?
     @Binding var nameAsk: NameAsk?
 
-    var body: some View {
+    var klBody: some View {
         let o = overview
         let sessions = store.currentTree.map { store.sessions(inTree: $0.path) } ?? []
         VStack(alignment: .leading, spacing: 8) {
@@ -353,7 +353,7 @@ struct BranchSyncBar: View {
         } label: {
             Image(systemName: "ellipsis").frame(width: 12)
         }
-        .menuStyle(.button)
+        .klMenuButtonStyle()
         .menuIndicator(.hidden)
         .kiteButton()
         .fixedSize()
@@ -361,8 +361,8 @@ struct BranchSyncBar: View {
 }
 
 /// 一个改动：状态字母、文件名、所在目录、增删行数；点开看对比。手机左滑暂存 / 右滑丢弃，Mac 鼠标移上去出按钮
-struct ChangeRow: View {
-    @Environment(AppModel.self) private var model
+struct ChangeRow: KLView {
+    @EnvModel private var model
     let change: RepoChange
     /// staged / unstaged / untracked（冲突的按 unstaged）
     let mode: String
@@ -372,12 +372,12 @@ struct ChangeRow: View {
     @Binding var ask: CodeAsk?
     @State private var hover = false
 
-    var body: some View {
+    var klBody: some View {
         Button { change.status == "U" ? openFile(change.path) : openDiff(change, mode) } label: {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(change.name).font(.ui(.subheadline)).foregroundStyle(change.status == "D" ? .secondary : .primary)
-                        .strikethrough(change.status == "D").lineLimit(1)
+                    Text(change.name).strikethrough(change.status == "D").font(.ui(.subheadline)).foregroundStyle(change.status == "D" ? .secondary : .primary)
+                        .lineLimit(1)
                     if !change.folder.isEmpty || change.oldPath != nil {
                         Text(change.oldPath.map { L("由 %@ 重命名", $0) } ?? change.folder)
                             .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
@@ -462,12 +462,12 @@ struct ChangeRow: View {
     }
 }
 
-struct StashRow: View {
+struct StashRow: KLView {
     let stash: RepoStash
     let store: RepoStore
     @Binding var ask: CodeAsk?
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 8) {
             Image(systemName: "archivebox").foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 1) {

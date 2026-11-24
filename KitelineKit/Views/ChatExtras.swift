@@ -4,8 +4,8 @@ import SwiftUI
 
 // MARK: 对话内搜索
 
-struct ChatSearchSheet: View {
-    @Environment(AppModel.self) private var model
+struct ChatSearchSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let key: String
     let jump: (String) -> Void
@@ -22,8 +22,8 @@ struct ChatSearchSheet: View {
         var ts: Double?
     }
 
-    var body: some View {
-        NavigationStack {
+    var klBody: some View {
+        KLNavigationStack {
             List {
                 if let hits {
                     Section {
@@ -60,7 +60,7 @@ struct ChatSearchSheet: View {
             .doneButton { dismiss() }
             .task(id: query) {
                 guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { hits = nil; return }
-                try? await Task.sleep(for: .milliseconds(450))
+                try? await Task.sleep(milliseconds: 450)
                 guard !Task.isCancelled else { return }
                 await search()
             }
@@ -68,7 +68,7 @@ struct ChatSearchSheet: View {
         #if os(macOS)
         .panelFrame(width: 560, height: 560)
         #else
-        .presentationDetents([.medium, .large])
+        .klPresentationDetents([.medium, .large])
         #endif
     }
 
@@ -112,7 +112,7 @@ extension View {
     }
 }
 
-struct CatchupPill: View {
+struct CatchupPill: KLView {
     let chat: ChatStore
     let since: Double
     /// 对话里怎么称呼这个 agent（Claude、Codex……）
@@ -127,7 +127,7 @@ struct CatchupPill: View {
 
     private static let testCommand = try? NSRegularExpression(pattern: #"\b(pytest|jest|vitest|mocha|go test|cargo test|npm (run )?test|pnpm (run )?test|yarn test|rspec|phpunit|unittest|run-integration|xcodebuild test|swift test)\b"#)
 
-    var body: some View {
+    var klBody: some View {
         let s = stats
         if s.replies + s.tools + s.images + s.errors > 0 {
             Button(action: tap) {
@@ -156,7 +156,7 @@ struct CatchupPill: View {
             .padding([.horizontal, .top], 12)   // 离标题栏和左右一样远
             .onAppear { shownAt = Date() }
             .task {
-                try? await Task.sleep(for: .seconds(Self.lifetime))
+                try? await Task.sleep(seconds: Self.lifetime)
                 if !Task.isCancelled { expire() }
             }
         }

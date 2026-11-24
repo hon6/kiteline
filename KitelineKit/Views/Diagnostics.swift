@@ -6,8 +6,8 @@ import SwiftUI
 /// 网络诊断：连不上 Mac 时，沿着连接的路一道道查，找出卡在哪一道。
 /// 手机网络 → 本地网络权限 → 局域网直连 → 远程访问 → 中继服务器 → 点对点到 Mac → Mac 认不认这台手机 → 实时连接
 @MainActor
-@Observable
-final class NetworkDiagnosis {
+final class NetworkDiagnosis: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     enum State: Equatable { case waiting, running, ok, warn, fail, skipped }
 
     struct Check: Identifiable {
@@ -23,8 +23,8 @@ final class NetworkDiagnosis {
 
     enum Action { case openSettings }
 
-    private(set) var checks: [Check] = []
-    private(set) var running = false
+    @Tracked private(set) var checks: [Check] = []
+    @Tracked private(set) var running = false
 
     /// 结论：有不通的说第一道；实时连接是通的就是「连得上」（要注意的写在各道里）；否则说第一处要注意的
     var conclusion: (state: State, title: String, text: String)? {
@@ -128,7 +128,7 @@ final class NetworkDiagnosis {
             let results = await Self.ping(lanAddresses, mac: mac, timeout: 4)
             if let best = results.filter({ $0.status == 200 }).min(by: { $0.ms < $1.ms }) {
                 reached = true
-                set("lan", .ok, L("已连通：%@（%@ 毫秒）", "\(best.url.host() ?? "")", "\(best.ms)"))
+                set("lan", .ok, L("已连通：%@（%@ 毫秒）", "\(best.url.klHost ?? "")", "\(best.ms)"))
             } else if results.contains(where: { $0.status == 401 }) {
                 revoked = true
                 set("lan", .fail, L("已连接到电脑，但电脑不信任此手机"), fix: L("此手机可能已在电脑上被停用。请在电脑上打开 Kiteline 的「手机访问」重新扫码"))
@@ -138,7 +138,7 @@ final class NetworkDiagnosis {
                         ? L("配对时未记录此电脑的证书（当时依赖手机上安装的「Local CA」描述文件），描述文件删除后即失去信任。请在电脑上打开 Kiteline 的「手机访问」重新扫码")
                         : L("可能是电脑已重置证书，或该地址现属于其他设备。请在电脑上打开 Kiteline 的「手机访问」重新扫码"))
             } else {
-                let hosts = lanAddresses.compactMap { $0.host() }.joined(separator: "、")
+                let hosts = lanAddresses.compactMap { $0.klHost }.joined(separator: "、")
                 set("lan", remoteUsable(mac) ? .warn : .fail, L("局域网中未找到电脑（已尝试 %@）", "\(hosts)"),
                     fix: L("请确认电脑已开机且未睡眠、Kiteline 正在运行，且手机与电脑连接同一 Wi-Fi；")
                         + (HostPlatform.isMac ? L("并在电脑的「系统设置 → 隐私与安全性 → 本地网络」中开启 Kiteline") : L("并确认电脑的防火墙允许 Kiteline 接受连接")))
@@ -163,7 +163,7 @@ final class NetworkDiagnosis {
         if remoteUsable(mac), let info = mac.remote {
             start("relay")
             let relay = URL(string: info.relay.isEmpty ? "https://tars.betac.cn" : info.relay)
-            let relayHost = relay?.host() ?? info.relay
+            let relayHost = relay?.klHost ?? info.relay
             var relayOK = false
             if let relay, let ms = await Self.relayPing(relay) {
                 relayOK = true
@@ -273,7 +273,7 @@ final class NetworkDiagnosis {
             for base in urls {
                 group.addTask {
                     let start = Date()
-                    let url = base.appending(path: "api/ping")
+                    let url = base.klAppending(path: "api/ping")
                     do {
                         let request = try MacClient.request(url, token: mac.token)
                         let (_, http) = try await client.send(request)
@@ -295,7 +295,7 @@ final class NetworkDiagnosis {
 
     /// 中继自己的 /ping（公开证书，用系统的网络栈）
     private static func relayPing(_ relay: URL) async -> Int? {
-        var request = URLRequest(url: relay.appending(path: "ping"))
+        var request = URLRequest(url: relay.klAppending(path: "ping"))
         request.timeoutInterval = 6
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let start = Date()
@@ -306,12 +306,12 @@ final class NetworkDiagnosis {
 }
 
 /// 网络诊断的弹窗：最上面是结论，下面一道道列出来
-struct NetworkDiagnosisSheet: View {
-    @Environment(AppModel.self) private var model
+struct NetworkDiagnosisSheet: KLView {
+    @EnvModel private var model
     @State private var diagnosis = NetworkDiagnosis()
     @State private var copied = false
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("网络诊断")) {
             VStack(alignment: .leading, spacing: 14) {
                 summary
@@ -418,11 +418,11 @@ struct NetworkDiagnosisSheet: View {
 }
 
 /// 首页标题下面「正在连接…」的按钮：转圈 + 文字，居中；点开网络诊断
-struct ConnectingButton: View {
+struct ConnectingButton: KLView {
     let text: String
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small).tint(Theme.claude)

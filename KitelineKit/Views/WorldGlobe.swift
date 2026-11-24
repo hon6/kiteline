@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// 左边栏顶上的入口图标：一颗像素地球（我的世界的方块：水、草地、沙滩），鼠标移上去转起来；开着世界时下面一道主题色
-public struct WorldGlobeIcon: View {
+public struct WorldGlobeIcon: KLView {
     var active = false
     @State private var hovering = false
 
@@ -21,7 +21,7 @@ public struct WorldGlobeIcon: View {
     ]
     private static let rows = [3, 5, 7, 9, 9, 9, 7, 5, 3]
 
-    public var body: some View {
+    public var klBody: some View {
         TimelineView(.animation(minimumInterval: 0.11, paused: !hovering)) { context in
             let shift = hovering ? Int(context.date.timeIntervalSinceReferenceDate * 9) % 18 : 4
             Canvas { ctx, size in
@@ -57,7 +57,7 @@ public struct WorldGlobeIcon: View {
         // 手机上没有悬停：出现时转一圈就停（一直转的话导航栏每秒重画九次，费电）
         .task {
             hovering = true
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(seconds: 2)
             hovering = false
         }
         #endif

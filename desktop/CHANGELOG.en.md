@@ -1,5 +1,15 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.59 (2026-11-24)
+
+### New Features
+
+- **Replies appear as they are written** (Windows, Linux): Claude's reply now shows up in the conversation word by word, in step with the terminal on your computer, instead of appearing only after the whole passage is finished. Applies to Claude Code sessions started after this update.
+
+### Bug Fixes
+
+- Fixed the welcome guide sometimes not appearing on a newly installed computer: the first time you open Kiteline, the guide now shows up as expected and walks you through checking your agents and environment and connecting your phone.
+
 ## 1.0.58 (2026-11-24)
 
 ### Bug Fixes

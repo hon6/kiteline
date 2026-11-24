@@ -6,33 +6,33 @@ import AppKit
 
 /// 整个 App 的状态：会话列表、各会话的对话、和 Mac 的实时连接，以及发消息、点允许这些操作
 @MainActor
-@Observable
-final class AppModel {
+final class AppModel: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     let api: MacAPI
     /// 手机直连的其他 Kiteline 电脑（设备维度里的「Kiteline 设备」，Model/LinkedHosts.swift）：请求按会话转给所在的那台
     let hub = DeviceHub()
-    @ObservationIgnored var linkedHosts: [String: LinkedHost] = [:]
+    var linkedHosts: [String: LinkedHost] = [:]
     /// 设置里各台 Kiteline 设备的状态（名字、在线、版本）
-    var linkedStatus: [LinkedStatus] = []
+    @Tracked var linkedStatus: [LinkedStatus] = []
     /// 主电脑最近一份整份状态（和直连的电脑合成前）
-    @ObservationIgnored var primaryRaw: [String: Any]?
+    var primaryRaw: [String: Any]?
 
     // Mac 推来的状态（/api/state、事件流 state）
-    private(set) var host = ""
-    private(set) var version = ""
-    private(set) var sessions: [SessionInfo] = []
+    @Tracked private(set) var host = ""
+    @Tracked private(set) var version = ""
+    @Tracked private(set) var sessions: [SessionInfo] = []
     /// 会话标题（key → 标题）：只在有会话改名、增减时才换。群聊页每行消息、每个成员头像都要成员现在的名字，
     /// 直接读 sessions 的话，任何会话一有动静（约两秒一次）所有行都跟着重算
     /// （11-13 追踪 Mac 版：开着一个群聊页，4 秒里 sessions 牵动了 21 万次视图失效，全在 GroupMessageRow / GroupMemberFace 上）
-    private(set) var sessionTitles: [String: String] = [:]
+    @Tracked private(set) var sessionTitles: [String: String] = [:]
     /// 上次登记的插件 agent（标志、称呼、要求的 iPhone 版本）：变了要重画列表（Agents 表本身不是 Observable）
-    @ObservationIgnored private var agentProfiles: [AgentProfile]?
-    private(set) var sources: [SourceInfo] = []
+    private var agentProfiles: [AgentProfile]?
+    @Tracked private(set) var sources: [SourceInfo] = []
     /// 要人处理的状况（VS Code 弹着对话框、到某台机器的连接断了），列表顶上显示
-    private(set) var alerts: [AlertInfo] = []
+    @Tracked private(set) var alerts: [AlertInfo] = []
     /// 在手机上「忽略」掉的提醒（编号 + 文字）：处理不了、又不想一直看到的先收起（11-13：VS Code 那条「无法重新连接」一直挂着）。
     /// 状况消失了就从这里删掉，以后再出现、或文字变了照常显示
-    private(set) var ignoredAlerts: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "ignoredAlerts") ?? [])
+    @Tracked private(set) var ignoredAlerts: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "ignoredAlerts") ?? [])
 
     /// 列表上要显示的提醒（去掉忽略的）
     var shownAlerts: [AlertInfo] { alerts.filter { !ignoredAlerts.contains(Self.alertMark($0)) } }
@@ -44,9 +44,9 @@ final class AppModel {
 
     private static func alertMark(_ alert: AlertInfo) -> String { alert.id + "|" + alert.text }
     /// 正在重连的提示（按钮转圈、不能连点）
-    private(set) var reconnecting: Set<String> = []
+    @Tracked private(set) var reconnecting: Set<String> = []
     /// 各台机器的 CPU、内存、网速（来源 id → 数据，sys 事件每 5 秒一条）。只有「按来源」分组的组头读它，别的页面不跟着刷新
-    private(set) var machineStats: [String: MachineStats] = [:]
+    @Tracked private(set) var machineStats: [String: MachineStats] = [:]
     /// 会话之间的消息往来（纸鸢传信、风筝线、协作图、对话里的卡片）
     let peers = PeerBoard()
     /// 会话里的终端
@@ -55,97 +55,97 @@ final class AppModel {
     let browsers = BrowserStore()
     /// 会话群（跨设备、跨项目的会话互相发消息，Model/Groups.swift）
     let groups = GroupBoard()
-    private(set) var me: Me?
+    @Tracked private(set) var me: Me?
     /// 用户给会话、给某家 agent 设的头像和昵称（电脑上存着，各端同步；见 Views/AgentDetails.swift）
-    private(set) var faces = FacesPayload()
-    private(set) var quickReplies: [String] = []
-    private(set) var pinned: [String] = []
+    @Tracked private(set) var faces = FacesPayload()
+    @Tracked private(set) var quickReplies: [String] = []
+    @Tracked private(set) var pinned: [String] = []
     /// 标记的会话（新标记的在前）：所有列表最上面，不受分组限制；关闭会话、会话结束时电脑端自动取消
-    private(set) var marked: [String] = []
-    private(set) var muted: Set<String> = []
-    private(set) var quietActive = false
+    @Tracked private(set) var marked: [String] = []
+    @Tracked private(set) var muted: Set<String> = []
+    @Tracked private(set) var quietActive = false
 
     // 连接
-    private(set) var connected = false
-    private(set) var everConnected = false
-    private(set) var connectionError: String?
+    @Tracked private(set) var connected = false
+    @Tracked private(set) var everConnected = false
+    @Tracked private(set) var connectionError: String?
 
     /// 正在看的会话（分列时是当前列）：朗读跟着它
-    var current: String?
+    @Tracked var current: String?
     /// 正开着的群聊页：这个群的提醒不弹横幅
-    var viewingGroup: String?
+    @Tracked var viewingGroup: String?
     /// 屏幕上开着的会话，各开了几处（分列时不止一个；同一个会话也可能在分列里和推进去的页面里各一份）：这些不算未读、不弹横幅
-    private(set) var openCounts: [String: Int] = [:]
+    @Tracked private(set) var openCounts: [String: Int] = [:]
     /// App 在前台时收到的提醒，弹成横幅
-    var banner: NotifyEvent?
+    @Tracked var banner: NotifyEvent?
     /// 底部一闪而过的提示
-    var toast: String?
+    @Tracked var toast: String?
     /// 连着的电脑端能做的（见 StatePayload.features）
-    private(set) var hostFeatures: Set<String> = []
+    @Tracked private(set) var hostFeatures: Set<String> = []
     /// 电脑上「远端项目在后台运行 Claude Code」的设置（见 HostedViews.swift）
-    private(set) var hosted = HostedSetting()
+    @Tracked private(set) var hosted = HostedSetting()
     /// 电脑上没有会话在运行的 VS Code 窗口（项目名）：上次问到的，页面先显示它（见 loadEditorWindows）
-    private(set) var editorIdle: [String] = []
+    @Tracked private(set) var editorIdle: [String] = []
     /// 超过每日花费上限、问一句「仍然发送吗」
-    var capPrompt: (key: String, id: String, message: String)?
+    @Tracked var capPrompt: (key: String, id: String, message: String)?
 
-    private(set) var chats: [String: ChatStore] = [:]
+    @Tracked private(set) var chats: [String: ChatStore] = [:]
     /// 首页汇总卡片的数
     let home = HomeStats()
     /// 延迟、下行速率：网差时顶上显示一条
     let net = NetMonitor()
     /// 通知收件箱里还没看过的条数（铃铛上的数）
-    private(set) var inboxUnread = 0
+    @Tracked private(set) var inboxUnread = 0
     /// 我的待办 + Claude 说要你做、还没决定加不加的提示（Model/Todos.swift）
-    var todos = TodoState()
+    @Tracked var todos = TodoState()
     /// 我的收藏（Model/Favorites.swift）
-    var favorites = FavoriteState()
+    @Tracked var favorites = FavoriteState()
     /// 标签组：相关会话放一组，存在电脑上、各端同一套（SharedTabGroups.swift）
     let tabGroupShared = SharedTabGroups()
     /// 新建任务后等新会话出现，出现了就自动打开（MainView 看到 pendingOpen 就推进去）
-    var pendingOpen: String?
+    @Tracked var pendingOpen: String?
     /// 已经结束的会话的标题、目录（打开它时标题栏用）
-    private(set) var pastMeta: [String: PastSession] = [:]
+    @Tracked private(set) var pastMeta: [String: PastSession] = [:]
     /// 打开某个会话时要跳到的那条（历史搜索的命中）
-    var jumpRequests: [String: String] = [:]
-    private var awaitNew: (sourceId: String, cwd: String, known: Set<String>, until: Date)?
+    @Tracked var jumpRequests: [String: String] = [:]
+    @Tracked private var awaitNew: (sourceId: String, cwd: String, known: Set<String>, until: Date)?
     /// 输入框里没发出去的话：像微信一样留着，列表里显示「[草稿]」
-    private(set) var drafts: [String: String]
-    private var seen: [String: Double]
-    private(set) var streamTask: Task<Void, Never>?
-    private var presenceTask: Task<Void, Never>?
+    @Tracked private(set) var drafts: [String: String]
+    @Tracked private var seen: [String: Double]
+    @Tracked private(set) var streamTask: Task<Void, Never>?
+    @Tracked private var presenceTask: Task<Void, Never>?
     /// 开着的对话页定时报「打开过」（见 reportViewed）
-    private var viewedTask: Task<Void, Never>?
+    @Tracked private var viewedTask: Task<Void, Never>?
     /// 定时看两条路（局域网、远程访问）通不通，走着局域网时它断了就换到远程访问
-    private var lanTask: Task<Void, Never>?
+    @Tracked private var lanTask: Task<Void, Never>?
     /// 什么时候切到后台的：回来时离开得久，远程访问的旧连接多半已被系统掐断，直接重连不等它超时
-    @ObservationIgnored private var backgroundAt: Date?
+    private var backgroundAt: Date?
     /// 上次把远程访问端点整个重开的时间（restartRemoteIfStuck，一分钟最多一次）
-    @ObservationIgnored private var remoteRestartAt: Date?
-    @ObservationIgnored private var pathWatch: UUID?
-    @ObservationIgnored private var proWatch: NSObjectProtocol?
-    private var needResync = false
+    private var remoteRestartAt: Date?
+    private var pathWatch: UUID?
+    private var proWatch: NSObjectProtocol?
+    @Tracked private var needResync = false
     /// 最近一份完整状态（解出来的 JSON）和它的序号：之后的增量（statepatch）合进它再当整份处理，见 mergeState
-    @ObservationIgnored private var stateRaw: [String: Any]?
-    @ObservationIgnored private var stateSeq: Int?
+    private var stateRaw: [String: Any]?
+    private var stateSeq: Int?
     /// 世界模式打开时交给网页的整份状态（同 /api/state）
     var stateJSON: Data? {
         guard let raw = stateRaw else { return nil }
         // 有直连的其他电脑：给合成后的那份（世界里也看得到那几台的会话）
         return try? JSONSerialization.data(withJSONObject: linkedHosts.isEmpty ? raw : combinedState(primary: raw).state)
     }
-    private var toastTask: Task<Void, Never>?
+    @Tracked private var toastTask: Task<Void, Never>?
 
     /// 嵌在 Mac App 主窗口里（连 Mac 自己的服务）：不报「手机开着 App」（不然 Mac 不往手机推提醒）、不开远程访问、不测网速
     let embedded: Bool
     /// Mac 窗口标题栏上点的按钮（文件、改动、测试、中断、菜单……），对话页收到后去做
-    var externalAction: (key: String, action: SessionAction, id: UUID)?
+    @Tracked var externalAction: (key: String, action: SessionAction, id: UUID)?
     /// Mac 端自测脚本要直接打开的页面（某个文件、某个文件的改动）
-    var externalRoute: (key: String, route: Route, id: UUID)?
+    @Tracked var externalRoute: (key: String, route: Route, id: UUID)?
     /// 分屏标签栏、标题条上给群点的按钮（成员、添加成员、改群名、解散），群聊页收到后去做
-    var groupAction: (id: String, action: GroupAction, token: UUID)?
+    @Tracked var groupAction: (id: String, action: GroupAction, token: UUID)?
     /// 成员面板展开着的群（标签栏上的成员按钮跟着变实心）
-    var groupDrawers: Set<String> = []
+    @Tracked var groupDrawers: Set<String> = []
 
     init(mac: PairedMac, embedded: Bool = false) {
         self.embedded = embedded
@@ -180,16 +180,17 @@ final class AppModel {
 
     /// 单个会话的状态，只在这个会话自己变了时才通知。对话页读这个：别的会话（同时在跑的几个）一有动静，
     /// sessions 整个换掉，读 sessions 的页面全要重算——10-22 真机追踪，每次状态推送对话页卡 50–110 ms
-    @Observable @MainActor
-    final class SessionSlot {
-        fileprivate(set) var info: SessionInfo?
+    @MainActor
+    final class SessionSlot: KLObservable {
+        let _klRegistrar = KLRegistrar.make()
+        @Tracked fileprivate(set) var info: SessionInfo?
         /// 只有在忙 / 等确认 / 空闲变了才通知（nil 是会话已结束）：对话页的消息行只看这个，
         /// 正在执行哪个工具、用量这些常变的字段由标题、输入区那几小块自己读 info（见 SessionReader）
-        fileprivate(set) var activity: String?
+        @Tracked fileprivate(set) var activity: String?
         /// 哪个 agent 的会话（助手头像、「中断 Codex」这些称呼用）：也单独拆出来，对话页读它不会跟着 info 一起刷新
-        fileprivate(set) var agent: String
+        @Tracked fileprivate(set) var agent: String
         /// 用户设的头像、昵称（会话自己的，没有就是这家 agent 默认的；都没设为 nil）：同样单独拆出来，很少变
-        fileprivate(set) var face: AgentFace?
+        @Tracked fileprivate(set) var face: AgentFace?
         /// 标签、标签组那一行只要这三样（标题、状态、出错没）：只在它们变了时才通知。读 info 的话会话每换一个工具、用量一变都要重画，
         /// 标签一多（几个标签组几十个标签）每秒的状态推送就要把所有标签重排一遍（11-10 反馈：标签多了卡）
         struct TabFace: Equatable {
@@ -197,7 +198,7 @@ final class AppModel {
             var activity: String
             var failed: Bool
         }
-        fileprivate(set) var tab: TabFace?
+        @Tracked fileprivate(set) var tab: TabFace?
         init(_ info: SessionInfo?) { self.info = info; activity = info?.activity; agent = info?.agent ?? Agents.defaultID; tab = info.map(Self.tabFace) }
         private static func tabFace(_ info: SessionInfo) -> TabFace { TabFace(title: info.title, activity: info.activity, failed: info.error != nil) }
         fileprivate func set(_ new: SessionInfo?) {
@@ -210,9 +211,9 @@ final class AppModel {
         fileprivate func setFace(_ new: AgentFace?) { if face != new { face = new } }
         var speaker: String { Agents.info(agent).speaker }
     }
-    @ObservationIgnored private var sessionSlots: [String: SessionSlot] = [:]
+    private var sessionSlots: [String: SessionSlot] = [:]
     /// sessions 按 key 的副本（不触发观察），给 sessionSlot 初始化用
-    @ObservationIgnored private var latestSessions: [String: SessionInfo] = [:]
+    private var latestSessions: [String: SessionInfo] = [:]
 
     /// 最新收到的这个会话的状态，不登记观察（菜单、提示文字这种点开 / 指着才看的用，读了不会跟着每次推送重画）
     func sessionSnapshot(_ key: String) -> SessionInfo? { latestSessions[key] }
@@ -528,7 +529,7 @@ final class AppModel {
                     // 这台电脑连续连不上：和它互联的电脑里有连得上的就换过去（两台里有一台在线就能用）
                     if misses >= 2, !self.embedded, await self.switchToReachableComputer() { return }
                 }
-                try? await Task.sleep(for: .seconds(delay))
+                try? await Task.sleep(seconds: delay)
                 delay = min(max(delay * 2, 1), 15)
             }
         }
@@ -564,8 +565,8 @@ final class AppModel {
     }
 
     /// 两条路的状态，设置 → 连接里的两个灯（nil = 还没测完）：局域网（直连电脑）、中继
-    private(set) var lanUp: Bool?
-    private(set) var relayUp: Bool?
+    @Tracked private(set) var lanUp: Bool?
+    @Tracked private(set) var relayUp: Bool?
 
     /// 现在走的路，给人看（设置、诊断里显示）。读远程访问的状态，换路时跟着变
     var routeLabel: String {
@@ -587,7 +588,7 @@ final class AppModel {
                 guard let self else { return }
                 if round % 5 == 0 { await self.checkRoutes() } else { self.readLink() }
                 round += 1
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(seconds: 3)
             }
         }
     }
@@ -600,7 +601,7 @@ final class AppModel {
     }
 
     /// 连着 Wi-Fi、远程访问却一直走中继（手机和电脑之间的直连被挡了），又测得通局域网地址：连着几轮了
-    @ObservationIgnored private var relayOnWiFiRounds = 0
+    private var relayOnWiFiRounds = 0
 
     /// 测一轮，按「远程访问直连就用它；局域网地址断了就换到远程访问」换路
     private func checkRoutes() async {
@@ -655,7 +656,7 @@ final class AppModel {
                 for linked in self?.linkedHosts.values.map(\.api) ?? [] {
                     _ = try? await linked.post("/api/presence", body: ["visible": true])
                 }
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(seconds: 30)
             }
         }
     }
@@ -696,7 +697,7 @@ final class AppModel {
                     if visible || history { self.reportViewed(visible ? nil : [], history: history) }
                 }
                 history = false
-                try? await Task.sleep(for: .seconds(600))
+                try? await Task.sleep(seconds: 600)
             }
         }
     }
@@ -761,6 +762,11 @@ final class AppModel {
                 }
                 PerfTrace.measure("合并 \(entries.items.count) 条") { chat.add(entries.items) }
                 if chat.loaded { PerfTrace.measure("离线缓存 \(chat.items.count) 条") { Offline.saveChat(entries.key, Array(chat.items.values)) } }
+            }
+        case "live":
+            // 正在生成的文字：只给开着的会话（没打开的等记录）
+            if let event = try? decoder.decode(LiveEvent.self, from: data), let chat = chats[event.key], chat.loaded || isOpen(event.key) {
+                chat.applyLive(event)
             }
         case "reset":
             if let reset = try? decoder.decode(KeyEvent.self, from: data) {
@@ -1015,8 +1021,8 @@ final class AppModel {
     }
 
     /// 不在屏幕上的对话过多久放掉消息（同浏览器把后台标签休眠、Zen 的标签卸载）
-    static var sleepAfter: Duration = .seconds(600)
-    @ObservationIgnored private var sleepTasks: [String: Task<Void, Never>] = [:]
+    static var sleepAfter: TimeInterval = 600
+    private var sleepTasks: [String: Task<Void, Never>] = [:]
 
     /// 对话页关了（切到别的标签、切走标签组、关了标签）：10 分钟内没再打开，就把这个会话已加载的消息放掉，也不再收它的新消息；
     /// 草稿、没发出去的消息、附件、展开过的步骤都留着。再打开时先放离线缓存（最近 80 条）、再从电脑取最新一页，看起来和没休眠一样。
@@ -1024,7 +1030,7 @@ final class AppModel {
     private func scheduleSleep(_ key: String) {
         sleepTasks[key]?.cancel()
         sleepTasks[key] = Task { [weak self] in
-            try? await Task.sleep(for: Self.sleepAfter)
+            try? await Task.sleep(seconds: Self.sleepAfter)
             guard !Task.isCancelled, let self else { return }
             self.sleepTasks[key] = nil
             guard !self.isOpen(key), let chat = self.chats[key], chat.loaded, chat.pending.isEmpty, !chat.loading else { return }
@@ -1129,7 +1135,7 @@ final class AppModel {
             if submitted, live, let before = session(key), !before.isBusy, !before.isWaiting,
                !(chat.pending.first { $0.id == id }?.text ?? "").hasPrefix("/") {
                 Task { [weak self, weak chat] in
-                    try? await Task.sleep(for: .seconds(15))
+                    try? await Task.sleep(seconds: 15)
                     guard let self, let chat, let now = self.session(key), !now.isBusy, !now.isWaiting,
                           chat.pending.contains(where: { $0.id == id && $0.state == .sent }) else { return }
                     chat.update(id) { $0.state = .unconfirmed }
@@ -1152,7 +1158,7 @@ final class AppModel {
     /// 会话连着两次（约 20 秒）都空闲了还没回显：排队的标成「未出现」，其余照旧撤掉
     private func expirePending(_ key: String, _ id: String) {
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(120))
+            try? await Task.sleep(seconds: 120)
             var idle = 0
             while true {
                 guard let self, let chat = self.chats[key], let p = chat.pending.first(where: { $0.id == id }),
@@ -1163,7 +1169,7 @@ final class AppModel {
                     if p.state == .later { chat.update(id) { $0.state = .unconfirmed } } else { chat.pending.removeAll { $0.id == id } }
                     return
                 }
-                try? await Task.sleep(for: .seconds(10))
+                try? await Task.sleep(seconds: 10)
             }
         }
     }
@@ -1175,7 +1181,7 @@ final class AppModel {
             var waited = 0.0
             var idle = 0
             while true {
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(seconds: 2)
                 waited += 2
                 guard let self, let chat = self.chats[key], let p = chat.pending.first(where: { $0.id == id }), p.state == .later else { return }
                 let session = self.session(key)
@@ -1246,14 +1252,14 @@ final class AppModel {
     /// 离线排队的这条过一会儿自己再发一次：3、6、12、24 秒……最长 30 秒一次。
     /// 只靠重连时的 flushQueued 不够：局域网里一次请求超时（Wi-Fi 省电、电脑忙）时实时连接常常还连着，不会「重连」，
     /// 消息就一直挂在「离线，连接后自动发送」，用户只能删了重发（11-20）。带同一个 cid，电脑那头会去重
-    @ObservationIgnored private var queuedAttempts: [String: Int] = [:]
+    private var queuedAttempts: [String: Int] = [:]
 
     private func retryQueuedLater(_ key: String, _ id: String) {
         let attempt = (queuedAttempts[id] ?? 0) + 1
         queuedAttempts[id] = attempt
         let delay = min(3 * pow(2, Double(attempt - 1)), 30)
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
+            try? await Task.sleep(seconds: delay)
             guard let self else { return }
             // 已经被重连时的 flushQueued 拿去发了、发出去了、被删了：不管
             guard let p = self.chats[key]?.pending.first(where: { $0.id == id }), p.state == .queued else {
@@ -1396,7 +1402,7 @@ final class AppModel {
     /// 电脑每秒都推状态：它还没处理完这次请求时推来的那份是旧列表，照收的话这一行先挪上去、被挪回原位、过一会儿又挪上去，
     /// 列表的挪动动画叠在一起，两行画在同一个位置、上面空出一块（用户 11-13 截图）。所以确认前把这一项按手机上的改法套回去
     private struct PendingFlag { let on: Bool; let until: Date }
-    private var pendingFlags: [String: PendingFlag] = [:]
+    @Tracked private var pendingFlags: [String: PendingFlag] = [:]
 
     /// 电脑推来的置顶 / 标记列表，套上还没确认的改动；电脑那份已经是这样了（确认了）或等了 10 秒的，就不再管
     private func reconcileFlags(_ incoming: [String], list: String) -> [String] {
@@ -1453,7 +1459,7 @@ final class AppModel {
         toast = text
         toastTask?.cancel()
         toastTask = Task {
-            try? await Task.sleep(for: .seconds(2.5))
+            try? await Task.sleep(seconds: 2.5)
             if !Task.isCancelled { toast = nil }
         }
     }

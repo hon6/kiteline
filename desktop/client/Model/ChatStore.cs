@@ -48,6 +48,51 @@ public sealed partial class ChatStore : ObservableObject
 
     public ChatStore(string key) => Key = key;
 
+    /// 正在生成的那一块（电脑推的 live，见 watcher 的 LiveTap）：画在对话最后、一个字一个字长出来（同 iOS 版）。
+    /// 对话记录要等一整块说完才写，以前长回复要等很久才一下子出来，终端里却早就逐字出了（11-24）
+    ChatItem? live;
+    string liveBlock = "", liveText = "";
+    double liveTs;
+    int liveN;
+    /// 电脑说这一块说完了：记录里那条（几乎同时到）到了再撤，免得中间空一下；3 秒还没到也撤
+    bool liveEnding;
+
+    /// 电脑推来的 live 事件：text 是整段（新的一块、或隔一会儿补一次），append 是接在后面的（n 接不上就等下一次整段）
+    public void ApplyLive(JsonNode json)
+    {
+        if (json.Bool("clear") == true)
+        {
+            if (live is null || liveEnding) return;
+            liveEnding = true;
+            var block = liveBlock;
+            Avalonia.Threading.DispatcherTimer.RunOnce(() =>
+            {
+                if (!liveEnding || liveBlock != block) return;
+                live = null;
+                liveEnding = false;
+                Revision++;
+            }, TimeSpan.FromSeconds(3));
+            return;
+        }
+        if (json.Str("id") is not string id || json.Str("kind") is not string kind || json.Int("n") is not int n) return;
+        if (json.Str("text") is string text)
+        {
+            // 排在已有内容后面：用电脑上这一块开始的时刻（和记录同一个钟），不早于已有的最后一条
+            if (live is null || liveBlock != id)
+                liveTs = Math.Max(json.Num("at") ?? 0, (items.Values.Select(i => i.Ts ?? 0).DefaultIfEmpty(0).Max()) + 1);
+            liveText = text;
+        }
+        else if (json.Str("append") is string append && live is not null && liveBlock == id && n == liveN + 1)
+            liveText += append;
+        else
+            return;
+        liveBlock = id;
+        liveN = n;
+        liveEnding = false;
+        live = ChatItem.Parse(new JsonObject { ["t"] = kind, ["id"] = "live", ["ts"] = liveTs, ["text"] = liveText, ["detail"] = id });
+        Revision++;
+    }
+
     public void Add(IEnumerable<ChatItem> incoming)
     {
         var users = new List<ChatItem>();
@@ -63,6 +108,11 @@ public sealed partial class ChatStore : ObservableObject
         }
         if (!any) return;
         if (users.Count > 0 && pending.Count > 0) Settle(users);
+        if (liveEnding && items.Values.Count > 0 && incoming.Any(i => i.T is "text" or "thinking" or "tool"))
+        {
+            live = null;
+            liveEnding = false;
+        }
         // 发的 /goal：对话里出了「已设定目标」这类提示就算到了（Codex 的目标不当成一句话回显）
         if (goalNoted) pending = pending.Where(p => p.IsFailed || !p.Text.StartsWith("/goal")).ToList();
         Revision++;
@@ -70,6 +120,8 @@ public sealed partial class ChatStore : ObservableObject
 
     public void Reset()
     {
+        live = null;
+        liveEnding = false;
         items.Clear();
         results.Clear();
         HasMore = true;
@@ -172,7 +224,12 @@ public sealed partial class ChatStore : ObservableObject
     public ChatItem? OpenTool => ChatLayout.OpenTool(items, results);
 
     /// 行只跟会话在忙 / 等确认 / 空闲有关
-    public List<ChatRow> Rows(string? activity) => ChatLayout.Build(items, results, pending, activity, Expanded, NewSince);
+    public List<ChatRow> Rows(string? activity)
+    {
+        if (live is null) return ChatLayout.Build(items, results, pending, activity, Expanded, NewSince);
+        var all = new Dictionary<string, ChatItem>(items) { [live.Id] = live };
+        return ChatLayout.Build(all, results, pending, activity, Expanded, NewSince);
+    }
 }
 
 /// 发过的一段语音：后台存着录音，按 id 取回来放

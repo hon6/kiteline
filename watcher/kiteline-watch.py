@@ -127,8 +127,8 @@ from urllib.parse import quote as url_quote
 from urllib.request import pathname2url
 
 PROTOCOL = 2
-WATCHER_VERSION = "2.38.17"
-FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run"]
+WATCHER_VERSION = "2.38.18"
+FEATURES = ["rpc", "entries", "history", "media", "put_file", "tmux", "outbox", "git", "tests", "usage", "digest", "projects", "history_any", "search", "usage_report", "files", "worktree", "project_overview", "agents", "sys", "peers", "plugins", "skills", "machine_info", "todos", "get_file", "fs", "repo", "limits", "term", "stage", "groups", "goal", "dirs", "brag", "bridge_bid", "term_run", "live"]
 TICK_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 MESSAGE_MAX_CHARS = 600
@@ -5022,6 +5022,24 @@ const jumps: Queued[] = []
 const over: { model?: string; effort?: string } = {}
 const settle: { command: string; args: string }[] = []
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+// 正在生成的那一块（主对话最新的一块文字 / 思考），写进 <会话>.live.json，Kiteline 在对话页上一个字一个字地显示（v7）。
+// 对话记录要等一整块说完才写，长回复在手机、电脑的对话页上要等很久才一下子出来，终端里却早就在逐字出了（11-24）。
+// 只留最新一块：上一块说完就进了记录，开始调工具或这次请求结束就清空（写 {}）
+const live = { step: '', block: -1, kind: '', text: '', dirty: false }
+let liveWriting = false
+const flushLive = ($: any) => {
+  if (!live.dirty || liveWriting || !dir || !sid) return
+  live.dirty = false
+  liveWriting = true
+  const body = JSON.stringify(live.kind ? { step: live.step, block: live.block, kind: live.kind, text: live.text } : {})
+  void Promise.resolve($.fs.write(`${dir}/${sid}.live.json`, body)).catch(() => undefined).then(() => { liveWriting = false })
+}
+const endLive = () => {
+  if (!live.kind) return
+  live.kind = ''
+  live.text = ''
+  live.dirty = true
+}
 // 是不是忙时也能马上生效的设置命令：是就记下来、回 true
 const instant = (slash: [string, string]): boolean => {
   const args = slash[1].trim()
@@ -5145,10 +5163,35 @@ export const register: Register = on => {
 
   // 忙时切的模型 / 思考等级：这一轮主对话接下来的每次模型请求直接按新的发（子 agent 的不动）。没切过就原样放过去
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId !== undefined || e.turnId !== turn || (over.model === undefined && over.effort === undefined)) return yield* next(e)
-    return yield* next({ ...e, ...(over.model !== undefined ? { model: over.model } : {}),
+    const swap = e.agentId === undefined && e.turnId === turn && (over.model !== undefined || over.effort !== undefined)
+    const ev = !swap ? e : { ...e, ...(over.model !== undefined ? { model: over.model } : {}),
       // 模型本来就不带思考等级的不硬加
-      ...(over.effort !== undefined && e.effort !== undefined ? { effort: over.effort as typeof e.effort } : {}) })
+      ...(over.effort !== undefined && e.effort !== undefined ? { effort: over.effort as typeof e.effort } : {}) }
+    // 子 agent 的不逐字显示（对话页上只画主对话）
+    if (e.agentId !== undefined || !dir) return yield* next(ev)
+    // 逐字转给 Kiteline（见 live）：原样往上交，不改内容
+    const step = `${e.turnId}:${e.index}`
+    const stream = next(ev)
+    try {
+      for await (const c of stream) {
+        if (c.kind === 'text' || c.kind === 'thinking') {
+          if (live.step !== step || live.block !== c.index || live.kind !== c.kind) {
+            live.step = step
+            live.block = c.index
+            live.kind = c.kind
+            live.text = ''
+          }
+          live.text += c.text
+          live.dirty = true
+        } else if (c.kind === 'tool') {
+          endLive()
+        }
+        yield c
+      }
+    } finally {
+      endLive()
+    }
+    return await stream.result
   })
 
   // 确认框电脑上已经答了（工具跑完或被拒）：别再等手机
@@ -5234,10 +5277,14 @@ export const register: Register = on => {
     }
     // v5：认 queue 的 hold（正在编辑的先不交）
     // v6：忙时切模型 / 思考等级不排队，下一次模型请求起生效（turn.step）
-    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: startedAt, v: 6 }))
+    // v7：正在生成的文字写进 <会话>.live.json（见 live）
+    await $.fs.write(`${dir}/${sid}.alive`, JSON.stringify({ at: startedAt, v: 7 }))
+    // 上一个进程没清掉的不算
+    live.dirty = true
     publishQueue($)
     if (ticking) return started
     ticking = true
+    $.clock.every(200, () => flushLive($))
     let busy = false
     $.clock.every(400, async () => {
       if (busy || !sid) return
@@ -5433,6 +5480,83 @@ def bridge_queue(session_id, started_at):
         return []
     return [dict({"id": x["id"], "text": x["text"]}, **({"cmd": True} if x.get("cmd") else {})) for x in items or []
             if isinstance(x, dict) and isinstance(x.get("id"), str) and isinstance(x.get("text"), str)]
+
+
+LIVE_TICK = 0.25      # 多久看一次正在生成的文字
+LIVE_STALE = 90.0     # 这么久没变化（进程没了、卡住）就当说完了
+LIVE_FULL_EVERY = 3.0 # 中途打开对话页的客户端只认整段：隔这么久发一次整段，其余只发新增的
+
+
+class LiveTap:
+    """正在生成的文字（mod v7 写的 <会话>.live.json，见 BRIDGE_MOD_FILES 里的 live）→ live 事件，各端对话页末尾逐字显示一条。
+    对话记录要等一整块说完才写，长回复要等很久才一下子出来，终端里早就在逐字出了（11-24）。
+    事件：{event: live, sessionId, id（这一块，步骤:块）, kind（text / thinking）, n（第几次）, text（整段，带 at = 这一块开始的毫秒时刻）
+    或 append（新增的）}；
+    说完了 {event: live, sessionId, clear: true}。客户端 n 接不上就等下一次整段。独立线程，0.25 秒一次（主循环 1 秒一次太卡）"""
+
+    def __init__(self):
+        self.state = {}   # 会话 → {sig, id, kind, text, n, full}
+
+    def start(self, watcher):
+        def loop():
+            while True:
+                time.sleep(LIVE_TICK)
+                try:
+                    self.tick(list(watcher.tailers.keys()))
+                except Exception as exc:  # noqa
+                    log("逐字显示出错：%r" % exc)
+        threading.Thread(target=loop, name="live", daemon=True).start()
+
+    def tick(self, sids, now=None, folder=None):
+        now = now or time.time()
+        folder = folder or bridge_dir()
+        for sid in sids:
+            path = os.path.join(folder, "%s.live.json" % sid)
+            st = self.state.get(sid)
+            try:
+                info = os.stat(path)
+                sig = (info.st_mtime, info.st_size)
+            except OSError:
+                info = sig = None
+            if sig is None or (st and st["sig"] == sig):
+                if st and st.get("id") and (sig is None or now - info.st_mtime > LIVE_STALE):
+                    self.clear(sid, st)
+                continue
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    data = json.load(handle)
+            except (OSError, ValueError):
+                continue   # 正写到一半：下一次再读
+            st = self.state.setdefault(sid, {"id": None})
+            st["sig"] = sig
+            fresh = isinstance(data, dict) and now - info.st_mtime <= LIVE_STALE
+            kind = data.get("kind") if fresh else None
+            text = data.get("text") if fresh else None
+            if kind not in ("text", "thinking") or not isinstance(text, str) or not text:
+                if st.get("id"):
+                    self.clear(sid, st)
+                continue
+            block = "%s.%s" % (data.get("step") or "", data.get("block"))
+            if block == st.get("id") and kind == st.get("kind") and text.startswith(st["text"]) and now - st["full"] < LIVE_FULL_EVERY:
+                if len(text) == len(st["text"]):
+                    continue
+                st["n"] += 1
+                emit({"event": "live", "sessionId": sid, "id": block, "kind": kind, "n": st["n"], "append": text[len(st["text"]):]})
+            else:
+                if block != st.get("id"):
+                    st["n"], st["at"] = 0, int(info.st_mtime * 1000)
+                st["n"] += 1
+                st["full"] = now
+                # at：这一块开始的时刻（电脑的钟，和记录同一个钟）：客户端拿它排在已有内容后面
+                emit({"event": "live", "sessionId": sid, "id": block, "kind": kind, "n": st["n"], "at": st["at"], "text": text})
+            st.update(id=block, kind=kind, text=text)
+
+    def clear(self, sid, st):
+        st.update(id=None, kind=None, text="", n=0)
+        emit({"event": "live", "sessionId": sid, "clear": True})
+
+
+LIVE = LiveTap()
 
 
 _ASK_ITEMS = {}    # 会话 → 从 mod 那里补出来的待确认工具调用（对话项，见 bridge_ask）
@@ -22157,6 +22281,7 @@ def main():
     TERMS.start_runner()   # agent 的 term run：在 Kiteline 的会话终端里跑命令（见 command_term）
     BROWSERS.start()       # 会话浏览器的调度器（见 BrowserPool）
     _FAST["watcher"] = watcher
+    LIVE.start(watcher)    # 正在生成的文字逐字推（见 LiveTap）
     try:
         sync_skills()
         sync_limits_mod()

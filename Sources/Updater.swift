@@ -126,7 +126,7 @@ final class Updater: ObservableObject {
                     if manual { self.error = L("无法连接更新服务器") }
                     return
                 }
-                let mac = (json["platforms"] as? [String: Any])?["mac"] as? [String: Any]
+                let mac = (json["platforms"] as? [String: Any])?[Self.platformKey] as? [String: Any]
                 if let mac, let version = mac["version"] as? String, let link = mac["url"] as? String, let url = URL(string: link),
                    Self.newer(version, than: self.current) {
                     var found = Release(version: version, url: url, size: Int64(Digest.number(mac["size"])), sha256: mac["sha256"] as? String ?? "",
@@ -208,7 +208,9 @@ final class Updater: ObservableObject {
             return
         }
         storeChecked = Date()
-        let region = Locale.current.region?.identifier.lowercased() ?? "cn"
+        let regionCode: String?
+        if #available(macOS 13, *) { regionCode = Locale.current.region?.identifier } else { regionCode = Locale.current.regionCode }
+        let region = regionCode?.lowercased() ?? "cn"
         let link = env["CCPULSE_STORE_LOOKUP"] ?? "https://itunes.apple.com/lookup?bundleId=com.mrhong.tars.ios&country=\(region)"
         guard let url = URL(string: link) else { return }
         URLSession.shared.dataTask(with: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)) { [weak self] data, response, _ in
@@ -279,6 +281,13 @@ final class Updater: ObservableObject {
         default: return ["ok": false, "error": "未知操作"]
         }
         return payload()
+    }
+
+    /// latest.json 里读哪个平台：macOS 14 起是主包「mac」；macOS 12 / 13 上只能装兼容包「mac12」（MINOS=12 编的那份，
+    /// 见 docs/platforms/mac-compat.md）。兼容包装在后来升到 14 的电脑上，下次更新自然换成主包
+    static var platformKey: String {
+        if #available(macOS 14, *) { return "mac" }
+        return "mac12"
     }
 
     static func newer(_ candidate: String, than current: String) -> Bool {

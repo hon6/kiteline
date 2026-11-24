@@ -9,7 +9,7 @@ final class LicensesWindowController: NSWindowController, NSWindowDelegate {
 
     private init() {
         let hosting = NSHostingController(rootView: LicensesRoot())
-        hosting.sizingOptions = []   // 窗口大小由用户拖，不跟内容走
+        if #available(macOS 13, *) { hosting.sizingOptions = [] }   // 窗口大小由用户拖，不跟内容走
         let window = NSWindow(contentViewController: hosting)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.title = L("开源许可")
@@ -45,8 +45,8 @@ final class LicensesWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-private struct LicensesRoot: View {
-    var body: some View {
+private struct LicensesRoot: KLView {
+    var klBody: some View {
         LicensesView()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))

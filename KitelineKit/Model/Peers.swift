@@ -68,14 +68,15 @@ enum PeerPrefs {
 }
 
 /// 往来的总账：电脑推来的都记在这（今天、昨天的），放动画的队列也在这
-@MainActor @Observable
-final class PeerBoard {
-    private(set) var links: [String: PeerLink] = [:]
-    private(set) var flights: [PeerFlight] = []
+@MainActor 
+final class PeerBoard: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
+    @Tracked private(set) var links: [String: PeerLink] = [:]
+    @Tracked private(set) var flights: [PeerFlight] = []
     /// 收信那一行闪一下（对方读到了）：会话 key → 什么时候
-    private(set) var pulses: [String: Date] = [:]
+    @Tracked private(set) var pulses: [String: Date] = [:]
     /// 发出那一步的工具调用 id → 正式的往来 id（对话里的卡片按工具调用找状态）
-    @ObservationIgnored private var aliases: [String: String] = [:]
+    private var aliases: [String: String] = [:]
 
     /// 截图版逐帧看纸鸢：TARS_DEMO_FLIGHT=0～1，纸鸢停在这个位置、不飞走（正式 App 里没有）
     var frozen: Double? {
@@ -105,7 +106,7 @@ final class PeerBoard {
             if before?.readAt == nil, let read = link.readAt, now - read < 30_000, let to = link.to {
                 pulses[to] = Date()
                 Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(2))
+                    try? await Task.sleep(seconds: 2)
                     if let at = self?.pulses[to], Date().timeIntervalSince(at) >= 1.9 { self?.pulses[to] = nil }
                 }
             }
@@ -152,7 +153,7 @@ final class PeerBoard {
         flights.append(flight)
         guard frozen == nil else { return }
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(PeerFlight.duration + 2.2))
+            try? await Task.sleep(seconds: PeerFlight.duration + 2.2)
             self?.flights.removeAll { $0.id == flight.id }
         }
     }

@@ -62,13 +62,13 @@ enum MachineFormat {
 
 /// 占用比例的小圆环：平时跟文字同色，到 warn 转橙、到 alarm 转红（CPU 八成、九成；内存 85%、95%：
 /// 电脑会把空闲内存拿去用，八成上下很常见，不该老是橙的）
-struct UsageRing: View {
+struct UsageRing: KLView {
     let ratio: Double
     var size: CGFloat = 11
     var warn = 0.8
     var alarm = 0.9
 
-    var body: some View {
+    var klBody: some View {
         let width = max(size * 0.2, 1.8)
         let tint: Color? = ratio >= alarm ? Theme.removed : ratio >= warn ? .orange : nil
         ZStack {
@@ -86,11 +86,11 @@ struct UsageRing: View {
 
 /// CPU 圆环 + 百分比、内存圆环 + 已用/总共，排一行不换行；「CPU」「内存」字样始终带着（光有圆环看不出是什么）。
 /// 数字每 5 秒变一次：按最宽的样子占位（100%、88/88 GB），宽度不跟着跳，旁边的字不会左右晃
-struct MachineStatsLine: View {
+struct MachineStatsLine: KLView {
     let stats: MachineStats
     var ring: CGFloat = 11
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             if let cpu = stats.cpu {
                 HStack(spacing: 4) {
@@ -123,15 +123,15 @@ struct MachineStatsLine: View {
 #if !KITELINE_MAC
 /// 跟在机器名右边的 CPU、内存：自己读这台机器的数据，每 5 秒刷新只重画这一小块（不连累整个列表）。
 /// 机器不在线、没数据时什么都不画；轻点打开这台机器的设备详情（IP、系统、处理器、内存、装了哪些 agent）
-struct MachineStatsBadge: View {
-    @Environment(AppModel.self) private var model
+struct MachineStatsBadge: KLView {
+    @EnvModel private var model
     let sourceId: String
     /// 设备详情还没拉回来时标题先写的机器名
     let name: String
     var font: Font = .ui(.caption)
     @State private var showDetail = false
 
-    var body: some View {
+    var klBody: some View {
         if let stats = model.liveStats(sourceId) {
             Button { showDetail = true } label: {
                 MachineStatsLine(stats: stats).font(font)
@@ -145,14 +145,14 @@ struct MachineStatsBadge: View {
 
 /// 首页大标题下面「电脑名 · N 个会话」那一行，排一行不换行：showStats 时电脑名后面跟着这台电脑自己的 CPU、内存
 /// （它的「本机」来源报的）；放不下时前面的字截短，CPU、内存不缩。点电脑名是网络诊断，点 CPU、内存弹出详细数字
-struct HostStatsLine: View {
-    @Environment(AppModel.self) private var model
+struct HostStatsLine: KLView {
+    @EnvModel private var model
     let name: String
     let sessions: Int
     var showStats = true
     let diagnose: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             Button(action: diagnose) {
                 // 放不下时先缩电脑名，会话数留全（英文的「6 sessions」比中文长，挤掉的不能是数字）
@@ -174,12 +174,12 @@ struct HostStatsLine: View {
 #if KITELINE_MAC
 extension KitelineKit {
     /// Mac 主窗口侧栏组头里跟在机器名右边的 CPU、内存（没数据、机器不在线时什么都不画）；鼠标停上去看详细数字
-    public struct MachineStatsRow: View {
+    public struct MachineStatsRow: KLView {
         let sourceId: String
 
         public init(sourceId: String) { self.sourceId = sourceId }
 
-        public var body: some View {
+        public var klBody: some View {
             if let stats = KitelineKit.model?.liveStats(sourceId) {
                 MachineStatsLine(stats: stats, ring: 10).help(stats.summary)
             }

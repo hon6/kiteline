@@ -7,8 +7,9 @@ import UniformTypeIdentifiers
 /// 补充几句话，发给一个已有会话，或者选个项目新建会话（同电脑上把文件拖进 Claude 的输入框）。
 /// 图片照对话里发图那样发（压缩后显示在对话里）；PDF、Excel 这类原样传到会话所在的电脑，Claude 收到的是文件路径。
 /// Info.plist 声明了能打开任何文件（CFBundleDocumentTypes，Alternate：只出现在「用其他应用打开」里，不抢默认打开方式）
-@MainActor @Observable
-final class InboundFiles {
+@MainActor 
+final class InboundFiles: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = InboundFiles()
 
     struct Item: Identifiable {
@@ -25,9 +26,9 @@ final class InboundFiles {
     static let maxFile = 25 * 1024 * 1024
     static let maxTotal = 28 * 1024 * 1024
 
-    private(set) var items: [Item] = []
+    @Tracked private(set) var items: [Item] = []
     /// 面板开着（再收到的文件加进同一个面板）
-    var showing = false
+    @Tracked var showing = false
 
     /// onOpenURL 收到的文件、面板里「添加文件」选的文件
     func receive(_ url: URL) {
@@ -93,17 +94,17 @@ final class InboundFiles {
 }
 
 /// 主界面上挂着：收到文件就弹出发送面板（从最上面那层弹，设置、新任务这些面板开着也弹得出来）
-struct InboundShareHost: ViewModifier {
+struct InboundShareHost: KLViewModifier {
     let model: AppModel
     @State private var inbox = InboundFiles.shared
 
-    func body(content: Content) -> some View {
-        content.onChange(of: inbox.items.count, initial: true) { _, count in
+    func klBody(content: Content) -> some View {
+        content.klOnChange(of: inbox.items.count, initial: true) { _, count in
             guard count > 0, !inbox.showing else { return }
             inbox.showing = true
             Task {
                 // 冷启动时等启动页飞走、界面搭好再弹
-                try? await Task.sleep(for: .milliseconds(700))
+                try? await Task.sleep(milliseconds: 700)
                 present()
             }
         }
@@ -122,7 +123,7 @@ struct InboundShareHost: ViewModifier {
         guard let top = SystemShare.top else { inbox.showing = false; return }
         weak var presented: UIViewController?
         let host = UIHostingController(rootView: InboundShareView(close: { done in presented?.dismiss(animated: true, completion: done) })
-            .environment(model).lookRoot())
+            .environment(\.appModelSlot, model).lookRoot())
         presented = host
         // 有文件时不让下拉关掉（一不小心就得回微信重新选），要点「取消」
         host.isModalInPresentation = true
@@ -131,8 +132,8 @@ struct InboundShareHost: ViewModifier {
 }
 
 /// 发送面板：文件 + 补充说明（可以说）+ 发到哪儿（已有会话 / 新建会话选项目）
-struct InboundShareView: View {
-    @Environment(AppModel.self) private var model
+struct InboundShareView: KLView {
+    @EnvModel private var model
     /// 关掉面板；关完了再做的事（进对话页：面板还在往下收时推进去，对话停在最上面，不在最新那条）
     let close: (_ then: (() -> Void)?) -> Void
     @State private var inbox = InboundFiles.shared
@@ -156,17 +157,17 @@ struct InboundShareView: View {
         !inbox.items.isEmpty && !tooLarge && !busy && (target == .session ? pickedSession != nil : pickedProject != nil)
     }
 
-    var body: some View {
-        NavigationStack {
+    var klBody: some View {
+        KLNavigationStack {
             List {
                 filesSection
                 Section {
-                    TextField("补充说明（可选），例如：核对这份报价单的金额", text: $text, axis: .vertical)
-                        .lineLimit(3...8)
+                    KLTextField("补充说明（可选），例如：核对这份报价单的金额", text: $text, axis: .vertical)
+                        .klLineLimit(3...8)
                         .focused($focused)
                     // 说出来转成文字接在后面（同新任务、对话页的「转文字」）
                     HoldToDictate { said in text = Dictation.append(said, to: text) }
-                        .listRowSeparator(.hidden)
+                        .klListRowSeparator(.hidden)
                 }
                 Section {
                     Picker("发送到", selection: $target) {
@@ -192,7 +193,7 @@ struct InboundShareView: View {
                     }
                 }
             }
-            .scrollDismissesKeyboard(.interactively)
+            .klScrollDismissesKeyboard(.interactively)
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { urls.forEach { inbox.receive($0) } }
@@ -209,7 +210,7 @@ struct InboundShareView: View {
             Task { await send() }
         }
         #endif
-        .onChange(of: inbox.items.isEmpty) { _, empty in
+        .klOnChange(of: inbox.items.isEmpty) { _, empty in
             // 文件全移除了：没东西可发，关掉（取消、发完是自己关的，showing 已经放下）
             if empty, !busy, inbox.showing { inbox.showing = false; close(nil) }
         }
@@ -243,7 +244,7 @@ struct InboundShareView: View {
                         }
                     }
                     Spacer(minLength: 4)
-                    Button { withAnimation(.snappy) { inbox.remove(item.id) } } label: {
+                    Button { withAnimation(.klSnappy) { inbox.remove(item.id) } } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.tertiary)
                             .frame(width: 36, height: 36).contentShape(Rectangle())
                     }

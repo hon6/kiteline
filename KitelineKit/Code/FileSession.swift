@@ -43,18 +43,19 @@ enum CodeStores {
 }
 
 /// 打开的一个文件：读进来的内容、磁盘上那份的指纹（保存时核对有没有被别人改过）、能不能改
-@MainActor @Observable
-final class FileSession {
+@MainActor 
+final class FileSession: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     let key: String
-    var path: String
-    @ObservationIgnored weak var model: AppModel?
-    var file: EditableFile?
-    var error: String?
-    var loading = false
-    var saving = false
+    @Tracked var path: String
+    weak var model: AppModel?
+    @Tracked var file: EditableFile?
+    @Tracked var error: String?
+    @Tracked var loading = false
+    @Tracked var saving = false
     /// 保存时发现电脑上的文件已经变了（多半是 Claude 刚改过）
-    var conflict = false
-    @ObservationIgnored var sha: String?
+    @Tracked var conflict = false
+    var sha: String?
 
     init(key: String, path: String, model: AppModel) {
         self.key = key
@@ -87,7 +88,7 @@ final class FileSession {
                 guard !retriedCancel else { return }
                 retriedCancel = true
                 Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .milliseconds(300))
+                    try? await Task.sleep(milliseconds: 300)
                     await self?.load(into: editor, id: id, readOnly: readOnly, options: options, line: line, reveal: reveal)
                 }
                 return
@@ -96,7 +97,7 @@ final class FileSession {
         }
     }
 
-    private var retriedCancel = false
+    @Tracked private var retriedCancel = false
 
     /// 保存；电脑上的文件在打开后又被改过就停下来问（force 覆盖）
     @discardableResult
@@ -137,13 +138,13 @@ final class FileSession {
 }
 
 /// 编辑器下面那条状态栏（同 VS Code）：分支、行列、选中、缩进、语言、换行符
-struct EditorStatusBar: View {
+struct EditorStatusBar: KLView {
     let editor: EditorController
     var branch: String?
     var eol: String?
     var openBranches: (() -> Void)?
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 14) {
             if let branch {
                 Button { openBranches?() } label: {

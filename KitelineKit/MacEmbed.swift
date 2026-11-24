@@ -233,7 +233,7 @@ public enum KitelineKit {
 }
 
 /// 左边栏「今日用量」大卡片、用量页顶上的额度条（同手机首页）：传 Limits.collect 汇总出的 JSON
-public struct TarsLimitsBoard: View {
+public struct TarsLimitsBoard: KLView {
     private let devices: [LimitDevice]
     private let compact: Bool
     private let wide: Bool
@@ -251,21 +251,21 @@ public struct TarsLimitsBoard: View {
     /// 手动刷新后的提示（有电脑一阵子没回复、读数没变时说明一句）
     public var refreshedNote: String { LimitsPayload.refreshedNote(devices) }
 
-    public var body: some View {
+    public var klBody: some View {
         LimitsBoard(devices: devices, compact: compact, wide: wide).tint(Theme.claude)
     }
 }
 
 /// 状态栏里一行紧凑的额度（Mac 新版界面窗口底部）：每台电脑每家 agent 一段「虚拟机 本周 67% · 本周 · Fable 41%」，
 /// 用到八成的那一项红色；还没有读数的不占地方
-public struct TarsLimitsStrip: View {
+public struct TarsLimitsStrip: KLView {
     private let devices: [LimitDevice]
 
     public init(json: Data?) {
         devices = json.flatMap { try? JSONDecoder().decode(LimitsPayload.self, from: $0) }?.devices ?? []
     }
 
-    public var body: some View {
+    public var klBody: some View {
         let blocks = devices.flatMap { device in device.agents.filter { !$0.pending }.map { (device, $0) } }
         HStack(spacing: 12) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, item in
@@ -289,17 +289,17 @@ public struct TarsLimitsStrip: View {
 }
 
 /// 左边栏「待办」页：和手机同一个页面；点来源 = 左边栏选中那个会话、滚到那条消息
-public struct TarsTodosView: View {
+public struct TarsTodosView: KLView {
     public init() {}
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            NavigationStack {
+            KLNavigationStack {
                 TodosView()
                     .font(.ui(.body))
                     .tint(Theme.claude)
             }
-            .environment(model)
+            .environment(\.appModelSlot, model)
             .environment(\.openRoute, OpenRoute { route in
                 if case .chat(let key) = route { KitelineKit.openSession(key) }
             })
@@ -312,15 +312,15 @@ public struct TarsTodosView: View {
 
 /// 左边栏「待办」页签（11-20 起待办在左边栏里看，不占右边）：和手机同一个页面，列表的第一行是 header（左边栏顶上那几格）；
 /// 点来源 = 右边打开那个会话、滚到那条消息
-public struct TarsTodosSidebar: View {
+public struct TarsTodosSidebar: KLView {
     let header: AnyView
     public init(header: AnyView) { self.header = header }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             TodosView(sidebarHeader: header)
                 .tint(Theme.claude)
-                .environment(model)
+                .environment(\.appModelSlot, model)
                 .environment(\.openRoute, OpenRoute { route in
                     if case .chat(let key) = route { KitelineKit.openSession(key) }
                 })
@@ -331,15 +331,15 @@ public struct TarsTodosSidebar: View {
 }
 
 /// 左边栏「收藏」页签：和手机同一个页面，列表的第一行是 header；点「原消息」= 右边打开那个会话、滚到那条消息
-public struct TarsFavoritesSidebar: View {
+public struct TarsFavoritesSidebar: KLView {
     let header: AnyView
     public init(header: AnyView) { self.header = header }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             FavoritesView(sidebarHeader: header)
                 .tint(Theme.claude)
-                .environment(model)
+                .environment(\.appModelSlot, model)
                 .environment(\.openRoute, OpenRoute { route in
                     if case .chat(let key) = route { KitelineKit.openSession(key) }
                 })
@@ -350,16 +350,16 @@ public struct TarsFavoritesSidebar: View {
 }
 
 /// 设置 → 来源里「后台运行 Claude Code」：按设备检测出口 IP、确认开启（和手机、会话页提示点开的同一个面板）；sourceId = 只看这一台
-public struct TarsHostedSetupView: View {
+public struct TarsHostedSetupView: KLView {
     let sourceId: String?
     public init(sourceId: String? = nil) { self.sourceId = sourceId }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             HostedSetupSheet(sourceId: sourceId)
                 .font(.ui(.body))
                 .tint(Theme.claude)
-                .environment(model)
+                .environment(\.appModelSlot, model)
         } else {
             SkeletonPage(nil, style: .form(5))
         }
@@ -367,17 +367,17 @@ public struct TarsHostedSetupView: View {
 }
 
 /// 左边栏「收藏」页：和手机同一个页面；点「原消息」= 左边栏选中那个会话、滚到那条消息
-public struct TarsFavoritesView: View {
+public struct TarsFavoritesView: KLView {
     public init() {}
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            NavigationStack {
+            KLNavigationStack {
                 FavoritesView()
                     .font(.ui(.body))
                     .tint(Theme.claude)
             }
-            .environment(model)
+            .environment(\.appModelSlot, model)
             .environment(\.openRoute, OpenRoute { route in
                 if case .chat(let key) = route { KitelineKit.openSession(key) }
             })
@@ -394,7 +394,7 @@ public struct TarsFavoritesView: View {
 /// key = 这个项目的任意一个会话（文件、Git 接口按会话找到电脑和目录）；sessions = 「会话」那一项的内容（主程序画，sessionCount 是活动栏上的数）；
 /// showCode：开了文件 / 改动 / 历史的标签报 true（右边换成编辑区），标签全关了报 false（右边回到会话）；
 /// barOnTop：嵌在左边栏那一列里时活动栏横着排在上面（文件 | Git | 会话），不另占一条竖栏
-public struct TarsProjectSide: View {
+public struct TarsProjectSide: KLView {
     let key: String
     let sessions: AnyView?
     let sessionCount: Int
@@ -413,29 +413,29 @@ public struct TarsProjectSide: View {
         self.showCode = showCode
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             let session = key
             CodePart(key: key, part: .side, sessions: sessions, sessionCount: sessionCount, barOnTop: barOnTop,
                      openTab: open.map { open in { tab in open(CodeTabKey.from(tab, session: session)) } }, onShowCode: showCode)
                 .font(.ui(.body))
                 .tint(Theme.claude)
-                .environment(model)
+                .environment(\.appModelSlot, model)
         }
     }
 }
 
 /// 二级侧边栏开着时右边的编辑区：文件、改动对比、提交历史的标签页（和 TarsProjectSide 共用一份状态）
-public struct TarsProjectEditor: View {
+public struct TarsProjectEditor: KLView {
     let key: String
     public init(key: String) { self.key = key }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             CodePart(key: key, part: .editor)
                 .font(.ui(.body))
                 .tint(Theme.claude)
-                .environment(model)
+                .environment(\.appModelSlot, model)
         }
     }
 }
@@ -538,12 +538,12 @@ extension KitelineKit {
 /// 会话（或群、历史会话）已经开成右边分屏里的标签：标题后一个小标签页图标（左边栏的会话行、群行、历史行共用，11-20 用户）。
 /// 再点这一行不会再开一个标签：切过去，那个标签的边框闪几下主题色（ChatPanes.flashTab）。
 /// 单独一层只读 openKeys：标签增删时只有这些小图标重画，行本身不动
-public struct TarsOpenedTabMark: View {
+public struct TarsOpenedTabMark: KLView {
     let key: String
 
     public init(key: String) { self.key = key }
 
-    public var body: some View {
+    public var klBody: some View {
         if KitelineKit.panes.openKeys.contains(key) {
             Image(systemName: "macwindow").font(.app(size: 9.5)).foregroundStyle(.secondary)
                 .help(L("已在标签页中打开"))
@@ -555,7 +555,7 @@ public struct TarsOpenedTabMark: View {
 /// 左边栏会话列表里的「会话群」一组（同「标记」、按项目分的组，排在会话前面）：进行中的群一行一个，点了同会话一样开成右边分屏的一个标签
 ///（选中值 @group:<id>），拖到右边哪一块的哪一边就放到哪；把会话拖到群上 = 加进这个群。成员都关了的收成「历史群」一行。
 /// 筛着设备、项目、状态或在搜索时：只留有成员在筛出来的会话里的群（搜索也认群名）；筛「标记」时只留标记的群
-public struct TarsGroupSidebarSection: View {
+public struct TarsGroupSidebarSection: KLView {
     @Binding var selection: String?
     let filter: TarsGroupFilter
     /// 「群」页签里：不要「会话群」组头（页签已经写着了）
@@ -567,9 +567,9 @@ public struct TarsGroupSidebarSection: View {
         self.headerless = headerless
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            GroupSidebarRows(selection: $selection, filter: filter, headerless: headerless).environment(model)
+            GroupSidebarRows(selection: $selection, filter: filter, headerless: headerless).environment(\.appModelSlot, model)
         }
     }
 }
@@ -618,15 +618,15 @@ extension KitelineKit {
     }
 }
 
-private struct GroupSidebarRows: View {
-    @Environment(AppModel.self) private var model
+private struct GroupSidebarRows: KLView {
+    @EnvModel private var model
     @Binding var selection: String?
     let filter: TarsGroupFilter
     var headerless = false
     /// 右键点了「解散群」、等确认的那个
     @State private var disbanding: String?
 
-    var body: some View {
+    var klBody: some View {
         if model.supportsGroups, !model.groups.items.isEmpty {
             let live = model.groups.items.filter { model.isLive($0) && filter.keeps($0) }
             let past = filter.active ? 0 : model.groups.items.filter { !model.isLive($0) }.count
@@ -702,12 +702,12 @@ private struct GroupSidebarRows: View {
 }
 
 /// 群那一行的选中、悬停：同左边栏会话行（淡品牌色底 + 细边，指着浅浅一层）
-private struct GroupRowHighlight: ViewModifier {
+private struct GroupRowHighlight: KLViewModifier {
     let selected: Bool
     let select: () -> Void
     @State private var hovering = false
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         content
             .padding(.horizontal, 7)
@@ -722,10 +722,10 @@ private struct GroupRowHighlight: ViewModifier {
 }
 
 /// 分屏里的一个群（同会话一样是一个标签）：群聊页 + 点到的会话、群交给左边栏；弹的面板对着这一块居中
-struct MacGroupPane: View {
+struct MacGroupPane: KLView {
     let id: String
 
-    var body: some View {
+    var klBody: some View {
         GroupChatView(id: id)
             .font(.ui(.body))
             .tint(Theme.claude)
@@ -735,15 +735,15 @@ struct MacGroupPane: View {
 }
 
 /// 右边的「会话群」页（进行中 + 历史群；左边栏选中 @groups）
-public struct TarsGroupsView: View {
+public struct TarsGroupsView: KLView {
     public init() {}
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            NavigationStack {
+            KLNavigationStack {
                 GroupsView().font(.ui(.body)).tint(Theme.claude)
             }
-            .environment(model)
+            .environment(\.appModelSlot, model)
             .environment(\.openRoute, KitelineKit.groupRoutes)
             .panelAnchor(key: "groups")
         } else {
@@ -753,7 +753,7 @@ public struct TarsGroupsView: View {
 }
 
 /// 拉群面板（左边栏右键「拉群协作」、把会话拖到另一个会话上）：keys 是先勾上的会话；建好后 done(群 id)
-public struct TarsGroupPicker: View {
+public struct TarsGroupPicker: KLView {
     let keys: [String]
     let done: (String) -> Void
 
@@ -762,9 +762,9 @@ public struct TarsGroupPicker: View {
         self.done = done
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            GroupPickerSheet(mode: .create(keys), done: done).environment(model).tint(Theme.claude)
+            GroupPickerSheet(mode: .create(keys), done: done).environment(\.appModelSlot, model).tint(Theme.claude)
         }
     }
 }
@@ -778,7 +778,7 @@ extension View {
 
 /// 更新记录窗口：和手机同一个时间轴页面（ChangelogTimeline）；Mac 直接给 App 里打包的 CHANGELOG.md，不经网络、不开浏览器
 /// 自测截图用：「加入待办」面板（从某条消息加一条），可带几张图
-public struct TarsTodoEditorPreview: View {
+public struct TarsTodoEditorPreview: KLView {
     let text: String
     let source: String
     let images: [Data]
@@ -789,18 +789,18 @@ public struct TarsTodoEditorPreview: View {
         self.images = images
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             let request = AddTodosRequest(key: "preview", itemId: "preview", title: source, ts: (Date().timeIntervalSince1970 - 600) * 1000, candidates: [text])
             TodoEditor(target: .fromMessage(request), attach: images)
                 .font(.ui(.body))
                 .tint(Theme.claude)
-                .environment(model)
+                .environment(\.appModelSlot, model)
         }
     }
 }
 
-public struct TarsChangelogView: View {
+public struct TarsChangelogView: KLView {
     let releases: [ChangelogRelease]
     let version: String
 
@@ -809,9 +809,9 @@ public struct TarsChangelogView: View {
         self.version = version
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if releases.isEmpty {
-            ContentUnavailableView(L("此版本未包含更新记录"), systemImage: "doc.text")
+            KLUnavailableView(L("此版本未包含更新记录"), systemImage: "doc.text")
         } else {
             ScrollView {
                 ChangelogTimeline(releases: releases, current: version)
@@ -828,14 +828,14 @@ public struct TarsChangelogView: View {
 }
 
 /// 某个会话的对话页（正在跑的、已经结束的都行）
-public struct TarsConversationView: View {
+public struct TarsConversationView: KLView {
     let key: String
 
     public init(key: String) { self.key = key }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            MacConversation(key: key).environment(model).id(key)
+            MacConversation(key: key).environment(\.appModelSlot, model).id(key)
         } else {
             SkeletonPage(style: .messages())
         }
@@ -898,7 +898,7 @@ public enum TarsWorldChat {
 
 /// 世界模式里浮着的那一个会话：自己一份只有一块的分屏（不动主窗口的分屏布局），只放这一个会话；
 /// 标题条、按钮、对话排版和主窗口右边完全一样。换了会话外面用 .id(key) 重建
-public struct TarsSessionCard: View {
+public struct TarsSessionCard: KLView {
     let key: String
     let accessory: TarsPaneAccessory?
     @State private var panes: ChatPanes
@@ -911,13 +911,13 @@ public struct TarsSessionCard: View {
         _panes = State(initialValue: panes)
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             ChatPanesView(panes: panes) { key in
                 TarsConversationView(key: key)
             }
             .environment(\.paneAccessory, accessory)
-            .environment(model)
+            .environment(\.appModelSlot, model)
         } else {
             SkeletonPage(style: .messages())
         }
@@ -925,9 +925,9 @@ public struct TarsSessionCard: View {
 }
 
 /// 对话页 + 弹出的面板（文件、改动、测试……，打开时 640 宽，能拖动、改大小），面板里还能再点进去
-private struct MacConversation: View {
+private struct MacConversation: KLView {
     let key: String
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     /// 分屏时：底部小提示、「仍然要发吗」只由当前块弹（不然几块各弹一个）
     @Environment(\.chatPane) private var pane
     @State private var panel: Panel?
@@ -945,7 +945,7 @@ private struct MacConversation: View {
         let data: [Data]
     }
 
-    var body: some View {
+    var klBody: some View {
         ChatView(key: key)
             .font(.ui(.body))   // 没写字号的字（正文、我发的消息）：Mac 上默认 13，照网页版用 14
             // 没指定样式的按钮：Mac 默认是带边框的系统按钮，照手机 / 网页版改成一行品牌橙的字。
@@ -966,13 +966,13 @@ private struct MacConversation: View {
                 default: panel = Panel(route: route)
                 }
             })
-            .onChange(of: model.externalRoute?.id) { _, _ in
+            .klOnChange(of: model.externalRoute?.id) { _, _ in
                 guard let request = model.externalRoute, request.key == key else { return }
                 model.externalRoute = nil
                 panel = Panel(route: request.route)
             }
             .sheetPanel(item: $panel) { panel in
-                PanelStack(root: panel.route).environment(model)
+                PanelStack(root: panel.route).environment(\.appModelSlot, model)
             }
             .onReceive(NotificationCenter.default.publisher(for: KitelineKit.previewImageNote)) { note in
                 guard pane?.isFocused ?? true, let list = note.object as? [Data], !list.isEmpty else { return }
@@ -980,8 +980,8 @@ private struct MacConversation: View {
             }
             .sheetPanel(item: $preview) { MacImageViewer(images: $0.data.map { .local($0) }, name: $0.data.count == 1 ? "preview.png" : nil) }
             // 底部小提示（「已拷贝」「已发送 /effort」……）：放在浮在窗口上面的小窗里，面板开着时也看得见
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { chatFrame = $0 }
-            .onChange(of: model.toast) { _, toast in if pane?.isFocused ?? true { MacToast.show(toast, over: chatFrame) } }
+            .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { chatFrame = $0 }
+            .klOnChange(of: model.toast) { _, toast in if pane?.isFocused ?? true { MacToast.show(toast, over: chatFrame) } }
             .onDisappear { MacToast.show(nil, over: .zero) }
             // 今天的花费超了上限：问一句仍然要发吗
             .confirmPanel(model.capPrompt.map { L("%@。仍要发送吗？", "\($0.message)") } ?? "",
@@ -1001,11 +1001,11 @@ struct ChatLinkButtonStyle: ButtonStyle {
         LinkLabel(configuration: configuration)
     }
 
-    private struct LinkLabel: View {
+    private struct LinkLabel: KLView {
         let configuration: Configuration
         @Environment(\.isEnabled) private var enabled
 
-        var body: some View {
+        var klBody: some View {
             configuration.label
                 .foregroundStyle(enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
                 .opacity(configuration.isPressed ? 0.55 : 1)
@@ -1063,7 +1063,7 @@ enum MacToast {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
-        host.sizingOptions = []
+        if #available(macOS 13, *) { host.sizingOptions = [] }
         panel.contentView = host.view
         self.panel = panel
         return panel
@@ -1073,10 +1073,10 @@ enum MacToast {
     static var view: NSView? { panel?.isVisible == true ? host.view : nil }
 }
 
-private struct ToastBubble: View {
+private struct ToastBubble: KLView {
     let text: String
 
-    var body: some View {
+    var klBody: some View {
         Text(text)
             .font(.app(size: 13))
             .foregroundStyle(.white)
@@ -1087,16 +1087,13 @@ private struct ToastBubble: View {
 }
 
 /// 面板：自己的导航栈，点文件 → 文件内容 → 改动记录……一层层往里推
-private struct PanelStack: View {
+private struct PanelStack: KLView {
     let root: Route
     @PanelDismiss private var dismiss
     @State private var path: [Route] = []
 
-    var body: some View {
-        NavigationStack(path: $path) {
-            page(root)
-                .navigationDestination(for: Route.self) { page($0) }
-        }
+    var klBody: some View {
+        stack
         .environment(\.openRoute, OpenRoute { route in
             if case .chat(let other) = route {
                 dismiss()
@@ -1112,13 +1109,44 @@ private struct PanelStack: View {
                minHeight: root.wideIDE ? 480 : 320, idealHeight: min(root.wideIDE ? 820 : 640, MacSheetLimit.size.height), maxHeight: .infinity)
     }
 
+    @ViewBuilder
+    private var stack: some View {
+        #if KL_MODERN
+        NavigationStack(path: $path) {
+            page(root)
+                .navigationDestination(for: Route.self) { page($0) }
+        }
+        #else
+        if #available(macOS 13, *) {
+            NavigationStack(path: $path) {
+                page(root)
+                    .navigationDestination(for: Route.self) { page($0) }
+            }
+        } else {
+            // macOS 12 没有 NavigationStack：自己排一层层的页面，顶上一个「返回」
+            VStack(spacing: 0) {
+                if !path.isEmpty {
+                    HStack {
+                        Button { path.removeLast() } label: { Label(L("返回"), systemImage: "chevron.left") }
+                            .buttonStyle(.borderless)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    Divider()
+                }
+                page(path.last ?? root).id(path.count)
+            }
+        }
+        #endif
+    }
+
     /// 代码 IDE 当成正经窗口（红黄绿钮关闭、缩放），别的面板右上角「完成」
-    private struct PanelChrome: ViewModifier {
+    private struct PanelChrome: KLViewModifier {
         let window: Bool
         let done: () -> Void
 
         @ViewBuilder
-        func body(content: Content) -> some View {
+        func klBody(content: Content) -> some View {
             if window { content.panelWindowStyle() } else { content.doneButton(done) }
         }
     }
@@ -1140,7 +1168,7 @@ private struct PanelStack: View {
         case .commit(let key, let hash): CommitScreen(key: key, hash: hash)
         case .fileHistory(let key, let path): FileHistoryScreen(key: key, path: path)
         case .inbox: InboxView()
-        default: ContentUnavailableView(L("在侧边栏中打开"), systemImage: "sidebar.left")
+        default: KLUnavailableView(L("在侧边栏中打开"), systemImage: "sidebar.left")
         }
     }
 }

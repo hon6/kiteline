@@ -3,24 +3,25 @@ import SwiftUI
 /// 浏览器操作回放（11-16 用户要的）：就在放大视图「Agent 的操作」那一块里回放，不弹窗（用户：反复弹很烦）。
 /// 平时上面是实时画面、进度条停在最右边（实时）；点播放或把进度条往回拖，上面换成录像，列表里高亮当时那条指令；「回到实时」回来。
 /// 录像里只存画面变了的帧，相邻两帧的时间差就是画面停了多久：正常速度按实际时长停留；「跳过等待」把超过 1 秒的停顿压成 0.6 秒；还能 2 / 4 / 8 倍速
-@MainActor @Observable
-final class BrowserReplay {
+@MainActor 
+final class BrowserReplay: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     let key: String
-    @ObservationIgnored weak var store: BrowserStore?
+    weak var store: BrowserStore?
 
     /// 正在看录像（上面的画面换成录像）；false = 实时
-    private(set) var active = false
-    private(set) var playing = false
-    private(set) var frames: [BrowserStore.RecFrame] = []
-    private(set) var index = 0
-    private(set) var loading = false
-    var speed: Double = 1
-    var skipWait = true
-    private var end: Double = 0
-    private var current: String?
-    private var images: [Int: PlatformImage] = [:]
-    @ObservationIgnored private var fetching: Set<Int> = []
-    @ObservationIgnored private var loop: Task<Void, Never>?
+    @Tracked private(set) var active = false
+    @Tracked private(set) var playing = false
+    @Tracked private(set) var frames: [BrowserStore.RecFrame] = []
+    @Tracked private(set) var index = 0
+    @Tracked private(set) var loading = false
+    @Tracked var speed: Double = 1
+    @Tracked var skipWait = true
+    @Tracked private var end: Double = 0
+    @Tracked private var current: String?
+    @Tracked private var images: [Int: PlatformImage] = [:]
+    private var fetching: Set<Int> = []
+    private var loop: Task<Void, Never>?
 
     init(key: String, store: BrowserStore) {
         self.key = key
@@ -102,7 +103,7 @@ final class BrowserReplay {
         loop = Task { [weak self] in
             while let self, self.playing, !Task.isCancelled, self.frames.indices.contains(self.index) {
                 await self.ensure(self.index)
-                try? await Task.sleep(for: .seconds(max(0.03, self.hold(self.index) / self.speed)))
+                try? await Task.sleep(seconds: max(0.03, self.hold(self.index) / self.speed))
                 if Task.isCancelled || !self.playing { return }
                 if self.index + 1 >= self.frames.count { self.playing = false; return }
                 self.index += 1
@@ -139,11 +140,11 @@ final class BrowserReplay {
 }
 
 /// 「Agent 的操作」上面的回放控制：播放 / 暂停、进度条、时间、倍速、跳过等待
-struct BrowserReplayBar: View {
-    @Bindable var replay: BrowserReplay
+struct BrowserReplayBar: KLView {
+    @KLBindable var replay: BrowserReplay
     var closed: Bool
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
                 Button { replay.togglePlay() } label: {

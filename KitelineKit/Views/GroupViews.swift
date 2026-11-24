@@ -8,12 +8,12 @@ import UniformTypeIdentifiers
 // MARK: - 头像
 
 /// 成员的小头像：会话换过头像就画它，没换是标题首字（同会话列表）
-struct GroupMemberFace: View {
-    @Environment(AppModel.self) private var model
+struct GroupMemberFace: KLView {
+    @EnvModel private var model
     let member: GroupMember
     var size: CGFloat = 36
 
-    var body: some View {
+    var klBody: some View {
         if let face = model.faces.sessions[member.key], !face.avatar.isEmpty {
             AgentFaceView(agent: member.agent ?? Agents.defaultID, face: face, size: size, corner: 0.23)
         } else {
@@ -23,13 +23,13 @@ struct GroupMemberFace: View {
 }
 
 /// 群头像（同微信）：成员头像拼在一个圆角方块里，两个并排、三个上一下二、四个以上田字格
-struct GroupAvatar: View {
+struct GroupAvatar: KLView {
     let members: [GroupMember]
     var size: CGFloat = 48
     /// 历史群：淡一点
     var dim = false
 
-    var body: some View {
+    var klBody: some View {
         let shown = Array(members.prefix(4))
         let gap = max(1.5, size * 0.04)
         let cell = (size - gap * 3) / 2
@@ -59,12 +59,12 @@ struct GroupAvatar: View {
 // MARK: - 列表里的一行
 
 /// 会话列表、全部群里的一行（同会话行的样子）：群头像，群名（人数）+ 时间，下面是最后一条群消息；历史群标「历史」
-struct GroupRow: View {
-    @Environment(AppModel.self) private var model
+struct GroupRow: KLView {
+    @EnvModel private var model
     let group: GroupInfo
     var compact = false
 
-    var body: some View {
+    var klBody: some View {
         let live = model.isLive(group)
         HStack(spacing: compact ? 10 : 12) {
             GroupAvatar(members: group.members, size: compact ? 32 : 48, dim: !live)
@@ -102,23 +102,23 @@ struct GroupRow: View {
         // 列表里的一行（compact）只说状态：成员在干什么，不放最后一条群消息（截短了看不全，11-10 用户）
         if compact { return status(live) }
         if group.paused {
-            return Text("\(Text("[已暂停转发]").foregroundStyle(.orange)) \(Text("轻点查看").foregroundStyle(.secondary))")
+            return Text("\(Text("[已暂停转发]").foregroundColor(.orange)) \(Text("轻点查看").foregroundColor(.secondary))")
         }
         guard let last = group.last, !last.system else {
             let names = group.members.map { model.title(of: $0) }.joined(separator: L("、"))
-            return Text(names).foregroundStyle(.secondary)
+            return Text(names).foregroundColor(.secondary)
         }
         let who = last.mine ? L("我") : (group.member(last.from).map { model.title(of: $0) } ?? last.fromTitle)
         let text = last.text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return Text("\(who)：\(text)").foregroundStyle(.secondary)
+        return Text("\(who)：\(text)").foregroundColor(.secondary)
     }
 }
 
 extension GroupRow {
     /// 「3 个成员 · 1 个待确认 · 2 个在工作」；转发暂停了说暂停；成员都关了说已结束
     func status(_ live: Bool) -> Text {
-        if group.paused { return Text("已暂停转发").foregroundStyle(.orange) }
-        guard live else { return Text("成员会话都已结束").foregroundStyle(.secondary) }
+        if group.paused { return Text("已暂停转发").foregroundColor(.orange) }
+        guard live else { return Text("成员会话都已结束").foregroundColor(.secondary) }
         let faces = group.members.compactMap { model.sessionSlot($0.key).tab }
         let waiting = faces.filter { $0.activity == "waiting" }.count
         let busy = faces.filter { $0.activity == "busy" }.count
@@ -128,14 +128,14 @@ extension GroupRow {
         if failed > 0 { parts.append(L("%lld 个出错", count: failed)) }
         if busy > 0 { parts.append(L("%lld 个在工作", count: busy)) }
         if waiting + busy + failed == 0 { parts.append(L("空闲")) }
-        return Text(parts.joined(separator: " · ")).foregroundStyle(waiting > 0 ? Color.orange : (busy > 0 ? Theme.claude : Color.secondary))
+        return Text(parts.joined(separator: " · ")).foregroundColor(waiting > 0 ? Color.orange : (busy > 0 ? Theme.claude : Color.secondary))
     }
 }
 
 // MARK: - 群聊页
 
-struct GroupChatView: View {
-    @Environment(AppModel.self) private var model
+struct GroupChatView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     /// 开在分屏里（同会话一样是一个标签）：群名、成员按钮、菜单在标签栏 / 标题条上（GroupPaneButtons），不往导航栏放
     @Environment(\.chatPane) private var pane
@@ -172,11 +172,11 @@ struct GroupChatView: View {
         #endif
     }
 
-    var body: some View {
+    var klBody: some View {
         if let group = model.groups.group(id) {
             page(group)
         } else {
-            ContentUnavailableView(L("群已解散"), systemImage: "person.2.slash")
+            KLUnavailableView(L("群已解散"), systemImage: "person.2.slash")
         }
     }
 
@@ -204,17 +204,17 @@ struct GroupChatView: View {
                     .font(ChatType.body)
                     .lineSpacing(ChatType.lineSpacing)
                 }
-                .defaultScrollAnchor(.bottom)
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: messages.count) { old, _ in
+                .klDefaultScrollAnchor(.bottom)
+                .klScrollDismissesKeyboard(.interactively)
+                .klOnChange(of: messages.count) { old, _ in
                     // 刚取回来（从 0 条变成有内容）直接到底、不做动画；之后来新消息再带动画滚
                     if old == 0 {
                         DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
                     } else {
-                        withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        withAnimation(.klSnappy) { proxy.scrollTo("bottom", anchor: .bottom) }
                     }
                 }
-                .onChange(of: model.groups.sending[id]?.count ?? 0) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                .klOnChange(of: model.groups.sending[id]?.count ?? 0) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
                 // 输入区同会话的对话页：贴在底部，消息滚到它下面
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     VStack(spacing: 0) {
@@ -224,9 +224,9 @@ struct GroupChatView: View {
                     .environment(\.chatWidth, chatWidth)
                 }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chatWidth = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { chatWidth = $0 }
         #if os(iOS)
-        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { homeBottom = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { homeBottom = $0 }
         .environment(\.homeBottom, homeBottom)
         .overlay { if voice.active { VoiceOverlay(voice: voice) } }
         #endif
@@ -249,26 +249,23 @@ struct GroupChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(macOS) && !KL_MODERN
+            // 兼容包：macOS 12 的工具栏里不能写 if（buildIf 要 13）：条目常在，按钮按条件出现
+            ToolbarItem(placement: .primaryAction) { if ownsBar { membersButton(group) } }
+            ToolbarItem(placement: .primaryAction) { if ownsBar { menu(group) } }
+            #else
             if ownsBar {
-                ToolbarItem(placement: .primaryAction) {
-                    // 群成员：人形图标 + 人数，点开右边滑出成员面板
-                    Button { withAnimation(.snappy(duration: 0.28)) { showMembers.toggle() } } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: showMembers ? "person.2.fill" : "person.2")
-                            Text("\(group.members.count)").font(.ui(.subheadline).monospacedDigit())
-                        }
-                    }
-                    .accessibilityLabel(L("群成员"))
-                }
+                ToolbarItem(placement: .primaryAction) { membersButton(group) }
                 ToolbarItem(placement: .primaryAction) { menu(group) }
             }
+            #endif
         }
         // 标签栏、标题条上点的成员、添加成员、改群名、解散：在这里弹
-        .onChange(of: model.groupAction?.token) { _, _ in
+        .klOnChange(of: model.groupAction?.token) { _, _ in
             guard let request = model.groupAction, request.id == id else { return }
             model.groupAction = nil
             switch request.action {
-            case .members: withAnimation(.snappy(duration: 0.28)) { showMembers.toggle() }
+            case .members: withAnimation(.klSnappy(duration: 0.28)) { showMembers.toggle() }
             case .add: showAdd = true
             case .rename: showRename = true
             case .disband: confirmDelete = true
@@ -280,8 +277,8 @@ struct GroupChatView: View {
             if Self.startWithMembers { showMembers = true }
         }
         .onDisappear { if model.viewingGroup == id { model.viewingGroup = nil } }
-        .sheetPanel(isPresented: $showAdd) { GroupPickerSheet(mode: .add(id)) { _ in }.environment(model) }
-        .sheetPanel(isPresented: $showRename) { GroupRenameSheet(id: id, name: group.name).environment(model) }
+        .sheetPanel(isPresented: $showAdd) { GroupPickerSheet(mode: .add(id)) { _ in }.environment(\.appModelSlot, model) }
+        .sheetPanel(isPresented: $showRename) { GroupRenameSheet(id: id, name: group.name).environment(\.appModelSlot, model) }
         .confirmPanel(GroupDisband.message, isPresented: $confirmDelete, confirm: L("解散群"), destructive: true) {
             Task { await model.deleteGroup(id) }
         }
@@ -289,6 +286,17 @@ struct GroupChatView: View {
                       isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), confirm: L("移出"), destructive: true) {
             if let key = removing?.key { Task { await model.removeFromGroup(id, key: key) } }
         }
+    }
+
+    /// 群成员：人形图标 + 人数，点开右边滑出成员面板
+    private func membersButton(_ group: GroupInfo) -> some View {
+        Button { withAnimation(.klSnappy(duration: 0.28)) { showMembers.toggle() } } label: {
+            HStack(spacing: 3) {
+                Image(systemName: showMembers ? "person.2.fill" : "person.2")
+                Text("\(group.members.count)").font(.ui(.subheadline).monospacedDigit())
+            }
+        }
+        .accessibilityLabel(L("群成员"))
     }
 
     private func menu(_ group: GroupInfo) -> some View {
@@ -349,7 +357,7 @@ struct GroupChatView: View {
                 ZStack(alignment: .trailing) {
                     Color.black.opacity(0.12)
                         .contentShape(Rectangle())
-                        .onTapGesture { withAnimation(.snappy(duration: 0.28)) { showMembers = false } }
+                        .onTapGesture { withAnimation(.klSnappy(duration: 0.28)) { showMembers = false } }
                         .transition(.opacity)
                     members(group)
                         .frame(width: min(300, geometry.size.width * 0.82))
@@ -369,7 +377,7 @@ struct GroupChatView: View {
                 Text("群成员").font(.ui(.headline))
                 Text("\(group.members.count)").font(.ui(.subheadline).monospacedDigit()).foregroundStyle(.secondary)
                 Spacer(minLength: 6)
-                Button { withAnimation(.snappy(duration: 0.28)) { showMembers = false } } label: {
+                Button { withAnimation(.klSnappy(duration: 0.28)) { showMembers = false } } label: {
                     Image(systemName: "xmark").font(.ui(.footnote).weight(.semibold)).foregroundStyle(.secondary)
                         .frame(width: 28, height: 28).contentShape(Rectangle())
                 }
@@ -468,13 +476,13 @@ struct GroupChatView: View {
 }
 
 /// 群里的一条：系统提示居中小字；我说的在右边；agent 说的在左边（头像、名字、在哪台电脑哪个项目），下面一行写投递到了没有
-struct GroupMessageRow: View {
-    @Environment(AppModel.self) private var model
+struct GroupMessageRow: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let group: GroupInfo
     let message: GroupMessage
 
-    var body: some View {
+    var klBody: some View {
         if message.system {
             Text(message.eventText).font(.ui(.caption)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 .padding(.horizontal, 10).padding(.vertical, 4)
@@ -550,8 +558,8 @@ struct GroupMessageRow: View {
 }
 
 /// 我在群里说的（右边的绿气泡；带的图在气泡上面、文件一个一张卡片，同会话里我发的），下面一行投递情况
-struct GroupBubbleMine: View {
-    @Environment(AppModel.self) private var model
+struct GroupBubbleMine: KLView {
+    @EnvModel private var model
     let text: String
     var footnote: String
     var failed: Bool
@@ -560,7 +568,7 @@ struct GroupBubbleMine: View {
     var images: [GroupMedia] = []
     var files: [GroupMedia] = []
 
-    var body: some View {
+    var klBody: some View {
         HStack {
             Spacer(minLength: 48)
             VStack(alignment: .trailing, spacing: 4) {
@@ -605,13 +613,13 @@ extension View {
 
 // MARK: - 改群名
 
-struct GroupRenameSheet: View {
-    @Environment(AppModel.self) private var model
+struct GroupRenameSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let id: String
     @State var name: String
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("修改群名"), cancel: true) {
             VStack(alignment: .leading, spacing: 12) {
                 TextField(L("群名"), text: $name)
@@ -646,7 +654,7 @@ struct GroupRenameSheet: View {
 
 // MARK: - 拉群 / 加成员
 
-struct GroupPickerSheet: View {
+struct GroupPickerSheet: KLView {
     enum Mode: Hashable {
         /// 新建：先勾上的会话（拖到一起的两个、右键点的那个）
         case create([String])
@@ -654,7 +662,7 @@ struct GroupPickerSheet: View {
         case add(String)
     }
 
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let mode: Mode
     /// 建好 / 加进了哪个群（交给弹出它的地方打开群聊页）
@@ -675,7 +683,7 @@ struct GroupPickerSheet: View {
     private var groupId: String? { if case .add(let id) = mode { id } else { nil } }
     private var existing: Set<String> { Set(groupId.flatMap { model.groups.group($0) }?.members.map(\.key) ?? []) }
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: groupId == nil ? L("拉群协作") : L("添加成员"), cancel: true) {
             VStack(alignment: .leading, spacing: 14) {
                 if groupId == nil {
@@ -862,8 +870,8 @@ struct GroupPickerSheet: View {
     private var topicEditor: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("要它们协作什么（可选）").font(.ui(.caption).weight(.semibold)).foregroundStyle(.secondary)
-            TextField(L("例如：右边用完虚拟机后告诉左边，左边再开始搬迁"), text: $topic, axis: .vertical)
-                .lineLimit(3...8)
+            KLTextField(L("例如：右边用完虚拟机后告诉左边，左边再开始搬迁"), text: $topic, axis: .vertical)
+                .klLineLimit(3...8)
                 .textFieldStyle(.plain).font(.ui(.body))
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -896,12 +904,12 @@ struct GroupPickerSheet: View {
 }
 
 /// 单独的群聊页接住拖来的会话（松开 = 进群）。开在分屏里时不挂：交给分屏算落点（中间进群、四边分屏），不然这一层把落点截走
-private struct GroupJoinDrop: ViewModifier {
+private struct GroupJoinDrop: KLViewModifier {
     let enabled: Bool
     @Binding var dropping: Bool
     let join: (String) -> Void
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if enabled {
             content.onDrop(of: [PaneDrag.type], isTargeted: $dropping) { providers in
                 guard let provider = providers.first else { return false }
@@ -942,12 +950,12 @@ extension AppModel {
 }
 
 /// 输入框下面那排的「发给全部成员 ⌄」（样子同会话那排的小按钮）：选只发给哪几个成员
-struct GroupRecipientsChip: View {
-    @Environment(AppModel.self) private var model
+struct GroupRecipientsChip: KLView {
+    @EnvModel private var model
     @Environment(\.chipHeight) private var height
     let target: ComposeGroup
 
-    var body: some View {
+    var klBody: some View {
         if let group = model.groups.group(target.id) {
             let recipients = target.recipients
             let picked = group.members.filter { recipients.wrappedValue.contains($0.key) }
@@ -975,7 +983,7 @@ struct GroupRecipientsChip: View {
                 .contentShape(Capsule())
             }
             #if os(macOS)
-            .menuStyle(.button)
+            .klMenuButtonStyle()
             .buttonStyle(.plain)
             #endif
             .menuIndicator(.hidden)
@@ -988,19 +996,19 @@ struct GroupRecipientsChip: View {
 // MARK: - 分屏里的群（同会话一样是一个标签）
 
 /// 标签栏右边 / 横着的 iPhone 标题条上群的按钮：标记、成员（人形 + 人数，点开右边滑出成员面板）。点了交给群聊页去做
-struct GroupPaneButtons: View {
-    @Environment(AppModel.self) private var model
+struct GroupPaneButtons: KLView {
+    @EnvModel private var model
     let id: String
     /// 块窄了：只留成员按钮（标记折进「更多」）
     var membersOnly = false
 
-    var body: some View {
+    var klBody: some View {
         if let group = model.groups.group(id) {
             let open = model.groupDrawers.contains(id)
             #if os(macOS)
             if !membersOnly {
                 TarsPaneButton(group.marked ? "star.fill" : "star", help: group.marked ? L("已标记，点按取消标记") : L("标记：排在所有列表的最上面")) {
-                    withAnimation(.snappy) { model.markGroup(id, !group.marked) }
+                    withAnimation(.klSnappy) { model.markGroup(id, !group.marked) }
                 }
                 .foregroundStyle(group.marked ? AnyShapeStyle(Theme.claude) : AnyShapeStyle(.primary))
             }
@@ -1030,13 +1038,13 @@ struct GroupPaneButtons: View {
 
 #if os(macOS)
 /// 标签栏上的成员按钮：人形 + 人数（成员面板开着时实心），样子同旁边的小图标按钮
-private struct GroupMembersButton: View {
+private struct GroupMembersButton: KLView {
     let count: Int
     let open: Bool
     let action: () -> Void
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             HStack(spacing: 3) {
                 Image(systemName: open ? "person.2.fill" : "person.2").font(.system(size: 12, weight: .medium))
@@ -1056,12 +1064,12 @@ private struct GroupMembersButton: View {
 #endif
 
 /// 群的「更多」菜单（标签栏的 ⋯、右键标签）：folded = 块太窄、标签栏上的按钮折进来了，成员排最前面
-struct GroupPaneMenu: View {
-    @Environment(AppModel.self) private var model
+struct GroupPaneMenu: KLView {
+    @EnvModel private var model
     let id: String
     let folded: Bool
 
-    var body: some View {
+    var klBody: some View {
         if let group = model.groups.group(id) {
             if folded {
                 Button { model.groupAction = (id, .members, UUID()) } label: { Label(L("群成员"), systemImage: "person.2") }
@@ -1116,15 +1124,15 @@ extension SessionCard {
 // MARK: - 全部群
 
 /// 「会话群」页：进行中的群在上，成员都关了的历史群在下
-struct GroupsView: View {
-    @Environment(AppModel.self) private var model
+struct GroupsView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @State private var showPicker = false
     /// 这次打开从电脑读过一回（之前空着是「正在读取」，不是「还没有会话群」）
     @State private var groupsFetched = false
     @State private var deleting: GroupInfo?
 
-    var body: some View {
+    var klBody: some View {
         let live = model.groups.items.filter { model.isLive($0) }
         let past = model.groups.items.filter { !model.isLive($0) }
         List {
@@ -1145,7 +1153,7 @@ struct GroupsView: View {
             if model.groups.items.isEmpty, !groupsFetched {
                 SkeletonPage(style: .list(5, sections: true))
             } else if model.groups.items.isEmpty {
-                ContentUnavailableView {
+                KLUnavailableView {
                     Label(L("还没有会话群"), systemImage: "person.2")
                 } description: {
                     Text("把一个会话拖到另一个会话上，或在会话的菜单里选「拉群协作」，让不同设备、不同项目里的会话互相沟通。")
@@ -1163,7 +1171,7 @@ struct GroupsView: View {
         }
         .task { await model.groups.load(model.api); groupsFetched = true }
         // 面板里显式带上 model：从推进来的页面弹出时，系统不一定把环境里的对象传进面板（截图版实测会崩）
-        .sheetPanel(isPresented: $showPicker) { GroupPickerSheet(mode: .create([])) { open(.group($0)) }.environment(model) }
+        .sheetPanel(isPresented: $showPicker) { GroupPickerSheet(mode: .create([])) { open(.group($0)) }.environment(\.appModelSlot, model) }
         .confirmPanel(GroupDisband.message,
                       isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), confirm: L("解散群"), destructive: true) {
             if let id = deleting?.id { Task { await model.deleteGroup(id) } }
@@ -1183,12 +1191,12 @@ enum GroupDisband {
 }
 
 /// 群那一行的标记、免打扰、解散（长按菜单里、Mac 侧栏右键菜单里）；解散先交给列表弹确认
-struct GroupMenuItems: View {
-    @Environment(AppModel.self) private var model
+struct GroupMenuItems: KLView {
+    @EnvModel private var model
     let group: GroupInfo
     let disband: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button { let id = group.id, on = !group.marked; afterRowAction(lift: GroupKey.make(id)) { model.markGroup(id, on) } } label: {
             Label(group.marked ? L("取消标记") : L("标记"), systemImage: group.marked ? "star.slash" : "star")
         }
@@ -1208,7 +1216,7 @@ struct GroupMenuItems: View {
 /// lift：这一行的标识（会话 key / 群 key，和 rowLift(_:) 对应），没有就只是延后带动画改
 @MainActor func afterRowAction(lift: String? = nil, _ change: @escaping @MainActor () -> Void) {
     Task { @MainActor in
-        try? await Task.sleep(for: .milliseconds(350))
+        try? await Task.sleep(milliseconds: 350)
         #if os(iOS)
         if let lift, await RowLift.shared.fly(lift, change) { return }
         #endif
@@ -1217,13 +1225,14 @@ struct GroupMenuItems: View {
 }
 
 /// 正在挪位置的那一行：真的那一行先藏起来（rowLift），快照浮在列表上从原位置滑到新位置
-@MainActor @Observable final class RowLift {
+@MainActor final class RowLift: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = RowLift()
     /// 藏起来的那一行
-    var hidden: String?
+    @Tracked var hidden: String?
     #if os(iOS)
     /// 每一行垫着的标记视图（key → 视图），用它找到这一行现在在列表里的哪一格
-    @ObservationIgnored private var markers: [String: WeakView] = [:]
+    private var markers: [String: WeakView] = [:]
     final class WeakView { weak var view: UIView?; init(_ v: UIView) { view = v } }
 
     func register(_ key: String, _ view: UIView) { markers[key] = WeakView(view) }
@@ -1257,7 +1266,7 @@ struct GroupMenuItems: View {
         hidden = key
         withAnimation(.easeInOut(duration: 0.45)) { change() }
         // 等列表排好新顺序，再看这一行落到哪一格
-        try? await Task.sleep(for: .milliseconds(40))
+        try? await Task.sleep(milliseconds: 40)
         var target = start
         if let (newCell, newList) = locate(key), newList === list {
             target = newCell.frame
@@ -1305,14 +1314,14 @@ extension View {
     }
 }
 
-private struct GroupRowActions: ViewModifier {
-    @Environment(AppModel.self) private var model
+private struct GroupRowActions: KLViewModifier {
+    @EnvModel private var model
     let group: GroupInfo
     /// 左右分栏、群还没开在右边：长按菜单里「在右侧 / 下方分屏打开」（参数 = 往下分）
     var split: ((Bool) -> Void)?
     let disband: () -> Void
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(action: disband) { Text("解散") }
@@ -1342,12 +1351,12 @@ private struct GroupRowActions: ViewModifier {
 }
 
 /// 列表里的群拖得进右边的分屏（只在左右分栏时）
-struct GroupRowDrag: ViewModifier {
+struct GroupRowDrag: KLViewModifier {
     let enabled: Bool
     let key: String
     let card: SessionCard
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if enabled { content.sessionDrag(key: key, card: card) } else { content }
     }
 }
@@ -1355,13 +1364,13 @@ struct GroupRowDrag: ViewModifier {
 // MARK: - 拖到一起拉群
 
 /// 会话行接住拖过来的另一个会话：松开 = 拉这两个会话建群（弹面板确认、可写要协作的事）。拖着经过时画虚线框和「松开拉群」
-struct GroupDropTarget: ViewModifier {
+struct GroupDropTarget: KLViewModifier {
     let key: String
     var label = L("松开拉群")
     let perform: (String) -> Void
     @State private var targeted = false
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .overlay {
                 // 拖的是群（拖进分屏用的）：不画「松开拉群」
@@ -1474,13 +1483,13 @@ private extension AppModel {
 }
 
 /// 卡片顶上一行：群标志、「发到群 / 来自群」+ 群名，轻点打开群聊页
-private struct GroupCardHead: View {
+private struct GroupCardHead: KLView {
     @Environment(\.openRoute) private var open
     let label: String
     let name: String
     let group: GroupInfo?
 
-    var body: some View {
+    var klBody: some View {
         Button {
             if let group { open(.group(group.id)) }
         } label: {
@@ -1498,12 +1507,12 @@ private struct GroupCardHead: View {
 }
 
 /// agent 发到群里的（group say）：一张「发到群」卡片，正文、只发给了谁
-struct GroupSayMessage: View {
-    @Environment(AppModel.self) private var model
+struct GroupSayMessage: KLView {
+    @EnvModel private var model
     let key: String
     let item: ChatItem
 
-    var body: some View {
+    var klBody: some View {
         let group = model.groupFor(key, id: item.group, name: nil)
         Bubble(mine: false, text: item.text, selectable: true) {
             VStack(alignment: .leading, spacing: 8) {
@@ -1520,13 +1529,13 @@ struct GroupSayMessage: View {
 
 /// Kiteline 送进这个会话的群消息（对话记录里是一条用户消息）：居中一张「来自群」卡片，一条条谁说了什么；
 /// 群说明、回复方法是写给 agent 看的，这里只标一句
-struct GroupInboundMessage: View {
-    @Environment(AppModel.self) private var model
+struct GroupInboundMessage: KLView {
+    @EnvModel private var model
     let key: String
     let item: ChatItem
     let inbound: GroupText.Inbound
 
-    var body: some View {
+    var klBody: some View {
         let group = model.groupFor(key, id: nil, name: inbound.name)
         VStack(alignment: .leading, spacing: 8) {
             HStack {

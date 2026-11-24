@@ -3,24 +3,25 @@ import WebKit
 
 /// 编辑器内核（Resources/editor/code-editor.html：CodeMirror 6 + VS Code 配色，tools/editor 打包）外面包的一层。
 /// IDE 里开文件、取内容、保存、对比都经它调网页里的 window.KL；网页经 webkit.messageHandlers.kl 回报改动、光标、⌘S
-@MainActor @Observable
-final class EditorController: NSObject {
-    @ObservationIgnored let webView: WKWebView
-    private(set) var ready = false
-    @ObservationIgnored private var queue: [String] = []
+@MainActor 
+final class EditorController: NSObject, KLObservable {
+    let _klRegistrar = KLRegistrar.make()
+    let webView: WKWebView
+    @Tracked private(set) var ready = false
+    private var queue: [String] = []
     /// 改了还没保存的标签
-    var dirty: Set<String> = []
-    var line = 1
-    var column = 1
-    var selected = 0
-    var lines = 0
-    var cursors = 1
-    var language = ""
-    var indent = ""
+    @Tracked var dirty: Set<String> = []
+    @Tracked var line = 1
+    @Tracked var column = 1
+    @Tracked var selected = 0
+    @Tracked var lines = 0
+    @Tracked var cursors = 1
+    @Tracked var language = ""
+    @Tracked var indent = ""
     /// 对比时有几处改动
-    var diffChunks = 0
+    @Tracked var diffChunks = 0
     /// 网页里按了 ⌘S（标签 id）
-    @ObservationIgnored var onSave: ((String) -> Void)?
+    var onSave: ((String) -> Void)?
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -194,11 +195,11 @@ enum EditorPrefs {
 
 #if os(iOS)
 /// 键盘上方那排键：Tab、括号引号、常用符号、撤销重做、查找、收起键盘（手机键盘上找这些要切好几次）
-struct CodeKeyBar: View {
+struct CodeKeyBar: KLView {
     let controller: EditorController
     private let symbols = ["{", "}", "(", ")", "[", "]", "<", ">", "=", ";", ":", "\"", "'", "/", "\\", "|", "-", "_", "+", "*", "&", "!", "?", "#", "$", "@", "`", ",", "."]
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 0) {
             key(systemImage: "arrow.right.to.line") { controller.insert("\t") }
             key(systemImage: "arrow.left.to.line") { controller.command("indentLess") }

@@ -239,22 +239,22 @@ enum SplashStyle {
 }
 
 /// 启动页上的纸鸢：就是 KiteMark（和 App 图标同一只、同一个品牌橙），连着提线和一段主线
-struct SplashKite: View {
-    var body: some View {
+struct SplashKite: KLView {
+    var klBody: some View {
         KiteMark(line: KiteColor.brand.opacity(0.75))
     }
 }
 
 /// 风筝 + Kiteline 字样。静态启动屏的图（Assets 的 LaunchMark）就是把它原样渲染出来的：
 /// TARS_RENDER_LAUNCH=<目录> bash ios/snapshot.sh shot x.png（见 Snapshot.swift），改了这里要重新出图
-struct SplashMark: View {
+struct SplashMark: KLView {
     static let size = CGSize(width: 200, height: 162)
     static let kite: CGFloat = 120
     /// 风筝飞走：往右上飘、轻轻一偏，字样淡掉
     var lifted = false
     var reduceMotion = false
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             SplashKite()
                 .frame(width: Self.kite, height: Self.kite)
@@ -279,7 +279,7 @@ struct SplashMark: View {
 }
 
 /// 盖在整个 App 上的启动页：品牌页停一下就走；服务器配了图就换上图，到点或点「跳过」再走
-struct SplashOverlay: View {
+struct SplashOverlay: KLView {
     @AppStorage("onboarded") private var onboarded = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -300,7 +300,7 @@ struct SplashOverlay: View {
     /// 品牌页在第一帧之后再停多久（静态启动屏已经显示了一会儿，这里不用长）
     private static let brandHold = 0.4
 
-    var body: some View {
+    var klBody: some View {
         if !gone {
             content
                 .allowsHitTesting(!leaving)
@@ -453,7 +453,7 @@ struct SplashOverlay: View {
             let file = URL(fileURLWithPath: preview)
             choice = SplashStore.choose(configFile: file, base: file)
         }
-        try? await Task.sleep(for: .milliseconds(300))
+        try? await Task.sleep(milliseconds: 300)
         await present(holding: false)
         #else
         // 第一次打开（还在引导）只用品牌页
@@ -466,7 +466,7 @@ struct SplashOverlay: View {
     private func present(holding: Bool) async {
         guard let choice else {
             if holding {
-                try? await Task.sleep(for: .seconds(Self.brandHold))
+                try? await Task.sleep(seconds: Self.brandHold)
                 leave()
             }
             return
@@ -488,7 +488,7 @@ struct SplashOverlay: View {
             showingItem = true
         }
         guard holding else { return }
-        try? await Task.sleep(for: .seconds(choice.item.hold))
+        try? await Task.sleep(seconds: choice.item.hold)
         leave()
     }
 
@@ -496,7 +496,7 @@ struct SplashOverlay: View {
         guard !leaving else { return }
         leaving = true
         Task {
-            try? await Task.sleep(for: .milliseconds(600))
+            try? await Task.sleep(milliseconds: 600)
             gone = true
         }
     }

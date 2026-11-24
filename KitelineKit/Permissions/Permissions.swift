@@ -83,13 +83,13 @@ enum PermissionState: Equatable {
 
 /// 查、要系统权限；被拒的引导去「设置」打开
 @MainActor
-@Observable
-final class Permissions {
+final class Permissions: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = Permissions()
 
-    private(set) var states: [PermissionKind: PermissionState] = [:]
+    @Tracked private(set) var states: [PermissionKind: PermissionState] = [:]
     /// 用到某个功能时发现没权限：弹框引导去设置
-    var blocked: PermissionKind?
+    @Tracked var blocked: PermissionKind?
 
     private let probe = LocalNetworkProbe()
     private let defaults = UserDefaults.standard
@@ -106,7 +106,7 @@ final class Permissions {
     /// 从「设置」回来、回到前台时重新查一遍
     func refresh() async {
         states[.camera] = Self.map(AVCaptureDevice.authorizationStatus(for: .video))
-        states[.microphone] = Self.map(AVAudioApplication.shared.recordPermission)
+        states[.microphone] = Self.microphoneState()
         states[.notifications] = Self.map(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus)
         states[.photos] = Self.map(PHPhotoLibrary.authorizationStatus(for: .addOnly))
         // 本地网络没有查询接口：问过一次以后才去探（没问过就探会直接弹系统框）
@@ -131,8 +131,14 @@ final class Permissions {
             _ = await AVCaptureDevice.requestAccess(for: .video)
             states[.camera] = Self.map(AVCaptureDevice.authorizationStatus(for: .video))
         case .microphone:
-            _ = await AVAudioApplication.requestRecordPermission()
-            states[.microphone] = Self.map(AVAudioApplication.shared.recordPermission)
+            if #available(macOS 14, iOS 17, *) {
+                _ = await KLMicPermission.request()
+            } else {
+                #if os(macOS)
+                _ = await AVCaptureDevice.requestAccess(for: .audio)
+                #endif
+            }
+            states[.microphone] = Self.microphoneState()
         case .notifications:
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
             states[.notifications] = Self.map(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus)
@@ -176,6 +182,17 @@ final class Permissions {
         }
     }
 
+    /// 麦克风：macOS 14 / iOS 17 起查 AVAudioApplication，更早的 Mac 查 AVCaptureDevice
+    private static func microphoneState() -> PermissionState {
+        if #available(macOS 14, iOS 17, *) { return map(AVAudioApplication.shared.recordPermission) }
+        #if os(macOS)
+        return map(AVCaptureDevice.authorizationStatus(for: .audio))
+        #else
+        return .notAsked
+        #endif
+    }
+
+    @available(macOS 14, iOS 17, *)
     private static func map(_ status: AVAudioApplication.recordPermission) -> PermissionState {
         switch status {
         case .granted: return .granted
@@ -241,14 +258,14 @@ final class LocalNetworkProbe {
                 } else if sawPrompt || Date().timeIntervalSince(start) > 3 {
                     break
                 }
-                try? await Task.sleep(for: .milliseconds(100))
+                try? await Task.sleep(milliseconds: 100)
             }
         }
         #endif
         // 再给 2 秒让 Bonjour 登记 / 找到自己
         for _ in 0..<20 {
             if result.granted { return true }
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await Task.sleep(milliseconds: 100)
         }
         return result.granted
     }

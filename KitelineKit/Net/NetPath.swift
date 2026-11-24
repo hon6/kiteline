@@ -56,7 +56,7 @@ enum LocalRoute {
         guard !urls.isEmpty else { return [] }
         let names = interfaceNames()
         return urls.filter { url in
-            guard let host = url.host(percentEncoded: false)?.lowercased() else { return false }
+            guard let host = url.klHostDecoded?.lowercased() else { return false }
             if host == "127.0.0.1" || host == "localhost" {
                 #if targetEnvironment(simulator) || KITELINE_MAC
                 return true   // 模拟器、Mac 主窗口连本机的服务
@@ -75,7 +75,7 @@ enum LocalRoute {
         guard !urls.isEmpty else { return false }
         let names = interfaceNames()
         return urls.contains { url in
-            guard let host = url.host(percentEncoded: false)?.lowercased(),
+            guard let host = url.klHostDecoded?.lowercased(),
                   let name = interface(toward: host, names) else { return false }
             return name.hasPrefix("utun") || name.hasPrefix("ipsec") || name.hasPrefix("ppp")
         }

@@ -141,8 +141,8 @@ enum CodeTabStore {
 }
 
 /// 分屏里一个代码标签的内容
-struct CodeTabView: View {
-    @Environment(AppModel.self) private var model
+struct CodeTabView: KLView {
+    @EnvModel private var model
     @Environment(\.colorScheme) private var scheme
     let key: String
     let parts: CodeTabKey.Parts
@@ -157,7 +157,7 @@ struct CodeTabView: View {
     private var options: EditorOptions { EditorOptions(dark: scheme == .dark, fontSize: fontSize, wrap: wrap, minimap: minimap) }
     private var store: RepoStore { CodeStores.repo(parts.session, model) }
 
-    var body: some View {
+    var klBody: some View {
         Group {
             switch parts.kind {
             case .file: fileBody
@@ -174,7 +174,7 @@ struct CodeTabView: View {
         .background(Theme.chatBackground)
         .gitFailureAlert(store)
         .task(id: key) { await begin() }
-        .onChange(of: options) { _, value in entry?.editor.setOptions(value) }
+        .klOnChange(of: options) { _, value in entry?.editor.setOptions(value) }
     }
 
     // MARK: 文件
@@ -263,7 +263,7 @@ struct CodeTabView: View {
                     if payload.original != nil {
                         CodeWebView(controller: entry.editor)
                     } else if payload.binary {
-                        ContentUnavailableView(L("二进制文件"), systemImage: "doc", description: Text("无法显示二进制文件的差异。"))
+                        KLUnavailableView(L("二进制文件"), systemImage: "doc", description: Text("无法显示二进制文件的差异。"))
                     } else {
                         ScrollView { Text(payload.diff).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).padding() }
                     }

@@ -13,7 +13,7 @@ import KitelineKit
 // MARK: - 左边栏「项目」页签
 
 /// 各台电脑上的项目：一行一个（在跑的会话、分支和未提交的改动），点一个打开它的二级侧边栏，再点一下收起
-struct SidebarProjects: View {
+struct SidebarProjects: KLView {
     @ObservedObject var model: KitelineModel
     /// 行的框离栏两边多远：plain 列表自己左边已经留了 8（11-21 量过），行再给 0 = 框离栏边 SideMetric.edge
     static let inset: CGFloat = 0
@@ -21,7 +21,7 @@ struct SidebarProjects: View {
     let header: AnyView
     @ObservedObject private var projects = ProjectsModel.shared
 
-    var body: some View {
+    var klBody: some View {
         // 不分筛选页签（11-21）：同下面的会话，分「活动中」「其他项目」两节；活动中 = 有会话在跑或今天动过
         let all = projects.groupedShown
         let active = all.filter { group in group.contains { projects.matches($0, "active") } }
@@ -29,12 +29,12 @@ struct SidebarProjects: View {
         List {
             header.listRowInsets(EdgeInsets())
             if !inPanel {
-                titleRow.padding(.top, 10).padding(.bottom, 4).selectionDisabled()
+                titleRow.padding(.top, 10).padding(.bottom, 4).klSelectionDisabled()
                     .listRowInsets(EdgeInsets(top: 0, leading: SideMetric.pad, bottom: 0, trailing: SideMetric.pad - 2))
-                    .listRowSeparator(.hidden)
+                    .klListRowSeparator(.hidden)
             }
             if projects.projects.isEmpty, !projects.loaded {
-                SkeletonShape(style: .list(5)).selectionDisabled()
+                SkeletonShape(style: .list(5)).klSelectionDisabled()
             }
             Section {
                 if active.isEmpty, projects.loaded {
@@ -56,12 +56,12 @@ struct SidebarProjects: View {
                 .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.top, 6)
                 .padding(.bottom, 6)
             }
-            .listSectionSeparator(.hidden)
+            .klListSectionSeparator(.hidden)
             if !rest.isEmpty {
                 Section {
                     if collapse.has("projects.rest.open") { rows(rest) }
                 } header: {
-                    Button { withAnimation(.snappy(duration: 0.18)) { collapse.toggle("projects.rest.open") } } label: {
+                    Button { withAnimation(.klSnappy(duration: 0.18)) { collapse.toggle("projects.rest.open") } } label: {
                         HStack(spacing: 4) {
                             PanelSectionTitle(title: L("其他项目"), count: rest.count)
                             Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
@@ -73,17 +73,17 @@ struct SidebarProjects: View {
                     .buttonStyle(.plain)
                     .padding(.leading, SideMetric.inset - 8).padding(.vertical, 4)
                 }
-                .listSectionSeparator(.hidden)
+                .klListSectionSeparator(.hidden)
             }
             if all.isEmpty, projects.loaded {
                 Text(L("暂无项目。点「打开项目」选择一个文件夹，用 Claude Code 或其他 Agent 打开。"))
                     .font(.app(size: 11.5)).foregroundStyle(.secondary)
                     .lineLimit(nil).fixedSize(horizontal: false, vertical: true)
-                    .selectionDisabled()
+                    .klSelectionDisabled()
             }
             ForEach(projects.errors, id: \.self) {
                 Label(ServerLang.ui($0), systemImage: "exclamationmark.triangle").font(.app(size: 11.5)).foregroundStyle(.secondary)
-                    .selectionDisabled()
+                    .klSelectionDisabled()
             }
         }
         // 不用系统侧栏样式：它每行左右再自带十几点，内容对不齐侧栏的 16 点对齐线（11-21 量过）
@@ -106,7 +106,7 @@ struct SidebarProjects: View {
                 .padding(.top, group[0].id == groups.first?.first?.id ? 6 : 0)
                 // 行的框离栏边 8、框里 8（侧栏规范 SideMetric；11-20 反馈：项目列表左右边距太大）
                 .listRowInsets(EdgeInsets(top: 1, leading: Self.inset, bottom: 1, trailing: Self.inset - 2))
-                .listRowSeparator(.hidden)
+                .klListRowSeparator(.hidden)
         }
     }
 
@@ -138,7 +138,7 @@ struct SidebarProjects: View {
 }
 
 /// 项目列表的一行（样子同会话行）：头像、项目名、时间；第二行在跑的会话和 Git 概况；第三行哪台电脑、哪个目录
-struct SidebarProjectRow: View {
+struct SidebarProjectRow: KLView {
     let project: ProjectItem
     /// 合成一项的几台设备上的同一个项目（只有一台时就是 [project]）
     var members: [ProjectItem] = []
@@ -147,7 +147,7 @@ struct SidebarProjectRow: View {
 
     private var all: [ProjectItem] { members.isEmpty ? [project] : members }
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: SideMetric.gap) {
             // 文件夹图标（11-20 反馈：项目去掉头像，显示文件夹标识）；有会话在忙 / 等确认时文件夹是主题色 / 橙色
             ProjectFolderMark(state: state, size: 16).padding(.top, 1)
@@ -212,11 +212,11 @@ struct SidebarProjectRow: View {
 }
 
 /// 项目的标识：一个文件夹（不用头像）。有会话等确认是橙色、在忙是主题色，别的是次要色
-struct ProjectFolderMark: View {
+struct ProjectFolderMark: KLView {
     let state: Activity
     var size: CGFloat = 16
 
-    var body: some View {
+    var klBody: some View {
         let color: Color = state == .waiting ? .tarsOrange : state == .busy ? .tarsBrand : .secondary
         Image(systemName: state == .unknown ? "folder" : "folder.fill")
             .font(.system(size: size, weight: .regular))
@@ -229,13 +229,13 @@ struct ProjectFolderMark: View {
 
 /// 主窗口右边那一大块。平时就是 DetailView；左边栏「项目」里点开了项目时，左边多一列二级侧边栏（文件、Git、会话）；
 /// 在里面点了文件、改动、提交历史，右边换成编辑区——会话那几列只是藏起来，不拆（拆了重建要大半秒，回来还得重新滚到底）
-struct ProjectSplit: View {
+struct ProjectSplit: KLView {
     @ObservedObject var model: KitelineModel
     @ObservedObject private var projects = ProjectsModel.shared
     /// 项目的内容拆成单独一列（二级侧边栏）；默认不拆，在左边栏里看（SidebarView）
     @AppStorage("projectPaneSplit", store: AppConfig.defaults) private var split = false
 
-    var body: some View {
+    var klBody: some View {
         // 新版界面不再有「拆成单独一栏」（会话列表、文件侧栏是布局里自己的块）
         let pane = model.worldMode || !split || model.newLayout ? nil : model.projectPane
         let codeKey = model.worldMode ? nil : model.projectPane.flatMap { model.projectShowsCode ? projects.codeKey($0) : nil }
@@ -257,7 +257,7 @@ struct ProjectSplit: View {
 /// 一个项目的内容（同 VS Code 的侧边栏）：顶上一行项目名和按钮，下面文件、Git、会话几栏换着看。两种放法：
 /// inline（默认）= 在左边栏那一列里，整列都是它，页签横着排在上面，顶上「‹」回项目列表；
 /// 不是 inline = 左边栏右边单独一列（二级侧边栏），左边一条竖的活动栏，右边缘能拖着改宽度
-struct ProjectPaneView: View {
+struct ProjectPaneView: KLView {
     @ObservedObject var model: KitelineModel
     let id: String
     var inline = false
@@ -271,7 +271,7 @@ struct ProjectPaneView: View {
         projects.fileMember(id).map { ($0.sourceId, $0.cwd) } ?? ProjectsModel.place(id) ?? ("", "")
     }
 
-    var body: some View {
+    var klBody: some View {
         let place = place
         let members = projects.members(id)
         // 会话：几台设备上的都列（会话上写着是哪台设备的）
@@ -323,7 +323,7 @@ struct ProjectPaneView: View {
             if !projects.loaded { projects.load() }   // 从别处直接点开项目（没进过项目列表）：用量、分支这些要先读一遍
         }
         // 「打开项目」开的会话出现了：右边直接打开它
-        .onChange(of: live.map(\.id)) { old, new in
+        .klOnChange(of: live.map(\.id)) { old, new in
             guard projects.selectWhenReady.contains(id), let fresh = new.first(where: { !old.contains($0) }) else { return }
             projects.selectWhenReady.remove(id)
             model.selection = fresh
@@ -416,7 +416,7 @@ struct ProjectPaneView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .menuStyle(.button)
+            .klMenuButtonStyle()
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .help("切换到其他项目")
@@ -451,13 +451,13 @@ struct ProjectPaneView: View {
 }
 
 /// 二级侧边栏顶上那行的小按钮：28×28，鼠标移上去有浅底
-private struct PaneHeadButton: View {
+private struct PaneHeadButton: KLView {
     let symbol: String
     let help: String
     let action: () -> Void
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.app(size: 12.5, weight: .medium)).foregroundStyle(.secondary)
                 .frame(width: SideMetric.control, height: SideMetric.control)
@@ -472,7 +472,7 @@ private struct PaneHeadButton: View {
 }
 
 /// 二级侧边栏的「会话」一栏：这个项目里正在运行的会话（同左边栏的会话行，点了右边打开）、最近结束的会话（点了看记录、能恢复）
-struct ProjectSessions: View {
+struct ProjectSessions: KLView {
     @ObservedObject var model: KitelineModel
     let id: String
     let live: [SessionItem]
@@ -483,7 +483,7 @@ struct ProjectSessions: View {
     @ObservedObject private var projects = ProjectsModel.shared
     @ObservedObject private var collapse = PanelCollapse.shared
 
-    var body: some View {
+    var klBody: some View {
         let place = self.place ?? ProjectsModel.place(id) ?? ("", "")
         List {
             Section {
@@ -499,14 +499,14 @@ struct ProjectSessions: View {
                 }
                 ForEach(live) { item in
                     SessionRow(item: item, pinned: model.isPinned(item.id), marked: model.isMarked(item.id),
-                               onMark: { withAnimation(.snappy) { model.toggleMark(item.id) } },
+                               onMark: { withAnimation(.klSnappy) { model.toggleMark(item.id) } },
                                onClose: item.canReply && item.can("close") ? { model.close(item.id, confirmed: true) } : nil, avatar: false, folder: false)
                         .modifier(SidebarRowHighlight(selected: model.selection == item.id && !model.projectShowsCode) { model.pick(item.id) })
                         // 第一行和上面的标题条之间空 6（标题条的底色是连着的，内边距加在条里看不出空隙；11-21 用户反复指出）
                         .padding(.top, item.id == live.first?.id ? 6 : 0)
                         // plain 列表自己左边留 8、右边 10（11-21 量过）：行左 0、右 -2 = 框离栏边 8
                         .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: -2))
-                        .listRowSeparator(.hidden)
+                        .klListRowSeparator(.hidden)
                         .sessionDraggable(item)
                         .contextMenu { SessionMenu(model: model, item: item) }
                 }
@@ -529,7 +529,7 @@ struct ProjectSessions: View {
                 .padding(.leading, SideMetric.inset - 8).padding(.trailing, -2).padding(.top, 6)
                 .padding(.bottom, 6)
             }
-            .listSectionSeparator(.hidden)
+            .klListSectionSeparator(.hidden)
             Section {
                 if !collapse.has("recent.open") {
                     EmptyView()
@@ -542,14 +542,14 @@ struct ProjectSessions: View {
                             })
                             .padding(.top, item.id == past.first?.id ? 6 : 0)
                             .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: -2))
-                            .listRowSeparator(.hidden)
+                            .klListRowSeparator(.hidden)
                     }
                 } else {
                     SkeletonShape(style: .list(3))
                 }
             } header: {
                 // 「最近的会话」能收起，默认收起（11-21）：点标题展开 / 收起，记住
-                Button { withAnimation(.snappy(duration: 0.18)) { collapse.toggle("recent.open") } } label: {
+                Button { withAnimation(.klSnappy(duration: 0.18)) { collapse.toggle("recent.open") } } label: {
                     HStack(spacing: 4) {
                         PanelSectionTitle(title: L("最近的会话"), count: projects.past[id]?.count ?? 0)
                         Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
@@ -561,11 +561,11 @@ struct ProjectSessions: View {
                 .buttonStyle(.plain)
                 .padding(.leading, SideMetric.inset - 8)
             }
-            .listSectionSeparator(.hidden)
+            .klListSectionSeparator(.hidden)
         }
         // 同项目列表：plain 样式，边距全按侧栏规范自己给
         .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        .klScrollContentBackground(.hidden)
     }
 }
 
@@ -573,7 +573,7 @@ struct ProjectSessions: View {
 
 /// 项目里的一块：sessions 这个项目的会话，files 文件侧栏（顶部图标切文件 / Git / 分支 / 提交历史）。
 /// 「项目」里没开着项目时不画（这一块所在的位置让给同一栏的别的块）
-struct ProjectBlock: View {
+struct ProjectBlock: KLView {
     @ObservedObject var model: KitelineModel
     let block: String
     @ObservedObject private var projects = ProjectsModel.shared
@@ -584,7 +584,7 @@ struct ProjectBlock: View {
         !model.worldMode && model.query.isEmpty && model.projectPane != nil
     }
 
-    var body: some View {
+    var klBody: some View {
         if Self.visible(model), let id = model.projectPane {
             let place = projects.fileMember(id).map { ($0.sourceId, $0.cwd) } ?? ProjectsModel.place(id) ?? ("", "")
             let members = projects.members(id)
@@ -606,7 +606,7 @@ struct ProjectBlock: View {
                         .padding(14).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
-            .scrollContentBackground(.hidden)
+            .klScrollContentBackground(.hidden)
             .modifier(SidebarPanel(title: block == "sessions" ? L("会话") : L("文件")))
             .id(id)
             // 最近的会话：新版界面里这一块自己去取（原来只有旧的项目二级栏取，这里一直是占位）
@@ -622,7 +622,7 @@ struct ProjectBlock: View {
 
 /// 「打开项目」（11-20）：选电脑和文件夹、选 Agent，直接打开——在那个文件夹里开好一个会话等你说话，
 /// 左边切到这个项目的二级侧边栏。不用先写任务（要先写好任务再开的，用「新任务」）
-struct OpenProjectSheet: View {
+struct OpenProjectSheet: KLView {
     @ObservedObject private var model = KitelineModel.shared
     @AppStorage("listSource") private var listSource = ""
     @State private var sourceId = ""
@@ -646,14 +646,14 @@ struct OpenProjectSheet: View {
         [NewTaskSheet.LaunchAgent(id: "claude-code", name: Agents.info("claude-code").name, viaUI: false)] + (launchable[sourceId] ?? [])
     }
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("选择项目所在的文件夹和要使用的 Agent，Kiteline 会在其中打开一个会话；项目的文件、Git 和会话显示在左侧栏中。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 14) {
+            KLGrid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 14) {
                 if targets.count > 1 {
-                    GridRow {
+                    KLGridRow {
                         Text("电脑").foregroundStyle(.secondary)
                         Picker("电脑", selection: $sourceId) {
                             ForEach(targets, id: \.id) { Text(verbatim: ServerLang.machine($0.displayName)).tag($0.id) }
@@ -662,7 +662,7 @@ struct OpenProjectSheet: View {
                         .fixedSize()
                     }
                 }
-                GridRow {
+                KLGridRow {
                     Text("文件夹").foregroundStyle(.secondary)
                     HStack(spacing: 8) {
                         Image(systemName: "folder").foregroundStyle(path.isEmpty ? Color.secondary : Color.tarsBrand)
@@ -674,7 +674,7 @@ struct OpenProjectSheet: View {
                         Button(path.isEmpty ? L("选择…") : L("更换…")) { browse() }.tarsButton()
                     }
                 }
-                GridRow(alignment: .top) {
+                KLGridRow(alignment: .top) {
                     Text("Agent").foregroundStyle(.secondary).padding(.top, 7)
                     VStack(spacing: 4) {
                         ForEach(agents) { choice in
@@ -723,7 +723,7 @@ struct OpenProjectSheet: View {
             // 少点一下：面板一开就让你选文件夹（测试实例不自动弹，系统的选文件夹框会出现在用户屏幕上）
             if !AppConfig.isolated { DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { if path.isEmpty, browsing == nil { browse() } } }
         }
-        .onChange(of: sourceId) { old, _ in
+        .klOnChange(of: sourceId) { old, _ in
             if !old.isEmpty { path = "" }   // 换了电脑：原来选的文件夹不在这台上
             if !agents.contains(where: { $0.id == agent }) { agent = "claude-code" }
             askAgents()

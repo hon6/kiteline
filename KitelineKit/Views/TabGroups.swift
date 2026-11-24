@@ -10,10 +10,11 @@ import UniformTypeIdentifiers
 /// 省资源（用户：标签多了卡、要省系统资源）：只有当前这组画在屏幕上，别的组只是一份存着的布局（几百字节），不建视图、不连对话；
 /// 切走的会话过 10 分钟把已加载的消息放掉（AppModel.scheduleSleep，同浏览器休眠后台标签）。侧栏每组一行只看各会话的状态点、待确认、新消息。
 /// 放掉的只是 Kiteline 里显示用的消息：agent 在 VS Code / 终端里照常跑，状态、推送、确认、群转发都走电脑推来的状态和后台，不受影响（11-10 反馈过）
-@Observable @MainActor
-public final class TabGroups {
+@MainActor
+public final class TabGroups: KLObservable {
+    public let _klRegistrar = KLRegistrar.make()
     /// 分屏标签栏顶上画不画会话组那一排（见 KitelineKit.tabGroupsInTitlebar）
-    var showsInTitlebar = true
+    @Tracked var showsInTitlebar = true
     struct Group: Codable, Identifiable, Equatable {
         let id: UUID
         var name: String
@@ -35,13 +36,13 @@ public final class TabGroups {
     }
 
     let panes: ChatPanes
-    private(set) var groups: [Group] = []
+    @Tracked private(set) var groups: [Group] = []
     /// 正显示的组（nil = 未分组的标签页）
-    private(set) var active: UUID?
+    @Tracked private(set) var active: UUID?
     /// 有组正显示时，未分组的那套存在这
-    private var loose: Data?
-    private var looseKeys: [String] = []
-    @ObservationIgnored private var store: (defaults: UserDefaults, key: String)?
+    @Tracked private var loose: Data?
+    @Tracked private var looseKeys: [String] = []
+    private var store: (defaults: UserDefaults, key: String)?
 
     init(panes: ChatPanes) { self.panes = panes }
 
@@ -262,7 +263,7 @@ public final class TabGroups {
     // MARK: 和电脑同步（组名、颜色、有哪些会话、先后存在电脑上，手机上看到同一套；分屏布局只存本机）
 
     /// 电脑上的那份（连上电脑时 KitelineKit.connect 接上）
-    @ObservationIgnored private weak var shared: SharedTabGroups?
+    private weak var shared: SharedTabGroups?
 
     func attach(_ shared: SharedTabGroups) {
         self.shared = shared
@@ -335,33 +336,33 @@ public final class TabGroups {
 ///（同 cmux 侧栏显示最新提醒）。点一下切到这组（组里的会话多列摆出来），左边的箭头展开看组里每个会话，点会话直接切过去并显示它。
 /// 把左边栏的会话拖到某组上 = 加进这组（多一列）。右键：重命名、每个会话一列、添加会话、删除。
 /// 快捷键（同 cmux）：⌃⌘] / ⌃⌘[ 下一组 / 上一组，⌃⌘1…9 第几组，⇧⌘U 跳到待确认 / 有新消息的会话，⌃⌘N 新建标签组
-public struct TarsTabGroupSection: View {
+public struct TarsTabGroupSection: KLView {
     /// 放在左边栏「标签组」页签里：不要组头（页签已经写着了，新建按钮在页签那一行右边）
     let headerless: Bool
 
     public init(headerless: Bool = false) { self.headerless = headerless }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            TabGroupRows(groups: KitelineKit.tabGroups, headerless: headerless).environment(model)
+            TabGroupRows(groups: KitelineKit.tabGroups, headerless: headerless).environment(\.appModelSlot, model)
         }
     }
 }
 
 /// 左边栏「标签组」页签那一行右边的「新建标签组」：未分组开着标签页时多一项「用当前 N 个标签页新建」
-public struct TarsTabGroupNewButton<Label: View>: View {
+public struct TarsTabGroupNewButton<Label: View>: KLView {
     let label: Label
 
     public init(@ViewBuilder label: () -> Label) { self.label = label() }
 
-    public var body: some View {
+    public var klBody: some View {
         let groups = KitelineKit.tabGroups
         if groups.active == nil, !groups.panes.isPristine {
             Menu {
                 Button(L("新建会话组…")) { TabGroupRequest.shared.picking = .create([]) }
                 Button(L("用当前 %lld 个标签页新建会话组", count: groups.panes.keys.count)) { groups.create(name: nil, keys: [], fromCurrent: true) }
             } label: { label }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .klMenuButtonStyle().buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .help(L("新建会话组"))
         } else {
             Button { TabGroupRequest.shared.picking = .create([]) } label: { label }
@@ -380,17 +381,17 @@ extension KitelineKit {
     }
 }
 
-private struct TabGroupRows: View {
+private struct TabGroupRows: KLView {
     let groups: TabGroups
     var headerless = false
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     // 弹的面板挂在主窗口上（TarsTabGroupPickerHost）：挂在列表的 Section 上会给这一节的每一行各挂一份，点一次弹好几个
     private var request: TabGroupRequest { TabGroupRequest.shared }
     private var renaming: UUID? { get { request.renaming } nonmutating set { request.renaming = newValue } }
     private var deleting: UUID? { get { request.deleting } nonmutating set { request.deleting = newValue } }
     private var picking: TabGroupPicker.Mode? { get { request.picking } nonmutating set { request.picking = newValue } }
 
-    var body: some View {
+    var klBody: some View {
         Section {
             if groups.groups.isEmpty {
                 emptyHint
@@ -421,7 +422,7 @@ private struct TabGroupRows: View {
             } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).frame(width: 20, height: 18).contentShape(Rectangle())
             }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .klMenuButtonStyle().buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .help(L("新建会话组"))
         }
     }
@@ -459,7 +460,7 @@ private struct TabGroupRows: View {
     private func row(_ group: TabGroups.Group) -> some View {
         let tint = groups.color(of: group.id)
         return TabGroupLine(symbol: "square.stack.fill", tint: tint.color, name: group.name, keys: groups.keys(group.id), expanded: group.expanded) {
-            withAnimation(.snappy(duration: 0.2)) { groups.toggleExpanded(group.id) }
+            withAnimation(.klSnappy(duration: 0.2)) { groups.toggleExpanded(group.id) }
         }
         .modifier(TabGroupHighlight(selected: groups.active == group.id, tint: tint.color) { groups.activate(group.id) })
         // 左边栏的会话拖到这组上：加进来（多一列）
@@ -472,7 +473,7 @@ private struct TabGroupRows: View {
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             _ = providers.first?.loadObject(ofClass: NSString.self) { object, _ in
                 guard let text = object as? String, text.hasPrefix("tabgroup:"), let id = UUID(uuidString: String(text.dropFirst(9))), id != group.id else { return }
-                DispatchQueue.main.async { withAnimation(.snappy) { groups.reorder(id, before: group.id) } }
+                DispatchQueue.main.async { withAnimation(.klSnappy) { groups.reorder(id, before: group.id) } }
             }
             return true
         }
@@ -516,13 +517,13 @@ private struct TabGroupRows: View {
         .padding(.leading, 30).padding(.trailing, 4).padding(.vertical, 2)
         .modifier(TabGroupHighlight(selected: groups.active == id && groups.panes.focused == key, compact: true, tint: groups.color(of: id).color) { groups.activate(id, focus: key) })
         .contextMenu {
-            Button(L("从会话组移除")) { withAnimation(.snappy) { groups.remove(key, from: id) } }
+            Button(L("从会话组移除")) { withAnimation(.klSnappy) { groups.remove(key, from: id) } }
         }
     }
 }
 
 /// 一组那一行：展开箭头、图标、组名、状态点；下面一行小字说最要紧的那件事
-private struct TabGroupLine: View {
+private struct TabGroupLine: KLView {
     let symbol: String
     /// 组的颜色：图标换成这个色的小色块（同 Edge 标签栏上组名前的色块）；nil = 未分组那行，画灰图标
     var tint: Color? = nil
@@ -531,9 +532,9 @@ private struct TabGroupLine: View {
     /// nil = 不能展开（未分组那行）
     let expanded: Bool?
     let toggle: (() -> Void)?
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         let digest = TabGroupDigest(keys: keys, model: model)
         HStack(alignment: .top, spacing: 6) {
             Group {
@@ -603,7 +604,7 @@ private struct TabGroupLine: View {
 }
 
 /// 选中、悬停：同左边栏会话行（淡品牌色底 + 细边，指着浅浅一层）。悬停只换底色，不增删控件、不改尺寸（见 mac-sidebar-trackpad-scroll）
-private struct TabGroupHighlight: ViewModifier {
+private struct TabGroupHighlight: KLViewModifier {
     let selected: Bool
     var compact = false
     /// 选中时的底色、细边用组的颜色（未分组用主题色）
@@ -611,7 +612,7 @@ private struct TabGroupHighlight: ViewModifier {
     let select: () -> Void
     @State private var hovering = false
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: compact ? 7 : 10, style: .continuous)
         let accent = tint ?? Theme.claude
         content
@@ -627,11 +628,11 @@ private struct TabGroupHighlight: ViewModifier {
 }
 
 /// 左边栏拖来的会话（PaneDrag）落在这组上：加进来；停在上面时描一圈主题色
-private struct TabGroupDrop: ViewModifier {
+private struct TabGroupDrop: KLViewModifier {
     let perform: (String) -> Void
     @State private var targeted = false
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .overlay {
                 if targeted {
@@ -652,7 +653,7 @@ private struct TabGroupDrop: ViewModifier {
 // MARK: 新建 / 添加会话
 
 /// 勾几个会话建一组（每个一列，按勾的先后从左到右），或往已有的组里加
-struct TabGroupPicker: View {
+struct TabGroupPicker: KLView {
     enum Mode: Hashable {
         /// 新建：先勾上的会话（会话右键「新建标签组」时就是它）
         case create([String])
@@ -661,7 +662,7 @@ struct TabGroupPicker: View {
 
     let mode: Mode
     let groups: TabGroups
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     /// 按勾的先后：建组时从左到右就是这个顺序
     @State private var picked: [String] = []
@@ -680,7 +681,7 @@ struct TabGroupPicker: View {
     private var target: UUID? { if case .add(let id) = mode { id } else { nil } }
     private var existing: Set<String> { Set(target.map(groups.keys) ?? []) }
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: target == nil ? L("新建会话组") : L("添加会话到「%@」", groups.group(target)?.name ?? ""), cancel: true) {
             VStack(alignment: .leading, spacing: 12) {
                 if target == nil {
@@ -809,14 +810,14 @@ struct TabGroupPicker: View {
 }
 
 /// 改组名、选颜色（同 Edge 点组名弹的那块：上面组名，下面一排九个色点，点色点立刻换上）
-private struct TabGroupRenameSheet: View {
+private struct TabGroupRenameSheet: KLView {
     @PanelDismiss private var dismiss
     @State var name: String
     @State var color: String
     let save: (String) -> Void
     let recolor: (String) -> Void
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: L("编辑会话组"), cancel: true) {
             VStack(alignment: .leading, spacing: 14) {
                 TextField(L("组名"), text: $name)
@@ -847,11 +848,11 @@ private struct TabGroupRenameSheet: View {
 }
 
 /// 一排九个色点：选中的外面一圈，指着显示颜色名
-struct TabGroupColorRow: View {
+struct TabGroupColorRow: KLView {
     @Binding var selection: String
     var changed: ((String) -> Void)? = nil
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             ForEach(TabGroupColor.all) { option in
                 let on = selection == option.id
@@ -939,7 +940,7 @@ public struct TabGroupColor: Identifiable, Equatable {
 // MARK: 右键菜单里的「标签组」
 
 /// 会话、标签右键里的一项「标签组 ▸」：加到某组 / 移到某组 / 用它新建。moving = 从正显示的标签上点的（挪过去，这边关掉）
-public struct TarsTabGroupMenu: View {
+public struct TarsTabGroupMenu: KLView {
     let key: String
     let moving: Bool
 
@@ -948,7 +949,7 @@ public struct TarsTabGroupMenu: View {
         self.moving = moving
     }
 
-    public var body: some View {
+    public var klBody: some View {
         let groups = KitelineKit.tabGroups
         Menu(moving ? L("移到会话组") : L("添加到会话组")) {
             ForEach(groups.groups.filter { $0.id != (moving ? groups.active : nil) }) { group in
@@ -1067,7 +1068,7 @@ extension KitelineKit {
     }
 
     /// 自测用：对话休眠的等待时间（秒）
-    public static func setChatSleep(seconds: Double) { AppModel.sleepAfter = .milliseconds(Int(seconds * 1000)) }
+    public static func setChatSleep(seconds: Double) { AppModel.sleepAfter = seconds }
 }
 
 extension KitelineKit {
@@ -1088,42 +1089,42 @@ extension KitelineKit {
 
 /// 标签栏最前面的组名色块（同 Edge 标签栏上的组标签）：正显示某组时是组的颜色 + 组名，未分组时灰色「未分组」。
 /// 点开是一张切换菜单：各组（带颜色、待确认和新消息的数）、未分组，下面是编辑、新建、每个会话一列。左边栏收起时也能切组
-public struct TarsTabGroupChip: View {
+public struct TarsTabGroupChip: KLView {
     public init() {}
 
-    public var body: some View {
-        if let model = KitelineKit.model { TabGroupChip(groups: KitelineKit.tabGroups).environment(model) }
+    public var klBody: some View {
+        if let model = KitelineKit.model { TabGroupChip(groups: KitelineKit.tabGroups).environment(\.appModelSlot, model) }
     }
 }
 
 /// 窗口最上沿一排会话组「倒挂标签」（11-11）：贴着窗口顶边，上面两个角是直的、和顶边连成一片，下面两个角圆，
 /// 像标签页倒过来吸在顶上；点了切到这一组。最前面「未分组」，最后「+」新建；右键改名改色、添加会话、每个会话一列、拉成群、删除。
 /// 横跨整个分屏的顶边（最上面一排各块的标签栏往上长到窗口顶的那段，见 ChatPanesView.groupStrip、PaneHeader.rise）
-public struct TarsTabGroupStrip: View {
+public struct TarsTabGroupStrip: KLView {
     let height: CGFloat
     public init(height: CGFloat) { self.height = height }
 
-    public var body: some View {
-        if let model = KitelineKit.model { TabGroupStrip(groups: KitelineKit.tabGroups, height: height).environment(model) }
+    public var klBody: some View {
+        if let model = KitelineKit.model { TabGroupStrip(groups: KitelineKit.tabGroups, height: height).environment(\.appModelSlot, model) }
     }
 }
 
-private struct TabGroupStrip: View {
+private struct TabGroupStrip: KLView {
     let groups: TabGroups
     let height: CGFloat
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
 
     private static let ungrouped = "tabgroup.ungrouped"
 
-    var body: some View {
+    var klBody: some View {
         // 放得下就只占这排标签那么宽：右边空着的地方还是标签栏（按住拖窗口、双击缩放）。
         // 组多到一整行都放不下才横着滚，并把正显示的那一组滚到看得见的地方
-        ViewThatFits(in: .horizontal) {
+        KLViewThatFits(in: .horizontal) {
             row
             ScrollViewReader { proxy in
                 KiteHScroll { row }
                     // 不指定停靠位置：已经整个看得见就不动（点的那个标签不会从指针底下滑开），看不见的才滚最短的一段进来
-                    .onChange(of: groups.active, initial: true) { _, active in
+                    .klOnChange(of: groups.active, initial: true) { _, active in
                         if let active { proxy.scrollTo(active) } else { proxy.scrollTo(Self.ungrouped) }
                     }
             }
@@ -1170,7 +1171,7 @@ private struct TabGroupStrip: View {
 
 /// 一个倒挂的组标签：上沿贴窗口顶（直角），下面两角圆；正显示的那组用组色铺底、字是组色，别的淡淡一层；
 /// 右边小角标：橙 = 待确认数，主题色 = 有新消息数
-private struct HangingGroupTab: View {
+private struct HangingGroupTab: KLView {
     let title: String
     let tint: Color?
     let active: Bool
@@ -1179,8 +1180,8 @@ private struct HangingGroupTab: View {
     let action: () -> Void
     @State private var hovering = false
 
-    var body: some View {
-        let shape = UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 7, bottomTrailingRadius: 7, topTrailingRadius: 0, style: .continuous)
+    var klBody: some View {
+        let shape = KLUnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 7, bottomTrailingRadius: 7, topTrailingRadius: 0, style: .continuous)
         let color = tint ?? Color.secondary
         Button(action: action) {
             HStack(spacing: 5) {
@@ -1209,12 +1210,12 @@ private struct HangingGroupTab: View {
     }
 }
 
-private struct TabGroupChip: View {
+private struct TabGroupChip: KLView {
     let groups: TabGroups
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         let active = groups.group(groups.active)
         let tint = active.map { groups.color(of: $0.id).color }
         // 别的组里有人等确认：色块右上角一个橙点，不用打开侧栏也知道
@@ -1266,7 +1267,7 @@ private struct TabGroupChip: View {
             }
             .contentShape(Rectangle())
         }
-        .menuStyle(.button)
+        .klMenuButtonStyle()
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
@@ -1277,31 +1278,32 @@ private struct TabGroupChip: View {
 }
 
 /// 新建标签组面板的开关（Mac 主窗口挂着 .sheetPanel 读它）
-@Observable @MainActor
-final class TabGroupRequest {
+@MainActor
+final class TabGroupRequest: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = TabGroupRequest()
-    var keys: [String]?
+    @Tracked var keys: [String]?
     /// 左边栏标签组里点的：添加会话 / 新建、重命名、删除
-    var picking: TabGroupPicker.Mode?
-    var renaming: UUID?
-    var deleting: UUID?
+    @Tracked var picking: TabGroupPicker.Mode?
+    @Tracked var renaming: UUID?
+    @Tracked var deleting: UUID?
 }
 
 /// Mac 主窗口挂着：⌃⌘N、会话右键「新建标签组」弹的面板
-public struct TarsTabGroupPickerHost: ViewModifier {
+public struct TarsTabGroupPickerHost: KLViewModifier {
     public init() {}
 
-    public func body(content: Content) -> some View {
+    public func klBody(content: Content) -> some View {
         let request = TabGroupRequest.shared
         let groups = KitelineKit.tabGroups
         content
             .sheetPanel(isPresented: Binding(get: { request.keys != nil }, set: { if !$0 { request.keys = nil } })) {
                 if let model = KitelineKit.model, let keys = request.keys {
-                    TabGroupPicker(mode: .create(keys), groups: groups).environment(model)
+                    TabGroupPicker(mode: .create(keys), groups: groups).environment(\.appModelSlot, model)
                 }
             }
             .sheetPanel(isPresented: Binding(get: { request.picking != nil }, set: { if !$0 { request.picking = nil } })) {
-                if let model = KitelineKit.model, let picking = request.picking { TabGroupPicker(mode: picking, groups: groups).environment(model) }
+                if let model = KitelineKit.model, let picking = request.picking { TabGroupPicker(mode: picking, groups: groups).environment(\.appModelSlot, model) }
             }
             .sheetPanel(isPresented: Binding(get: { request.renaming != nil }, set: { if !$0 { request.renaming = nil } })) {
                 if let id = request.renaming, let group = groups.group(id) {
@@ -1310,7 +1312,7 @@ public struct TarsTabGroupPickerHost: ViewModifier {
             }
             .confirmPanel(L("删除这个会话组？组里的会话不会关闭，仍在左边的会话列表里。"),
                           isPresented: Binding(get: { request.deleting != nil }, set: { if !$0 { request.deleting = nil } }), confirm: L("删除会话组"), destructive: true) {
-                if let id = request.deleting { withAnimation(.snappy) { groups.delete(id) } }
+                if let id = request.deleting { withAnimation(.klSnappy) { groups.delete(id) } }
             }
     }
 }

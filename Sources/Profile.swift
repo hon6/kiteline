@@ -191,12 +191,12 @@ func profileInitials(_ name: String) -> String {
 }
 
 /// 一个头像：有图显示图，没图显示名字首字（和对话里一样的蓝灰底）
-struct ProfileFace: View {
+struct ProfileFace: KLView {
     var image: NSImage?
     var name: String
     var side: CGFloat
 
-    var body: some View {
+    var klBody: some View {
         ZStack {
             if let image = image {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
@@ -210,7 +210,7 @@ struct ProfileFace: View {
     }
 }
 
-struct ProfileSection: View {
+struct ProfileSection: KLView {
     @State private var name = AppState.shared.config.mobile.myName
     @State private var avatar = AppState.shared.config.mobile.avatar
     @State private var face: NSImage? = Profile.current(AppState.shared.config.mobile).jpeg.flatMap(NSImage.init(data:))
@@ -221,7 +221,7 @@ struct ProfileSection: View {
         return trimmed.isEmpty ? Profile.macName : trimmed
     }
 
-    var body: some View {
+    var klBody: some View {
         Section {
             HStack(spacing: 14) {
                 ProfileFace(image: avatar == "text" ? nil : face, name: shownName, side: 52)
@@ -243,7 +243,7 @@ struct ProfileSection: View {
             Text("对话中你一侧显示的头像和名字，手机与 Mac 共用。默认使用此 Mac 账户的头像和用户名；名字留空时使用 Mac 用户名。")
                 .foregroundStyle(.secondary)
         }
-        .onChange(of: name) { _, value in
+        .klOnChange(of: name) { _, value in
             let cleaned = Profile.cleanName(value)
             AppState.shared.updatePreferences { $0.mobile.myName = cleaned == Profile.macName ? "" : cleaned }
         }
@@ -269,7 +269,7 @@ struct ProfileSection: View {
 }
 
 /// 换头像的弹出框：Mac 账户头像、名字首字、选一张图片，再加系统自带的那几十张
-struct AvatarPicker: View {
+struct AvatarPicker: KLView {
     enum Choice { case avatar(String), file(URL) }
 
     var selected: String
@@ -279,7 +279,7 @@ struct AvatarPicker: View {
 
     private let columns = Array(repeating: GridItem(.fixed(52), spacing: 10), count: 7)
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {

@@ -8,38 +8,38 @@ import AVFAudio
 /// 也可以选手机自带的语音。开着「朗读模式」时，正在看的会话里 Claude 的新回复自动读出来，
 /// 别的会话需要你确认、有结论了也播报一句。
 @MainActor
-@Observable
-final class Speaker: NSObject {
+final class Speaker: NSObject, KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = Speaker()
 
     /// 朗读模式：新回复自动读
-    var autoRead: Bool = UserDefaults.standard.bool(forKey: "speakOn") {
+    @Tracked var autoRead: Bool = UserDefaults.standard.bool(forKey: "speakOn") {
         didSet { UserDefaults.standard.set(autoRead, forKey: "speakOn") }
     }
     /// mac = Mac 合成（推荐）；device = 手机自带
-    var engine: String = UserDefaults.standard.string(forKey: "ttsEngine") ?? "mac" {
+    @Tracked var engine: String = UserDefaults.standard.string(forKey: "ttsEngine") ?? "mac" {
         didSet { UserDefaults.standard.set(engine, forKey: "ttsEngine") }
     }
     /// Mac 上的哪个声音；空 = Mac 自动挑最自然的
-    var voiceId: String = UserDefaults.standard.string(forKey: "ttsVoice") ?? "" {
+    @Tracked var voiceId: String = UserDefaults.standard.string(forKey: "ttsVoice") ?? "" {
         didSet { UserDefaults.standard.set(voiceId, forKey: "ttsVoice") }
     }
-    var rate: Double = UserDefaults.standard.object(forKey: "ttsRate") as? Double ?? 1 {
+    @Tracked var rate: Double = UserDefaults.standard.object(forKey: "ttsRate") as? Double ?? 1 {
         didSet { UserDefaults.standard.set(rate, forKey: "ttsRate") }
     }
 
     /// 正在读的消息 id（"sample" = 试听）
-    private(set) var speaking: String?
+    @Tracked private(set) var speaking: String?
     /// 正在读的是哪个会话（会话列表在那一行标喇叭，看得出在读谁；试听、无归属的播报是 nil）
-    private(set) var speakingKey: String?
+    @Tracked private(set) var speakingKey: String?
     weak var api: MacAPI?
-    private var queue: [(text: String, id: String, key: String?)] = []
-    private var run = 0
+    @Tracked private var queue: [(text: String, id: String, key: String?)] = []
+    @Tracked private var run = 0
     /// 正在录音（按住说话、听写）：先不读，别和你说话撞在一起，读的声音也不会录进去
-    private var listening = false
-    private var resume: Task<Void, Never>?
+    @Tracked private var listening = false
+    @Tracked private var resume: Task<Void, Never>?
     #if os(iOS)
-    private var player: AVAudioPlayer?
+    @Tracked private var player: AVAudioPlayer?
     private let synth = AVSpeechSynthesizer()
     #endif
 
@@ -81,7 +81,7 @@ final class Speaker: NSObject {
         guard listening else { return }
         resume?.cancel()
         resume = Task {
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(seconds: 1)
             guard !Task.isCancelled else { return }
             listening = false
             if speaking == nil { next() }
@@ -150,7 +150,7 @@ final class Speaker: NSObject {
         try? AVAudioSession.sharedInstance().setActive(true)
         guard let player = try? AVAudioPlayer(data: data), player.play() else { return false }
         self.player = player
-        while player.isPlaying, run == current { try? await Task.sleep(for: .milliseconds(200)) }
+        while player.isPlaying, run == current { try? await Task.sleep(milliseconds: 200) }
         return true
     }
     #endif
@@ -165,8 +165,8 @@ final class Speaker: NSObject {
             utterance.voice = AVSpeechSynthesisVoice(language: piece.range(of: "\\p{Han}", options: .regularExpression) != nil ? "zh-CN" : "en-US")
             utterance.rate = Float(min(0.62, max(0.4, 0.5 * rate)))
             synth.speak(utterance)
-            try? await Task.sleep(for: .milliseconds(300))
-            while synth.isSpeaking, run == current { try? await Task.sleep(for: .milliseconds(200)) }
+            try? await Task.sleep(milliseconds: 300)
+            while synth.isSpeaking, run == current { try? await Task.sleep(milliseconds: 200) }
         }
         return true
         #else

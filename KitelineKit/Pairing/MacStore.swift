@@ -20,14 +20,14 @@ struct PairedMac: Codable, Equatable {
 }
 
 /// 存配对信息：令牌是钥匙，放钥匙串，只留在这台手机上（不进 iCloud 备份恢复到别的设备）
-@Observable
-final class MacStore {
+final class MacStore: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = MacStore()
 
-    private(set) var current: PairedMac?
+    @Tracked private(set) var current: PairedMac?
     /// 另加的 Kiteline 电脑（手机直连，设备维度里的「Kiteline 设备」，见 DeviceHub）：各自的地址、令牌、证书。
     /// 单独存一项（kiteline.linked）：主电脑那一项格式不变，装回旧版 App 照样连主电脑，只是看不到这些
-    private(set) var linked: [PairedMac] = []
+    @Tracked private(set) var linked: [PairedMac] = []
 
     private init() {
         current = Keychain.load()

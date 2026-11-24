@@ -1,20 +1,20 @@
 import SwiftUI
 
 /// 一串连续的步骤（思考、工具调用），装在一张卡片里；很多步时前面的折成一行
-struct StepsCard: View {
-    @Environment(AppModel.self) private var model
+struct StepsCard: KLView {
+    @EnvModel private var model
     let key: String
     let groupId: String
     let steps: [Step]
     let hidden: Int
     @State private var openStep: Step?
 
-    var body: some View {
+    var klBody: some View {
         let _ = PerfTrace.body("StepsCard")
         VStack(alignment: .leading, spacing: 0) {
             if hidden > 0 {
                 Button {
-                    withAnimation(.snappy) { _ = model.chat(key).expanded.insert(groupId) }
+                    withAnimation(.klSnappy) { _ = model.chat(key).expanded.insert(groupId) }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "ellipsis").frame(width: 16)
@@ -44,7 +44,7 @@ struct StepsCard: View {
     }
 }
 
-struct StepRow: View {
+struct StepRow: KLView {
     let step: Step
     var key = ""
     /// 点开图片后能左右滑着看的一组（整张步骤卡片的图）
@@ -57,18 +57,18 @@ struct StepRow: View {
     @State private var expanded = false
     #endif
 
-    var body: some View {
+    var klBody: some View {
         let item = step.item
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                if item.t == "thinking" { withAnimation(.snappy) { expanded.toggle() } } else { open() }
+                if item.t == "thinking" { withAnimation(.klSnappy) { expanded.toggle() } } else { open() }
             } label: {
                 // 照 VS Code：工具名粗体、和正文一样大；后面的参数 0.85em 等宽；思考是灰色斜体
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     StateIcon(step: step).frame(width: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + ChatType.size * 0.35 }
                     Text(name).fontWeight(.bold).lineLimit(1).layoutPriority(1)
                     Group {
-                        if item.t == "tool" { Text(brief).font(ChatType.detail).fontDesign(nil) } else { Text(brief).italic() }
+                        if item.t == "tool" { Text(brief).font(ChatType.detail).klFontDesign(nil) } else { Text(brief).italic() }
                     }
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
@@ -77,7 +77,7 @@ struct StepRow: View {
                             Text("+\(stat.added)").foregroundStyle(Theme.added)
                             Text("−\(stat.removed)").foregroundStyle(Theme.removed)
                         }
-                        .font(ChatType.detail).fontDesign(nil)
+                        .font(ChatType.detail).klFontDesign(nil)
                     }
                     Image(systemName: item.t == "thinking" && expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: ChatType.size * 0.75, weight: .semibold)).foregroundStyle(.tertiary)
@@ -101,7 +101,7 @@ struct StepRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .copyCorner(text, inset: ChatType.px(4))
                 // 思考很长时展开后要翻回顶上才收得起来：底下也放一个「收起」
-                Button { withAnimation(.snappy) { expanded = false } } label: {
+                Button { withAnimation(.klSnappy) { expanded = false } } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.up").font(.system(size: ChatType.size * 0.7, weight: .semibold))
                         Text("收起思考")
@@ -145,10 +145,10 @@ struct StepRow: View {
 }
 
 /// 步骤左边的图标：没状态时是工具图标；在跑转圈、等你确认是橙点、成功绿点、出错红点
-struct StateIcon: View {
+struct StateIcon: KLView {
     let step: Step
 
-    var body: some View {
+    var klBody: some View {
         switch step.state {
         case .none:
             if step.item.t == "thinking" {
@@ -169,11 +169,11 @@ struct StateIcon: View {
 }
 
 /// 点开一步：参数（命令、改动、计划……）+ 结果
-struct ToolDetailView: View {
+struct ToolDetailView: KLView {
     let key: String
     let step: Step
 
-    var body: some View {
+    var klBody: some View {
         FitSheet(title: title, background: Theme.card) {
             VStack(alignment: .leading, spacing: 16) {
                 if step.item.t == "tool" { ToolInput(item: step.item) }
@@ -196,7 +196,7 @@ struct ToolDetailView: View {
 }
 
 /// 带小标题的一节
-struct Section2<Content: View>: View {
+struct Section2<Content: View>: KLView {
     let title: String
     @ViewBuilder let content: Content
     init(_ title: String, @ViewBuilder content: () -> Content) {
@@ -204,7 +204,7 @@ struct Section2<Content: View>: View {
         self.content = content()
     }
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.ui(.footnote)).foregroundStyle(.secondary).textCase(.uppercase)
             content
@@ -212,13 +212,13 @@ struct Section2<Content: View>: View {
     }
 }
 
-struct ToolInput: View {
+struct ToolInput: KLView {
     let item: ChatItem
 
     private var input: JSONValue? { item.input }
     private func field(_ key: String) -> String { input?[key]?.string ?? "" }
 
-    var body: some View {
+    var klBody: some View {
         switch item.name ?? "" {
         case "Bash":
             Section2(field("description").isEmpty ? L("命令") : field("description")) { MonoBlock(text: field("command")) }
@@ -269,11 +269,11 @@ struct ToolInput: View {
     }
 }
 
-struct ToolResult: View {
+struct ToolResult: KLView {
     let key: String
     let result: ChatItem?
 
-    var body: some View {
+    var klBody: some View {
         if let result {
             Section2(result.isError == true ? L("出错") : L("结果")) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -294,16 +294,16 @@ struct ToolResult: View {
 }
 
 /// 改动：删的红、加的绿
-struct DiffView: View {
+struct DiffView: KLView {
     let path: String
     let old: String
     let new: String
     var limit = 2000
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !path.isEmpty {
-                Text(path).font(.ui(.caption).monospaced()).fontDesign(nil).foregroundStyle(.secondary)
+                Text(path).font(.ui(.caption).monospaced()).klFontDesign(nil).foregroundStyle(.secondary)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.primary.opacity(0.05))
@@ -320,18 +320,18 @@ struct DiffView: View {
                 Text("…共 \(newLines.count) 行").font(.ui(.caption)).foregroundStyle(.secondary).padding(8)
             }
         }
-        .font(.app(size: 12, design: .monospaced)).fontDesign(nil)
+        .font(.app(size: 12, design: .monospaced)).klFontDesign(nil)
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.primary.opacity(0.08)).allowsHitTesting(false))
     }
 }
 
-private struct DiffLine: View {
+private struct DiffLine: KLView {
     let text: String
     let sign: String
     let color: Color
 
-    var body: some View {
+    var klBody: some View {
         Text("\(sign) \(text)")
             .foregroundStyle(color)
             .fixedSize(horizontal: false, vertical: true)

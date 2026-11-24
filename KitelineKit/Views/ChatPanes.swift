@@ -11,13 +11,14 @@ import AppKit
 /// 正在拖窗口边缘改大小、拖分屏分隔条：这期间对话页的消息先按开始拖时的宽度摆着（多出来的裁掉、不够的露底色），松手再按新宽度排一次（同 Xcode）。
 /// 不这样的话每拖一个像素，每一列的每条消息都要重新折行、量高度：开五六列、几百行的会话时拖起来一顿一顿（11-16）。
 /// 标题条、标签栏、输入框照样实时跟着变（它们排版很便宜）
-@Observable @MainActor
-final class PaneResize {
+@MainActor
+final class PaneResize: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = PaneResize()
 
-    private(set) var active = false
-    private var window = false
-    private var divider = false
+    @Tracked private(set) var active = false
+    @Tracked private var window = false
+    @Tracked private var divider = false
 
     private init() {
         #if os(macOS)
@@ -50,8 +51,8 @@ final class PaneResize {
 /// 点过、在打字的那块是「当前块」：左边栏点会话换掉的是它，标题栏的按钮、菜单也对它。
 /// Mac 上每块是一组标签页（同浏览器，10-23 起）：左边栏点开的会话在当前块里新开一个标签，切走了标签还在，点标签切回来，× 关掉；
 /// 关掉最后一个标签，这一块也关掉（只剩一块时变回空白）。iPad 每块仍只放一个会话
-@Observable
-public final class ChatPanes {
+public final class ChatPanes: KLObservable {
+    public let _klRegistrar = KLRegistrar.make()
     /// 一块：开着的几个会话（标签页，按顺序）和正显示的那个（key 是空的 = 还没选，显示「选择会话」）
     struct Pane: Hashable {
         let id: UUID
@@ -87,7 +88,7 @@ public final class ChatPanes {
         }
     }
 
-    private(set) var root: Node {
+    @Tracked private(set) var root: Node {
         didSet {
             scheduleSave()
             let now = Set(keys)
@@ -96,26 +97,26 @@ public final class ChatPanes {
     }
     /// 开成标签的会话（切到后面的标签也算）：只在标签增删时变。左边栏给这些会话画「已在标签页中打开」的标识，
     /// 只读它，就不会跟着拖分隔条、切标签重画
-    public private(set) var openKeys: Set<String> = []
+    @Tracked public private(set) var openKeys: Set<String> = []
     /// 左边栏里又点了一个已经开成标签的会话：不再开，切过去，那个标签的边框闪几下主题色（告诉你它在哪）。
     /// token 每次加一，标签看到是自己就闪（见 TabFlashRing）
     struct TabFlash: Equatable {
         let key: String
         let token: Int
     }
-    private(set) var tabFlash: TabFlash?
-    private(set) var focusID: UUID { didSet { scheduleSave() } }
+    @Tracked private(set) var tabFlash: TabFlash?
+    @Tracked private(set) var focusID: UUID { didSet { scheduleSave() } }
     /// 记在哪（见 remember）：空 = 不记（截图版、测试实例）
-    @ObservationIgnored private var store: (defaults: UserDefaults, key: String)?
-    @ObservationIgnored private var saving: DispatchWorkItem?
+    private var store: (defaults: UserDefaults, key: String)?
+    private var saving: DispatchWorkItem?
     /// 每块现在多大（画出来时量的）：判断还分不分得下、拖进来能落在哪边。改了不用重画
-    @ObservationIgnored var sizes: [UUID: CGSize] = [:]
+    var sizes: [UUID: CGSize] = [:]
     /// 整个分屏多大（画出来时量的）：分完以后各块按它重新匀大小。还没量过是 zero
-    @ObservationIgnored var bounds: CGSize = .zero
+    var bounds: CGSize = .zero
     /// Mac：窗口工具栏最右边主程序放了按钮（两套界面的切换）：贴着窗口右上角的那一块标签栏右边让出这么宽（见 PaneHeader）
-    var trailingReserve: CGFloat = 0
+    @Tracked var trailingReserve: CGFloat = 0
     /// 自测截图用：假装正拖着某个会话停在当前块的某一边
-    var preview: (pane: UUID, zone: DropZone, key: String)?
+    @Tracked var preview: (pane: UUID, zone: DropZone, key: String)?
 
     /// 正拖着的标签（Mac）：哪个会话、从哪块、标签多大（跟手画一张一样大的）
     struct TabDragging: Equatable {
@@ -131,20 +132,20 @@ public final class ChatPanes {
     }
 
     /// 自测截图：分隔线都画成指针停在上面
-    var captureHandles = false
+    @Tracked var captureHandles = false
     /// 分屏的坐标系：拖标签的位置、各块和标签的位置都按它算
     static let space = "chatPanes"
-    var tabDrag: TabDragging?
+    @Tracked var tabDrag: TabDragging?
     /// 落点：变了才改，块和标签栏只跟着它重画
-    var tabTarget: TabTarget?
+    @Tracked var tabTarget: TabTarget?
     /// 指针在分屏里的位置：只有跟手的那张标签读它，拖动时别的不跟着重画
-    var tabPoint: CGPoint = .zero
+    @Tracked var tabPoint: CGPoint = .zero
     /// 各块的对话区、标签栏、每个标签在分屏里的位置（画出来时量的）：算落点用。改了不用重画
-    @ObservationIgnored var contentFrames: [UUID: CGRect] = [:]
-    @ObservationIgnored var stripFrames: [UUID: CGRect] = [:]
+    var contentFrames: [UUID: CGRect] = [:]
+    var stripFrames: [UUID: CGRect] = [:]
     /// 各块标题条以下的部分、输入栏的上沿：信绳只钉在这两者之间的消息区里（不爬到标题条、输入栏上）
-    @ObservationIgnored var bodyFrames: [UUID: CGRect] = [:]
-    @ObservationIgnored var composerTops: [UUID: CGFloat] = [:]
+    var bodyFrames: [UUID: CGRect] = [:]
+    var composerTops: [UUID: CGFloat] = [:]
 
     /// 一块的消息区（标题条以下、输入栏以上）
     func messageFrame(_ id: UUID) -> CGRect? {
@@ -152,13 +153,13 @@ public final class ChatPanes {
         if let top = composerTops[id], top > frame.minY + 40, top < frame.maxY { frame.size.height = top - frame.minY }
         return frame
     }
-    @ObservationIgnored var tabFrames: [UUID: [String: CGRect]] = [:]
+    var tabFrames: [UUID: [String: CGRect]] = [:]
     /// 分屏左上角在窗口里的位置（自测按标签的位置算鼠标坐标用）
-    @ObservationIgnored var origin: CGPoint = .zero
+    var origin: CGPoint = .zero
     /// 拖着时按了 Esc：松手前都不再跟
-    @ObservationIgnored private var tabDragCancelled = false
+    private var tabDragCancelled = false
     #if os(macOS)
-    @ObservationIgnored private var escMonitor: Any?
+    private var escMonitor: Any?
 
     /// 指着展开的标签（Mac，11-04 起）：鼠标停在一个标题被截短的标签上，它按完整标题变宽——不超出这一块，
     /// 这块的会话、分屏按钮先收进「更多」，别的标签缩窄；离开这块的标签栏收回。key 是空串 = 「选择会话」新标签
@@ -166,14 +167,14 @@ public final class ChatPanes {
         let pane: UUID
         let key: String
     }
-    var peek: Peek?
+    @Tracked var peek: Peek?
     /// 各块平时（没展开时）哪些标签的标题被截短了、每个标签多宽：排版时记，展开时照着算。改了不用重画
-    @ObservationIgnored var truncated: [UUID: Set<String>] = [:]
-    @ObservationIgnored var tabWidths: [UUID: [CGFloat]] = [:]
+    var truncated: [UUID: Set<String>] = [:]
+    var tabWidths: [UUID: [CGFloat]] = [:]
     /// 指针在哪几块的标签栏上、指着哪几个标签（挪到相邻的时「进」「出」谁先到都行，最后进的算数）
-    @ObservationIgnored private var hoveredStrips: Set<UUID> = []
-    @ObservationIgnored private var hoveredTabs: [Peek] = []
-    @ObservationIgnored private var peekWork: DispatchWorkItem?
+    private var hoveredStrips: Set<UUID> = []
+    private var hoveredTabs: [Peek] = []
+    private var peekWork: DispatchWorkItem?
     #endif
 
     public init() {
@@ -486,7 +487,7 @@ public final class ChatPanes {
             if escMonitor == nil {
                 escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     guard event.keyCode == 53, let self, self.tabDrag != nil else { return event }
-                    withAnimation(.snappy(duration: 0.15)) { self.cancelTabDrag() }
+                    withAnimation(.klSnappy(duration: 0.15)) { self.cancelTabDrag() }
                     return nil
                 }
             }
@@ -575,7 +576,7 @@ public final class ChatPanes {
     }
 
     /// 展开、收回的动画（11-04 改为流畅地展开）：标签宽度、按钮收起一起走，不回弹
-    static let peekAnimation = Animation.smooth(duration: 0.24)
+    static let peekAnimation = Animation.klSmooth(duration: 0.24)
 
     /// 停 0.3 秒才展开（划过去不闪）；已经展开时换到别的标签、收回都是 0.15 秒
     private func updatePeek() {
@@ -632,9 +633,9 @@ public final class ChatPanes {
         for step in 1...12 {
             let t = CGFloat(step) / 12
             dragTab(key, from: list[from].id, at: CGPoint(x: start.x + (point.x - start.x) * t, y: start.y + (point.y - start.y) * t))
-            try? await Task.sleep(for: .milliseconds(30))
+            try? await Task.sleep(milliseconds: 30)
         }
-        try? await Task.sleep(for: .seconds(hold))
+        try? await Task.sleep(seconds: hold)
         endTabDrag()
     }
 
@@ -736,7 +737,7 @@ public final class ChatPanes {
     }
 
     /// 存完以后（Mac 标签组跟着给正显示的那组存一份副本）
-    @ObservationIgnored var onSave: (() -> Void)?
+    var onSave: (() -> Void)?
 
     /// 拖分隔条时每一帧都在变：停下半秒再存
     private func scheduleSave() {
@@ -1087,7 +1088,7 @@ public struct TarsPaneAccessory: Equatable {
 }
 
 /// 分屏标题条上的小图标按钮：26×24，鼠标移上去有浅底；颜色跟外面（当前块深一点、别的块浅一点）
-public struct TarsPaneButton: View {
+public struct TarsPaneButton: KLView {
     let symbol: String
     let help: String
     let action: () -> Void
@@ -1099,7 +1100,7 @@ public struct TarsPaneButton: View {
         self.action = action
     }
 
-    public var body: some View {
+    public var klBody: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
@@ -1115,11 +1116,11 @@ public struct TarsPaneButton: View {
 }
 
 /// 标签栏上按钮的悬停说明（代替 .help()：标签栏铺在标题栏那一带，系统提示不弹）：停 0.35 秒出、移开 / 点按 / 消失就收
-struct PaneTip: ViewModifier {
+struct PaneTip: KLViewModifier {
     let text: String
     @State private var pending: DispatchWorkItem?
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .accessibilityHint(text)
             .onHover { inside in
@@ -1198,10 +1199,10 @@ enum PaneDrag {
 #if os(macOS)
 /// 正拖着会话（系统拖放）：对话区自己收拖进来的文件、图片，落点会被它截走、分屏这层收不到（10-26 反馈：拖过去没反应），
 /// 拖着的时候各块对话区上盖一层透明的接住它。松开鼠标就撤（等落下那一下处理完）
-@Observable
-final class PaneDragState {
-    var active = false
-    @ObservationIgnored private var timer: Timer?
+final class PaneDragState: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
+    @Tracked var active = false
+    private var timer: Timer?
 
     func begin() {
         active = true
@@ -1216,7 +1217,7 @@ final class PaneDragState {
 #endif
 
 /// 拖着走的会话卡片（半透明跟着手指 / 指针），落点上也画一张
-public struct SessionCard: View {
+public struct SessionCard: KLView {
     let title: String
     let status: String
     let line: String
@@ -1238,7 +1239,7 @@ public struct SessionCard: View {
                   dot: StatusColor.of(session))
     }
 
-    public var body: some View {
+    public var klBody: some View {
         HStack(alignment: .top, spacing: 10) {
             Text(String(title.prefix(1)))
                 .font(.system(size: 15, weight: .semibold))
@@ -1280,12 +1281,12 @@ extension View {
 // MARK: 画出来
 
 /// 整个分屏
-struct ChatPanesView<Content: View>: View {
+struct ChatPanesView<Content: View>: KLView {
     let panes: ChatPanes
     /// Mac 主窗口：铺进窗口工具栏那一带，最上面一排的标题条（标签）就是窗口的标题栏
     var fillsTitlebar = false
     let content: (String) -> Content
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     #if os(macOS)
     /// 窗口标题栏 + 工具栏多高
     @State private var band: CGFloat = 52
@@ -1296,7 +1297,7 @@ struct ChatPanesView<Content: View>: View {
     /// 这棵分屏视图的编号：信件卡片登记位置时带上，信绳只连同一棵里的（主窗口里可能同时有两棵）
     @State private var ropeTree = UUID()
 
-    var body: some View {
+    var klBody: some View {
         #if os(macOS)
         if fillsTitlebar {
             // 整个分屏往上铺到窗口顶，最上面一排的标题条往上长到工具栏那么高（从窗口量：顶上安全区在这里量出来不准）
@@ -1316,15 +1317,15 @@ struct ChatPanesView<Content: View>: View {
     private var tree: some View {
         RootNodeView(root: panes.root, panes: panes, content: content)
             .environment(\.peerRopeTree, ropeTree)
-            .coordinateSpace(.named(ChatPanes.space))
+            .coordinateSpace(name: ChatPanes.space)
             #if KITELINE_MAC
             .overlay(alignment: .topLeading) { groupStrip }
             #endif
             // 同一封信在两列里的两张卡片之间的绳子（只有分屏时）
             .overlay { if panes.count > 1 { PeerRopeLayer(tree: ropeTree) } }
             .overlay { TabDragGhost(panes: panes) }
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { panes.bounds = $0 }
-            .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { origin in
+            .klOnGeometryChange(for: CGSize.self) { $0.size } action: { panes.bounds = $0 }
+            .klOnGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { origin in
                 panes.origin = origin
                 #if os(macOS)
                 // 红绿灯在窗口左上角 78 点以内
@@ -1335,11 +1336,11 @@ struct ChatPanesView<Content: View>: View {
             // 导航栏、标题栏底下垫对话区的底色
             .background(Theme.chatBackground)
             // 读现在的值，不用送来的：一下子连变两次（点「一分为二」= 先切到这块、再切到新的一块）时，先送来的是过时的
-            .onChange(of: panes.focused) { _, _ in
+            .klOnChange(of: panes.focused) { _, _ in
                 if let key = panes.focused { model.current = GroupKey.id(key) == nil && !CodeTabKey.isCode(key) && !key.hasPrefix("@new:") ? key : nil }
             }
             // 解散了的群（自己解散、别的设备上解散）：它的标签跟着关掉。群列表取到以后才比（刚启动时还没取到，别把上次开着的群关了）
-            .onChange(of: model.groups.loaded ? model.groups.items.map(\.id) : nil, initial: true) { _, ids in
+            .klOnChange(of: model.groups.loaded ? model.groups.items.map(\.id) : nil, initial: true) { _, ids in
                 guard let ids else { return }
                 let alive = Set(ids)
                 for key in panes.keys where GroupKey.id(key).map({ !alive.contains($0) }) == true { panes.close(key: key) }
@@ -1369,14 +1370,14 @@ struct ChatPanesView<Content: View>: View {
 /// 最外层：只有一块时也按「只有这一项的一层分割」画，始终是同一个 SplitView。
 /// 不然从一块分成两块（或关回一块）时，最外层从「一块」换成「分割」，SwiftUI 当成换了视图，
 /// 原来那块的对话整个销毁重建——长对话重排一遍要零点几秒到两秒（11-01 反馈开关多列卡）。各块按 id 认，增删一块别的不动
-private struct RootNodeView<Content: View>: View {
+private struct RootNodeView<Content: View>: KLView {
     let root: ChatPanes.Node
     let panes: ChatPanes
     let content: (String) -> Content
 
     private static var soloID: UUID { UUID(uuidString: "00000000-0000-0000-0000-00000000501E")! }
 
-    var body: some View {
+    var klBody: some View {
         SplitView(split: split, panes: panes, atTop: true, content: content)
     }
 
@@ -1386,13 +1387,13 @@ private struct RootNodeView<Content: View>: View {
     }
 }
 
-private struct NodeView<Content: View>: View {
+private struct NodeView<Content: View>: KLView {
     let node: ChatPanes.Node
     let panes: ChatPanes
     let atTop: Bool
     let content: (String) -> Content
 
-    var body: some View {
+    var klBody: some View {
         switch node {
         case .pane(let pane): PaneView(pane: pane, panes: panes, atTop: atTop, content: content)
         case .split(let split): SplitView(split: split, panes: panes, atTop: atTop, content: content)
@@ -1401,7 +1402,7 @@ private struct NodeView<Content: View>: View {
 }
 
 /// 一层分割：几项左右或上下排，中间是能拖的分隔条
-private struct SplitView<Content: View>: View {
+private struct SplitView<Content: View>: KLView {
     let split: ChatPanes.Split
     let panes: ChatPanes
     let atTop: Bool
@@ -1409,10 +1410,11 @@ private struct SplitView<Content: View>: View {
     /// 拖分隔条时，按下那一刻的比例
     @State private var dragStart: [CGFloat]?
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geo in
             let horizontal = split.axis == .horizontal
             let length = max(0, (horizontal ? geo.size.width : geo.size.height) - CGFloat(split.items.count - 1) * PaneDivider.thickness)
+            #if os(iOS) || KL_MODERN
             let layout = horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
             layout {
                 ForEach(Array(split.items.enumerated()), id: \.element.id) { index, item in
@@ -1433,20 +1435,41 @@ private struct SplitView<Content: View>: View {
                         .frame(width: horizontal ? share : nil, height: horizontal ? nil : share)
                 }
             }
+            #else
+            KLStack(horizontal ? .horizontal : .vertical, spacing: 0) {
+                ForEach(Array(split.items.enumerated()), id: \.element.id) { index, item in
+                    if index > 0 {
+                        PaneDivider(axis: split.axis, dragging: dragStart != nil, captureHover: panes.captureHandles) { delta in
+                            if dragStart == nil { dragStart = panes.fractions(split.id) }
+                            if let dragStart { panes.drag(split.id, index - 1, from: dragStart, by: delta / max(length, 1), length: length) }
+                        } ended: {
+                            dragStart = nil
+                        } reset: {
+                            panes.equalize(split.id)
+                        }
+                        .zIndex(1)
+                    }
+                    let share = length * (split.fractions.indices.contains(index) ? split.fractions[index] : 1 / CGFloat(split.items.count))
+                    // 往下一层要包一下（视图不能直接套自己）；上下分的只有第一项还贴着顶边
+                    AnyView(NodeView(node: item, panes: panes, atTop: atTop && (horizontal || index == 0), content: content))
+                        .frame(width: horizontal ? share : nil, height: horizontal ? nil : share)
+                }
+            }
+            #endif
         }
         // 拖分隔条期间消息不重新折行，松手再排（见 PaneResize）
-        .onChange(of: dragStart != nil) { _, dragging in PaneResize.shared.setDivider(dragging) }
+        .klOnChange(of: dragStart != nil) { _, dragging in PaneResize.shared.setDivider(dragging) }
         .onDisappear { if dragStart != nil { PaneResize.shared.setDivider(false) } }
     }
 }
 
 /// 一块：顶上标题条，下面是对话（还没选会话就列出能选的）；会话拖到上面时标出会落在哪
-private struct PaneView<Content: View>: View {
+private struct PaneView<Content: View>: KLView {
     let pane: ChatPanes.Pane
     let panes: ChatPanes
     let atTop: Bool
     let content: (String) -> Content
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @State private var zone: DropZone?
     #if os(iOS)
     /// 横着的 iPhone 键盘弹出来时收起标题条：键盘占掉一大半高度，标题条再占 40 点，输入框就被顶到看不见（10-27）
@@ -1462,7 +1485,7 @@ private struct PaneView<Content: View>: View {
         #endif
     }
 
-    var body: some View {
+    var klBody: some View {
         let context = ChatPaneContext(panes: panes, id: pane.id)
         let shown = zone ?? (panes.preview?.pane == pane.id ? panes.preview?.zone : nil)
         // 从列表拖来的会话停在群聊这块中间：松开是进群（自测画「拖着停在那儿」时按画的那个会话算）
@@ -1483,7 +1506,7 @@ private struct PaneView<Content: View>: View {
             // 最小尺寸写 0：里面哪一行比这一块宽也不往外报，这一块（连同顶上的标题条）始终是分给它的大小；
             // 真放不下时靠左下放（输入框留在原处），多出来的裁掉
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .bottomLeading)
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.bodyFrames[pane.id] = $0 }
+            .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.bodyFrames[pane.id] = $0 }
             #if os(macOS)
             // 别让内容画到别的块上，也别伸进左边栏底下（Mac 窗口底下没有要延伸过去的地方）
             .clipped()
@@ -1491,7 +1514,7 @@ private struct PaneView<Content: View>: View {
             // 只框对话区、不框标签栏那一行（11-22 截图：框画到标签栏、顶上项目那一排去了）
             .overlay { if let key = pane.key { PaneFlashRing(key: key, pane: pane.id, panes: panes) } }
             // 拖标签、拖会话的落点都在对话区里算（同 VS Code：标签栏上是插到第几个，对话区是中间 / 四边），高亮也只盖对话区
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.contentFrames[pane.id] = $0 }
+            .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.contentFrames[pane.id] = $0 }
             .overlay {
                 if PaneDrag.state.active {
                     Color.clear.contentShape(Rectangle())
@@ -1506,8 +1529,8 @@ private struct PaneView<Content: View>: View {
                     DropZoneOverlay(zone: tabZone, card: nil, plain: true)
                 }
             }
-            .animation(.snappy(duration: 0.15), value: shown)
-            .animation(.snappy(duration: 0.15), value: tabZone)
+            .animation(.klSnappy(duration: 0.15), value: shown)
+            .animation(.klSnappy(duration: 0.15), value: tabZone)
             #else
             // 别让内容画到别的块上；贴着屏幕底的那块，输入栏的底色照样延伸到 Home 横条那一带
             .mask(Rectangle().ignoresSafeArea())
@@ -1516,11 +1539,11 @@ private struct PaneView<Content: View>: View {
         .environment(\.chatPane, context)
         // 在这一块里按下去（点消息、点输入框、拖滚动条……）：它就是当前块
         .background(PressWatcher { panes.focus(pane.id) })
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { panes.sizes[pane.id] = $0 }
+        .klOnGeometryChange(for: CGSize.self) { $0.size } action: { panes.sizes[pane.id] = $0 }
         #if !os(macOS)
         .onDrop(of: [PaneDrag.type], delegate: PaneDropDelegate(pane: pane.id, panes: panes, zone: $zone, join: join))
         // 拖标题条换位置（同 Mac 拖标签）：iPad 每块只放一个会话、没有标签栏，整块都算落点
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.contentFrames[pane.id] = $0 }
+        .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.contentFrames[pane.id] = $0 }
         .overlay {
             if let shown {
                 DropZoneOverlay(zone: shown, card: panes.preview?.pane == pane.id ? nil : PaneDrag.current?.card,
@@ -1529,8 +1552,8 @@ private struct PaneView<Content: View>: View {
                 DropZoneOverlay(zone: tabZone, card: nil, plain: true)
             }
         }
-        .animation(.snappy(duration: 0.15), value: shown)
-        .animation(.snappy(duration: 0.15), value: panes.tabZone(pane.id))
+        .animation(.klSnappy(duration: 0.15), value: shown)
+        .animation(.klSnappy(duration: 0.15), value: panes.tabZone(pane.id))
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in typing = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in typing = false }
         #endif
@@ -1584,7 +1607,7 @@ private struct PaneDropDelegate: DropDelegate {
 }
 
 /// 拖着会话停在一块上：要落的那一半（或整块）蒙一层品牌色，中间是那个会话的卡片
-private struct DropZoneOverlay: View {
+private struct DropZoneOverlay: KLView {
     let zone: DropZone
     let card: SessionCard?
     /// 自测截图：没有真的在拖，按 key 画卡片
@@ -1593,9 +1616,9 @@ private struct DropZoneOverlay: View {
     var plain = false
     /// 松开就进这个群（会话拖到群聊那块中间）
     var joining: String?
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geo in
             let rect = zone.rect(in: geo.size).insetBy(dx: 6, dy: 6)
             VStack(spacing: 10) {
@@ -1619,12 +1642,12 @@ private struct DropZoneOverlay: View {
 #if os(iOS)
 /// 横着的 iPhone 左上角拉出会话列表的按钮：一颗浮在标题条上的毛玻璃（高光细边 + 淡阴影，和标题条分出层次；10-27），
 /// 图标就是侧栏的标志。点过一次之前，每次出现时图标轻弹两下、外圈扩散两圈，提示这里能拉出会话列表；点过就不再提示
-private struct SidebarHandle: View {
+private struct SidebarHandle: KLView {
     let action: () -> Void
     @AppStorage("sidebarHandleLearned") private var learned = false
     @State private var hint = 0
 
-    var body: some View {
+    var klBody: some View {
         Button {
             learned = true
             action()
@@ -1663,7 +1686,7 @@ private struct SidebarHandle: View {
         .accessibilityLabel("会话列表")
         .task {
             guard !learned else { return }
-            try? await Task.sleep(for: .milliseconds(600))   // 转屏、换页的动画走完再提示
+            try? await Task.sleep(milliseconds: 600)   // 转屏、换页的动画走完再提示
             hint += 1
         }
     }
@@ -1699,12 +1722,12 @@ extension EnvironmentValues {
     @Entry var barlessPanes: BarlessPanes?
 }
 
-private struct PaneHeader: View {
+private struct PaneHeader: KLView {
     let pane: ChatPanes.Pane
     let panes: ChatPanes
     let focused: Bool
     var atTop = false
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @Environment(\.barlessPanes) private var barless
     #if os(iOS)
     /// 这一条有多宽：横着的 iPhone 三列时每列二百多点，按钮少放几个，标题才看得见
@@ -1721,7 +1744,7 @@ private struct PaneHeader: View {
     @State private var hoveringStrip = false
     #endif
 
-    var body: some View {
+    var klBody: some View {
         #if os(macOS)
         macBody
         #else
@@ -1754,7 +1777,7 @@ private struct PaneHeader: View {
         .frame(height: Self.height)
         // 块被挤得比这一条还窄时：不往外撑，多出来的按钮裁掉（拖宽就回来）
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
         // 当前块：整条淡主题色底（不用底边色条，11-21：单边色条是 AI 样式）
         .background(focused && several ? Theme.claude.opacity(0.12) : .clear)
         .background(Theme.chatBackground, ignoresSafeAreaEdges: [])
@@ -1767,7 +1790,7 @@ private struct PaneHeader: View {
         .contextMenu { menuItems }
         .opacity(pane.key != nil && panes.tabDrag?.key == pane.key ? 0.5 : 1)
         .modifier(HeaderDrag(pane: pane, panes: panes))
-        .animation(.snappy(duration: 0.18), value: focused)
+        .animation(.klSnappy(duration: 0.18), value: focused)
         #endif
     }
 
@@ -1784,7 +1807,7 @@ private struct PaneHeader: View {
                 let marked = model.isMarked(key)
                 Button { model.setMarked(key, !marked) } label: {
                     Image(systemName: marked ? "star.fill" : "star").foregroundStyle(marked ? Theme.claude : Color.primary)
-                        .contentTransition(.symbolEffect(.replace))
+                        .klContentTransition(.symbolEffect(.replace))
                         .frame(width: 30, height: 30).contentShape(Rectangle())
                 }
                 .accessibilityLabel(marked ? "已标记，轻点取消标记" : "标记会话")
@@ -1792,7 +1815,7 @@ private struct PaneHeader: View {
             if room >= 340 || Speaker.shared.speakingKey == key {
                 Button { model.externalAction = (key, .speak, UUID()) } label: {
                     Image(systemName: Speaker.shared.speakingKey == key ? "speaker.wave.2.fill" : "speaker.wave.2")
-                        .symbolEffect(.variableColor.iterative, isActive: Speaker.shared.speakingKey == key)
+                        .klVariableColor(isActive: Speaker.shared.speakingKey == key)
                         .frame(width: 30, height: 30).contentShape(Rectangle())
                 }
                 .accessibilityLabel(Speaker.shared.speakingKey == key ? "停止朗读" : "朗读最新回复")
@@ -1844,14 +1867,14 @@ private struct PaneHeader: View {
         .frame(height: Self.tabRow + rise, alignment: .bottom)
         // 块被挤得比这一条还窄时：不往外撑，多出来的按钮裁掉（拖宽就回来）
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.stripFrames[pane.id] = $0 }
+        .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.stripFrames[pane.id] = $0 }
         // 指着标签栏：标签展开着时在空白、按钮上也保持（见 ChatPanes.hoverStrip）
         .onHover { on in
             hoveringStrip = on
             panes.hoverStrip(pane.id, on)
         }
         .onDisappear { if hoveringStrip { panes.hoverStrip(pane.id, false) } }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+        .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             width = frame.width
             // 红绿灯在窗口左上角 78 点以内：铺进工具栏那一带、又贴着窗口左边时让开
             let inset = rise > 0 ? max(0, 78 - frame.minX) : 0
@@ -1887,7 +1910,7 @@ private struct PaneHeader: View {
             }
         }
         .clipped()
-        .animation(.snappy(duration: 0.18), value: focused)
+        .animation(.klSnappy(duration: 0.18), value: focused)
     }
 
     /// 最上面一排往上长到窗口顶（工具栏那一带）多出来的高；多 1 点：对话的滚动视图贴着工具栏底边时会往上伸到工具栏底下，盖住标签栏
@@ -1947,17 +1970,17 @@ private struct PaneHeader: View {
                     .zIndex(key == pane.key ? 1 : 0)
             }
             if plus {
-                TarsPaneButton("plus", help: L("新标签页：选择要在此打开的会话")) { withAnimation(.snappy) { panes.newTab(pane.id) } }
+                TarsPaneButton("plus", help: L("新标签页：选择要在此打开的会话")) { withAnimation(.klSnappy) { panes.newTab(pane.id) } }
                     .padding(.leading, 2).padding(.bottom, 5)
                     .foregroundStyle(.secondary)
             }
         }
-        .animation(.snappy(duration: 0.2), value: pane.tabs)
+        .animation(.klSnappy(duration: 0.2), value: pane.tabs)
         if CGFloat(entries.count) * Self.minTab > room {
             ScrollViewReader { proxy in
                 KiteHScroll { row }
-                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-                    .onChange(of: pane.key) { _, key in withAnimation { proxy.scrollTo(key, anchor: .center) } }
+                    .klScrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                    .klOnChange(of: pane.key) { _, key in withAnimation { proxy.scrollTo(key, anchor: .center) } }
             }
         } else {
             row
@@ -2008,7 +2031,7 @@ private struct PaneHeader: View {
                         .frame(width: 26, height: 24)
                         .contentShape(Rectangle())
                 }
-                .menuStyle(.button)
+                .klMenuButtonStyle()
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
@@ -2065,7 +2088,7 @@ private struct PaneHeader: View {
 /// 一个标签：状态点、会话标题、×。正显示的那个是对话的底色、和下面连成一片（几块时当前块的顶上一道强调色）；
 /// 别的标签平铺在标签栏上，鼠标指上去浅浅一层底、出现 ×（同浏览器）。点一下切过去；拖到别的块（或这块的边上）挪过去；
 /// 右键：关闭、关闭其他、关闭右侧、分出去，和会话的全部操作
-private struct PaneTab: View {
+private struct PaneTab: KLView {
     /// nil = 「选择会话」新标签
     let key: String?
     let pane: ChatPanes.Pane
@@ -2075,7 +2098,7 @@ private struct PaneTab: View {
     let cap: CGFloat
     /// 左边和前一个标签之间画一道细竖线
     var divider = false
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @Environment(\.paneAccessory) private var accessory
     @State private var hovering = false
     /// 正拖着会话停在这个标签上：插到它前面还是后面（画一道竖线）
@@ -2084,7 +2107,7 @@ private struct PaneTab: View {
 
     private static let foot: CGFloat = 7
 
-    var body: some View {
+    var klBody: some View {
         let active = key == pane.key
         let lit = active && (focused || !several)
         let shape = PaneTabShape(foot: Self.foot)
@@ -2097,7 +2120,7 @@ private struct PaneTab: View {
                 .truncationMode(.tail)
                 // 标签变宽变窄（指着展开、收回）的动画里：标题直接换成排好的样子、裁在自己的框里跟着框展开，
                 // 不做新旧两份的淡入淡出（中途会叠出两份字、旧的「…」留在原处）
-                .contentTransition(.identity)
+                .klContentTransition(.identity)
                 .clipped()
             // 窄的时候没在显示的标签不留 × 的位置，先让给标题（关它：右键，或点过去再关）
             if closable, active || cap >= 150 {
@@ -2157,7 +2180,7 @@ private struct PaneTab: View {
         .contextMenu { menu }
         .modifier(TabDragGesture(key: key, pane: pane, panes: panes))
         // 会话拖到这个标签上：落在左半边插到它前面，右半边插到后面（同浏览器排标签顺序）
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tabWidth = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { tabWidth = $0 }
         // 会话之间互发消息时，纸鸢在分屏的标签之间飞（见 PeerStage）
         .peerAnchor(key ?? "", tab: true)
         .onDrop(of: [PaneDrag.type], delegate: TabDropDelegate(key: key, pane: pane, panes: panes, width: tabWidth, gap: $dropGap))
@@ -2207,9 +2230,9 @@ private struct PaneTab: View {
         if let key {
             Button(L("关闭标签页")) { panes.closeTab(pane.id, key) }
             if pane.tabs.count > 1 {
-                Button(L("关闭其他标签页")) { withAnimation(.snappy) { panes.closeOtherTabs(pane.id, keeping: key) } }
+                Button(L("关闭其他标签页")) { withAnimation(.klSnappy) { panes.closeOtherTabs(pane.id, keeping: key) } }
                 if pane.tabs.last != key {
-                    Button(L("关闭右侧标签页")) { withAnimation(.snappy) { panes.closeOtherTabs(pane.id, keeping: key, rightOnly: true) } }
+                    Button(L("关闭右侧标签页")) { withAnimation(.klSnappy) { panes.closeOtherTabs(pane.id, keeping: key, rightOnly: true) } }
                 }
                 Divider()
                 Button(L("移到右侧分屏")) { panes.drop(key, from: pane.id, on: pane.id, zone: .trailing) }
@@ -2234,21 +2257,19 @@ private struct PaneTab: View {
 
 /// 标签的边框闪几下主题色：左边栏里再点一个已经开成标签的会话时（ChatPanes.flashTab），三下、一秒左右，平时不画。
 /// 单独一层：只有它读 tabFlash，闪的时候别的标签不跟着重画
-private struct TabFlashRing: View {
+private struct TabFlashRing: KLView {
     let key: String
     let panes: ChatPanes
     let foot: CGFloat
     @State private var pulse = 0
 
-    var body: some View {
+    var klBody: some View {
         PaneTabShape(foot: foot, open: true)
             .stroke(Theme.claude, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
             .padding(.top, 1)
-            .phaseAnimator([0.0, 1, 0.15, 1, 0.15, 1, 0], trigger: pulse) { ring, level in
-                ring.opacity(level)
-            } animation: { _ in .easeInOut(duration: 0.16) }
+            .klFlash(trigger: pulse)
             .allowsHitTesting(false)
-            .onChange(of: panes.tabFlash) { _, flash in
+            .klOnChange(of: panes.tabFlash) { _, flash in
                 if flash?.key == key { pulse += 1 }
             }
     }
@@ -2257,7 +2278,7 @@ private struct TabFlashRing: View {
 /// 对话区的外框闪几下主题色（同 TabFlashRing 的节奏）：标签小、分屏多时光闪标签不容易看到，连下面的对话区一圈一起闪才明显。
 /// 只框对话区：上沿就是标签栏底边，在这个标签那一段断开、两头接上标签自己闪烁边的两只脚，合起来是「标签 + 对话区」一个整体轮廓；
 /// 标签栏那一行（连同铺进标题栏、顶上项目那一排）不画（11-22 截图：顶上左右上边不要，从标签到右边就可以）
-private struct PaneFlashRing: View {
+private struct PaneFlashRing: KLView {
     let key: String
     let pane: UUID
     let panes: ChatPanes
@@ -2265,14 +2286,12 @@ private struct PaneFlashRing: View {
     /// 标签在对话区里的左右（开始闪的时候量一次；标签不在这一块的标签栏里时整条上沿都画）
     @State private var gap: ClosedRange<CGFloat>?
 
-    var body: some View {
+    var klBody: some View {
         OpenTopFrame(gap: gap)
             .stroke(Theme.claude, style: StrokeStyle(lineWidth: 2.5, lineJoin: .round))
-            .phaseAnimator([0.0, 1, 0.15, 1, 0.15, 1, 0], trigger: pulse) { ring, level in
-                ring.opacity(level)
-            } animation: { _ in .easeInOut(duration: 0.16) }
+            .klFlash(trigger: pulse)
             .allowsHitTesting(false)
-            .onChange(of: panes.tabFlash) { _, flash in
+            .klOnChange(of: panes.tabFlash) { _, flash in
                 guard flash?.key == key else { return }
                 if let tab = panes.tabFrames[pane]?[key], let body = panes.bodyFrames[pane], tab.width > 0 {
                     gap = (tab.minX - body.minX)...(tab.maxX - body.minX)
@@ -2347,15 +2366,15 @@ private struct TabDropDelegate: DropDelegate {
 
 /// 按住标签拖（同 VS Code）：在窗口里自己跟着指针走，不走系统拖放——系统拖放落到对话区上会被它收文件的落点截走（10-26 反馈：拖过去没反应），也没法自动测。
 /// 拖到标签栏上 = 插到那里（排顺序、挪到别的块）；拖到某块对话区的中间 = 挪进那一块，四边 = 从那边分出来；别处松手 = 不动；拖着时按 Esc 取消
-private struct TabDragGesture: ViewModifier {
+private struct TabDragGesture: KLViewModifier {
     let key: String?
     let pane: ChatPanes.Pane
     let panes: ChatPanes
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if let key {
             content
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.tabFrames[pane.id, default: [:]][key] = $0 }
+                .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { panes.tabFrames[pane.id, default: [:]][key] = $0 }
                 .gesture(
                     DragGesture(minimumDistance: 4, coordinateSpace: .named(ChatPanes.space))
                         .onChanged { value in panes.dragTab(key, from: pane.id, at: value.location) }
@@ -2390,11 +2409,50 @@ private struct PaneTabShape: Shape {
     }
 }
 
+#if os(iOS) || KL_MODERN
+private typealias TabsLayout = TabsLayoutImpl
+#else
 /// 一排标签（最后一个子视图是「+」时 trailing = true，它按自己的宽度）：每个标签按标题要的宽度来（最宽 maxTab）；
 /// 总宽放不下时同浏览器，短的照旧、长的平分剩下的（不窄于 minTab，标题截短）。外面不给宽度（横着滚）时每个最宽 160。
 /// expand：指着展开的第几个标签按完整标题变宽（最宽 peekMax）：先用按钮收起让出的地方，不够再缩右边的、再缩左边的（最窄到只剩状态点）。
 /// 别的标签从平时排出来的宽度开始缩；缩右边的时它左边不动、缩左边的时它右边不动，指针一直还在它上面（不会一展开就移出去、收回、又展开地来回跳）
-private struct TabsLayout: Layout {
+private struct TabsLayout<Content: View>: KLView {
+    let minTab: CGFloat
+    let maxTab: CGFloat
+    let trailing: Bool
+    var report: TabsReport?
+    var expand: Int?
+    let content: () -> Content
+
+    init(minTab: CGFloat, maxTab: CGFloat, trailing: Bool, report: TabsReport?, expand: Int?, @ViewBuilder content: @escaping () -> Content) {
+        self.minTab = minTab; self.maxTab = maxTab; self.trailing = trailing; self.report = report; self.expand = expand; self.content = content
+    }
+
+    var klBody: some View {
+        #if os(macOS) && !KL_MODERN
+        if #available(macOS 13, *) {
+            TabsLayoutImpl(minTab: minTab, maxTab: maxTab, trailing: trailing, report: report, expand: expand) { content() }
+        } else {
+            // macOS 12：每个标签按自己算好的宽度（PaneTab 的 cap）一个挨一个排，底边对齐
+            HStack(alignment: .bottom, spacing: 0) { content() }
+        }
+        #elseif os(iOS) || KL_MODERN
+        TabsLayoutImpl(minTab: minTab, maxTab: maxTab, trailing: trailing, report: report, expand: expand) { content() }
+        
+        #else
+        if #available(macOS 13, iOS 16, *) {
+            TabsLayoutImpl(minTab: minTab, maxTab: maxTab, trailing: trailing, report: report, expand: expand) { content() }
+        } else {
+            // macOS 12：每个标签按自己算好的宽度（PaneTab 的 cap）一个挨一个排，底边对齐
+            HStack(alignment: .bottom, spacing: 0) { content() }
+        }
+        #endif
+    }
+}
+#endif
+
+@available(macOS 13, iOS 16, *)
+private struct TabsLayoutImpl: Layout {
     let minTab: CGFloat
     let maxTab: CGFloat
     let trailing: Bool
@@ -2500,8 +2558,8 @@ public enum TabWindowLock {
 
 /// 标签栏的空白处：按住拖动窗口，双击照系统设置缩放 / 最小化（主窗口的工具栏那一带让给了标签栏）。
 /// 用 SwiftUI 的拖窗口手势（macOS 15 起）：这一带的鼠标按下在 AppKit 那层落到对话的滚动视图上，挂 NSView 收不到
-private struct WindowDragArea: ViewModifier {
-    func body(content: Content) -> some View {
+private struct WindowDragArea: KLViewModifier {
+    func klBody(content: Content) -> some View {
         if #available(macOS 15, *) {
             content
                 .contentShape(Rectangle())
@@ -2528,8 +2586,8 @@ private struct WindowDragArea: ViewModifier {
 /// 分屏铺进窗口工具栏那一带时，里面的滚动视图（对话、标签条）不要 macOS 26 顶边那层模糊（滚动口袋）：标签栏本身不透明，用不着它；
 /// 窗口被系统搬去别的屏幕、台前调度缩放过之后，这层模糊会盖在整排标签和按钮上（10-25 截图：点得着、看不清）。
 /// 自测对照：TARS_EDGE_EFFECT=1 保留
-private struct NoTopEdgeEffect: ViewModifier {
-    func body(content: Content) -> some View {
+private struct NoTopEdgeEffect: KLViewModifier {
+    func klBody(content: Content) -> some View {
         if #available(macOS 26, *), ProcessInfo.processInfo.environment["TARS_EDGE_EFFECT"] != "1" {
             content.scrollEdgeEffectHidden(true, for: .top)
         } else {
@@ -2627,16 +2685,16 @@ private struct TitlebarBridge: NSViewRepresentable {
 #endif
 
 /// 拖着的标签跟着指针走：一张半透明的标签挂在指针右下方（同 Finder 拖文件），不挡住标签栏上要插进去的那道竖线；iPad 拖标题条时挂在手指上方
-private struct TabDragGhost: View {
+private struct TabDragGhost: KLView {
     let panes: ChatPanes
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     #if os(macOS)
     private static let border = MacPalette.separator
     #else
     private static let border = Color.primary.opacity(0.12)
     #endif
 
-    var body: some View {
+    var klBody: some View {
         if let drag = panes.tabDrag {
             let width = max(80, drag.size.width - 14), height = max(24, drag.size.height)
             HStack(spacing: 7) {
@@ -2672,15 +2730,15 @@ private struct TabDragGhost: View {
 }
 
 /// 标题条拖得动（有会话时）：拖到别的块上把会话挪过去
-private struct HeaderDrag: ViewModifier {
+private struct HeaderDrag: KLViewModifier {
     let pane: ChatPanes.Pane
     let panes: ChatPanes
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if let key = pane.key {
             // 同 Mac 拖标签：窗口里自己跟着手指走（见 TabDragGesture）。拖到另一块中间 = 两块换位置，拖到边上 = 从那边分出来
             content
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { frame in
+                .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { frame in
                     panes.tabFrames[pane.id] = [key: CGRect(origin: frame.origin, size: CGSize(width: min(frame.width, 240), height: frame.height))]
                 }
                 .gesture(
@@ -2695,13 +2753,13 @@ private struct HeaderDrag: ViewModifier {
 }
 
 /// 空的一块（刚一分为二出来的）：列出还没打开的会话，点一个放进来；也可以从左边列表拖一个进来
-private struct PanePicker: View {
+private struct PanePicker: KLView {
     let paneID: UUID
     let panes: ChatPanes
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     @AppStorage("listSorting") private var sorting = "started"
 
-    var body: some View {
+    var klBody: some View {
         let open = Set(panes.keys)
         let others = model.sortedSessions(sorting).filter { !open.contains($0.key) && keeps($0.key) }
         // 群同会话一样能开在这里（进行中的在前，历史群也能开：在里面发话会恢复成员）
@@ -2712,7 +2770,7 @@ private struct PanePicker: View {
                 #if KITELINE_MAC
                 // 最上面：新建会话（11-20 反馈：同 VS Code 新开对话标签——按现在看的项目、设备、agent 先带好，发第一句就开出会话、接在这个标签上）
                 if let make = KitelineKit.newSessionDraft, let draft = make(panes.pane(paneID)?.previous) {
-                    Button { withAnimation(.snappy) { panes.setKey(paneID, draft) } } label: {
+                    Button { withAnimation(.klSnappy) { panes.setKey(paneID, draft) } } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "plus.bubble.fill").font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.white)
@@ -2737,7 +2795,7 @@ private struct PanePicker: View {
                     .padding(.bottom, 8)
                 ForEach(others) { session in
                     Button {
-                        withAnimation(.snappy) { panes.setKey(paneID, session.key) }
+                        withAnimation(.klSnappy) { panes.setKey(paneID, session.key) }
                     } label: {
                         PickerRow(session: session)
                     }
@@ -2748,7 +2806,7 @@ private struct PanePicker: View {
                         .padding(.top, others.isEmpty ? 0 : 10).padding(.bottom, 2)
                     ForEach(groups) { group in
                         Button {
-                            withAnimation(.snappy) { panes.setKey(paneID, GroupKey.make(group.id)) }
+                            withAnimation(.klSnappy) { panes.setKey(paneID, GroupKey.make(group.id)) }
                         } label: {
                             GroupPickerRow(group: group)
                         }
@@ -2774,10 +2832,10 @@ extension PanePicker {
     }
 }
 
-private struct PickerRow: View {
+private struct PickerRow: KLView {
     let session: SessionInfo
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 10) {
             Text(String(session.title.prefix(1)))
                 .font(.system(size: 14, weight: .semibold))
@@ -2802,11 +2860,11 @@ private struct PickerRow: View {
 }
 
 /// 「选择会话」里的一个群：群头像、群名、几个成员（历史群标出来）
-private struct GroupPickerRow: View {
+private struct GroupPickerRow: KLView {
     let group: GroupInfo
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         let live = model.isLive(group)
         HStack(spacing: 10) {
             GroupAvatar(members: group.members, size: 32, dim: !live)
@@ -2823,12 +2881,12 @@ private struct GroupPickerRow: View {
 }
 
 /// 「选择会话」里一行的底：浅底圆角，Mac 上指着描一圈强调色
-private struct PickerRowStyle: ViewModifier {
+private struct PickerRowStyle: KLViewModifier {
     #if os(macOS)
     @State private var hover = false
     #endif
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(Theme.botBubble.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -2843,12 +2901,12 @@ private struct PickerRowStyle: ViewModifier {
 /// 标签、标题条最前面的小记号：会话是状态点；群是双人图标（成员有在工作的就是强调色）
 /// 标签、标题条前面的状态点（群是两个人的小图标）。只读这个会话自己的 SessionSlot.tab（标题、状态、出错），
 /// 别的会话有动静、这个会话换了个工具都不重画（标签多了每秒的推送会把所有标签重排一遍）
-struct PaneMark: View {
+struct PaneMark: KLView {
     let key: String?
     var size: CGFloat = 7
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         if let id = GroupKey.id(key) {
             let busy = model.groups.group(id)?.members.contains { model.sessionSlot($0.key).tab?.activity == "busy" } ?? false
             Image(systemName: "person.2.fill")
@@ -2900,7 +2958,7 @@ extension AppModel {
 
 /// 块与块之间的分隔条：一道细线，按住拖调大小，双击恢复平分。
 /// Mac 上指针放上去变成拖动的样子；iPad 上中间有个小把手
-struct PaneDivider: View {
+struct PaneDivider: KLView {
     let axis: Axis
     let dragging: Bool
     /// 自测截图：画成指针停在线的正中间
@@ -2928,7 +2986,7 @@ struct PaneDivider: View {
     private static let alwaysShown = true
     #endif
 
-    var body: some View {
+    var klBody: some View {
         let horizontal = axis == .horizontal
         Rectangle()
             .fill(Color.primary.opacity(hover || dragging ? 0.22 : 0.12))
@@ -2960,13 +3018,13 @@ struct PaneDivider: View {
                         if inside { (horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() } else { NSCursor.pop() }
                         #endif
                     }
-                    .onContinuousHover(coordinateSpace: .local) { phase in
+                    .klOnContinuousHover { phase in
                         switch phase {
                         case .active(let point): along = horizontal ? point.y : point.x
                         case .ended: if pressAlong == nil { along = nil }
                         }
                     }
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                         length = horizontal ? frame.height : frame.width
                         start = horizontal ? frame.minY : frame.minX
                     }
@@ -2992,7 +3050,7 @@ struct PaneDivider: View {
 }
 
 /// 分隔线上的把手：圆形小钮，里面左右（或上下）箭头；平时是玻璃底，拖着时淡淡的强调色底 + 细边
-private struct DividerHandle: View {
+private struct DividerHandle: KLView {
     #if os(macOS)
     static let size: CGFloat = 24
     #else
@@ -3001,7 +3059,7 @@ private struct DividerHandle: View {
     let horizontal: Bool
     let active: Bool
 
-    var body: some View {
+    var klBody: some View {
         Image(systemName: horizontal ? "arrow.left.and.right" : "arrow.up.and.down")
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(active ? Theme.claude : Color.secondary)
@@ -3221,7 +3279,7 @@ extension KitelineKit {
 
 /// Mac 主窗口右边：分屏的会话。fillsTitlebar = 铺进窗口工具栏那一带（标签栏就是标题栏）；accessory = 标题条上会话自己的按钮、菜单
 /// 按值比较（外面配 .equatable()）：Mac 主窗口随左边栏数据（每台电脑每秒推一次状态）重算时，这里输入没变就整个跳过
-public struct TarsPanesView: View, Equatable {
+public struct TarsPanesView: KLView, Equatable {
     let fillsTitlebar: Bool
     let accessory: TarsPaneAccessory?
 
@@ -3230,7 +3288,7 @@ public struct TarsPanesView: View, Equatable {
         self.accessory = accessory
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
             ChatPanesView(panes: KitelineKit.panes, fillsTitlebar: fillsTitlebar) { key in
                 // 群同会话一样开成一个标签
@@ -3243,9 +3301,9 @@ public struct TarsPanesView: View, Equatable {
                 }
             }
             .environment(\.paneAccessory, accessory)
-            .environment(model)
+            .environment(\.appModelSlot, model)
             // 关掉了的代码标签：它的编辑器（网页）扔掉，别一直占内存
-            .onChange(of: KitelineKit.panes.keys) { _, keys in CodeTabStore.prune(keeping: Set(keys)) }
+            .klOnChange(of: KitelineKit.panes.keys) { _, keys in CodeTabStore.prune(keeping: Set(keys)) }
         } else {
             SkeletonPage(style: .messages())
         }

@@ -99,8 +99,9 @@ enum BrowserSize: String, CaseIterable, Identifiable {
     var level: String { self == .mini ? "thumb" : "full" }
 }
 
-@MainActor @Observable
-final class BrowserStore {
+@MainActor 
+final class BrowserStore: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     struct Frame {
         var image: PlatformImage
         var seq: Int
@@ -112,20 +113,20 @@ final class BrowserStore {
     }
 
     /// 会话 key → 最近一帧
-    private(set) var frames: [String: Frame] = [:]
+    @Tracked private(set) var frames: [String: Frame] = [:]
     /// 会话 key → 指令列表、标签页（打开大画面时拉，有新指令时刷新）
-    private(set) var actions: [String: [BrowserAction]] = [:]
-    private(set) var tabs: [String: [BrowserTab]] = [:]
+    @Tracked private(set) var actions: [String: [BrowserAction]] = [:]
+    @Tracked private(set) var tabs: [String: [BrowserTab]] = [:]
     /// 会话 key → 放多大（没设过是小窗）
-    var sizes: [String: BrowserSize] = [:]
+    @Tracked var sizes: [String: BrowserSize] = [:]
     /// 放到「整个应用 / 全屏」的那个会话（盖在整个窗口上，见 BrowserAppLayer）
-    var focus: String?
+    @Tracked var focus: String?
     /// 会话 key → 关掉了小窗（这次浏览器打开期间不再浮出；agent 请你接管时照样浮出）
-    var dismissed: [String: Double] = [:]
+    @Tracked var dismissed: [String: Double] = [:]
     /// 正由这台设备接管的会话
-    private(set) var controlling: Set<String> = []
+    @Tracked private(set) var controlling: Set<String> = []
     /// 小窗被拖到哪（相对右上角的默认位置）：记在本机，各会话共用
-    var miniOffset: CGSize = BrowserStore.savedOffset() {
+    @Tracked var miniOffset: CGSize = BrowserStore.savedOffset() {
         didSet { UserDefaults.standard.set([miniOffset.width, miniOffset.height], forKey: "browserMiniOffset") }
     }
 
@@ -134,11 +135,11 @@ final class BrowserStore {
         return CGSize(width: pair[0], height: pair[1])
     }
 
-    @ObservationIgnored weak var model: AppModel?
+    weak var model: AppModel?
     /// 正在看的会话 → 看的档位（几处同时看取最高的）
-    @ObservationIgnored private var viewers: [String: [UUID: String]] = [:]
-    @ObservationIgnored private var leases: [String: Task<Void, Never>] = [:]
-    @ObservationIgnored private let viewerId = UUID().uuidString
+    private var viewers: [String: [UUID: String]] = [:]
+    private var leases: [String: Task<Void, Never>] = [:]
+    private let viewerId = UUID().uuidString
 
     func size(_ key: String) -> BrowserSize { sizes[key] ?? .mini }
 
@@ -215,7 +216,7 @@ final class BrowserStore {
                 } catch {
                     // 浏览器被回收了、会话结束了：等下一轮（会话数据里没了 browser，小窗自己会收起）
                 }
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(seconds: 5)
             }
         }
     }

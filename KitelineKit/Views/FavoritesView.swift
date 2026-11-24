@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 我的收藏（同微信的收藏）：收藏的消息一条一张，新的在上；能搜文字、会话名；点「原消息」跳回那条消息，
 /// 长按 / 右键复制、取消收藏。内容存在电脑上，各端看到的是同一份
-struct FavoritesView: View {
-    @Environment(AppModel.self) private var model
+struct FavoritesView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @State private var query = ""
     /// 这次打开从电脑读过一回（之前列表空着是「正在读取」，不是「暂无收藏」）
@@ -16,7 +16,7 @@ struct FavoritesView: View {
     /// 刚点开原消息的那一条：选中样子同会话列表（淡主题色底 + 描边），11-21 反馈：选中状态不明显
     @State private var current: String?
 
-    var body: some View {
+    var klBody: some View {
         let items = filtered
         List {
             if let sidebarHeader {
@@ -39,7 +39,7 @@ struct FavoritesView: View {
             } else if model.favorites.items.isEmpty {
                 emptyState
             } else if items.isEmpty {
-                ContentUnavailableView.search(text: query)
+                KLUnavailableView.search(text: query)
             }
         }
         #if os(macOS)
@@ -48,7 +48,7 @@ struct FavoritesView: View {
         #endif
         .animation(.skeletonFade, value: fetched)   // 读回来时骨架淡出、内容淡入
         // 别处（手机、电脑）收藏 / 取消了一条，推过来时行平滑挪动
-        .animation(.snappy, value: model.favorites.items.map(\.id))
+        .animation(.klSnappy, value: model.favorites.items.map(\.id))
         .modifier(FavoritesSearch(query: $query, on: sidebarHeader == nil))
         .navigationTitle(sidebarHeader == nil ? L("收藏") : "")
         #if os(iOS)
@@ -58,7 +58,7 @@ struct FavoritesView: View {
         .refreshable { await model.refreshFavorites() }
         .sheetPanel(item: $editing) { FavoriteEditor(item: $0) }
         // 自测：从外面叫它打开某一条的编辑（KitelineKit.editFavorite）
-        .onChange(of: FavoriteEditRequest.shared.item) { _, item in
+        .klOnChange(of: FavoriteEditRequest.shared.item) { _, item in
             guard let item else { return }
             FavoriteEditRequest.shared.item = nil
             editing = item
@@ -149,7 +149,7 @@ struct FavoritesView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
+        KLUnavailableView {
             Label("暂无收藏", systemImage: "star")
         } description: {
             #if os(macOS)
@@ -162,18 +162,18 @@ struct FavoritesView: View {
 }
 
 /// 整页的收藏带搜索框（手机在导航栏下、Mac 面板在列表上面固定一条）；嵌在 Mac 左边栏里时搜索框是列表里的一行，不挂这个
-private struct FavoritesSearch: ViewModifier {
+private struct FavoritesSearch: KLViewModifier {
     @Binding var query: String
     let on: Bool
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if on { content.panelSearch($query, prompt: L("搜索收藏的内容、会话")) } else { content }
     }
 }
 
 /// 一条收藏：图（一张大一点，几张排九宫格）、文字（长的先显示开头，「展开全文」看全部），底下一行谁说的 · 哪个会话 · 时间 · 原消息
-struct FavoriteRow: View {
-    @Environment(AppModel.self) private var model
+struct FavoriteRow: KLView {
+    @EnvModel private var model
     let item: FavoriteItem
     /// 改这条的文字（连着的电脑支持才有）
     var edit: (() -> Void)? = nil
@@ -188,7 +188,7 @@ struct FavoriteRow: View {
     private let single: CGFloat = 140, gridWidth: CGFloat = 260
     #endif
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             // 第一行：左边收藏的那条消息的时间（年月日时分秒），右边编辑（11-21）
             HStack(spacing: 6) {
@@ -210,7 +210,7 @@ struct FavoriteRow: View {
                     .font(ChatType.body)
                     .lineSpacing(ChatType.lineSpacing)
                 if long {
-                    Button(expanded ? L("收起") : L("展开全文")) { withAnimation(.snappy) { expanded.toggle() } }
+                    Button(expanded ? L("收起") : L("展开全文")) { withAnimation(.klSnappy) { expanded.toggle() } }
                         .buttonStyle(.steady(.plain))
                         .font(.ui(.footnote))
                         .foregroundStyle(Theme.claude)
@@ -279,16 +279,17 @@ private struct FavoriteViewerIndex: Identifiable {
 }
 
 /// 自测用：让开着的收藏页打开某一条的编辑面板
-@MainActor @Observable
-final class FavoriteEditRequest {
+@MainActor 
+final class FavoriteEditRequest: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = FavoriteEditRequest()
-    var item: FavoriteItem?
+    @Tracked var item: FavoriteItem?
 }
 
 /// 改一条收藏的文字（11-20 反馈：收藏里的内容有问题没办法修改）：只改收藏里存的这一份，原对话不动，图不动。
 /// Mac 是面板里一个大文字框（回车换行，⌘回车保存），手机是一页表单
-struct FavoriteEditor: View {
-    @Environment(AppModel.self) private var model
+struct FavoriteEditor: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let item: FavoriteItem
     @State private var text: String
@@ -317,7 +318,7 @@ struct FavoriteEditor: View {
         dismiss()
     }
 
-    var body: some View {
+    var klBody: some View {
         #if os(macOS)
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
@@ -359,11 +360,11 @@ struct FavoriteEditor: View {
         .confirmPanel(L("放弃所做的修改？"), isPresented: $confirmDiscard, confirm: L("放弃修改"), destructive: true, cancel: L("继续编辑")) { dismiss() }
         .task { focusToken += 1 }
         #else
-        NavigationStack {
+        KLNavigationStack {
             Form {
                 Section {
-                    TextField("收藏的内容", text: $text, axis: .vertical)
-                        .lineLimit(6...24)
+                    KLTextField("收藏的内容", text: $text, axis: .vertical)
+                        .klLineLimit(6...24)
                 } header: {
                     // 和电脑一样：左边出自哪个会话，右边完整时间
                     HStack(spacing: 8) {
@@ -398,10 +399,10 @@ struct FavoriteEditor: View {
 
 
 #if os(macOS)
-private struct PlainInSidebar: ViewModifier {
+private struct PlainInSidebar: KLViewModifier {
     let on: Bool
-    func body(content: Content) -> some View {
-        if on { content.listStyle(.plain).scrollContentBackground(.hidden) } else { content }
+    func klBody(content: Content) -> some View {
+        if on { content.listStyle(.plain).klScrollContentBackground(.hidden) } else { content }
     }
 }
 #endif

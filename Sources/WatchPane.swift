@@ -5,12 +5,12 @@ import KitelineKit
 
 /// 设置 → Apple Watch：手表跟着 iPhone 走（不用单独配对），这里看哪台手机配了手表、改手表上的选项。
 /// 选项存在 config.mobile.watch，手机 App 的「设置 → Apple Watch」改的是同一份
-struct WatchPane: View {
+struct WatchPane: KLView {
     @State private var watch = AppState.shared.config.mobile.watch
     @State private var devices: [DeviceStore.Device] = []
     @State private var replies: [String] = AppState.shared.config.mobile.watch.replies
 
-    var body: some View {
+    var klBody: some View {
         Form {
             Section {
                 HStack(alignment: .top, spacing: 14) {
@@ -118,10 +118,10 @@ struct WatchPane: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
+        .klFormStyleGrouped()
         .frame(width: SettingsWindowController.width, height: 680)
         .onAppear(perform: reload)
-        .onChange(of: watch) { _, value in
+        .klOnChange(of: watch) { _, value in
             var next = value
             next.replies = AppState.shared.config.mobile.watch.replies
             guard next != AppState.shared.config.mobile.watch else { return }

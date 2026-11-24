@@ -88,8 +88,8 @@ public enum FolderStart {
 
 /// 新任务「打开其他文件夹」：一层层点进那台电脑上的文件夹，选定后在那里新建会话。
 /// iPhone 和 Mac（远端电脑；Mac 本机用系统的选文件夹框）同一个页面
-struct FolderPicker: View {
-    @Environment(AppModel.self) private var model
+struct FolderPicker: KLView {
+    @EnvModel private var model
     let sourceId: String
     let machine: String
     /// 打开时先到哪（空 = 主目录）
@@ -108,7 +108,7 @@ struct FolderPicker: View {
     @State private var loading = false
     @State private var nameAsk: NameAsk?
 
-    var body: some View {
+    var klBody: some View {
         List {
             if let failed {
                 Label(failed, systemImage: "exclamationmark.triangle").font(.ui(.footnote)).foregroundStyle(.orange)
@@ -137,7 +137,7 @@ struct FolderPicker: View {
                 }
             }
         }
-        .contentMargins(.top, 4, for: .scrollContent)
+        .klContentMargins(.top, 4, for: .scrollContent)
         .overlay {
             if listing == nil {
                 if let error { LoadFailed(error: error) { await load(start) } } else { SkeletonPage(style: .files(8)) }
@@ -149,6 +149,7 @@ struct FolderPicker: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        #if os(iOS) || KL_MODERN
         .toolbar {
             if let cancel {
                 ToolbarItem(placement: .cancellationAction) { Button("取消", action: cancel).panelToolbarButton() }.panelBare()
@@ -175,9 +176,37 @@ struct FolderPicker: View {
                     .panelToolbarButton()
             }.panelBare()
         }
+        #else
+        .klApply { view in
+            if let cancel { view.klBareToolbarItem(.cancellationAction) { Button("取消", action: cancel).panelToolbarButton() } } else { view }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button { newFolder() } label: { Label("新建文件夹…", systemImage: "folder.badge.plus") }
+                    Toggle(isOn: $hidden) { Label("显示隐藏文件夹", systemImage: "eye") }
+                    if let listing {
+                        Divider()
+                        Button { Task { await load(listing.home) } } label: { Label("主目录", systemImage: "house") }
+                        ForEach(listing.roots, id: \.self) { drive in
+                            Button { Task { await load(drive) } } label: { Label(drive, systemImage: "internaldrive") }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .panelToolbarItem()
+            }
+        }
+        .klBareToolbarItem(.confirmationAction) {
+            Button("打开") { if let listing { pick(listing.path) } }
+                .disabled(listing == nil || loading)
+                .panelToolbarButton()
+        }
+        #endif
         .codeAsks(.constant(nil), $nameAsk)
         .task { await load(start) }
-        .onChange(of: hidden) { _, _ in Task { await load(listing?.path ?? start) } }
+        .klOnChange(of: hidden) { _, _ in Task { await load(listing?.path ?? start) } }
         #if os(macOS)
         .panelFrame(width: 520, height: 560)
         #endif
@@ -201,7 +230,7 @@ struct FolderPicker: View {
     /// 当前路径当组头（同「项目文件」）：放不下时前面几级收成「…」（点它回到再上一级），现在在哪一级总看得见
     private func crumbs(_ listing: FolderListing) -> some View {
         let parts = listing.crumbs
-        return ViewThatFits(in: .horizontal) {
+        return KLViewThatFits(in: .horizontal) {
             ForEach(Array((1...max(parts.count, 1)).reversed()), id: \.self) { keep in
                 crumbRow(listing, parts: parts, keep: min(keep, parts.count))
             }
@@ -265,7 +294,7 @@ struct FolderPicker: View {
 
 #if KITELINE_MAC
 /// Mac「新任务」里选远端电脑上的文件夹（本机用系统的选文件夹框）
-public struct TarsFolderPicker: View {
+public struct TarsFolderPicker: KLView {
     let sourceId: String
     let machine: String
     let start: String
@@ -279,15 +308,15 @@ public struct TarsFolderPicker: View {
         self.pick = pick
     }
 
-    public var body: some View {
+    public var klBody: some View {
         if let model = KitelineKit.model {
-            NavigationStack {
+            KLNavigationStack {
                 FolderPicker(sourceId: sourceId, machine: machine, start: start, cancel: { dismiss() }) { path in
                     pick(path)
                     dismiss()
                 }
             }
-            .environment(model)
+            .environment(\.appModelSlot, model)
             .lookRoot()
         }
     }

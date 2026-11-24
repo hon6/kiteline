@@ -69,7 +69,7 @@ final class MacAPI: @unchecked Sendable {
         case loopback, lan, remote, tailscale, other
 
         static func of(_ url: URL) -> AddressKind {
-            guard let host = url.host()?.lowercased() else { return .other }
+            guard let host = url.klHost?.lowercased() else { return .other }
             if host == "127.0.0.1" || host == "localhost" { return url.scheme == "http" ? .loopback : .remote }
             return of(host: host)
         }
@@ -94,10 +94,10 @@ final class MacAPI: @unchecked Sendable {
     /// 现在走的路，给人看：「局域网 192.168.1.5」「局域网直连」（远程访问在同一 Wi-Fi 里）「中继」
     var routeLabel: String {
         let url = base
-        if url.host() == "demo.tars.invalid" { return L("演示数据（未连接电脑）") }
+        if url.klHost == "demo.tars.invalid" { return L("演示数据（未连接电脑）") }
         switch AddressKind.of(url) {
         case .loopback: return L("本机")
-        case .lan: return L("局域网 ") + (url.host() ?? "")
+        case .lan: return L("局域网 ") + (url.klHost ?? "")
         case .remote:
             let link = linkReader()
             guard link.up else { return L("远程访问（正在连接）") }
@@ -106,8 +106,8 @@ final class MacAPI: @unchecked Sendable {
             case .relay: return L("中继")
             case .none: return L("远程访问")
             }
-        case .tailscale: return "Tailscale " + (url.host() ?? "")
-        case .other: return url.host() ?? ""
+        case .tailscale: return "Tailscale " + (url.klHost ?? "")
+        case .other: return url.klHost ?? ""
         }
     }
 
@@ -236,7 +236,7 @@ final class MacAPI: @unchecked Sendable {
                 if !waiting, remoteHit != nil || lanHit != nil {
                     waiting = true
                     group.addTask {
-                        try? await Task.sleep(for: .milliseconds(grace))
+                        try? await Task.sleep(milliseconds: grace)
                         return Self.graceOver
                     }
                 }
@@ -258,7 +258,7 @@ final class MacAPI: @unchecked Sendable {
                 if once.first() { continuation.resume(returning: url) }
             }
             Task {
-                try? await Task.sleep(for: .seconds(seconds))
+                try? await Task.sleep(seconds: seconds)
                 if once.first() { continuation.resume(returning: nil) }
             }
         }
@@ -358,7 +358,7 @@ final class MacAPI: @unchecked Sendable {
     func getCaching<T: Decodable>(_ type: T.Type, _ path: String, _ query: [String: String] = [:]) async throws -> T {
         #if SNAPSHOT
         // 截图版测缓存：KITELINE_DEMO_SLOWAPI=<秒> 让这些接口晚这么久才回（看重开时是不是先显示缓存、右上角「更新中」）
-        if let delay = Double(ProcessInfo.processInfo.environment["KITELINE_DEMO_SLOWAPI"] ?? "") { try? await Task.sleep(for: .seconds(delay)) }
+        if let delay = Double(ProcessInfo.processInfo.environment["KITELINE_DEMO_SLOWAPI"] ?? "") { try? await Task.sleep(seconds: delay) }
         #endif
         let (data, http) = try await exchange("GET", path, query, body: nil)
         _ = try APIError.check(data, http)

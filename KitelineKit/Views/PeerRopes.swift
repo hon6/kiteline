@@ -158,7 +158,7 @@ extension View {
     }
 }
 
-private struct PeerRopeEnd: ViewModifier {
+private struct PeerRopeEnd: KLViewModifier {
     @Environment(\.chatPane) private var pane
     @Environment(\.peerRopeTree) private var tree
     @AppStorage(PeerPrefs.ropesKey) private var on = true
@@ -170,12 +170,12 @@ private struct PeerRopeEnd: ViewModifier {
     /// 这张卡片（视图）的标记：只删自己登记的
     @State private var owner = UUID()
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { frame = $0; report($0) }
-            .onChange(of: (pane?.panes.count ?? 0) * 2 + (on ? 1 : 0)) { _, _ in if let frame { report(frame) } }
+            .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatPanes.space)) } action: { frame = $0; report($0) }
+            .klOnChange(of: (pane?.panes.count ?? 0) * 2 + (on ? 1 : 0)) { _, _ in if let frame { report(frame) } }
             .onHover { inside in if let id { PeerRopeBoard.shared.hover(id, inside) } }
-            .onChange(of: id) { old, _ in if let old { PeerRopeBoard.shared.report(old, outgoing: outgoing, card: nil, owner: owner) } }
+            .klOnChange(of: id) { old, _ in if let old { PeerRopeBoard.shared.report(old, outgoing: outgoing, card: nil, owner: owner) } }
             .onDisappear {
                 guard let id else { return }
                 PeerRopeBoard.shared.report(id, outgoing: outgoing, card: nil, owner: owner)
@@ -199,12 +199,12 @@ extension EnvironmentValues {
 }
 
 /// 盖在整个分屏上的一层（ChatPanesView 挂的，tree 是那棵分屏视图的编号）
-struct PeerRopeLayer: View {
+struct PeerRopeLayer: KLView {
     let tree: UUID
     @AppStorage(PeerPrefs.ropesKey) private var on = true
     @AppStorage(PeerPrefs.cardsKey) private var cards = true
 
-    var body: some View {
+    var klBody: some View {
         if on && cards { PeerRopeHost(tree: tree) }
     }
 }
@@ -564,7 +564,7 @@ private final class PeerRopeView: NSView {
     /// 自测用：最近建的绳子层
     static weak var current: PeerRopeView?
     private let engine = RopeEngine()
-    private var link: CADisplayLink?
+    private var link: KLFrameLink?
     /// 窗口不在任何屏幕上时（自测窗口放在屏幕外、显示器断开）display link 不走，改用定时器
     private var timer: Timer?
     private var last: CFTimeInterval = 0
@@ -670,9 +670,7 @@ private final class PeerRopeView: NSView {
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
         } else {
-            let link = displayLink(target: self, selector: #selector(tick(_:)))
-            link.add(to: .main, forMode: .common)
-            self.link = link
+            link = KLFrameLink(view: self) { [weak self] time in self?.frame(at: time) }
         }
     }
 
@@ -682,8 +680,6 @@ private final class PeerRopeView: NSView {
         timer?.invalidate()
         timer = nil
     }
-
-    @objc private func tick(_ link: CADisplayLink) { frame(at: link.timestamp) }
 
     private func frame(at time: CFTimeInterval) {
         let dt = last == 0 ? 1.0 / 60 : min(1.0 / 20, time - last)

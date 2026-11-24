@@ -8,17 +8,17 @@ import AppKit
 #endif
 
 /// 输入框下面那排里的终端按钮：点开 / 收起会话里的终端面板；角标是开着几个终端（主题色，不用醒目的红）
-struct TerminalChip: View {
-    @Environment(AppModel.self) private var model
+struct TerminalChip: KLView {
+    @EnvModel private var model
     @Environment(\.chipHeight) private var height
     let session: SessionInfo
     let chat: ChatStore
 
-    var body: some View {
+    var klBody: some View {
         let count = model.terminals.count(session)
         let open = chat.terminalOpen
         Button {
-            withAnimation(.snappy(duration: 0.25)) { chat.terminalOpen.toggle() }
+            withAnimation(.klSnappy(duration: 0.25)) { chat.terminalOpen.toggle() }
         } label: {
             Image(systemName: "apple.terminal")
                 .font(.app(size: 12, weight: .semibold))
@@ -51,8 +51,8 @@ struct TerminalChip: View {
 
 /// 会话里的终端面板：在输入区的位置从底下升起来（收起后输入框回来），上面是标签（几个终端）、新建、收起，下面是终端本身。
 /// 终端开在会话所在的电脑上，收起面板、离开对话页都不会结束它，点标签上的 × 才关
-struct TerminalPanel: View {
-    @Environment(AppModel.self) private var model
+struct TerminalPanel: KLView {
+    @EnvModel private var model
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var scale
     let key: String
@@ -82,7 +82,7 @@ struct TerminalPanel: View {
     @AppStorage("terminalGestureGuideOff") private var guideOff = false
     @State private var guideShown = false
 
-    var body: some View {
+    var klBody: some View {
         let store = model.terminals
         let terms = store.lists[key] ?? []
         let current = store.selected[key].flatMap { id in terms.first { $0.id == id } }
@@ -112,7 +112,7 @@ struct TerminalPanel: View {
                     }
                 }
             }
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { area = $0 }
+            .klOnGeometryChange(for: CGSize.self) { $0.size } action: { area = $0 }
             .overlay { if guideShown { gestureGuide } }
             if terms.count > 1 {
                 sash
@@ -121,7 +121,7 @@ struct TerminalPanel: View {
             }
             .frame(height: height)
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .background(Theme.inputBar)
         .task(id: key) {
             #if canImport(UIKit)
@@ -244,7 +244,7 @@ struct TerminalPanel: View {
 
     /// 新开一个终端，一开始就按面板的大小（同 SwiftTerm 的算法）：先按 80 列开再缩小的话，zsh 会在第一行留下一个「%」
     private func openNew() async {
-        for _ in 0..<20 where area.width < 1 { try? await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0..<20 where area.width < 1 { try? await Task.sleep(milliseconds: 50) }
         let size = grid(width: area.width, height: area.height)
         await model.terminals.open(key, cols: size.cols, rows: size.rows)
     }
@@ -315,7 +315,7 @@ struct TerminalPanel: View {
             } label: {
                 Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
             }
-            .menuStyle(.button)
+            .klMenuButtonStyle()
             .buttonStyle(.plain)
             #if os(macOS)
             .menuIndicator(.hidden)
@@ -323,7 +323,7 @@ struct TerminalPanel: View {
             #endif
             .accessibilityLabel(L("更多"))
             Button {
-                withAnimation(.snappy(duration: 0.25)) { chat.terminalOpen = false }
+                withAnimation(.klSnappy(duration: 0.25)) { chat.terminalOpen = false }
             } label: {
                 Image(systemName: "chevron.down").frame(width: 28, height: 28).contentShape(Rectangle())
             }
@@ -428,8 +428,8 @@ struct TerminalPanel: View {
                                  close: { Task { await model.terminals.close(key, term.id) } })
                         .contextMenu { termMenu(term) }
                         // 拖动排序（同 VS Code）：拖到哪一行上就放到它前面
-                        .draggable(term.id)
-                        .dropDestination(for: String.self) { ids, _ in
+                        .klDraggable(term.id)
+                        .klDropDestination(for: String.self) { ids, _ in
                             guard let moving = ids.first, moving != term.id else { return false }
                             Task { await model.terminals.move(key, moving, before: term.id) }
                             return true
@@ -485,7 +485,7 @@ enum TerminalColors {
 /// SwiftTerm 的终端视图：按键交给 TerminalStore 发到电脑，电脑上的输出经 TerminalStore 喂回来
 #if canImport(UIKit)
 struct TermScreen: UIViewRepresentable {
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     let key: String
     let id: String
     let fontSize: Double
@@ -528,7 +528,7 @@ struct TermScreen: UIViewRepresentable {
 }
 #else
 struct TermScreen: NSViewRepresentable {
-    @Environment(AppModel.self) private var model
+    @EnvModel private var model
     let key: String
     let id: String
     let fontSize: Double
@@ -624,7 +624,7 @@ final class TermLink: NSObject, TerminalViewDelegate, TermSink {
 }
 
 /// 终端标题列表里的一行（两列布局的右边那列）
-private struct TermTitleRow: View {
+private struct TermTitleRow: KLView {
     let term: TermInfo
     let title: String
     let icon: String
@@ -648,7 +648,7 @@ private struct TermTitleRow: View {
 
     private var label: String { term.device.isEmpty ? title : "\(term.device) · \(title)" }
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 6) {
             if !connector.isEmpty && !compact {
                 Text(connector).font(.app(size: 12, design: .monospaced)).foregroundStyle(.tertiary).frame(width: 8)

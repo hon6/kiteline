@@ -37,7 +37,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.58"
+VERSION = "1.0.59"
 
 
 class App:
@@ -521,6 +521,13 @@ class App:
             self.terms.run(event, source)
         elif kind == "term_run_cancel":
             self.terms.cancel(event, source)
+        elif kind == "live":
+            # 正在生成的文字（逐字显示，见 watcher 的 LiveTap）：原样转给各端，键换成会话 key
+            session_id = event.get("sessionId")
+            if session_id:
+                payload = {k: v for k, v in event.items() if k not in ("event", "sessionId")}
+                payload["key"] = "%s#%s" % (source.id, session_id)
+                self.server.publish("live", payload)
         elif kind in ("entries", "reset"):
             session_id = event.get("sessionId")
             if not session_id:

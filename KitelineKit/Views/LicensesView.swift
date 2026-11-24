@@ -3,7 +3,7 @@ import SwiftUI
 /// 开源许可（设置 → 关于 →「开源许可」）：列出 App 用到的第三方开源组件和它们的许可原文。
 /// 清单是 App 里打包的 ThirdPartyNotices.json（tools/licenses.py 生成，iPhone、Mac 各一份）。
 /// iPhone 上是可搜索的列表、点进去看原文；Mac 在单独的窗口里左右分栏（Sources/LicensesWindow.swift）
-public struct LicensesView: View {
+public struct LicensesView: KLView {
     @State private var notices = ThirdPartyNotices.bundled()
     @State private var query = ""
     #if KITELINE_MAC
@@ -22,7 +22,7 @@ public struct LicensesView: View {
         return text.isEmpty ? notices.components : notices.components.filter { $0.name.localizedCaseInsensitiveContains(text) }
     }
 
-    public var body: some View {
+    public var klBody: some View {
         #if KITELINE_MAC
         // 普通 NSWindow 里没有工具栏：搜索框、返回都不靠工具栏，左边列表、右边原文
         HStack(spacing: 0) {
@@ -62,7 +62,7 @@ public struct LicensesView: View {
         }
         .searchable(text: $query, prompt: Text("搜索组件"))
         .overlay {
-            if notices.components.isEmpty { ContentUnavailableView(L("此版本未包含开源许可清单"), systemImage: "doc.text") }
+            if notices.components.isEmpty { KLUnavailableView(L("此版本未包含开源许可清单"), systemImage: "doc.text") }
         }
         .navigationTitle("开源许可")
         .navigationBarTitleDisplayMode(.inline)
@@ -80,11 +80,11 @@ public struct LicensesView: View {
     }
 }
 
-private struct LicenseDetail: View {
+private struct LicenseDetail: KLView {
     let item: ThirdPartyNotices.Component
     let texts: [String]
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {

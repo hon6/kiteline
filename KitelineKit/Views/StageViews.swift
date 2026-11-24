@@ -109,11 +109,11 @@ extension SessionInfo {
 }
 
 /// 各部分完成情况的小圆点：做完的实心、正在做的空心圈、没开始的淡色
-struct StageDots: View {
+struct StageDots: KLView {
     let dots: [StageDot]
     let size: CGFloat
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: size * 0.2) {
             ForEach(Array(dots.enumerated()), id: \.offset) { _, dot in
                 switch dot {
@@ -129,7 +129,7 @@ struct StageDots: View {
 
 /// 「2/4 开发中」小标识：会话列表（iPhone、Mac 侧栏、菜单栏）。
 /// 主题色字、淡主题色底、细边（同选中态的写法，不用整块饱和色）
-public struct StageBadge: View {
+public struct StageBadge: KLView {
     let step: Int
     let total: Int
     let label: String
@@ -151,7 +151,7 @@ public struct StageBadge: View {
         self.init(step: stage.step, total: stage.total, label: stage.label, part: stage.part, dots: stage.dots, size: size)
     }
 
-    public var body: some View {
+    public var klBody: some View {
         HStack(spacing: size * 0.3) {
             if dots.count >= 2 { StageDots(dots: dots, size: size).padding(.trailing, size * 0.1) }
             if let part { Text(part).font(.app(size: size, weight: .semibold)) }
@@ -174,7 +174,7 @@ public struct StageBadge: View {
 /// 对话页输入框上方的任务进展条（11-01：步骤都放这里，对话里别处不再显示）。只在忙、等确认时有：
 /// 平时收成一行——做到第几步、在做什么、这一步用了多久；轻点（或往上滑）展开成清单：走过的步骤打勾划掉，
 /// 正在做的主题色，没到的灰圈；分了几部分（几个端）的每部分一行，正在做的那部分下面列出它的步骤
-struct StageStrip: View {
+struct StageStrip: KLView {
     let stage: StageInfo
     /// 对话页多高：展开的清单最多占四成五，再多在里面滚
     var available: CGFloat = 0
@@ -188,7 +188,7 @@ struct StageStrip: View {
     private static let corner: CGFloat = 14
     #endif
 
-    var body: some View {
+    var klBody: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let seconds = stage.seconds(now: context.date)
             VStack(spacing: 0) {
@@ -221,7 +221,7 @@ struct StageStrip: View {
     }
 
     private func toggle() {
-        withAnimation(.snappy(duration: 0.28)) { expanded.toggle() }
+        withAnimation(.klSnappy(duration: 0.28)) { expanded.toggle() }
     }
 
     /// 收起时的一行：（分部分的圆点、哪部分）2/5 这一步叫什么 · 在做什么 …… 这一步用了多久 ⌃
@@ -301,9 +301,9 @@ struct StageStrip: View {
             }
             .font(.ui(.footnote))
             .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+            .klOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .klScrollBounceBehavior(.basedOnSize)
         // 量到清单多高之前先按行数估一个，免得展开的第一下是 0 高
         .frame(height: min(listHeight > 0 ? listHeight : CGFloat(rows) * 25 + 44, cap))
     }
@@ -359,10 +359,10 @@ struct StageStrip: View {
 }
 
 /// 清单前的圈：做完的打勾（灰，和划掉的字一起淡下去）、正在做的主题色、没到的空圈（同任务清单）
-private struct StageCheck: View {
+private struct StageCheck: KLView {
     let dot: StageDot
 
-    var body: some View {
+    var klBody: some View {
         switch dot {
         case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
         case .current: Image(systemName: "circle.dotted.circle").foregroundStyle(Theme.claude)
@@ -372,11 +372,11 @@ private struct StageCheck: View {
 }
 
 /// 收起那行最前面的小圈：转到这一步的一半（做到第几步一眼看出来）
-private struct StageRing: View {
+private struct StageRing: KLView {
     let step: Int
     let total: Int
 
-    var body: some View {
+    var klBody: some View {
         ZStack {
             Circle().stroke(Theme.claude.opacity(0.2), lineWidth: 2)
             Circle().trim(from: 0, to: max(0, (CGFloat(step) - 0.5) / CGFloat(max(1, total))))
@@ -384,6 +384,6 @@ private struct StageRing: View {
                 .rotationEffect(.degrees(-90))
         }
         .frame(width: 13, height: 13)
-        .animation(.snappy, value: step)
+        .animation(.klSnappy, value: step)
     }
 }

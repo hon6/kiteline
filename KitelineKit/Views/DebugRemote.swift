@@ -42,7 +42,7 @@ private extension UIView {
 }
 
 enum DebugRemote {
-    static let actions = ["sidebar.hide", "sidebar.show", "rotate.landscape", "rotate.portrait", "dump", "cmd"]
+    static let actions = ["sidebar.hide", "sidebar.show", "rotate.landscape", "rotate.portrait", "rotate.fake", "dump", "cmd"]
     /// live 命令：照电脑推来的内容在本机开 / 更新 / 结束实时活动（看锁屏卡片和灵动岛的排版）
     private static func live(_ arg: String) async {
         #if targetEnvironment(macCatalyst)
@@ -210,6 +210,14 @@ enum DebugRemote {
             } else {
                 window.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: action == "rotate.landscape" ? .landscapeRight : .portrait))
             }
+        case "rotate.fake":
+            // 模拟器里的 iPad 窗口转不动（没有 Simulator.app、系统也不让 App 自己转）：把窗口按横屏尺寸布局再顺时针转 90°，
+            // 截图后在电脑上逆时针转回来，就是一张真实横屏排版的图（只在截图版 / 调试版里，拍宣传图用）
+            let b = window.screen.bounds
+            window.bounds = CGRect(x: 0, y: 0, width: b.height, height: b.width)
+            window.center = CGPoint(x: b.width / 2, y: b.height / 2)
+            window.transform = CGAffineTransform(rotationAngle: .pi / 2)
+            window.rootViewController?.view.setNeedsLayout()
         case "dump":
             let insets = window.safeAreaInsets
             var lines = ["window \(Int(window.bounds.width))x\(Int(window.bounds.height)) safe=\(Int(insets.top)),\(Int(insets.left)),\(Int(insets.bottom)),\(Int(insets.right))"]

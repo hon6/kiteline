@@ -2,8 +2,8 @@
 import SwiftUI
 
 /// 设置 → 存储空间：手机上存了多少图片和离线对话记录；能全部清掉，也能按会话清
-struct StorageView: View {
-    @Environment(AppModel.self) private var model
+struct StorageView: KLView {
+    @EnvModel private var model
     @State private var rows: [Row]?
     @State private var confirmAll = false
     @State private var clearing: Row?
@@ -19,12 +19,12 @@ struct StorageView: View {
         var id: String { key }
     }
 
-    var body: some View {
+    var klBody: some View {
         List {
             Section {
-                LabeledContent("一共", value: Bytes.size(total(\.bytes)))
-                LabeledContent("图片", value: L("%@ 张 · ", "\(total(\.images))") + Bytes.size(total(\.imageBytes)))
-                LabeledContent("离线对话记录", value: Bytes.size(total(\.chatBytes)))
+                KLLabeledContent("一共", value: Bytes.size(total(\.bytes)))
+                KLLabeledContent("图片", value: L("%@ 张 · ", "\(total(\.images))") + Bytes.size(total(\.imageBytes)))
+                KLLabeledContent("离线对话记录", value: Bytes.size(total(\.chatBytes)))
                 Button("清理全部缓存", role: .destructive) { confirmAll = true }
                     .disabled(total(\.bytes) == 0)
             } footer: { Group {

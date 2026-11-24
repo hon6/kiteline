@@ -1,15 +1,15 @@
 import SwiftUI
 
 /// 通知收件箱（同网页版）：Kiteline 发过的每条提醒都在这里，含免打扰时没推到锁屏的；早上起来翻一遍就知道夜里发生了什么
-struct InboxView: View {
-    @Environment(AppModel.self) private var model
+struct InboxView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @State private var entries: [InboxEntry]?
     @State private var error: String?
     @State private var seenBefore: Double = UserDefaults.standard.double(forKey: "inboxSeen")
     @AppStorage("inboxFilter") private var filter = "all"
 
-    var body: some View {
+    var klBody: some View {
         let all = entries ?? []
         let held = all.filter { $0.delivery != "sent" }
         let shown = filter == "held" ? held : all
@@ -39,13 +39,13 @@ struct InboxView: View {
                 // 空状态照系统样式（图标 + 标题 + 说明）
                 Group {
                     if all.isEmpty {
-                        ContentUnavailableView {
+                        KLUnavailableView {
                             Label("暂无通知", systemImage: "bell")
                         } description: {
                             Text("Claude 需要确认、完成任务或发来图片时，将在此处记录。")
                         }
                     } else {
-                        ContentUnavailableView {
+                        KLUnavailableView {
                             Label("均已推送到锁屏", systemImage: "bell.badge")
                         } description: {
                             Text("免打扰时段内未推送的提醒会显示在这里。")
@@ -56,7 +56,7 @@ struct InboxView: View {
             }
         }
         // 筛选条是第一行：去掉分组列表给第一组留的那一大截上边距
-        .contentMargins(.top, 4, for: .scrollContent)
+        .klContentMargins(.top, 4, for: .scrollContent)
         .overlay { if entries == nil { if let error { LoadFailed(error: error) { await load() } } else { SkeletonPage(style: .list(7, lead: .icon)) } } }
         .animation(.skeletonFade, value: entries == nil)   // 读回来时骨架淡出、内容淡入
         .navigationTitle("通知")
@@ -139,11 +139,11 @@ extension Route {
 }
 
 /// 列表右上角的铃铛：通知收件箱，有没看过的就带数字
-struct InboxBell: View {
-    @Environment(AppModel.self) private var model
+struct InboxBell: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
 
-    var body: some View {
+    var klBody: some View {
         Button { open(.inbox) } label: {
             Image(systemName: "bell")
                 .overlay(alignment: .topTrailing) {
@@ -163,10 +163,10 @@ struct InboxBell: View {
 }
 
 /// 网差 / 连不上时顶上的一条：「网络较差 · ↓ 80 KB/s · 延迟 950 ms」
-struct NetStrip: View {
-    @Environment(AppModel.self) private var model
+struct NetStrip: KLView {
+    @EnvModel private var model
 
-    var body: some View {
+    var klBody: some View {
         // 在别处的 Wi-Fi 上开着 Tailscale 这类组网：免费版不经隧道连，说清楚这算远程访问（否则一直「连接中」不知道为什么）
         let viaTunnel = !model.connected && !Store.shared.isPro && model.api.lanViaTunnel
         if !model.connected, !Store.shared.isPro, !NetPath.shared.onLAN || model.everConnected || viaTunnel {

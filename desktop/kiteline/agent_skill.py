@@ -35,36 +35,44 @@ def compact_window(value):
 
 
 _SAVERS = {"at": 0.0, "data": None, "thread": None}
+# 客户端刚打开时好几个请求同时要电脑状态：不加锁时两个请求会各建一个线程、互相覆盖，
+# 一个去等还没启动的线程（RuntimeError: cannot join thread before it is started），状态接口报错、新手引导不弹
+_SAVERS_LOCK = threading.Lock()
 
 
 def savers_summary(sources, wait=True):
     """设置页显示用：各台在线电脑上图片缩小省了多少（加起来）、哪几台没有能缩图的工具。
     要问每台的 watcher，结果留 20 秒；过期了在后台再问：有上一次的结果就直接给上一次的，从没问过才等（最多 4 秒）。
     app 的每分钟循环也会调一次（wait=False），打开设置时一般已经有结果"""
-    if time.time() - _SAVERS["at"] > 20 and not (_SAVERS["thread"] and _SAVERS["thread"].is_alive()):
-        def run():
-            out = {"images": 0, "before": 0, "after": 0, "saved": 0, "unable": []}
-            for source in list(sources):
-                if not getattr(source, "live", False):
-                    continue
-                try:
-                    reply = source.request({"cmd": "savers"}, timeout=8)
-                except Exception:   # 老 watcher 不认这个请求、连接断了：这台不算
-                    continue
-                lean = reply.get("lean") if isinstance(reply, dict) else None
-                if not isinstance(lean, dict):
-                    continue
-                for key in ("images", "before", "after", "saved"):
-                    out[key] += int(lean.get(key) or 0)
-                if reply.get("claude") and not reply.get("canResize"):
-                    out["unable"].append(str(getattr(source, "name", "") or ""))
-            _SAVERS.update(at=time.time(), data=out)
-
-        _SAVERS["thread"] = threading.Thread(target=run, name="savers-summary", daemon=True)
-        _SAVERS["thread"].start()
-        if wait and _SAVERS["data"] is None:
-            _SAVERS["thread"].join(4)
+    with _SAVERS_LOCK:
+        worker = _SAVERS["thread"]
+        if time.time() - _SAVERS["at"] > 20 and not (worker and worker.is_alive()):
+            worker = threading.Thread(target=_ask_savers, args=(list(sources),), name="savers-summary", daemon=True)
+            _SAVERS["thread"] = worker
+            worker.start()
+    if wait and _SAVERS["data"] is None and worker:
+        worker.join(4)
     return _SAVERS["data"]
+
+
+def _ask_savers(sources):
+    """后台线程：挨台问 watcher 图片缩小省了多少，汇总后记进 _SAVERS"""
+    out = {"images": 0, "before": 0, "after": 0, "saved": 0, "unable": []}
+    for source in sources:
+        if not getattr(source, "live", False):
+            continue
+        try:
+            reply = source.request({"cmd": "savers"}, timeout=8)
+        except Exception:   # 老 watcher 不认这个请求、连接断了：这台不算
+            continue
+        lean = reply.get("lean") if isinstance(reply, dict) else None
+        if not isinstance(lean, dict):
+            continue
+        for key in ("images", "before", "after", "saved"):
+            out[key] += int(lean.get(key) or 0)
+        if reply.get("claude") and not reply.get("canResize"):
+            out["unable"].append(str(getattr(source, "name", "") or ""))
+    _SAVERS.update(at=time.time(), data=out)
 
 
 def _isolated():

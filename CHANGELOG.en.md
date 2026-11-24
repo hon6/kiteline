@@ -1,5 +1,22 @@
 # Kiteline Release Notes
 
+## 3.49.55 (2026-11-24)
+
+### Bug Fixes
+
+- **Crash when opening some pages on macOS 12 and 13** (Mac, edition for macOS 12 / 13): Fixed a crash that could occur on macOS 12 and 13 when opening pages and panels such as To-dos, group chats, code, commit details, and the image viewer. The edition for macOS 14 and later is not affected.
+
+## 3.49.54 (2026-11-24)
+
+### New Features
+
+- **Replies appear as they are written** (iPhone, iPad, Mac, Windows, Linux, Mini Program): Claude's reply now shows up in the conversation word by word, in step with the terminal on your computer, instead of appearing only after the whole passage is finished. Applies to Claude Code sessions started after this update.
+- **Support for macOS 12, 13 and older Intel Macs**: A new Mac edition for macOS 12 Monterey and macOS 13 Ventura lets Intel Macs from 2015 onward that can only upgrade to macOS 12 or 13 install and use Kiteline (choose "Mac (macOS 12 / 13)" on the download page). On these systems some visual details (such as charts, certain animations, and layout touches) are simplified; all features work the same. The edition for macOS 14 and later is unchanged.
+
+### Improvements
+
+- Kiteline's process now appears as Kiteline in Activity Monitor and other system tools.
+
 ## 3.49.53 (2026-11-24)
 
 ### Bug Fixes

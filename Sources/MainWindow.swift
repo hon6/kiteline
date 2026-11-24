@@ -13,7 +13,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         NativeConversation.setUp()
         let hosting = NSHostingController(rootView: MainView().tarsLook())
         // 让 SwiftUI 的 toolbar / 标题直接用在 NSWindow 上（统一工具栏，macOS 26 起是液态玻璃）
-        hosting.sceneBridgingOptions = [.toolbars, .title]
+        if #available(macOS 14, *) { hosting.sceneBridgingOptions = [.toolbars, .title] }
         let window = NSWindow(contentViewController: hosting)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.toolbarStyle = .unified
@@ -57,11 +57,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
 // MARK: - 主视图
 
-struct MainView: View {
+struct MainView: KLView {
     @ObservedObject var model = KitelineModel.shared
     @ObservedObject private var sidebar = SidebarState.shared
 
-    var body: some View {
+    var klBody: some View {
         // 两套界面并存（11-20 反馈：现在的界面保留，右上角可以切到新版，给个适应的过渡期）：
         // 经典版 = SidebarView（顶上几格入口 + 会话列表）；新版 = RailSidebar（最左一条图标栏 + 一栏内容）加窗口底部的状态栏（NewLayout.swift）
         root(model.newLayout)
@@ -76,6 +76,7 @@ struct MainView: View {
         }
     }
 
+    #if KL_MODERN
     private func split(_ fresh: Bool) -> some View {
         NavigationSplitView(columnVisibility: sidebar.binding) {
             Group {
@@ -92,6 +93,43 @@ struct MainView: View {
         }
         .searchable(text: $model.query, placement: .sidebar, prompt: "搜索会话")
     }
+    #else
+    @ViewBuilder
+    private func split(_ fresh: Bool) -> some View {
+        if #available(macOS 13, *) {
+            NavigationSplitView(columnVisibility: sidebar.binding) {
+                sidebarColumn(fresh)
+                    .navigationSplitViewColumnWidth(min: fresh ? 290 : 260, ideal: fresh ? 330 : 300, max: fresh ? 450 : 400)
+            } detail: {
+                detailColumn
+            }
+            .searchable(text: $model.query, placement: .sidebar, prompt: "搜索会话")
+        } else {
+            // macOS 12 没有 NavigationSplitView：NavigationView 的两栏（侧栏能用系统的按钮收起）
+            NavigationView {
+                sidebarColumn(fresh)
+                    .frame(minWidth: fresh ? 290 : 260, idealWidth: fresh ? 330 : 300, maxWidth: fresh ? 450 : 400)
+                detailColumn
+            }
+            .searchable(text: $model.query, placement: .sidebar, prompt: "搜索会话")
+        }
+    }
+    #endif
+
+    private func sidebarColumn(_ fresh: Bool) -> some View {
+        Group {
+            if fresh { RailSidebar(model: model) } else { SidebarView(model: model) }
+        }
+        .modifier(SidebarChrome(model: model))
+    }
+
+    private var detailColumn: some View {
+        ProjectSplit(model: model)
+            // 窗口右上角的界面切换按钮：不放工具栏，挂在右边这一栏上（挂在外层会被系统的分栏视图盖住），见 LayoutSwitchCorner
+            .overlay(alignment: .topTrailing) { LayoutSwitchCorner(model: model) }
+            // 装了带新版界面的版本：右上角按钮下面提示一次（NewLayoutTour.swift）
+            .overlay(alignment: .topTrailing) { NewLayoutAnnouncement() }
+    }
 }
 
 /// 窗口右上角的「新版界面 / 经典界面」切换：浮在内容最上面工具栏那一带，样子同工具栏按钮（玻璃胶囊，高 36，在那一带里上下居中）。
@@ -100,21 +138,21 @@ struct MainView: View {
 /// 有会话组时标签行被顶上那排组标签压低，整行落在它上面，最明显）。标签栏右边按这个按钮实际多宽让位。
 /// 用法：`.overlay(alignment: .topTrailing) { LayoutSwitchCorner(model:) }` 挂在贴着窗口右上角的那一栏自己身上——
 /// 两套界面的分栏都是系统的分栏视图（NSSplitView），挂在窗口最外层的浮层会被它盖住，看不见也点不着
-struct LayoutSwitchCorner: View {
+struct LayoutSwitchCorner: KLView {
     @ObservedObject var model: KitelineModel
     /// 按钮底下是标签栏（要让位）。新版界面最右一栏是文件侧栏这类时按钮落在那一栏上方，标签栏不用让（keyuanchuangmei-56 发现多让了 112）
     var overTabs = true
     @State private var hovering = false
     @State private var width: CGFloat = 0
 
-    var body: some View {
+    var klBody: some View {
         LayoutSwitch(model: model)
             .buttonStyle(CornerButtonStyle(hovering: hovering))
             .tourAnchor("layoutSwitch")
             .onHover { hovering = $0 }
             // 右上角那一块标签栏让出：按钮宽 + 右边 6 + 和标签栏按钮之间留 8（中英文字数不同，按实际宽度）
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; reserve() }
-            .onChange(of: overTabs) { reserve() }
+            .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; reserve() }
+            .klOnChange(of: overTabs) { reserve() }
             .frame(height: TitlebarInset.band)   // 在标题栏 + 工具栏那一带里上下居中，同工具栏上的按钮
             .padding(.trailing, 6)
             .ignoresSafeArea(.container, edges: .top)
@@ -139,10 +177,10 @@ struct LayoutSwitchCorner: View {
 }
 
 /// 主窗口两套界面共用的：纸鸢、浏览器、翻译宿主、各种面板
-struct MainChrome: ViewModifier {
+struct MainChrome: KLViewModifier {
     @ObservedObject var model: KitelineModel
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
         // 会话之间互发消息：纸鸢从发信会话飞到收信会话（开在分屏里时在标签之间飞），侧栏左边的风筝线连起最近有往来的会话
         .overlay { KitelineKit.PeerStageView(order: model.filtered.map(\.id)) }
@@ -181,7 +219,7 @@ struct MainChrome: ViewModifier {
 
 // MARK: - 侧栏
 
-struct SidebarView: View {
+struct SidebarView: KLView {
     @ObservedObject var model: KitelineModel
     /// 新版界面里当「会话」那一栏用：不带顶上几格入口和底栏（入口在图标栏上，来源、手机数在窗口底部的状态栏里）
     var embedded = false
@@ -208,14 +246,14 @@ struct SidebarView: View {
         }
     }
 
-    var body: some View {
+    var klBody: some View {
         // 先按设备、项目，再按状态筛（搜索词在 model.filtered 里已经筛过），最后分组
         let base = scoped(model.sortedSessions(sorting))
         let shown = base.filter { matches($0, status) }
         // 不用列表自带的选中（见 SidebarRowHighlight），选中靠 model.selection
         List {
             if model.query.isEmpty, !embedded {
-                SidebarTiles(model: model).selectionDisabled()
+                SidebarTiles(model: model).klSelectionDisabled()
             }
             // 「会话」「群」「标签组」三个页签（11-10 起分开）：状态 / 设备 / 项目筛选和「显示方式」只在「会话」里，
             // 「建群」在「群」里，「新建标签组」在「标签组」里。搜索时不分页签：会话和名字对得上的群一起列，免得搜群名还要先切过去
@@ -225,32 +263,32 @@ struct SidebarView: View {
             let allGroups = TarsGroupFilter(keys: nil, markedOnly: false, query: "")
             // 改版说明（看过一次就不再出）：会话列表去哪了、会话 / 群 / 会话组有什么不同
             if !searching {
-                ListTabsGuide(groups: groupsOn) { withAnimation(.snappy) { listTab = "tabgroups" } }
+                ListTabsGuide(groups: groupsOn) { withAnimation(.klSnappy) { listTab = "tabgroups" } }
                     .padding(.top, 8)
-                    .selectionDisabled()
+                    .klSelectionDisabled()
             }
-            controls(base, count: shown.count, tab: tab).selectionDisabled()
+            controls(base, count: shown.count, tab: tab).klSelectionDisabled()
             if tab == "tabgroups" {
                 // 标签组：一个阶段的几个会话一组，切到哪组右边就多列显示哪组（KitelineKit/Views/TabGroups.swift）
-                TarsTabGroupSection(headerless: true).selectionDisabled()
+                TarsTabGroupSection(headerless: true).klSelectionDisabled()
             } else if groupsTab {
                 if !KitelineKit.groupSectionShown(allGroups) {
                     Label("还没有会话群。点「建群」，或把一个会话拖到另一个会话上，让它们互相沟通。", systemImage: "person.2")
                         .font(.app(size: 11.5)).foregroundStyle(.secondary)
                         .lineLimit(nil).fixedSize(horizontal: false, vertical: true)   // 侧栏列表默认只排一行，这里要看全
-                        .selectionDisabled()
+                        .klSelectionDisabled()
                 }
-                TarsGroupSidebarSection(selection: $model.selection, filter: allGroups, headerless: true).selectionDisabled()
+                TarsGroupSidebarSection(selection: $model.selection, filter: allGroups, headerless: true).klSelectionDisabled()
             } else if model.sessions.isEmpty {
                 Label("没有运行中的会话。在 VS Code 中打开 Claude Code，或在终端运行 claude。", systemImage: "moon.stars")
                     .font(.app(size: 11.5)).foregroundStyle(.secondary)
-                    .selectionDisabled()
-                if searching { TarsGroupSidebarSection(selection: $model.selection, filter: groupFilter(shown)).selectionDisabled() }
+                    .klSelectionDisabled()
+                if searching { TarsGroupSidebarSection(selection: $model.selection, filter: groupFilter(shown)).klSelectionDisabled() }
             } else {
                 // 搜索时（或这台电脑不支持群、没有「群」页签时）群还列在会话前面
                 let groupScope = groupFilter(shown)
                 let mixed = searching || !groupsOn
-                if mixed { TarsGroupSidebarSection(selection: $model.selection, filter: groupScope).selectionDisabled() }
+                if mixed { TarsGroupSidebarSection(selection: $model.selection, filter: groupScope).klSelectionDisabled() }
                 let headed = mixed && KitelineKit.groupSectionShown(groupScope)
                 ForEach(groups(shown), id: \.key) { group in
                     if let name = group.name ?? (headed ? L("会话") : nil) {
@@ -266,7 +304,7 @@ struct SidebarView: View {
                                 if let source = group.source {
                                     // 点 CPU、内存看这台机器的设备详情（同手机）
                                     Button { model.machineDetail = source } label: {
-                                        KitelineKit.MachineStatsRow(sourceId: source).font(.app(size: 10.5)).fontWeight(.regular).padding(.leading, 2)
+                                        KitelineKit.MachineStatsRow(sourceId: source).font(.app(size: 10.5)).klFontWeight(.regular).padding(.leading, 2)
                                     }
                                     .buttonStyle(.plain)
                                     .help(L("设备详情"))
@@ -288,7 +326,7 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .overlay {
             if model.filtered.isEmpty && !model.query.isEmpty {
-                ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass")
+                KLUnavailableView("没有匹配的会话", systemImage: "magnifyingglass")
             }
         }
         .safeAreaInset(edge: .bottom) { if !embedded { SidebarFooter(model: model) } }
@@ -297,7 +335,7 @@ struct SidebarView: View {
     private func rows(_ items: [SessionItem]) -> some View {
         ForEach(items) { item in
             SessionRow(item: item, pinned: model.isPinned(item.id), marked: model.isMarked(item.id),
-                       onMark: { withAnimation(.snappy) { model.toggleMark(item.id) } },
+                       onMark: { withAnimation(.klSnappy) { model.toggleMark(item.id) } },
                        onClose: item.canReply && item.can("close") ? { model.close(item.id, confirmed: true) } : nil, avatar: !embedded)
                 .modifier(SidebarRowHighlight(selected: model.selection == item.id) { model.pick(item.id) })
                 // 新版界面：系统侧栏列表每边自带 16 点，行的框要离栏边 8（侧栏规范 SideMetric），减回去
@@ -412,7 +450,7 @@ struct SidebarView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 if model.query.isEmpty {
-                    SidebarTabs(selection: Binding(get: { tab }, set: { new in withAnimation(.snappy) { listTab = new } }), tabs: [
+                    SidebarTabs(selection: Binding(get: { tab }, set: { new in withAnimation(.klSnappy) { listTab = new } }), tabs: [
                         SidebarTabs.Tab(id: "sessions", title: L("会话"), count: count),
                     ] + (groupsOn ? [SidebarTabs.Tab(id: "groups", title: L("群"), count: KitelineKit.liveGroupCount)] : []) + [
                         SidebarTabs.Tab(id: "tabgroups", title: L("会话组"), count: KitelineKit.tabGroupCount, alert: KitelineKit.tabGroupsWaiting),
@@ -441,7 +479,7 @@ struct SidebarView: View {
                             if option.id != "error" || n > 0 || status == option.id {
                                 FilterChip(title: option.title, count: n, dot: option.color, symbol: option.id == "marked" ? "star.fill" : nil,
                                            selected: status == option.id) {
-                                    withAnimation(.snappy) { statusFilter = status == option.id && option.id != "all" ? "all" : option.id }
+                                    withAnimation(.klSnappy) { statusFilter = status == option.id && option.id != "all" ? "all" : option.id }
                                 }
                             }
                         }
@@ -480,7 +518,7 @@ struct SidebarView: View {
     /// 收起时的一行：「🖥 全部设备 · 📁 ccpulse ⌄」；筛着的那项用品牌色。点一下展开 / 收起两排胶囊
     private func scopeSummary(bySource: Bool, byProject: Bool) -> some View {
         return Button {
-            withAnimation(.snappy) { scopeOpen.toggle() }
+            withAnimation(.klSnappy) { scopeOpen.toggle() }
         } label: {
             HStack(spacing: 6) {
                 // 不画设备、文件夹两个小图标：侧栏宽 270 时「全部设备 · 全部项目」放不下，设备被截成「全部…」（11-21 自测）
@@ -506,8 +544,8 @@ struct SidebarView: View {
     /// 在展开的胶囊里选好了：稍等一下再收起（让选中的样子先闪一下）
     private func collapseScope() {
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(250))
-            withAnimation(.snappy) { scopeOpen = false }
+            try? await Task.sleep(milliseconds: 250)
+            withAnimation(.klSnappy) { scopeOpen = false }
         }
     }
 
@@ -516,25 +554,25 @@ struct SidebarView: View {
     private var viewMenu: some View {
         Menu {
             if activeProject == nil {
-                Picker("分组", selection: $grouping.animation(.snappy)) {
+                Picker("分组", selection: $grouping.animation(.klSnappy)) {
                     ForEach(Self.groupOptions, id: \.0) { option in Text(option.1).tag(option.0) }
                 }
                 .pickerStyle(.inline)
             }
-            Picker("排序", selection: $sorting.animation(.snappy)) {
+            Picker("排序", selection: $sorting.animation(.klSnappy)) {
                 ForEach(Self.sortOptions, id: \.0) { option in Text(option.1).tag(option.0) }
             }
             .pickerStyle(.inline)
             if !isDefaultView || isFiltering {
                 Divider()
                 Button("恢复默认") {
-                    withAnimation(.snappy) { grouping = "none"; sorting = "started"; clearFilters() }
+                    withAnimation(.klSnappy) { grouping = "none"; sorting = "started"; clearFilters() }
                 }
             }
         } label: {
             ViewMenuLabel(summary: viewSummary, isDefault: isDefaultView, compact: true)
         }
-        .menuStyle(.button)
+        .klMenuButtonStyle()
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
@@ -605,27 +643,27 @@ struct SidebarView: View {
         let name = place + (title.map { L("%@的会话", "\($0)") } ?? L("的会话"))
         return VStack(spacing: 8) {
             Text("暂无\(name)").font(.app(size: 12)).foregroundStyle(.secondary)
-            Button("显示全部") { withAnimation(.snappy) { clearFilters() } }
+            Button("显示全部") { withAnimation(.klSnappy) { clearFilters() } }
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .selectionDisabled()
+        .klSelectionDisabled()
     }
 }
 
 /// 左边栏这一列共用的外壳（经典版、新版都挂）：窗口工具栏上的新任务 / 世界 / 数据流三个按钮，把这一列的宽度报给顶上的纸鸢
-struct SidebarChrome: ViewModifier {
+struct SidebarChrome: KLViewModifier {
     @ObservedObject var model: KitelineModel
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             // 把侧栏宽度报给顶上的纸鸢（它飞在侧栏这一段上方；侧栏收起时不飞）。只报出去、不参与排版，不会互相撑
             .background {
                 GeometryReader { geometry in
                     Color.clear
                         .onAppear { KiteOverlay.shared.sidebarWidth = geometry.size.width }
-                        .onChange(of: geometry.size.width) { _, width in KiteOverlay.shared.sidebarWidth = width }
+                        .klOnChange(of: geometry.size.width) { _, width in KiteOverlay.shared.sidebarWidth = width }
                 }
             }
             .onDisappear { KiteOverlay.shared.sidebarWidth = 0 }
@@ -662,7 +700,7 @@ struct SidebarChrome: ViewModifier {
 }
 
 /// 左边栏顶上「会话 9 | 群 1 | 标签组 2」三个页签：选中的那个字重、下面一条品牌色短线，没选中的淡字；同一行右边放这个页签的按钮
-private struct SidebarTabs: View {
+private struct SidebarTabs: KLView {
     struct Tab {
         let id: String
         let title: String
@@ -674,7 +712,7 @@ private struct SidebarTabs: View {
     @Binding var selection: String
     let tabs: [Tab]
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 14) {
             ForEach(tabs, id: \.id) { tab in
                 let on = selection == tab.id
@@ -701,11 +739,11 @@ private struct SidebarTabs: View {
 }
 
 /// 页签那一行右边的小按钮（建群、新建标签组）：图标 + 两个字，样子同「显示方式」默认态但更紧凑，三个页签放下了也不挤
-struct SidebarTabButton: View {
+struct SidebarTabButton: KLView {
     let symbol: String
     let title: String
 
-    var body: some View {
+    var klBody: some View {
         KiteLabel(title, symbol: symbol).lineLimit(1)
             .kiteLook()
         .fixedSize()
@@ -714,14 +752,14 @@ struct SidebarTabButton: View {
 
 /// 左边栏会话行的选中、悬停：同上面的入口格子，淡品牌色底 + 细边。不用列表自带的选中——键盘焦点在列表上时它是一整块饱和的强调色，
 /// 行里的橙色状态字也被吃掉（10-23 反馈太突兀）；另外会话现在开成标签页，按方向键一路选下去会给经过的每个会话都开一个标签
-struct SidebarRowHighlight: ViewModifier {
+struct SidebarRowHighlight: KLViewModifier {
     let selected: Bool
     let select: () -> Void
     @State private var hovering = false
     /// 新版界面的侧栏里：框里的边距、圆角照侧栏规范（SideMetric）；经典版不变
     @Environment(\.sideColumn) private var side
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         let scheme = Look.shared.scheme
         let shape = RoundedRectangle(cornerRadius: side ? SideMetric.radius : scheme == nil ? 10 : 4, style: .continuous)
         let fill: Color = if let scheme { selected ? scheme.listActiveColor : (hovering ? scheme.listHoverColor : .clear) }
@@ -741,7 +779,7 @@ struct SidebarRowHighlight: ViewModifier {
 
 /// 左边栏顶上的入口（同手机首页的汇总卡片）：小方块图标、右上角的数、名字、一行小字。
 /// 两列排；小字一格放不下的占一整行，落单的也撑满一行（TileGrid），排得整齐
-struct SidebarTiles: View {
+struct SidebarTiles: KLView {
     @ObservedObject var model: KitelineModel
     @ObservedObject private var today = TodayModel.shared
     @State private var usage: (cost: Double, output: Double, requests: Double, tokens: Double)?
@@ -750,7 +788,7 @@ struct SidebarTiles: View {
     /// 卡片上的刷新按钮转圈
     @State private var limitsBusy = false
 
-    var body: some View {
+    var klBody: some View {
         let todos = KitelineKit.todoCounts
         let running = Set(model.sessions.map { "\($0.sourceId)\n\($0.cwd)" }).count
         let waiting = Set(model.sessions.filter { $0.activity == .waiting }.map { "\($0.sourceId)\n\($0.cwd)" }).count
@@ -836,7 +874,7 @@ struct SidebarTiles: View {
 
 /// 「今日用量」大卡片（同手机首页）：右上角今天的 token 总数，下面是各台电脑各家 agent 的 5 小时 / 本周额度条，花费这些明细点进去看；
 /// 还没有额度读数时退回一行今天的花费。底色、选中样式同其它格子
-private struct SidebarLimitsTile: View {
+private struct SidebarLimitsTile: KLView {
     let limits: TarsLimitsBoard
     /// 右上角：今天各台电脑一共用了多少 token
     let tokens: String
@@ -847,7 +885,7 @@ private struct SidebarLimitsTile: View {
     @Binding var selection: String?
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         let selected = selection == KitelineModel.usageID
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         Button { selection = KitelineModel.usageID } label: {
@@ -909,7 +947,7 @@ private struct SidebarLimitsTile: View {
 }
 
 /// 一个入口格子：左上小方块图标（有新东西时右上角红色数字），右上角的数，下面名字和一行小字；选中时淡品牌色底
-private struct SidebarTile: View {
+private struct SidebarTile: KLView {
     let id: String
     let symbol: String
     let title: String
@@ -923,7 +961,7 @@ private struct SidebarTile: View {
     @Binding var selection: String?
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         let selected = selection == id
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         Button { selection = id } label: {
@@ -970,6 +1008,7 @@ private struct SidebarTile: View {
 
 /// 入口格子的排法：两列；每格先问内容要多宽，一格放不下的占一整行；落单的（下一个占整行、或排在最后）也撑满一行，
 /// 不留半行空。同一行的格子一样高
+@available(macOS 13, *)
 struct TileGrid: Layout {
     var spacing: CGFloat = 8
 
@@ -1025,12 +1064,12 @@ struct TileGrid: Layout {
 }
 
 /// 会话卡片上点「×」后，挨着按钮弹出的确认气泡（同原来的确认框：标题、关了会怎样、取消 / 关闭会话；回车关、Esc 取消）
-struct CloseConfirm: View {
+struct CloseConfirm: KLView {
     let key: String
     let onCancel: () -> Void
     let onClose: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L("关闭此会话？")).font(.app(size: 13, weight: .semibold))
             if let note = KitelineModel.shared.closeNote(key) {
@@ -1050,7 +1089,7 @@ struct CloseConfirm: View {
     }
 }
 
-struct SessionRow: View {
+struct SessionRow: KLView {
     let item: SessionItem
     var pinned = false
     /// 标记了：标题后一颗主题色实心星，点了取消；没标记的鼠标移上来时右上角出一颗空心星，点了标记
@@ -1067,7 +1106,7 @@ struct SessionRow: View {
     /// 自测截图：标题是这个的卡片画成鼠标停在上面（截不到真的悬停）
     static var captureHover: String?
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: 10) {
             if avatar {
                 SessionAvatar(key: item.id, title: item.title, activity: item.activity, size: 34)
@@ -1214,18 +1253,18 @@ extension View {
     }
 }
 
-struct SessionMenu: View {
+struct SessionMenu: KLView {
     @ObservedObject var model: KitelineModel
     let item: SessionItem
 
-    var body: some View {
+    var klBody: some View {
         Button("在 VS Code 中打开") { model.jump(item.id) }
         if !KitelineKit.panes.keys.contains(item.id) {
             // 把右边当前那块一分为二放这个会话（同把它拖到右边那块的右边 / 下边）
             Button("在右侧分屏打开") { openSplit(down: false) }
             Button("在下方分屏打开") { openSplit(down: true) }
         }
-        Button(model.isMarked(item.id) ? "取消标记" : "标记") { withAnimation(.snappy) { model.toggleMark(item.id) } }
+        Button(model.isMarked(item.id) ? "取消标记" : "标记") { withAnimation(.klSnappy) { model.toggleMark(item.id) } }
         Button(AppState.shared.config.mobile.pinnedSessions.contains(item.id) ? "取消置顶" : "置顶") { model.togglePin(item.id) }
         Button("在此项目中新建会话…") { model.newTask(in: item) }
         TarsTabGroupMenu(key: item.id)
@@ -1284,11 +1323,11 @@ struct SessionMenu: View {
     }
 }
 
-struct SidebarFooter: View {
+struct SidebarFooter: KLView {
     @ObservedObject var model: KitelineModel
     @ObservedObject private var screen = VirtualScreen.shared
 
-    var body: some View {
+    var klBody: some View {
         // 每一项都是按钮（至少 32×32，鼠标移上去有浅底），点了打开对应的设置页：来源 → 来源，手机数、二维码 → 手机访问，齿轮 → 设置首页（通用）
         HStack(spacing: 2) {
             FooterButton(help: L("来源：点击管理")) { SettingsWindowController.shared.show(tab: .sources) } label: {
@@ -1332,13 +1371,13 @@ struct SidebarFooter: View {
 }
 
 /// 侧栏底栏的一个按钮：至少 32×32 好点中，鼠标移上去有浅底
-private struct FooterButton<Content: View>: View {
+private struct FooterButton<Content: View>: KLView {
     let help: String
     let action: () -> Void
     @ViewBuilder let label: Content
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         Button(action: action) {
             label
@@ -1355,10 +1394,10 @@ private struct FooterButton<Content: View>: View {
 
 // MARK: - 右侧
 
-struct DetailView: View {
+struct DetailView: KLView {
     @ObservedObject var model: KitelineModel
 
-    var body: some View {
+    var klBody: some View {
         if model.worldMode {
             WorldView(model: model)
         } else if model.selection == KitelineModel.todayID {
@@ -1389,7 +1428,7 @@ struct DetailView: View {
 /// 每块顶上是一张标签（同浏览器），会话自己的按钮（文件、改动、测试、在 VS Code 中打开、更多）在各自的标签栏上；
 /// macOS 15 起最上面一排标签栏铺进窗口工具栏那一带，窗口不再另有一条标题栏（10-23 起：上下文用量在每块底下已经有了，按钮都跟会话走）。
 /// 左边栏选中的就是当前块的会话，「会话」菜单也对它；在右边点了另一块，左边栏跟着选中（空块 = 不选）
-struct ConversationDetail: View {
+struct ConversationDetail: KLView {
     @ObservedObject var model: KitelineModel
     let key: String?
 
@@ -1404,7 +1443,7 @@ struct ConversationDetail: View {
     static let accessory = TarsPaneAccessory(buttons: { key in AnyView(PaneButtons(model: KitelineModel.shared, key: key)) },
                                                      menu: { key, folded in AnyView(PaneMenu(model: KitelineModel.shared, key: key, folded: folded)) })
 
-    var body: some View {
+    var klBody: some View {
         TarsPanesView(fillsTitlebar: Self.fillsTitlebar, accessory: Self.accessory)
             .equatable()
             // 窗口标题（「窗口」菜单、调度中心里看得到）仍是当前块的会话，只是不画在工具栏上
@@ -1412,7 +1451,7 @@ struct ConversationDetail: View {
             .modifier(TitlebarTabs(subtitle: subtitle))
             // 读现在的值，不用送来的：当前块一下子连变两次时（点「一分为二」= 先切到这块、再切到新的一块），
             // 先送来的是过时的，拿它去设左边栏又会把当前块切回去
-            .onChange(of: KitelineKit.panes.focused) { _, _ in
+            .klOnChange(of: KitelineKit.panes.focused) { _, _ in
                 let focused = KitelineKit.panes.focused
                 if focused != model.selection { model.selection = focused }
             }
@@ -1440,10 +1479,10 @@ struct ConversationDetail: View {
 }
 
 /// 工具栏那一带让给标签栏：不画标题、底色透明（macOS 15 起）；更早的系统照旧写标题和小字
-private struct TitlebarTabs: ViewModifier {
+private struct TitlebarTabs: KLViewModifier {
     let subtitle: String
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         if #available(macOS 15, *) {
             content
                 .toolbar(removing: .title)
@@ -1456,15 +1495,15 @@ private struct TitlebarTabs: ViewModifier {
 
 /// 标签栏上会话自己的按钮（原来在窗口标题栏上）：正在跑的 = 文件、改动、测试、在 VS Code 中打开；已结束的 = 文件、在 VS Code 中恢复。
 /// 中断在输入框旁边（红色停止键）和「更多」菜单里；上下文用量在输入框下面那排
-struct PaneButtons: View {
+struct PaneButtons: KLView {
     @ObservedObject var model: KitelineModel
     let key: String
 
-    var body: some View {
+    var klBody: some View {
         if let item = model.session(key) {
             let marked = model.isMarked(item.id)
             TarsPaneButton(marked ? "star.fill" : "star", help: marked ? L("已标记，点按取消标记") : L("标记：排在所有列表的最上面")) {
-                withAnimation(.snappy) { model.toggleMark(item.id) }
+                withAnimation(.klSnappy) { model.toggleMark(item.id) }
             }
             .foregroundStyle(marked ? AnyShapeStyle(Color.tarsBrand) : AnyShapeStyle(.primary))
             TarsPaneButton("folder", help: L("文件：浏览此项目的文件（只读）")) { KitelineKit.perform(.files, key: item.id) }
@@ -1479,12 +1518,12 @@ struct PaneButtons: View {
 }
 
 /// 标签栏的「更多」菜单、右键标签的菜单：会话的全部操作（同左边栏右键）；folded = 块太窄、标签栏上的按钮折进来了，排在最前面
-struct PaneMenu: View {
+struct PaneMenu: KLView {
     @ObservedObject var model: KitelineModel
     let key: String
     let folded: Bool
 
-    var body: some View {
+    var klBody: some View {
         if let item = model.session(key) {
             if folded {
                 Button("文件") { KitelineKit.perform(.files, key: item.id) }
@@ -1506,10 +1545,10 @@ struct PaneMenu: View {
     }
 }
 
-struct WelcomeView: View {
+struct WelcomeView: KLView {
     @ObservedObject var model: KitelineModel
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 18) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()

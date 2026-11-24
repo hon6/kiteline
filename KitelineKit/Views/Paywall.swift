@@ -2,14 +2,14 @@ import StoreKit
 import SwiftUI
 
 /// 付费页：不在电脑所在的 Wi-Fi 时想连（远程访问），或在设置里点「Kiteline Pro」，从底部弹出来
-struct PaywallView: View {
+struct PaywallView: KLView {
     @PanelDismiss private var dismiss
     @Environment(\.openURL) private var openURL
     let reason: Store.Reason
     @State private var selected: String?
     private var store: Store { Store.shared }
 
-    var body: some View {
+    var klBody: some View {
         let plans = Plan.list(store.products)
         let plan = plans.first { $0.id == selected } ?? plans.first { $0.yearly } ?? plans.first
         ScrollView {
@@ -38,7 +38,7 @@ struct PaywallView: View {
             }
             .padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 24)
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .klScrollBounceBehavior(.basedOnSize)
         .background(Theme.pageBackground)
         .overlay(alignment: .topTrailing) {
             Button { dismiss() } label: {
@@ -50,9 +50,9 @@ struct PaywallView: View {
             .accessibilityLabel("关闭")
             .padding(7)
         }
-        .presentationDragIndicator(.visible)
+        .klPresentationDragIndicator(.visible)
         .task { if store.products.isEmpty { await store.loadProducts() } }
-        .onChange(of: store.isPro) { _, pro in if pro { dismiss() } }
+        .klOnChange(of: store.isPro) { _, pro in if pro { dismiss() } }
     }
 
     private var header: some View {
@@ -225,8 +225,8 @@ struct Plan: Identifiable {
 }
 
 /// 在这里弹付费页：主界面挂一个；本身就是弹窗的页面（设置、新建任务）各挂一个——弹窗开着时主界面弹不出别的弹窗
-struct PaywallHost: ViewModifier {
-    func body(content: Content) -> some View {
+struct PaywallHost: KLViewModifier {
+    func klBody(content: Content) -> some View {
         content.sheetPanel(isPresented: Binding(get: { Store.shared.paywall != nil }, set: { if !$0 { Store.shared.paywall = nil } })) {
             PaywallView(reason: Store.shared.paywall ?? .settings)
         }

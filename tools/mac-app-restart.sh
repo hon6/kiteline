@@ -11,7 +11,7 @@ APP="${1:?用法：mac-app-restart.sh <要打开的 .app>}"
 LOG="${TMPDIR:-/tmp}/kiteline-restart.log"
 
 PIDS=$(ps -axo pid=,command= | awk '{ pid = $1; sub(/^ *[0-9]+ /, "") }
-  /\/(Kiteline|TARS)\.app\/Contents\/MacOS\/TARS( |$)|\/CC Pulse\.app\/Contents\/MacOS\/CCPulse( |$)/ { print pid }' | tr '\n' ' ')
+  /\/(Kiteline|TARS)\.app\/Contents\/MacOS\/(TARS|Kiteline)( |$)|\/CC Pulse\.app\/Contents\/MacOS\/CCPulse( |$)/ { print pid }' | tr '\n' ' ')
 
 # 自己是不是在 Kiteline 里面跑（会话终端）：是的话 Kiteline 一退出这里就会被带走
 inside=0

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 一行消息：头像 + 气泡（同微信：时间不跟在每条下面，隔 5 分钟以上才在中间显示一次）。
 /// 同一个人连着说的几条，只有第一条显示头像，气泡的小尖角也只在那条上
-struct MessageRow<Content: View>: View {
+struct MessageRow<Content: View>: KLView {
     enum Side { case me, bot }
     let side: Side
     let first: Bool
@@ -35,7 +35,7 @@ struct MessageRow<Content: View>: View {
     @Environment(\.chatFace) private var chatFace
     @Environment(\.openAgentInfo) private var openAgentInfo
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: gap) {
             if side == .me { Spacer(minLength: chatWidth > 0 ? min(meRoom, chatWidth * meRatio) : meRoom) } else { avatar }
             BubbleFooterLayout(spacing: footerShown ? 6 : 0, trailing: side == .me) {
@@ -96,7 +96,7 @@ struct MessageRow<Content: View>: View {
         if let copyText {
             Button {
                 Clipboard.copy(copyText, feedback: false)
-                withAnimation(.snappy(duration: 0.15)) { copied = true }
+                withAnimation(.klSnappy(duration: 0.15)) { copied = true }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { withAnimation { copied = false } }
             } label: {
                 // Mac 上同旁边的朗读钮只放图标（指着有说明）；iPhone 图标 + 字，好认也好点
@@ -198,9 +198,9 @@ let avatarCorner: CGFloat = 0.2
 #endif
 
 /// Claude Code 的头像：强调色方块里白色的 Claude Code 标志（同别的 agent 用各自的标志，不再用 ✳︎ 字符）
-struct ClaudeAvatar: View {
+struct ClaudeAvatar: KLView {
     var size: CGFloat = 40
-    var body: some View {
+    var klBody: some View {
         AgentGlyph(Agents.defaultID, size: size * 0.6).foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(Theme.claude, in: RoundedRectangle(cornerRadius: size * avatarCorner, style: .continuous))
@@ -208,10 +208,10 @@ struct ClaudeAvatar: View {
 }
 
 /// 对话里助手的头像：Claude Code 是强调色方块里它的白色标志，别的 agent 是石墨底上它的白色标志（不用各家的品牌色）
-struct AgentAvatar: View {
+struct AgentAvatar: KLView {
     let agent: String
     var size: CGFloat = 40
-    var body: some View {
+    var klBody: some View {
         if agent == Agents.defaultID {
             ClaudeAvatar(size: size)
         } else {
@@ -223,11 +223,11 @@ struct AgentAvatar: View {
 }
 
 /// 我的头像：Mac 账户头像（或在设置里换的），没有图就显示名字首字
-struct MyAvatar: View {
-    @Environment(AppModel.self) private var model
+struct MyAvatar: KLView {
+    @EnvModel private var model
     var size: CGFloat = 40
 
-    var body: some View {
+    var klBody: some View {
         let name = model.me?.name ?? L("我")
         if let path = model.me?.avatar, !path.isEmpty, let parts = URLComponents(string: path) {
             RemoteImage(path: parts.path, query: Dictionary((parts.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first }))
@@ -248,7 +248,7 @@ struct MenuAction: Identifiable {
 }
 
 /// 气泡（同微信）：带小尖角；长按弹出深色横排菜单——复制、引用、朗读、分享、选择文字……
-struct Bubble<Content: View>: View {
+struct Bubble<Content: View>: KLView {
     var mine: Bool
     /// 有文字的气泡自动带上「复制」「分享」「选择文字」
     var text: String? = nil
@@ -267,7 +267,7 @@ struct Bubble<Content: View>: View {
     /// 尖角（高 12）对着第一行字的中间：上内边距 + 半行（行高 1.5 倍字号）− 尖角一半
     private var tailY: CGFloat { ChatType.padV + ChatType.size * 0.75 - 6 }
 
-    var body: some View {
+    var klBody: some View {
         content
             .environment(\.markdownSelectable, selectable)
             .environment(\.richTone, mine ? .mine : .primary)
@@ -349,11 +349,11 @@ struct BubbleTail: Shape {
 }
 
 /// 长按菜单：深灰底、白色图标 + 小字，一排（同微信）
-struct MessageMenu: View {
+struct MessageMenu: KLView {
     let actions: [MenuAction]
     let dismiss: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 0) {
             ForEach(actions) { action in
                 Button {
@@ -379,12 +379,12 @@ struct MessageMenu: View {
 }
 
 /// 「选择文字」：全屏大字，可以拖动选一部分（同微信双击消息的效果）
-struct SelectTextSheet: View {
+struct SelectTextSheet: KLView {
     @PanelDismiss private var dismiss
     let text: String
 
-    var body: some View {
-        NavigationStack {
+    var klBody: some View {
+        KLNavigationStack {
             ScrollView {
                 // 系统文字控件：能拖着选任意一段（SwiftUI 的 Text 在 iPhone 上只能整段复制）
                 RichText(text: RichBuilder.plain(text, tone: .primary, size: ChatType.scaled(20)))
@@ -395,10 +395,15 @@ struct SelectTextSheet: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            #if os(iOS) || KL_MODERN
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("全部复制") { Clipboard.copy(text); dismiss() }.panelToolbarButton() }.panelBare()
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton() }.panelBare()
             }
+            #else
+            .klBareToolbarItem(.cancellationAction) { Button("全部复制") { Clipboard.copy(text); dismiss() }.panelToolbarButton() }
+            .klBareToolbarItem(.confirmationAction) { Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton() }
+            #endif
         }
     }
 }
@@ -415,8 +420,8 @@ enum Quote {
     }
 }
 
-struct UserMessage: View {
-    @Environment(AppModel.self) private var model
+struct UserMessage: KLView {
+    @EnvModel private var model
     @Environment(\.chatReadOnly) private var readOnly
     let key: String
     let item: ChatItem
@@ -431,7 +436,7 @@ struct UserMessage: View {
         return (text, item.id)
     }
 
-    var body: some View {
+    var klBody: some View {
         let text = item.text ?? ""
         let chat = model.chat(key)
         // 手机发过去的文件（PDF、Excel……）是消息末尾的「[附件] 路径」行：拆出来画成文件卡片，轻点取回预览
@@ -482,8 +487,8 @@ struct UserMessage: View {
     }
 }
 
-struct BotText: View {
-    @Environment(AppModel.self) private var model
+struct BotText: KLView {
+    @EnvModel private var model
     @Environment(\.chatReadOnly) private var readOnly
     let key: String
     let item: ChatItem
@@ -498,7 +503,7 @@ struct BotText: View {
         return (text, item.id)
     }
 
-    var body: some View {
+    var klBody: some View {
         let text = item.text ?? ""
         let files = FileLink.mentions(in: text)
         let display = translator.shown(item.id) ?? text
@@ -529,12 +534,12 @@ struct BotText: View {
     }
 }
 
-struct AgentImageMessage: View {
-    @Environment(AppModel.self) private var model
+struct AgentImageMessage: KLView {
+    @EnvModel private var model
     let key: String
     let item: ChatItem
 
-    var body: some View {
+    var klBody: some View {
         Bubble(mine: false, text: item.text, actions: [model.forwardImagesAction(key: key, images: item.images ?? []),
                                                         model.favoriteAction(key: key, item: item, mine: false)].compactMap { $0 }) {
             VStack(alignment: .leading, spacing: 8) {
@@ -548,12 +553,12 @@ struct AgentImageMessage: View {
 }
 
 /// agent 发来的网页（agent_page，watcher 的 send-page）：一张卡片，轻点打开（手机上在 App 里，电脑上用浏览器），下面是一句说明
-struct AgentPageMessage: View {
-    @Environment(AppModel.self) private var model
+struct AgentPageMessage: KLView {
+    @EnvModel private var model
     let key: String
     let item: ChatItem
 
-    var body: some View {
+    var klBody: some View {
         Bubble(mine: false, text: item.text, actions: [model.favoriteAction(key: key, item: item, mine: false)].compactMap { $0 }) {
             VStack(alignment: .leading, spacing: 8) {
                 Label(L("%@ 发来网页", model.sessionSlot(key).speaker), systemImage: "doc.richtext").font(.ui(.caption)).foregroundStyle(.secondary)
@@ -591,13 +596,13 @@ struct AgentPageMessage: View {
 /// agent 经待办技能记的一条（agent_todo）。两种（10-27 起的）：
 /// - forUser：只有你能做的事 → 「现在处理」（不加进待办）或「加入待办」；处理过的给「已处理好」：输入框里先写好，确认后发给 agent
 /// - 不是 forUser：agent 自己以后要做的事 → 显示状态和进度（它自己更新），点一下看待办
-struct AgentTodoMessage: View {
-    @Environment(AppModel.self) private var model
+struct AgentTodoMessage: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     let key: String
     let item: ChatItem
 
-    var body: some View {
+    var klBody: some View {
         let todos = model.todos
         let speaker = model.sessionSlot(key).speaker
         let mine = todos.items.first { $0.source?.key == key && $0.source?.itemId == item.id }
@@ -670,13 +675,13 @@ struct AgentTodoMessage: View {
 }
 
 /// agent 发来的关键信息（agent_key：账号密码、密钥、地址）：一项一行，能单独复制；密码这类默认遮住，点眼睛才显示；下面一键收藏
-struct AgentKeyMessage: View {
-    @Environment(AppModel.self) private var model
+struct AgentKeyMessage: KLView {
+    @EnvModel private var model
     let key: String
     let item: ChatItem
     @State private var shown: Set<Int> = []
 
-    var body: some View {
+    var klBody: some View {
         let saved = model.favorites.contains(key: key, itemId: item.id)
         let fields = item.fields ?? []
         Bubble(mine: false, text: item.text, actions: [model.favoriteAction(key: key, item: item, mine: false)].compactMap { $0 }) {
@@ -740,13 +745,13 @@ struct AgentKeyMessage: View {
 }
 
 /// 语音条（同微信）：时长越长越宽，点一下播放 / 停止
-struct VoiceBubble: View {
-    @Environment(AppModel.self) private var model
+struct VoiceBubble: KLView {
+    @EnvModel private var model
     let id: String?
     let duration: Double
     let mine: Bool
 
-    var body: some View {
+    var klBody: some View {
         let seconds = max(1, Int(duration.rounded()))
         let playing = id != nil && VoicePlayer.shared.playing == id
         Bubble(mine: mine) {
@@ -754,9 +759,9 @@ struct VoiceBubble: View {
                 if mine {
                     Spacer(minLength: 0)
                     Text("\(seconds)″").font(.ui(.body))
-                    Image(systemName: "wave.3.left").symbolEffect(.variableColor.iterative, isActive: playing)
+                    Image(systemName: "wave.3.left").klVariableColor(isActive: playing)
                 } else {
-                    Image(systemName: "wave.3.right").symbolEffect(.variableColor.iterative, isActive: playing)
+                    Image(systemName: "wave.3.right").klVariableColor(isActive: playing)
                     Text("\(seconds)″").font(.ui(.body))
                     Spacer(minLength: 0)
                 }
@@ -771,11 +776,11 @@ struct VoiceBubble: View {
 }
 
 /// 语音转出来的文字：放在语音条下面的浅色块里（同微信「转文字」）
-struct TranscriptBox: View {
+struct TranscriptBox: KLView {
     let text: String
     @State private var selecting = false
 
-    var body: some View {
+    var klBody: some View {
         Text(text.isEmpty ? L("转写中…") : text)
             .foregroundStyle(text.isEmpty ? .secondary : .primary)
             .fixedSize(horizontal: false, vertical: true)
@@ -791,14 +796,14 @@ struct TranscriptBox: View {
 }
 
 /// 任务清单（TodoWrite）
-struct TodoCard: View {
+struct TodoCard: KLView {
     let todos: [JSONValue]
 
-    var body: some View {
+    var klBody: some View {
         let done = todos.filter { $0["status"]?.string == "completed" }.count
         VStack(alignment: .leading, spacing: ChatType.px(4)) {
             HStack {
-                Label("任务清单", systemImage: "checklist").fontWeight(.bold)
+                Label("任务清单", systemImage: "checklist").klFontWeight(.bold)
                 Spacer()
                 Text("\(done)/\(todos.count)").monospacedDigit().foregroundStyle(.secondary)
             }
@@ -812,7 +817,7 @@ struct TodoCard: View {
                     Text(text)
                         .strikethrough(status == "completed")
                         .foregroundStyle(status == "completed" ? .secondary : .primary)
-                        .fontWeight(status == "in_progress" ? .semibold : .regular)
+                        .klFontWeight(status == "in_progress" ? .semibold : .regular)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -825,11 +830,11 @@ struct TodoCard: View {
 }
 
 /// 系统提示（用量到上限、子任务回报、上下文已压缩……），居中小字；带详情的轻点查看
-struct EventRow: View {
+struct EventRow: KLView {
     let item: ChatItem
     @State private var showDetail = false
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 4) {
             // 目标的那几行（设定、每轮检查、达成……）前面带个小图标，达成的写上用了几轮、多久
             if let goal = item.goal { Image(systemName: GoalText.eventSymbol(goal)).imageScale(.small) }
@@ -863,12 +868,12 @@ struct EventRow: View {
 }
 
 /// 发出去还没在对话里回显的消息
-struct PendingMessage: View {
-    @Environment(AppModel.self) private var model
+struct PendingMessage: KLView {
+    @EnvModel private var model
     let key: String
     let pending: PendingSend
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .trailing, spacing: 4) {
             if let seconds = pending.voice {
                 // 按住说话前选了图：图和语音一起发，图单独一块显示在语音条上面
@@ -914,7 +919,7 @@ struct PendingMessage: View {
                 }
                 .font(.ui(.caption2))
                 .foregroundStyle(.orange)
-                Button { withAnimation(.snappy(duration: 0.2)) { model.discard(key, pending.id) } } label: {
+                Button { withAnimation(.klSnappy(duration: 0.2)) { model.discard(key, pending.id) } } label: {
                     Text("移除").font(.ui(.caption2).weight(.medium)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.steady(.plain))
@@ -930,7 +935,7 @@ struct PendingMessage: View {
                 }
                 .buttonStyle(.steady(.plain))
                 // 不想再发了：从对话里拿掉，别一直挂在最底下
-                Button { withAnimation(.snappy(duration: 0.2)) { model.discard(key, pending.id) } } label: {
+                Button { withAnimation(.klSnappy(duration: 0.2)) { model.discard(key, pending.id) } } label: {
                     Text("移除").font(.ui(.caption2).weight(.medium)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.steady(.plain))
@@ -941,10 +946,10 @@ struct PendingMessage: View {
 }
 
 /// 还没发到 Mac 的图（本地缩略图）
-struct PreviewStrip: View {
+struct PreviewStrip: KLView {
     let previews: [Data]
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 4) {
             ForEach(Array(previews.enumerated()), id: \.offset) { _, data in
                 if let image = PlatformImage(data: data) {
@@ -957,13 +962,13 @@ struct PreviewStrip: View {
 }
 
 /// 等宽文字块（命令、输出、思考原文）
-struct MonoBlock: View {
+struct MonoBlock: KLView {
     let text: String
     var error = false
 
-    var body: some View {
+    var klBody: some View {
         Text(text.isEmpty ? " " : text)
-            .font(.app(size: 12.5, design: .monospaced)).fontDesign(nil)
+            .font(.app(size: 12.5, design: .monospaced)).klFontDesign(nil)
             .foregroundStyle(error ? Theme.removed : .primary)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
@@ -1014,13 +1019,13 @@ enum Clipboard {
 
 /// 右上角的拷贝小钮（同 VS Code 的代码块）：Mac 上指着这一块才出现，iPhone / iPad 没有悬停、一直显示；
 /// 点了图标换成对勾一会儿（不另外弹「已拷贝」）
-struct CopyCorner: ViewModifier {
+struct CopyCorner: KLViewModifier {
     let text: String
     var inset: CGFloat = 6
     @State private var hovering = false
     @State private var copied = false
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .overlay(alignment: .topTrailing) {
                 if Self.alwaysShown || Self.captureShown || hovering || copied {
@@ -1029,10 +1034,10 @@ struct CopyCorner: ViewModifier {
                         #if canImport(UIKit)
                         Haptics.tap()
                         #endif
-                        withAnimation(.snappy(duration: 0.15)) { copied = true }
+                        withAnimation(.klSnappy(duration: 0.15)) { copied = true }
                         Task {
-                            try? await Task.sleep(for: .seconds(1.5))
-                            withAnimation(.snappy(duration: 0.2)) { copied = false }
+                            try? await Task.sleep(seconds: 1.5)
+                            withAnimation(.klSnappy(duration: 0.2)) { copied = false }
                         }
                     } label: {
                         Image(systemName: copied ? "checkmark" : "doc.on.doc")

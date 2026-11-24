@@ -141,7 +141,7 @@ final class ARMode: NSObject, NSWindowDelegate {
     func focus(_ key: String) {
         guard isOn else { return }
         WorldHost.ar.focus(key)
-        if !dock.pinned { withAnimation(.snappy(duration: 0.3)) { dock.expanded = false } }
+        if !dock.pinned { withAnimation(.klSnappy(duration: 0.3)) { dock.expanded = false } }
         returnKeys()
     }
 
@@ -574,13 +574,13 @@ final class ARDock: ObservableObject {
     }
 }
 
-struct ARDockView: View {
+struct ARDockView: KLView {
     @ObservedObject var dock: ARDock
     @ObservedObject private var model = KitelineModel.shared
     @State private var drag: CGSize = .zero
     @State private var collapse: DispatchWorkItem?
 
-    var body: some View {
+    var klBody: some View {
         GeometryReader { geometry in
             // 运镜到会话上之后：原生会话页盖在那块窗口的位置上
             if let key = dock.detail {
@@ -609,7 +609,7 @@ struct ARDockView: View {
                         .transition(.scale(scale: 0.5, anchor: .topLeading).combined(with: .opacity))
                 }
             }
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { dock.hitRect = $0 }
+            .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { dock.hitRect = $0 }
             .onHover { inside in hover(inside) }
             .padding(.leading, min(max(8, dock.origin.x), max(8, geometry.size.width - 70)) + drag.width)
             .padding(.top, min(max(30, dock.origin.y), max(30, geometry.size.height - 70)) + drag.height)
@@ -626,7 +626,7 @@ struct ARDockView: View {
             if !dock.expanded, drag == .zero { withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) { dock.expanded = true } }
         } else if dock.expanded, !dock.pinned {
             let work = DispatchWorkItem {
-                withAnimation(.snappy(duration: 0.28)) { dock.expanded = false }
+                withAnimation(.klSnappy(duration: 0.28)) { dock.expanded = false }
                 ARMode.shared.returnKeys()
             }
             collapse = work
@@ -637,7 +637,7 @@ struct ARDockView: View {
 
 /// 运镜到会话上之后浮出来的会话页：和主窗口里的会话页同一个（TarsSessionCard，自己一份单块分屏），
 /// 标题条、按钮、对话排版、输入框、看大图、浏览器小窗都一样；左上角外面一个 ×（Esc），「更多」菜单最上面是「在主窗口中打开」
-private struct ARSessionCard: View {
+private struct ARSessionCard: KLView {
     let key: String
     @ObservedObject var dock: ARDock
 
@@ -651,7 +651,7 @@ private struct ARSessionCard: View {
             })
         })
 
-    var body: some View {
+    var klBody: some View {
         TarsSessionCard(key: key, accessory: Self.accessory)
             .id(key)
             .background(Color(nsColor: .windowBackgroundColor))
@@ -674,12 +674,12 @@ private struct ARSessionCard: View {
 }
 
 /// 收起来的侧栏：玻璃小球，中间是纸鸢；有会话在工作时外圈一道光在转，有等你确认的右上角一个数字
-private struct ARBall: View {
+private struct ARBall: KLView {
     @ObservedObject var dock: ARDock
     @ObservedObject var model: KitelineModel
     @State private var spin = false
 
-    var body: some View {
+    var klBody: some View {
         let waiting = model.sessions.filter { $0.activity == .waiting }.count
         let busy = model.sessions.contains { $0.activity == .busy }
         ZStack {
@@ -722,11 +722,11 @@ private struct ARBall: View {
 }
 
 /// 展开的侧栏：顶上一排 AR 的按钮，下面就是平时的会话列表（同新版界面里那一栏，右键菜单、筛选、分组都在）
-private struct ARSidebarPanel: View {
+private struct ARSidebarPanel: KLView {
     @ObservedObject var dock: ARDock
     @ObservedObject var model: KitelineModel
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(nsImage: ARKiteImage.make(side: 18)).resizable().frame(width: 18, height: 18)
@@ -737,7 +737,7 @@ private struct ARSidebarPanel: View {
                 Spacer(minLength: 4)
                 ARIconButton(symbol: dock.pinned ? "pin.fill" : "pin", on: dock.pinned, help: dock.pinned ? L("取消固定（指针移开后自动收起）") : L("固定侧栏")) {
                     dock.pinned.toggle()
-                    if !dock.pinned { withAnimation(.snappy(duration: 0.28)) { dock.expanded = false } }
+                    if !dock.pinned { withAnimation(.klSnappy(duration: 0.28)) { dock.expanded = false } }
                 }
                 ARIconButton(symbol: dock.fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", on: false,
                              help: dock.fullscreen ? L("退出全屏，回到软件窗口大小（M）") : L("全屏（M）")) { dock.fullscreen.toggle() }
@@ -809,7 +809,7 @@ private struct ARSidebarPanel: View {
 
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
             SidebarView(model: model, embedded: true)
-                .scrollContentBackground(.hidden)
+                .klScrollContentBackground(.hidden)
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
             Text(L("WASD 移动 · 拖动转向 · 悬停放大 · 点击打开 · Tab 切到下一个待处理的会话"))
                 .font(.app(size: 11))
@@ -826,14 +826,14 @@ private struct ARSidebarPanel: View {
     }
 }
 
-private struct ARIconButton: View {
+private struct ARIconButton: KLView {
     let symbol: String
     let on: Bool
     let help: String
     let action: () -> Void
     @State private var hovering = false
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
@@ -847,24 +847,24 @@ private struct ARIconButton: View {
     }
 }
 
-private struct ARChip: View {
+private struct ARChip: KLView {
     let title: String
     let symbol: String
     let on: Bool
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) { ARChipLabel(title: title, symbol: symbol, on: on) }
             .buttonStyle(.plain)
     }
 }
 
-private struct ARChipLabel: View {
+private struct ARChipLabel: KLView {
     let title: String
     let symbol: String
     let on: Bool
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 4) {
             Image(systemName: symbol).font(.system(size: 10.5, weight: .semibold))
             Text(title).lineLimit(1)
@@ -881,10 +881,10 @@ private struct ARChipLabel: View {
 }
 
 /// 透出桌面的磨砂玻璃（窗口本身透明，系统材质要用「窗口后面」的混合才看得到桌面）+ 一层石墨色 + 细边
-private struct ARGlass: View {
+private struct ARGlass: KLView {
     let cornerRadius: CGFloat
 
-    var body: some View {
+    var klBody: some View {
         ZStack {
             ARVisualEffect()
             Color(red: 0.07, green: 0.07, blue: 0.08).opacity(0.42)

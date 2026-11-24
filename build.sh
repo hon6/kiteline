@@ -8,15 +8,23 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 APP_NAME="Kiteline"
-EXEC_NAME="TARS"
+EXEC_NAME="Kiteline"   # 进程名（活动监视器里显示的）；11-24 起由 TARS 改为 Kiteline，包目录 dist/Kiteline.app 不变
 BUNDLE_ID="com.mrhong.tars"
 DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 CACHE="$ROOT/.build-cache"
 # 架构：平时只编 Apple 芯片（本机自用）；官网下载版（release.sh）传 ARCHS="arm64 x86_64" 编通用版，Intel Mac 也能装
 ARCHS="${ARCHS:-arm64}"
+# 最低系统版本（docs/platforms/mac-compat.md）：
+#   默认 14.0 = 主包（现有用户用的）：带 -D KL_MODERN，兼容层（KitelineKit/Shared/KitelineObservation.swift、KitelineCompat.swift）
+#     一律直接调系统接口，编出来和不用兼容层的写法一样；
+#   MINOS=12.0 = 兼容包（只给 macOS 12 / 13 的老 Mac，2015–2017 年的 Intel Mac）：运行时按系统版本走新接口或退路。
+# 装进包里的 LSMinimumSystemVersion 按它改写（源 Info.plist 里写的是主包的 14.0）
+export MINOS="${MINOS:-14.0}"   # 点对点库（p2p/build.sh）也按它编
+KL_FLAGS=""; [ "${MINOS%%.*}" -ge 14 ] && KL_FLAGS="-D KL_MODERN"
 # FAST=1：只为看效果的测试包，不做优化、并行编译，快好几倍（正式版 / 官网下载版不要用）
-OPT="-O"; [ "${FAST:-}" = 1 ] && OPT="-Onone -j 10"
+# 正式编译用整模块优化（-wmo）：数据类的属性读写（KitelineKit/Shared/KitelineObservation.swift）要跨文件内联才和系统 @Observable 一样快
+OPT="-O -wmo -num-threads 10"; [ "${FAST:-}" = 1 ] && OPT="-Onone -j 10 -continue-building-after-errors"
 rust_triple() { if [ "$1" = x86_64 ]; then echo x86_64-apple-darwin; else echo aarch64-apple-darwin; fi; }
 
 # 装了 Xcode 但还没同意许可协议时，xcrun 会拒绝工作；有命令行工具就先用它编译
@@ -65,12 +73,12 @@ echo "==> 编译终端（SwiftTerm，vendor/SwiftTerm）"
 # 会话里的终端用的终端模拟器（MIT，github.com/migueldeicaza/SwiftTerm v1.20.0），编成单独的模块；
 # 四万多行、一次三十多秒：按源码内容缓存，没改过就直接用上次编好的
 ST_HASH=$(find "$ROOT/vendor/SwiftTerm/Sources" -name '*.swift' -type f -print0 | sort -z | xargs -0 shasum | shasum | cut -c1-12)
-ST="$CACHE/swiftterm-$ST_HASH"
+ST="$CACHE/swiftterm-$ST_HASH-macos$MINOS"   # 最低系统版本不同要分开缓存（模块记着编译时的版本）
 for arch in $ARCHS; do
   if [ ! -f "$ST/$arch/libSwiftTerm.a" ]; then
     STTMP="$ST/$arch.tmp-$$"
     rm -rf "$STTMP"; mkdir -p "$STTMP"
-    swiftc $OPT -parse-as-library -swift-version 5 -module-name SwiftTerm -target "$arch-apple-macosx14.0" \
+    swiftc $OPT -parse-as-library -swift-version 5 -module-name SwiftTerm -target "$arch-apple-macosx${MINOS}" \
       -emit-library -static -emit-module -emit-module-path "$STTMP/SwiftTerm.swiftmodule" -o "$STTMP/libSwiftTerm.a" \
       $(find "$ROOT/vendor/SwiftTerm/Sources/SwiftTerm" -name '*.swift' | sort)
     rm -rf "$ST/$arch"; mv "$STTMP" "$ST/$arch"
@@ -88,7 +96,7 @@ KIT_SOURCES=$(find "$ROOT/KitelineKit" -name '*.swift' ! -path '*/Watch/*' ! -pa
   ! -name TARSApp.swift ! -name PairView.swift ! -name Glass.swift ! -name OnboardingView.swift ! -name ReadinessView.swift \
   ! -name SettingsView.swift ! -name SettingsPages.swift ! -name SessionListView.swift ! -name MainView.swift ! -name Snapshot.swift | sort)
 # 纸鸢的形状、各 agent 的标志（App 图标、iPhone、手表、Mac 共用一份）在 KitelineKit/Shared 里，也编进来
-KIT_SOURCES="$KIT_SOURCES $ROOT/KitelineKit/Shared/PaperKite.swift $ROOT/KitelineKit/Shared/AgentMark.swift $ROOT/KitelineKit/Shared/Lang.swift"
+KIT_SOURCES="$KIT_SOURCES $ROOT/KitelineKit/Shared/PaperKite.swift $ROOT/KitelineKit/Shared/AgentMark.swift $ROOT/KitelineKit/Shared/Lang.swift $ROOT/KitelineKit/Shared/KitelineObservation.swift $ROOT/KitelineKit/Shared/KitelineCompat.swift"
 for arch in $ARCHS; do
   mkdir -p "$KIT/$arch"
   swiftc \
@@ -96,8 +104,8 @@ for arch in $ARCHS; do
     -parse-as-library \
     -swift-version 5 \
     -module-name KitelineKit \
-    -D KITELINE_MAC \
-    -target "$arch-apple-macosx14.0" \
+    -D KITELINE_MAC $KL_FLAGS \
+    -target "$arch-apple-macosx${MINOS}" \
     -I "$ST/$arch" \
     -emit-library -static \
     -emit-module -emit-module-path "$KIT/$arch/KitelineKit.swiftmodule" \
@@ -114,7 +122,7 @@ for arch in $ARCHS; do
   swiftc \
     $OPT \
     -parse-as-library \
-    -target "$arch-apple-macosx14.0" \
+    -target "$arch-apple-macosx${MINOS}" $KL_FLAGS \
     ${P2P_FLAGS[@]+"${P2P_FLAGS[@]}"} \
     -I "$ROOT/vendor/sherpa-onnx/include" \
     -I "$KIT/$arch" -L "$KIT/$arch" -lKitelineKit \
@@ -133,6 +141,7 @@ lipo -create "${BINS[@]}" -output "$APP/Contents/MacOS/$EXEC_NAME"
 
 echo "==> 拷贝资源"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MINOS" "$APP/Contents/Info.plist"
 
 # 共享扩展：系统共享菜单里的「Kiteline」（微信「转发到其他应用 → 选择电脑中的应用」、访达「共享」……），见 ShareExtension/
 echo "==> 编译共享扩展"
@@ -141,13 +150,14 @@ mkdir -p "$APPEX/Contents/MacOS"
 EXT_BINS=()
 for arch in $ARCHS; do
   swiftc $OPT -parse-as-library -application-extension -module-name KitelineShare \
-    -target "$arch-apple-macosx14.0" -framework AppKit \
+    -target "$arch-apple-macosx${MINOS}" -framework AppKit \
     -Xlinker -e -Xlinker _NSExtensionMain \
     -o "$KIT/$arch/KitelineShare" "$ROOT/ShareExtension/ShareViewController.swift"
   EXT_BINS+=("$KIT/$arch/KitelineShare")
 done
 lipo -create "${EXT_BINS[@]}" -output "$APPEX/Contents/MacOS/KitelineShare"
 cp "$ROOT/ShareExtension/Info.plist" "$APPEX/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MINOS" "$APPEX/Contents/Info.plist"
 # 扩展的版本号跟主程序走（系统按它判断扩展有没有更新）
 for key in CFBundleShortVersionString CFBundleVersion; do
   /usr/libexec/PlistBuddy -c "Set :$key $(/usr/libexec/PlistBuddy -c "Print :$key" "$ROOT/Resources/Info.plist")" "$APPEX/Contents/Info.plist"
@@ -155,7 +165,7 @@ done
 # 强调色（品牌橙）：选中、开关、链接、焦点框、弹出面板默认都用它（系统设置里强调色是「多色」时生效）
 if xcrun --find actool >/dev/null 2>&1; then
   xcrun actool "$ROOT/Resources/Assets.xcassets" --compile "$APP/Contents/Resources" --platform macosx \
-    --minimum-deployment-target 14.0 --output-partial-info-plist "$CACHE/assets-info.plist" >/dev/null
+    --minimum-deployment-target ${MINOS} --output-partial-info-plist "$CACHE/assets-info.plist" >/dev/null
 else
   echo "    没有 actool（只有命令行工具）：跳过强调色"
 fi

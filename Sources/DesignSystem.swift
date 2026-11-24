@@ -90,12 +90,12 @@ struct LookButtonStyle<Base: PrimitiveButtonStyle>: PrimitiveButtonStyle {
         Wrapped(configuration: configuration, base: base)
     }
 
-    private struct Wrapped: View {
+    private struct Wrapped: KLView {
         let configuration: PrimitiveButtonStyleConfiguration
         let base: Base
         @Environment(\.controlSize) private var controlSize
 
-        var body: some View {
+        var klBody: some View {
             Button(role: configuration.role, action: configuration.trigger) {
                 configuration.label.font(.app(size: size))
             }
@@ -114,11 +114,11 @@ struct LookButtonStyle<Base: PrimitiveButtonStyle>: PrimitiveButtonStyle {
 }
 
 /// 全 App 统一的图标（和手机 App 的 TarsIcon 一样）：品牌橙的图形放在淡橙色圆角方块里，只有这一种双色样式
-struct DuoIcon: View {
+struct DuoIcon: KLView {
     let symbol: String
     var size: CGFloat = 34
 
-    var body: some View {
+    var klBody: some View {
         Image(systemName: symbol)
             .symbolRenderingMode(.hierarchical)
             .font(.system(size: size * 0.46, weight: .semibold))
@@ -159,7 +159,7 @@ extension Activity {
 
 // MARK: - 头像
 
-struct SessionAvatar: View {
+struct SessionAvatar: KLView {
     let key: String
     let title: String
     let activity: Activity
@@ -174,7 +174,7 @@ struct SessionAvatar: View {
         return String(first)
     }
 
-    var body: some View {
+    var klBody: some View {
         // 用户在「Agent 详情」里给这个会话换了头像就画那个（同手机）；没换是和图标同一种双色：淡橙底 + 品牌橙的首字
         TarsSessionFace(key: key, size: size, corner: 0.28) {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
@@ -198,10 +198,10 @@ struct SessionAvatar: View {
 }
 
 /// 工作中：随风飘的小纸鸢（和手机、对话页同一个，代替原来的 ✻），直接压在头像角上，不垫底
-struct SpinningGlyph: View {
+struct SpinningGlyph: KLView {
     var size: CGFloat = 14
 
-    var body: some View {
+    var klBody: some View {
         KiteSpinner(size: size * 1.15, color: .tarsBrand)
             .frame(width: size * 1.2, height: size * 1.2)
     }

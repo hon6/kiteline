@@ -21,7 +21,7 @@ public enum KiteColor {
 /// 在 Canvas 里按 384 格子画一只纸鸢：origin 是格子左上角在画布里的位置，unit 是每格多少点
 private func drawKite(_ context: GraphicsContext, color: Color, origin: CGPoint, unit: CGFloat, detail: PaperKite.Detail,
                       pose: PaperKite.Pose = PaperKite.Pose(), bridle: CGFloat? = nil) {
-    let cgColor = color.resolve(in: context.environment).cgColor
+    let cgColor = color.klCGColor(in: context.environment)
     context.withCGContext { cg in
         cg.translateBy(x: origin.x, y: origin.y)
         cg.scaleBy(x: unit, y: unit)
@@ -30,11 +30,11 @@ private func drawKite(_ context: GraphicsContext, color: Color, origin: CGPoint,
 }
 
 /// 静态的纸鸢标志。line 给了颜色就连提线、再从结往下拉一段主线（拉到框外为止）
-struct KiteMark: View {
+struct KiteMark: KLView {
     var color: Color = KiteColor.brand
     var line: Color?
 
-    var body: some View {
+    var klBody: some View {
         Canvas { context, size in
             let unit = min(size.width, size.height) / PaperKite.size
             let detail: PaperKite.Detail = unit * PaperKite.size >= 48 ? .full : .glyph
@@ -202,7 +202,7 @@ public final class KiteSpinnerView: KitePlatformView {
 }
 
 /// SwiftUI 里用的小纸鸢（颜色跟着传进来的 Color，主题色变了会重新出图）
-public struct KiteSpinner: View {
+public struct KiteSpinner: KLView {
     var size: CGFloat
     var color: Color
 
@@ -211,7 +211,7 @@ public struct KiteSpinner: View {
         self.color = color
     }
 
-    public var body: some View {
+    public var klBody: some View {
         KiteSpinnerRepresentable(size: size, color: color)
             .frame(width: size, height: size)
             .allowsHitTesting(false)
@@ -225,7 +225,7 @@ private struct KiteSpinnerRepresentable: UIViewRepresentable {
     let color: Color
     func makeUIView(context: Context) -> KiteSpinnerView { KiteSpinnerView(frame: CGRect(x: 0, y: 0, width: size, height: size)) }
     func updateUIView(_ view: KiteSpinnerView, context: Context) {
-        view.configure(size: size, color: color.resolve(in: context.environment).cgColor)
+        view.configure(size: size, color: color.klCGColor(in: context.environment))
     }
 }
 #else
@@ -234,7 +234,7 @@ private struct KiteSpinnerRepresentable: NSViewRepresentable {
     let color: Color
     func makeNSView(context: Context) -> KiteSpinnerView { KiteSpinnerView(frame: CGRect(x: 0, y: 0, width: size, height: size)) }
     func updateNSView(_ view: KiteSpinnerView, context: Context) {
-        view.configure(size: size, color: color.resolve(in: context.environment).cgColor)
+        view.configure(size: size, color: color.klCGColor(in: context.environment))
     }
 }
 #endif
@@ -300,7 +300,7 @@ public final class PulseDotView: KitePlatformView {
 }
 
 /// SwiftUI 里用的呼吸圆点
-public struct PulseDot: View {
+public struct PulseDot: KLView {
     var color: Color
     var size: CGFloat
     var low: CGFloat
@@ -313,7 +313,7 @@ public struct PulseDot: View {
         self.period = period
     }
 
-    public var body: some View {
+    public var klBody: some View {
         PulseDotRepresentable(color: color, low: low, period: period)
             .frame(width: size, height: size)
             .allowsHitTesting(false)
@@ -327,7 +327,7 @@ private struct PulseDotRepresentable: UIViewRepresentable {
     let period: Double
     func makeUIView(context: Context) -> PulseDotView { PulseDotView(frame: .zero) }
     func updateUIView(_ view: PulseDotView, context: Context) {
-        view.configure(color: color.resolve(in: context.environment).cgColor, low: low, period: period)
+        view.configure(color: color.klCGColor(in: context.environment), low: low, period: period)
     }
 }
 #else
@@ -337,7 +337,7 @@ private struct PulseDotRepresentable: NSViewRepresentable {
     let period: Double
     func makeNSView(context: Context) -> PulseDotView { PulseDotView(frame: .zero) }
     func updateNSView(_ view: PulseDotView, context: Context) {
-        view.configure(color: color.resolve(in: context.environment).cgColor, low: low, period: period)
+        view.configure(color: color.klCGColor(in: context.environment), low: low, period: period)
     }
 }
 #endif
@@ -406,7 +406,11 @@ public final class KiteFlightView: KitePlatformView {
     /// 纸鸢在原位时渐变的起点（提线结）
     private var restStart: CGPoint = .zero
     /// 线现算时逐帧刷新（只在起飞、飞远的那一段里开着）
+    #if canImport(UIKit)
     private var link: CADisplayLink?
+    #else
+    private var link: KLFrameLink?
+    #endif
 
     static let loop: Double = 120
     static let fps: Double = 15
@@ -728,11 +732,11 @@ public final class KiteFlightView: KitePlatformView {
         guard link == nil else { return }
         #if canImport(UIKit)
         let link = CADisplayLink(target: self, selector: #selector(step))
-        #else
-        let link = displayLink(target: self, selector: #selector(step))
-        #endif
         link.add(to: .main, forMode: .common)
         self.link = link
+        #else
+        link = KLFrameLink(view: self) { [weak self] _ in self?.step() }
+        #endif
     }
 
     private func stopLink() {
@@ -752,7 +756,7 @@ private extension NSValue {
 
 /// SwiftUI 里用的顶上纸鸢（iPhone 首页用；Mac 主窗口直接用 KiteFlightView）。
 /// 颜色跟着传进来的 Color 走（一般是主题色），浅色 / 深色、换主题时 SwiftUI 会重新调 update，重新上色
-public struct KiteFlight: View {
+public struct KiteFlight: KLView {
     var spec: KiteFlightSpec
     var color: Color
     /// 飞远的进度（见 KiteFlightView.setLift）
@@ -770,7 +774,7 @@ public struct KiteFlight: View {
         self.takeoff = takeoff
     }
 
-    public var body: some View {
+    public var klBody: some View {
         KiteFlightRepresentable(spec: spec, color: color, lift: lift, paused: paused, takeoff: takeoff, reduceMotion: reduceMotion)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -789,7 +793,7 @@ private struct KiteFlightRepresentable: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeUIView(context: Context) -> KiteFlightView { KiteFlightView(frame: .zero) }
     func updateUIView(_ view: KiteFlightView, context: Context) {
-        view.configure(spec, color: color.resolve(in: context.environment).cgColor, reduceMotion: reduceMotion)
+        view.configure(spec, color: color.klCGColor(in: context.environment), reduceMotion: reduceMotion)
         view.setLift(lift)
         if takeoff != context.coordinator.takeoff {
             context.coordinator.takeoff = takeoff
@@ -810,7 +814,7 @@ private struct KiteFlightRepresentable: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> KiteFlightView { KiteFlightView(frame: .zero) }
     func updateNSView(_ view: KiteFlightView, context: Context) {
-        view.configure(spec, color: color.resolve(in: context.environment).cgColor, reduceMotion: reduceMotion)
+        view.configure(spec, color: color.klCGColor(in: context.environment), reduceMotion: reduceMotion)
         view.setLift(lift)
         if takeoff != context.coordinator.takeoff {
             context.coordinator.takeoff = takeoff

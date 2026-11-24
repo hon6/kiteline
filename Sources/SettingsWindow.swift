@@ -191,7 +191,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             let hosting = NSHostingController(rootView: AnyView(SettingsWindowController.pane(tab).frame(minWidth: SettingsWindowController.width)
                 // 设置里没写样式的按钮也照按钮样式规范（有边框、选中亮主题色；11-21 自测：「更换头像…」等是一行橙字）
                 .buttonStyle(KiteButtonStyle()).tarsLook()))
-            hosting.sizingOptions = [.preferredContentSize]
+            if #available(macOS 13, *) { hosting.sizingOptions = [.preferredContentSize] }
             // 页面视图包一层只贴顶边的容器：它自己的尺寸约束不再直接撑窗口（否则动画中途一次布局就让窗口跳到目标大小），
             // 窗口大小由 SettingsTabsController 按 preferredContentSize 动画调整
             let pane = SettingsPaneContainer(hosting: hosting)
@@ -278,16 +278,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 // MARK: - 通用
 
 /// 「VS Code 在虚拟屏幕中运行」（同菜单栏面板、主窗口侧栏底部的显示器按钮）
-private struct VirtualScreenSection: View {
+private struct VirtualScreenSection: KLView {
     @ObservedObject private var screen = VirtualScreen.shared
 
-    var body: some View {
+    var klBody: some View {
         Section {
             Toggle("VS Code 在虚拟屏幕中运行", isOn: Binding(get: { screen.isOn }, set: { on in
                 if on != screen.isOn { screen.toggle() }
             }))
             if screen.isOn {
-                LabeledContent("虚拟屏幕中的窗口", value: L("%lld 个", count: screen.windowCount))
+                KLLabeledContent("虚拟屏幕中的窗口", value: L("%lld 个", count: screen.windowCount))
             }
         } header: {
             Text("VS Code")
@@ -298,14 +298,14 @@ private struct VirtualScreenSection: View {
     }
 }
 
-struct GeneralPane: View {
+struct GeneralPane: KLView {
     @State private var config = AppState.shared.config
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var launchAtLogin = KLLoginItem.enabled
     /// 节省 token 分组里开关下面的说明：图片缩小省了多少、哪台电脑缩不了图（问各台在线的 watcher，见 loadSavers）
     @State private var leanSaved: String?
     @State private var leanUnable: String?
 
-    var body: some View {
+    var klBody: some View {
         Form {
             ProfileSection()
             LookSection()
@@ -437,7 +437,7 @@ struct GeneralPane: View {
                 }
                 // 识别引擎：普通话用本机 Fun-ASR-Nano（下载中显示进度）
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    LabeledContent("识别引擎", value: config.mobile.voiceLocale == "zh-CN" ? ServerLang.ui(LocalASR.statusText) : L("系统语音识别"))
+                    KLLabeledContent("识别引擎", value: config.mobile.voiceLocale == "zh-CN" ? ServerLang.ui(LocalASR.statusText) : L("系统语音识别"))
                 }
             }
             if VirtualScreen.supported { VirtualScreenSection() }
@@ -446,7 +446,7 @@ struct GeneralPane: View {
                 Toggle("安装网页测试技能", isOn: binding(\.mobile.installTestSkill))
                 Toggle("安装待办与关键信息技能", isOn: binding(\.mobile.installTodoSkill))
                 Toggle("安装任务阶段技能", isOn: binding(\.mobile.installStageSkill))
-                LabeledContent("其他编程 agent") {
+                KLLabeledContent("其他编程 agent") {
                     Button("在「插件」中管理") { SettingsWindowController.shared.show(tab: .plugins) }
                 }
             } header: {
@@ -478,7 +478,7 @@ struct GeneralPane: View {
                     Text("Agent 所在的电脑").tag("server")
                 }
                 Stepper(value: binding(\.mobile.browserMax), in: 1...16) {
-                    LabeledContent("最多同时打开", value: L("%d 个", config.mobile.browserMax))
+                    KLLabeledContent("最多同时打开", value: L("%d 个", config.mobile.browserMax))
                 }
                 Toggle("录下浏览器操作，可以回放", isOn: binding(\.mobile.browserRecord))
                 Picker("空闲多久后关闭", selection: binding(\.mobile.browserIdle)) {
@@ -495,11 +495,11 @@ struct GeneralPane: View {
             }
             Section("启动") {
                 Toggle("登录时自动打开 Kiteline", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, on in
+                    .klOnChange(of: launchAtLogin) { _, on in
                         do {
-                            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                            if on { try KLLoginItem.register() } else { try KLLoginItem.unregister() }
                         } catch {
-                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                            launchAtLogin = KLLoginItem.enabled
                             KitelineModel.alert(L("设置失败"), error.localizedDescription)
                         }
                     }
@@ -517,7 +517,7 @@ struct GeneralPane: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
+        .klFormStyleGrouped()
         .frame(width: SettingsWindowController.width, height: 720)
     }
 
@@ -595,10 +595,10 @@ struct GeneralPane: View {
 
 // MARK: - 定时任务
 
-struct SchedulesPane: View {
+struct SchedulesPane: KLView {
     @State private var tasks: [Scheduler.Task] = []
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("到达设定时间后，在项目的 VS Code 窗口中新建会话并将任务发送给 Claude。新建方式：在主窗口「新任务」或手机端新任务中选择「定时」。")
@@ -658,7 +658,7 @@ struct SchedulesPane: View {
 
 // MARK: - 设备
 
-struct DevicesPane: View {
+struct DevicesPane: KLView {
     @State private var devices: [DeviceStore.Device] = []
     @State private var online: Set<String> = []
 
@@ -671,7 +671,7 @@ struct DevicesPane: View {
         return "laptopcomputer"
     }
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("每台已配对的手机都有独立的密钥。如手机丢失或不再使用，可在此停用：密钥将失效、连接断开，并停止向其推送。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
@@ -741,10 +741,10 @@ struct DevicesPane: View {
 
 // MARK: - 操作记录
 
-struct AuditPane: View {
+struct AuditPane: KLView {
     @State private var entries: [[String: Any]] = []
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("记录手机与对话页的所有操作：发送消息、确认、新建任务、恢复会话、修改设置、配对。失败的操作以红色标示。")
@@ -795,7 +795,7 @@ struct AuditPane: View {
 
 // MARK: - 快捷短语
 
-struct PhrasesPane: View {
+struct PhrasesPane: KLView {
     @State private var items: [Phrase] = AppState.shared.config.mobile.quickReplies.map(Phrase.init)
     @State private var selection: Phrase.ID?
 
@@ -805,7 +805,7 @@ struct PhrasesPane: View {
         init(_ text: String) { self.text = text }
     }
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("显示在对话页输入框上方：点击直接发送给 Claude，长按则填入输入框以便编辑。手机与 Mac 共用此列表。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
@@ -854,7 +854,7 @@ struct PhrasesPane: View {
 
 // MARK: - 手机访问
 
-struct PhonePane: View {
+struct PhonePane: KLView {
     @ObservedObject var model = KitelineModel.shared
     @State private var addresses: [(label: String, base: String)] = []
     @State private var selected = 0
@@ -869,7 +869,7 @@ struct PhonePane: View {
         return PhoneAccess.pairingLink(base: addresses[selected].base, token: token)
     }
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: 22) {
             VStack(spacing: 12) {
                 ZStack {
@@ -928,7 +928,7 @@ struct PhonePane: View {
                         // 过期了、被用掉了（服务里的码已经不是它）就自动换新的：窗口一直开着时，大字显示的旧码输了只会被拒
                         .task {
                             while !Task.isCancelled {
-                                try? await Task.sleep(for: .seconds(1))
+                                try? await Task.sleep(seconds: 1)
                                 // 二维码里的令牌用掉了（有设备扫码配上了）或过期了：换一个
                                 if !token.isEmpty, !AppState.shared.mobile.linkTokenValid(token) {
                                     token = AppState.shared.mobile.newLinkToken()
@@ -1069,7 +1069,7 @@ enum PhoneAccess {
 
 // MARK: - 来源
 
-struct SourcesPane: View {
+struct SourcesPane: KLView {
     @ObservedObject var model = KitelineModel.shared
     @State private var adding = false
     /// 添加另一台装了 Kiteline 的电脑（PeerComputers）
@@ -1082,7 +1082,7 @@ struct SourcesPane: View {
     @State private var busy = false
     @State private var message = ""
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Kiteline 监听以下机器上的 Claude Code：本机、你在 VS Code 中通过 Remote-SSH 连接的远端主机，以及添加的其他 Kiteline 电脑。首次连接远端时将自动部署观察器。")
                 .font(.app(size: 12)).foregroundStyle(.secondary)
@@ -1176,7 +1176,7 @@ struct SourcesPane: View {
     }
 }
 
-struct SourceRow: View {
+struct SourceRow: KLView {
     let source: SourceItem
     @State private var hovering = false
     /// 设备详情（IP、系统、CPU、内存、装了哪些 agent）：和手机同一个面板
@@ -1188,7 +1188,7 @@ struct SourceRow: View {
     @State private var draft = ""
     @FocusState private var focused: Bool
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 12) {
             Image(systemName: source.kind == .ssh ? "server.rack" : (source.kind == .kiteline ? "desktopcomputer" : "laptopcomputer"))
                 .font(.app(size: 16))
@@ -1204,7 +1204,7 @@ struct SourceRow: View {
                             .focused($focused)
                             .onSubmit(commit)
                             .onExitCommand { editing = false }
-                            .onChange(of: focused) { _, on in if !on, editing { commit() } }
+                            .klOnChange(of: focused) { _, on in if !on, editing { commit() } }
                     } else {
                         Text(source.name).font(.app(size: 13, weight: .semibold))
                             .onTapGesture(count: 2, perform: startEditing)
@@ -1280,14 +1280,14 @@ struct SourceRow: View {
 
 /// 已添加的 Kiteline 电脑：在线状态、连不上的原因、移除（来源行在上面的列表里，按对方的来源自动增删）
 /// 会话都在后台运行后自动关掉项目的 VS Code 窗口（开关），以及一次关掉所有「没有会话在运行」的窗口（见 EditorWindows.swift）
-struct EditorWindowsCard: View {
+struct EditorWindowsCard: KLView {
     @State private var auto = AppState.shared.config.mobile.hostedCloseEditor
     @State private var idle: [String] = []
     @State private var closing = false
     @State private var note = ""
     private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: Binding(get: { auto }, set: { on in
                 auto = on
@@ -1346,12 +1346,12 @@ struct EditorWindowsCard: View {
     }
 }
 
-struct PeerComputersCard: View {
+struct PeerComputersCard: KLView {
     @State private var peers = PeerComputers.shared.all
     @State private var problems = PeerComputers.shared.problems
     private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
-    var body: some View {
+    var klBody: some View {
         if !peers.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(peers) { peer in
@@ -1402,7 +1402,7 @@ struct PeerComputersCard: View {
 }
 
 /// 添加 Kiteline 电脑：列出局域网里找到的，或手输地址；再输那台电脑「手机访问」页上的 6 位验证码，那台电脑上点「允许」
-struct AddPeerCard: View {
+struct AddPeerCard: KLView {
     var done: () -> Void
     @StateObject private var finder = PeerFinder()
     @State private var address = ""
@@ -1412,7 +1412,7 @@ struct AddPeerCard: View {
     @State private var busy = false
     @State private var message = ""
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("添加 Kiteline 电脑").font(.app(size: 13, weight: .semibold))
             Text("在那台电脑上打开 Kiteline「设置 → 手机访问」，填入它的地址和页面上显示的 6 位验证码，再到那台电脑上点「允许」。两台电脑之间直接连接（局域网、公网 IP 或你自己的组网），不经过 Kiteline 的中继。")
@@ -1432,7 +1432,7 @@ struct AddPeerCard: View {
                 }
             }
             TextField("地址（IP 或域名，如 192.168.1.20；端口不是 8766 时写成 IP:端口）", text: $address)
-                .onChange(of: address) { _, _ in if picked != nil, !busy { fingerprint = nil; picked = nil } }
+                .klOnChange(of: address) { _, _ in if picked != nil, !busy { fingerprint = nil; picked = nil } }
             TextField("6 位验证码", text: $code)
             if !message.isEmpty {
                 Text(message).font(.app(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -1482,8 +1482,8 @@ struct AddPeerCard: View {
 
 // MARK: - 权限
 
-struct PermissionsPane: View {
-    var body: some View {
+struct PermissionsPane: KLView {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             PermissionsList()
             Text("自行构建的 App 每次重新构建后，macOS 可能要求重新授予以上权限。")
@@ -1496,14 +1496,14 @@ struct PermissionsPane: View {
 }
 
 /// 各项权限的卡片（设置 → 权限、第一次打开的引导第二步共用）：每 2 秒刷新一次，去系统设置里打开了回来马上能看到
-struct PermissionsList: View {
+struct PermissionsList: KLView {
     @State private var accessibility = AXIsProcessTrusted()
     @State private var speech = Transcriber.status
     @State private var notifications = "unknown"
     @State private var localNetwork = LocalNetwork.status
     private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             permission("hand.raised", ServerLang.ui(Delivery.accessibilityName), accessibility,
                        L("用于将手机发送的消息粘贴到 VS Code 中的会话并提交，以及操作确认框。未授权时，手机消息将无法送达。")
@@ -1581,8 +1581,8 @@ struct PermissionsList: View {
 
 // MARK: - 关于
 
-struct AboutPane: View {
-    var body: some View {
+struct AboutPane: KLView {
+    var klBody: some View {
         VStack(spacing: 14) {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 110, height: 110)
                 .shadow(color: .black.opacity(0.25), radius: 14, y: 6)

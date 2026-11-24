@@ -3,12 +3,12 @@ import SwiftUI
 import KitelineKit
 
 /// 设置 → 远程访问：点对点直连 + 中继兜底，不需要账号。这里开关、填自建中继、看哪些手机能远程连
-struct RemotePane: View {
+struct RemotePane: KLView {
     @StateObject private var model = RemoteModel()
     @State private var relay = AppState.shared.config.mobile.relayURL
     @State private var showLogs = false
 
-    var body: some View {
+    var klBody: some View {
         Form {
             Section {
                 Toggle("开启远程访问", isOn: Binding(get: { model.enabled }, set: { model.setEnabled($0) }))
@@ -18,7 +18,7 @@ struct RemotePane: View {
             }
             if model.enabled {
                 Section("状态") {
-                    LabeledContent("连接") {
+                    KLLabeledContent("连接") {
                         HStack(spacing: 6) {
                             Circle().fill(model.status.online ? Color.green : (model.status.state == "starting" ? .orange : .red))
                                 .frame(width: 8, height: 8)
@@ -26,12 +26,12 @@ struct RemotePane: View {
                         }
                     }
                     if let relay = model.status.relay, !relay.isEmpty {
-                        LabeledContent("中继", value: relay.replacingOccurrences(of: ".link./", with: ".link").replacingOccurrences(of: "https://", with: ""))
+                        KLLabeledContent("中继", value: relay.replacingOccurrences(of: ".link./", with: ".link").replacingOccurrences(of: "https://", with: ""))
                     }
                     if let error = model.status.error, !error.isEmpty {
                         Text(error).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                     }
-                    LabeledContent("可远程连接的手机") {
+                    KLLabeledContent("可远程连接的手机") {
                         Text(model.phones.isEmpty ? L("暂无（在同一 Wi-Fi 下完成配对后显示）") : model.phones.joined(separator: "、"))
                             .foregroundStyle(model.phones.isEmpty ? .secondary : .primary)
                     }
@@ -55,7 +55,7 @@ struct RemotePane: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .klFormStyleGrouped()
         .frame(width: SettingsWindowController.width)
         .onAppear { model.reload() }
         .sheetPanel(isPresented: $showLogs) {

@@ -16,7 +16,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     private init() {
         let hosting = NSHostingController(rootView: OnboardingFlow(model: model).tarsLook(wrapButtons: true))
-        hosting.sizingOptions = []
+        if #available(macOS 13, *) { hosting.sizingOptions = [] }
         let window = NSWindow(contentViewController: hosting)
         // 同别的弹窗（11-02 反馈：要有标题栏、全屏、关闭）：标题栏写明是什么，红黄绿钮都能用，绿钮铺满屏幕
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -196,12 +196,12 @@ final class OnboardingModel: ObservableObject {
 
 // MARK: - 窗口内容
 
-struct OnboardingFlow: View {
+struct OnboardingFlow: KLView {
     @ObservedObject var model: OnboardingModel
     /// 拉大、全屏时步骤条和内容不再变宽，居中
     private static let readable: CGFloat = 940
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             StepBar(model: model)
                 .frame(maxWidth: Self.readable)
@@ -258,10 +258,10 @@ struct OnboardingFlow: View {
 }
 
 /// 顶上的四步：序号圈 +「第一步」+ 标题；当前一步淡强调色底 + 细边，做过的打勾。点了直接跳过去
-private struct StepBar: View {
+private struct StepBar: KLView {
     @ObservedObject var model: OnboardingModel
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 8) {
             ForEach(OnboardingModel.Step.allCases) { step in
                 let current = step == model.step
@@ -302,11 +302,11 @@ private struct StepBar: View {
 }
 
 /// 每一步的标题 + 一段说明
-private struct StepHeader: View {
+private struct StepHeader: KLView {
     let title: String
     let detail: String
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.app(size: 21, weight: .semibold))
             Text(detail).font(.app(size: 13)).foregroundStyle(.secondary)
@@ -316,12 +316,12 @@ private struct StepHeader: View {
 }
 
 /// 一行开关：左边标题 + 说明，开关靠右
-private struct SwitchRow: View {
+private struct SwitchRow: KLView {
     let title: String
     let detail: String
     @Binding var isOn: Bool
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.app(size: 13, weight: .semibold))
@@ -336,11 +336,11 @@ private struct SwitchRow: View {
 
 // MARK: 第一步 了解 Kiteline
 
-private struct AgentsStep: View {
+private struct AgentsStep: KLView {
     @ObservedObject var model: OnboardingModel
     @State private var showForm = false
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 18) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
@@ -370,7 +370,7 @@ private struct AgentsStep: View {
 
             feedback
         }
-        .onChange(of: model.agents) { _, agents in
+        .klOnChange(of: model.agents) { _, agents in
             // 一个都没检测到：直接展开填写框
             if let agents, !agents.contains(where: \.installed) { showForm = true }
         }
@@ -448,7 +448,7 @@ private struct AgentsStep: View {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.note)
                         .font(.app(size: 13))
-                        .scrollContentBackground(.hidden)
+                        .klScrollContentBackground(.hidden)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 6)
                     if model.note.isEmpty {
@@ -477,10 +477,10 @@ private struct AgentsStep: View {
 
 // MARK: 第二步 授予权限
 
-private struct PermissionsStep: View {
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+private struct PermissionsStep: KLView {
+    @State private var launchAtLogin = KLLoginItem.enabled
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             StepHeader(title: L("授予必要的权限"),
                        detail: L("Kiteline 需要以下权限，才能把你在手机上发送的消息和确认操作送到电脑上的会话中。其中第一项必须开启，其余可按需开启。"))
@@ -488,11 +488,11 @@ private struct PermissionsStep: View {
             SwitchRow(title: L("登录时自动打开 Kiteline"), detail: L("推荐开启：电脑开机后手机即可连接，无需手动打开。"),
                       isOn: Binding(get: { launchAtLogin }, set: { on in
                 do {
-                    if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                    if on { try KLLoginItem.register() } else { try KLLoginItem.unregister() }
                 } catch {
                     Log.write("切换登录时自动打开失败：\(error.localizedDescription)")
                 }
-                launchAtLogin = SMAppService.mainApp.status == .enabled
+                launchAtLogin = KLLoginItem.enabled
             }))
         }
     }
@@ -500,7 +500,7 @@ private struct PermissionsStep: View {
 
 // MARK: 第三步 连接手机
 
-private struct PhoneStep: View {
+private struct PhoneStep: KLView {
     static let appStore = "https://apps.apple.com/cn/app/kiteline/id6825244029"
     @State private var link: String?
     @State private var token = ""
@@ -508,7 +508,7 @@ private struct PhoneStep: View {
     @State private var expiry = Date()
     @State private var paired = DeviceStore.shared.all.count
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 18) {
             StepHeader(title: L("在手机上使用 Kiteline"),
                        detail: L("iPhone 安装 Kiteline App，安卓手机使用 Kiteline 微信小程序；与这台电脑配对后，即可在手机上查看会话、回复消息和处理确认请求。Apple Watch App 随 iPhone 自动安装。"))
@@ -543,7 +543,7 @@ private struct PhoneStep: View {
         .task {
             // 码过期、二维码被扫过就换新的；顺便看有没有新配上的手机
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(seconds: 1)
                 if !token.isEmpty, !AppState.shared.mobile.linkTokenValid(token) { reloadLink() }
                 let current = AppState.shared.mobile.pairingCode
                 if Date() >= expiry || current.isEmpty {
@@ -638,10 +638,10 @@ private struct PhoneStep: View {
 
 // MARK: 第四步 虚拟屏幕
 
-private struct ScreenStep: View {
+private struct ScreenStep: KLView {
     @ObservedObject private var screen = VirtualScreen.shared
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 18) {
             StepHeader(title: L("让 VS Code 在虚拟屏幕中运行"),
                        detail: L("你在手机上发送消息时，Kiteline 需要切换到 VS Code，把消息填进对应的会话并提交。开启虚拟屏幕后，VS Code 的窗口会放到一块看不见的屏幕上：消息送达时不会弹到你面前、不打断你正在做的事，完成后自动回到你原来使用的程序。"))

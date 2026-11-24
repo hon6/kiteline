@@ -96,31 +96,32 @@ struct StoreRelease: Codable, Equatable {
     }
 }
 
-@MainActor @Observable
-final class AppUpdates {
+@MainActor 
+final class AppUpdates: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = AppUpdates()
     /// 官网的各平台最新版（relay/download.sh 发布时写）；旧版电脑端没有更新接口时手机自己看它
     nonisolated static let feed = URL(string: "https://tars.betac.cn/download/latest.json")!
     /// 「以后再说」之后多久再弹
     static let snoozeFor: TimeInterval = 24 * 3600
 
-    private(set) var store: StoreRelease?
-    private(set) var hostOffer: UpdateOffer?
-    private(set) var hostState: HostUpdateState?
+    @Tracked private(set) var store: StoreRelease?
+    @Tracked private(set) var hostOffer: UpdateOffer?
+    @Tracked private(set) var hostState: HostUpdateState?
     /// 从手机上让电脑更新、重启完了的版本：面板里那一项显示「已更新」
-    private(set) var hostDone: String?
+    @Tracked private(set) var hostDone: String?
     /// 正在弹的面板里列的几项；nil = 没在弹
-    var prompt: [UpdateOffer]?
+    @Tracked var prompt: [UpdateOffer]?
     /// 勾了「不再提示」的（UpdateOffer.id）
-    private(set) var skipped: Set<String>
+    @Tracked private(set) var skipped: Set<String>
 
-    @ObservationIgnored private var snoozed: [String: Double]
-    @ObservationIgnored private weak var model: AppModel?
-    @ObservationIgnored private var storeChecked: Date?
+    private var snoozed: [String: Double]
+    private weak var model: AppModel?
+    private var storeChecked: Date?
     /// 官网 latest.json 上次取到的（旧版电脑端用；一小时内不重复取，三十几 KB）
-    @ObservationIgnored private var feedCache: (at: Date, json: [String: Any], notes: [String: [[String: Any]]])?
-    @ObservationIgnored private var promptTask: Task<Void, Never>?
-    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    private var feedCache: (at: Date, json: [String: Any], notes: [String: [[String: Any]]])?
+    private var promptTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
 
     private static let storeKey = "updateStoreRelease"
     private static let skippedKey = "updateSkipped"
@@ -305,7 +306,7 @@ final class AppUpdates {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             for _ in 0..<900 {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(seconds: 1)
                 guard let self, !Task.isCancelled, let model = self.model, self.hostState?.busy == true,
                       let offer = self.hostOffer, case .host(let platform, let name) = offer.kind else { return }
                 guard model.connected, let reply = try? await model.api.get("/api/host-update") else { continue }
@@ -348,7 +349,7 @@ final class AppUpdates {
         guard !due.isEmpty, promptTask == nil else { return }
         promptTask = Task { [weak self] in
             defer { self?.promptTask = nil }
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(seconds: 3)
             for attempt in 0..<60 {
                 guard let self, !Task.isCancelled else { return }
                 let offers = self.due
@@ -358,7 +359,7 @@ final class AppUpdates {
                     self.present(offers)
                     return
                 }
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(seconds: 5)
             }
         }
     }
@@ -402,7 +403,7 @@ final class AppUpdates {
             ]))
             hostOffer = offers.last
         }
-        if !offers.isEmpty { Task { try? await Task.sleep(for: .seconds(1.5)); self.prompt = offers } }
+        if !offers.isEmpty { Task { try? await Task.sleep(seconds: 1.5); self.prompt = offers } }
     }
     #endif
 }

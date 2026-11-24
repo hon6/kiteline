@@ -5,8 +5,8 @@ import SwiftUI
 
 // MARK: 今日动态
 
-struct TodayView: View {
-    @Environment(AppModel.self) private var model
+struct TodayView: KLView {
+    @EnvModel private var model
     @State private var range = "today"
     @State private var payload: DigestPayload?
     @State private var error: String?
@@ -15,7 +15,7 @@ struct TodayView: View {
 
     private var title: String { ["today": L("今日动态"), "yesterday": L("昨日动态"), "week": L("近 7 天动态")][range] ?? L("今日动态") }
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Picker("范围", selection: $range) {
@@ -33,10 +33,17 @@ struct TodayView: View {
                     if payload.sessions.isEmpty { PageNote(text: "此期间暂无 Claude Code 动态。") }
                     ForEach(payload.sessions) { DigestCard(session: $0) }
                     ForEach(payload.errors, id: \.self) { PageNote(text: $0) }
+                    #if os(iOS) || KL_MODERN
                     NavigationLink(value: Route.usage) {
                         LinkRow(title: L("用量报表（按天、模型、项目）"))
                     }
                     .buttonStyle(.steady(.plain))
+                    #else
+                    RouteLink(value: Route.usage) {
+                        LinkRow(title: L("用量报表（按天、模型、项目）"))
+                    }
+                    .buttonStyle(.steady(.plain))
+                    #endif
                     if let at = payload.generatedAt {
                         Text("生成于 \(Format.messageTime(at)) · 统计所有在线来源，包括已关闭的会话")
                             .font(.ui(.caption)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
@@ -96,12 +103,12 @@ struct TodayView: View {
 }
 
 /// 一个会话在这段时间里做了什么：几轮、改了哪些文件、测试、结论、截图
-struct DigestCard: View {
+struct DigestCard: KLView {
     let session: DigestSession
     @State private var expanded = false
     @State private var allFiles = false
 
-    var body: some View {
+    var klBody: some View {
         let s = session
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -135,7 +142,7 @@ struct DigestCard: View {
                     }
                     .padding(12)
                     .background(Theme.tile, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .onTapGesture { guard TouchTravel.isTap else { return }; withAnimation(.snappy) { expanded.toggle() } }
+                    .onTapGesture { guard TouchTravel.isTap else { return }; withAnimation(.klSnappy) { expanded.toggle() } }
             }
             if !s.files.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -166,12 +173,21 @@ struct DigestCard: View {
             }
             HStack {
                 Spacer()
+                #if os(iOS) || KL_MODERN
                 NavigationLink(value: Route.chat(s.id)) {
                     // 字只有一行高：点击区域上下各扩 8、左边扩 12，排版上再收回来
                     Text(s.live ? "打开对话 ›" : "查看对话 ›").font(.ui(.subheadline).weight(.medium))
                         .padding(.vertical, 8).padding(.leading, 12)
                         .contentShape(Rectangle())
                 }
+                #else
+                RouteLink(value: Route.chat(s.id)) {
+                    // 字只有一行高：点击区域上下各扩 8、左边扩 12，排版上再收回来
+                    Text(s.live ? "打开对话 ›" : "查看对话 ›").font(.ui(.subheadline).weight(.medium))
+                        .padding(.vertical, 8).padding(.leading, 12)
+                        .contentShape(Rectangle())
+                }
+                #endif
             }
             .padding(.vertical, -8)
         }
@@ -205,7 +221,7 @@ struct DigestCard: View {
             Text(name)
             if let edits = file.edits, edits > 1 { Text(" ×\(edits)").foregroundStyle(.secondary).font(.ui(.caption2)) }
         }
-        .font(.ui(.footnote, design: .monospaced)).fontDesign(nil)
+        .font(.ui(.footnote, design: .monospaced)).klFontDesign(nil)
         .lineLimit(1)
         .truncationMode(.head)
     }
@@ -213,8 +229,8 @@ struct DigestCard: View {
 
 // MARK: 用量
 
-struct UsageView: View {
-    @Environment(AppModel.self) private var model
+struct UsageView: KLView {
+    @EnvModel private var model
     @State var days = 7
     @State private var payload: UsagePayload?
     @State private var budget = Budget()
@@ -227,7 +243,7 @@ struct UsageView: View {
 
     enum BudgetKind: String, Identifiable { case daily, cap; var id: String { rawValue } }
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 // 订阅额度（各台电脑的 5 小时 / 本周）：首页卡片上那几条，宽屏时一台电脑一栏
@@ -278,7 +294,7 @@ struct UsageView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .sheetPanel(isPresented: $showBrag) { BragShareSheet().environment(model) }
+        .sheetPanel(isPresented: $showBrag) { BragShareSheet().environment(\.appModelSlot, model) }
         .updating(refreshing && payload != nil)
         .task(id: days) {
             // 先显示上次存的（这个范围的用量、预算、额度），再静默取新的
@@ -290,7 +306,7 @@ struct UsageView: View {
         // 额度每 5 分钟重拉一次（同首页）
         .task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))
+                try? await Task.sleep(seconds: 300)
                 if !Task.isCancelled, let fresh = try? await model.api.getCaching(LimitsPayload.self, "/api/limits") { limits = fresh.devices }
             }
         }
@@ -321,6 +337,7 @@ struct UsageView: View {
         ], columns: 3)
         if r.days.count > 1 {
             SectionLabel(text: L("每天花费"))
+            #if os(iOS) || KL_MODERN
             Chart {
                 ForEach(r.days, id: \.day) { day in
                     BarMark(x: .value("日期", String(day.day.suffix(5)).replacingOccurrences(of: "-", with: "/")),
@@ -337,6 +354,12 @@ struct UsageView: View {
             .frame(height: 170)
             .padding(14)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            #else
+            DailyCostChart(days: r.days)
+            .frame(height: 170)
+            .padding(14)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            #endif
         }
         if r.agents.count > 1 {
             breakdown(L("按 Agent"), r.agents, total: t.cost) { L("%@ 次请求", "\(Int($0.requests.rounded()))") }
@@ -430,8 +453,8 @@ struct UsageView: View {
 
 // MARK: 历史会话
 
-struct HistoryView: View {
-    @Environment(AppModel.self) private var model
+struct HistoryView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @State private var query = ""
     @State private var sessions: [PastSession] = []
@@ -449,7 +472,7 @@ struct HistoryView: View {
     /// 只看某个项目（项目名 = 目录最后一级，几台设备上同名的算一个；空 = 全部项目）
     @AppStorage("historyProject") private var projectFilter = ""
 
-    var body: some View {
+    var klBody: some View {
         let base = sessions.filter(inScope)
         let shown = base.filter { matches($0, statusFilter) }
         List {
@@ -481,18 +504,18 @@ struct HistoryView: View {
         #if os(iOS)
         .listStyle(.insetGrouped)
         // 筛选条是第一行：去掉分组列表给第一组留的那一大截上边距（和搜索框之间只留一点）
-        .contentMargins(.top, 4, for: .scrollContent)
+        .klContentMargins(.top, 4, for: .scrollContent)
         #endif
         .overlay {
             if !loaded {
                 SkeletonPage(query.isEmpty ? "正在读取历史会话…" : "正在搜索…", style: query.isEmpty ? .history : .list(8)).background(Theme.pageBackground)
             } else if sessions.isEmpty {
-                ContentUnavailableView(query.isEmpty ? "暂无历史会话" : "未找到「\(query)」", systemImage: "clock.arrow.circlepath")
+                KLUnavailableView(query.isEmpty ? "暂无历史会话" : "未找到「\(query)」", systemImage: "clock.arrow.circlepath")
             } else if shown.isEmpty {
-                ContentUnavailableView {
+                KLUnavailableView {
                     Label(query.isEmpty ? "暂无\(filterName)" : "\(filterName)中未找到「\(query)」", systemImage: "line.3.horizontal.decrease")
                 } actions: {
-                    Button(query.isEmpty ? "显示全部" : "在全部会话中搜索") { withAnimation(.snappy) { clearFilters() } }
+                    Button(query.isEmpty ? "显示全部" : "在全部会话中搜索") { withAnimation(.klSnappy) { clearFilters() } }
                 }
             }
         }
@@ -516,7 +539,7 @@ struct HistoryView: View {
                 loaded = true
             }
             // 打字时等一下再搜
-            if !query.isEmpty { try? await Task.sleep(for: .milliseconds(400)) }
+            if !query.isEmpty { try? await Task.sleep(milliseconds: 400) }
             guard !Task.isCancelled else { return }
             await load()
         }
@@ -601,7 +624,7 @@ struct HistoryView: View {
                         FilterChip(title: option.1, count: base.filter { matches($0, option.0) }.count, dot: option.2,
                                    selected: statusFilter == option.0) {
                             Haptics.tap()
-                            withAnimation(.snappy) { statusFilter = statusFilter == option.0 && option.0 != "all" ? "all" : option.0 }
+                            withAnimation(.klSnappy) { statusFilter = statusFilter == option.0 && option.0 != "all" ? "all" : option.0 }
                         }
                     }
                 }
@@ -620,14 +643,14 @@ struct HistoryView: View {
     /// 「显示方式」：分组放在一个菜单里，按钮上写着现在怎么分
     private var viewMenu: some View {
         Menu {
-            Picker("分组", selection: $grouping.animation(.snappy)) {
+            Picker("分组", selection: $grouping.animation(.klSnappy)) {
                 ForEach(Self.groupOptions, id: \.0) { option in Text(option.1).tag(option.0) }
             }
             .pickerStyle(.inline)
             if grouping != "none" || isFiltering {
                 Section {
                     Button {
-                        withAnimation(.snappy) { grouping = "none"; clearFilters() }
+                        withAnimation(.klSnappy) { grouping = "none"; clearFilters() }
                     } label: { Label("恢复默认", systemImage: "arrow.counterclockwise") }
                 }
             }
@@ -710,12 +733,12 @@ struct HistoryView: View {
     }
 }
 
-struct PastRow: View {
+struct PastRow: KLView {
     let session: PastSession
     let searching: Bool
     var query = ""
 
-    var body: some View {
+    var klBody: some View {
         HStack(alignment: .top, spacing: 12) {
             Avatar(text: Format.initials(session.title), size: 40)
             VStack(alignment: .leading, spacing: 4) {
@@ -765,8 +788,8 @@ struct PastRow: View {
 
 // MARK: 项目
 
-struct ProjectsView: View {
-    @Environment(AppModel.self) private var model
+struct ProjectsView: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @State private var projects: [ProjectInfo] = []
     @State private var cost7: [String: Double] = [:]
@@ -780,7 +803,7 @@ struct ProjectsView: View {
     /// 后台在取新的（页面上先显示着上次存的）
     @State private var refreshing = false
 
-    var body: some View {
+    var klBody: some View {
         let shown = projects.filter { p in
             filter == "all" || (filter == "active" && (lives(p).count > 0 || p.today > 0)) || (filter == "dirty" && p.dirty)
         }
@@ -880,12 +903,12 @@ struct ProjectsView: View {
 }
 
 /// 项目卡片：头像、名字、目录、状态；git 一行；最近提交；今天几个会话、7 天花费
-struct ProjectCard: View {
+struct ProjectCard: KLView {
     let project: ProjectInfo
     let lives: [SessionInfo]
     let cost7: Double
 
-    var body: some View {
+    var klBody: some View {
         let p = project
         let waiting = lives.filter(\.isWaiting).count
         let busy = lives.filter(\.isBusy).count
@@ -909,7 +932,7 @@ struct ProjectCard: View {
             } else if p.hasGit {
                 gitLine.font(.ui(.caption))
                 if let commit = p.lastCommit {
-                    (Text((p.lastHash ?? "") + " ").font(.ui(.caption).monospaced()).fontDesign(nil).foregroundColor(.secondary)
+                    (Text((p.lastHash ?? "") + " ").font(.ui(.caption).monospaced()).klFontDesign(nil).foregroundColor(.secondary)
                      + Text(commit).foregroundColor(.primary)
                      + Text(p.lastCommitAt.map { "  \(Bytes.relative($0))" } ?? "").foregroundColor(.secondary))
                         .font(.ui(.caption)).lineLimit(1)
@@ -948,11 +971,11 @@ struct StatCard: Hashable {
 }
 
 /// 一格一个数（今日动态、用量顶上那几格）
-struct StatGrid: View {
+struct StatGrid: KLView {
     let cards: [StatCard]
     var columns = 3
 
-    var body: some View {
+    var klBody: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: columns), spacing: 10) {
             ForEach(cards, id: \.self) { card in
                 VStack(alignment: .leading, spacing: 3) {
@@ -970,11 +993,11 @@ struct StatGrid: View {
     }
 }
 
-struct Chip: View {
+struct Chip: KLView {
     let text: String
     var color: Color? = nil
 
-    var body: some View {
+    var klBody: some View {
         Text(text).font(.ui(.caption))
             .foregroundStyle(color ?? .secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)
@@ -982,17 +1005,17 @@ struct Chip: View {
     }
 }
 
-struct SectionLabel: View {
+struct SectionLabel: KLView {
     let text: String
-    var body: some View {
+    var klBody: some View {
         Text(text).font(.ui(.footnote).weight(.semibold)).foregroundStyle(.secondary).padding(.leading, 4).padding(.top, 4)
     }
 }
 
-struct PageNote: View {
+struct PageNote: KLView {
     let text: String
     var color: Color? = nil
-    var body: some View {
+    var klBody: some View {
         Text(text).font(.ui(.footnote)).foregroundStyle(color ?? .secondary).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4)
     }
@@ -1000,22 +1023,29 @@ struct PageNote: View {
 
 /// 页面已经显示着上次存的数据、后台在取新的：导航栏右边一个小转圈「更新中」，取完消失（11-13：
 /// 进页面先给缓存，后台静默更新，更新时在某个位置转个圈）。没有缓存时页面自己照旧在中间转圈
-struct UpdatingMark: ViewModifier {
+struct UpdatingMark: KLViewModifier {
     let active: Bool
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content.toolbar {
+            #if os(macOS) && !KL_MODERN
+            // 兼容包：macOS 12 的工具栏里不能写 if（buildIf 要 13）：条目常在，转圈按条件出现
+            ToolbarItem(placement: .primaryAction) { if active { mark } }
+            #else
             if active {
-                ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("更新中").font(.ui(.caption)).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 6)
-                    .accessibilityElement(children: .combine)
-                }
+                ToolbarItem(placement: .primaryAction) { mark }
             }
+            #endif
         }
+    }
+
+    private var mark: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text("更新中").font(.ui(.caption)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 6)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1025,7 +1055,7 @@ extension View {
 }
 
 /// 一组入口（同系统设置的分组卡片）：图标一列对齐、标题、右边的值和「›」，行间细线从文字起
-struct EntryRows: View {
+struct EntryRows: KLView {
     struct Entry: Identifiable {
         let symbol: String
         let title: String
@@ -1035,7 +1065,7 @@ struct EntryRows: View {
     }
     let entries: [Entry]
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { Divider().padding(.leading, 48) }
@@ -1063,12 +1093,12 @@ struct EntryRows: View {
 }
 
 /// 一行「标题 … 值 ›」，可以单独成卡片
-struct LinkRow: View {
+struct LinkRow: KLView {
     let title: String
     var value: String? = nil
     var boxed = true
 
-    var body: some View {
+    var klBody: some View {
         HStack {
             Text(title).foregroundStyle(.primary)
             Spacer()
@@ -1082,8 +1112,78 @@ struct LinkRow: View {
     }
 }
 
-/// 一排排自动换行（标签用）
-struct FlowLayout: Layout {
+#if os(iOS) || KL_MODERN
+typealias FlowLayout = FlowLayoutImpl
+#else
+/// 一排排自动换行（标签用）。macOS 12 没有 Layout：排成一行、放不下横着滚（KLFlowFallback）
+struct FlowLayout<Content: View>: KLView {
+    var spacing: CGFloat = 6
+    let content: () -> Content
+
+    init(spacing: CGFloat = 6, @ViewBuilder content: @escaping () -> Content) {
+        self.spacing = spacing; self.content = content
+    }
+
+    var klBody: some View {
+        #if os(macOS) && !KL_MODERN
+        if #available(macOS 13, *) {
+            FlowLayoutImpl(spacing: spacing) { content() }
+        } else {
+            KLFlowFallback(spacing: spacing, content: content)
+        }
+        #elseif os(iOS) || KL_MODERN
+        FlowLayoutImpl(spacing: spacing) { content() }
+        
+        #else
+        if #available(macOS 13, iOS 16, *) {
+            FlowLayoutImpl(spacing: spacing) { content() }
+        } else {
+            KLFlowFallback(spacing: spacing, content: content)
+        }
+        #endif
+    }
+}
+#endif
+
+#if os(iOS) || KL_MODERN
+// 主包、iPhone 直接用 AnyLayout（见 Composer.swift），不需要它
+#else
+/// 能换行就换行、不能就排一行（输入框下那排按钮）：wrap 变了也是同一个视图（AnyLayout），不会重建
+struct FlowOrRow<Content: View>: KLView {
+    let wrap: Bool
+    var spacing: CGFloat = 6
+    let content: () -> Content
+
+    init(wrap: Bool, spacing: CGFloat = 6, @ViewBuilder content: @escaping () -> Content) {
+        self.wrap = wrap; self.spacing = spacing; self.content = content
+    }
+
+    var klBody: some View {
+        #if os(macOS) && !KL_MODERN
+        if #available(macOS 13, iOS 16, *) {
+            AnyLayout(wrap ? AnyLayout(FlowLayoutImpl(spacing: spacing)) : AnyLayout(HStackLayout(spacing: spacing))) { content() }
+        } else if wrap {
+            KLFlowFallback(spacing: spacing, content: content)
+        } else {
+            HStack(spacing: spacing) { content() }
+        }
+        #elseif os(iOS) || KL_MODERN
+        AnyLayout(wrap ? AnyLayout(FlowLayoutImpl(spacing: spacing)) : AnyLayout(HStackLayout(spacing: spacing))) { content() }
+        #else
+        if #available(macOS 13, iOS 16, *) {
+            AnyLayout(wrap ? AnyLayout(FlowLayoutImpl(spacing: spacing)) : AnyLayout(HStackLayout(spacing: spacing))) { content() }
+        } else if wrap {
+            KLFlowFallback(spacing: spacing, content: content)
+        } else {
+            HStack(spacing: spacing) { content() }
+        }
+        #endif
+    }
+}
+#endif
+
+@available(macOS 13, iOS 16, *)
+struct FlowLayoutImpl: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -1122,5 +1222,56 @@ struct FlowLayout: Layout {
             rows[rows.count - 1] = row
         }
         return rows.filter { !$0.items.isEmpty }
+    }
+}
+
+/// 每天花费的柱状图（记录的 + 估算的叠在一起）。Swift Charts 要 macOS 13：macOS 12 上自己画一排柱子
+private struct DailyCostChart: KLView {
+    let days: [UsageItem]
+
+    var klBody: some View {
+        #if os(macOS) && !KL_MODERN
+        if #available(macOS 13, *) { chart } else { bars }
+        #elseif os(iOS) || KL_MODERN
+        chart
+        #else
+        if #available(macOS 13, iOS 16, *) { chart } else { bars }
+        #endif
+    }
+
+    private static func label(_ day: String) -> String { String(day.suffix(5)).replacingOccurrences(of: "-", with: "/") }
+
+    @available(macOS 13, iOS 16, *)
+    private var chart: some View {
+        Chart {
+            ForEach(days, id: \.day) { day in
+                BarMark(x: .value("日期", Self.label(day.day)), y: .value("花费", max(0, day.cost - day.estimated)))
+                    .foregroundStyle(by: .value("类型", L("记录")))
+                BarMark(x: .value("日期", Self.label(day.day)), y: .value("花费", day.estimated))
+                    .foregroundStyle(by: .value("类型", L("估算")))
+            }
+        }
+        .chartForegroundStyleScale([L("记录"): Theme.added, L("估算"): Theme.added.opacity(0.4)])
+        .chartLegend(.hidden)
+        .chartYAxis { AxisMarks { value in AxisValueLabel { if let v = value.as(Double.self) { Text(Money.cost(v)) } } } }
+    }
+
+    private var bars: some View {
+        let top = max(days.map(\.cost).max() ?? 0, 0.0001)
+        return HStack(alignment: .bottom, spacing: 3) {
+            ForEach(days, id: \.day) { day in
+                VStack(spacing: 4) {
+                    GeometryReader { geo in
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            Rectangle().fill(Theme.added.opacity(0.4)).frame(height: geo.size.height * CGFloat(day.estimated / top))
+                            Rectangle().fill(Theme.added).frame(height: geo.size.height * CGFloat(max(0, day.cost - day.estimated) / top))
+                        }
+                    }
+                    Text(Self.label(day.day)).font(.ui(.caption2)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.6)
+                }
+                .help(Money.cost(day.cost))
+            }
+        }
     }
 }

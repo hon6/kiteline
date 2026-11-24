@@ -21,9 +21,9 @@ enum PadSide {
 }
 
 /// 左栏里一节的小标题（会话 7、活动中……），字对齐 16
-struct PadSectionTitle: View {
+struct PadSectionTitle: KLView {
     let text: String
-    var body: some View {
+    var klBody: some View {
         Text(text).font(.ui(.subheadline).weight(.semibold)).foregroundStyle(.secondary)
             .padding(.horizontal, PadSide.text).padding(.top, 10).padding(.bottom, 6)
     }
@@ -36,8 +36,8 @@ enum PadLayout {
 }
 
 /// 新版界面的左栏：图标栏 + 一栏内容
-struct PadNewSidebar: View {
-    @Environment(AppModel.self) private var model
+struct PadNewSidebar: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @AppStorage("padRail") private var rail = "sessions"
     @AppStorage(PadLayout.key) private var newLayout = false
@@ -47,7 +47,7 @@ struct PadNewSidebar: View {
     /// 项目栏里打开着的项目（id = 设备 + 目录）
     @AppStorage("padProject") private var projectID = ""
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 0) {
             railColumn
             // 分隔线只到顶栏下沿：别伸到搜索框后面（11-22 反馈：搜索框下面的线重叠）
@@ -55,10 +55,10 @@ struct PadNewSidebar: View {
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .environment(\.rowAvatar, false)
-        .fullScreenCover(item: $world) { cover in WorldScreen(page: cover.id).environment(model) }
-        .sheet(isPresented: $settings) { SettingsView().environment(model) }
+        .fullScreenCover(item: $world) { cover in WorldScreen(page: cover.id).environment(\.appModelSlot, model) }
+        .sheet(isPresented: $settings) { SettingsView().environment(\.appModelSlot, model) }
         .sheet(isPresented: $overview) {
-            NavigationStack {
+            KLNavigationStack {
                 OverviewPage()
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
@@ -71,7 +71,7 @@ struct PadNewSidebar: View {
                 overview = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { open(route) }
             })
-            .environment(model)
+            .environment(\.appModelSlot, model)
             .presentationSizing(.page)
         }
     }
@@ -103,7 +103,7 @@ struct PadNewSidebar: View {
             RailIcon(symbol: "cube.transparent", title: L("AR 模式"), on: false) { world = .init(id: "ar") }
             RailIcon(symbol: "gearshape", title: L("设置"), on: false) { settings = true }
             RailIcon(symbol: "rectangle.split.2x1", title: L("切换到经典界面"), on: false) {
-                withAnimation(.snappy) { newLayout = false }
+                withAnimation(.klSnappy) { newLayout = false }
             }
         }
         .padding(.vertical, 12)
@@ -122,14 +122,14 @@ struct PadNewSidebar: View {
 }
 
 /// 图标栏的一格：选中时整格淡淡的主题色底（不加单边色条），右上角数字角标
-private struct RailIcon: View {
+private struct RailIcon: KLView {
     let symbol: String
     let title: String
     let on: Bool
     var badge = 0
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 19, weight: on ? .semibold : .regular))
@@ -158,13 +158,13 @@ private struct RailIcon: View {
 // MARK: - 项目
 
 /// 项目栏：没打开项目时是项目列表（活动中 / 其他项目），打开了一个就换成它的会话 + 文件 / Git
-struct PadProjectsColumn: View {
-    @Environment(AppModel.self) private var model
+struct PadProjectsColumn: KLView {
+    @EnvModel private var model
     @Binding var projectID: String
 
-    var body: some View {
+    var klBody: some View {
         if let project = model.home.projects.first(where: { $0.id == projectID }) {
-            PadProjectPane(project: project) { withAnimation(.snappy) { projectID = "" } }
+            PadProjectPane(project: project) { withAnimation(.klSnappy) { projectID = "" } }
                 .id(project.id)
         } else {
             PadProjectList { projectID = $0.id }
@@ -174,13 +174,13 @@ struct PadProjectsColumn: View {
 }
 
 /// 项目列表：「活动中」（有会话开着的）在上、带「打开项目」；「其他项目」能收起
-private struct PadProjectList: View {
-    @Environment(AppModel.self) private var model
+private struct PadProjectList: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @AppStorage("padProjects.rest.open") private var restOpen = true
     let pick: (ProjectInfo) -> Void
 
-    var body: some View {
+    var klBody: some View {
         let all = model.home.projects.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }
         let active = all.filter { !lives($0).isEmpty }
         let rest = all.filter { lives($0).isEmpty }
@@ -201,7 +201,7 @@ private struct PadProjectList: View {
                     Text("暂无活动中的项目").font(.ui(.footnote)).foregroundStyle(.secondary).padding(.horizontal, PadSide.text).padding(.vertical, 6)
                 }
                 if !rest.isEmpty {
-                    Button { withAnimation(.snappy(duration: 0.18)) { restOpen.toggle() } } label: {
+                    Button { withAnimation(.klSnappy(duration: 0.18)) { restOpen.toggle() } } label: {
                         HStack(spacing: 4) {
                             Text("其他项目 \(rest.count)")
                             Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).rotationEffect(.degrees(restOpen ? 90 : 0))
@@ -220,7 +220,7 @@ private struct PadProjectList: View {
         .navigationTitle("项目")
         .refreshable { await model.home.refresh(model.api, force: true) }
         .overlay {
-            if all.isEmpty { ContentUnavailableView("暂无项目", systemImage: "folder", description: Text("在电脑上用 Claude Code 打开过的文件夹会显示在这里")) }
+            if all.isEmpty { KLUnavailableView("暂无项目", systemImage: "folder", description: Text("在电脑上用 Claude Code 打开过的文件夹会显示在这里")) }
         }
     }
 
@@ -258,8 +258,8 @@ private struct PadProjectList: View {
 
 /// 打开着的项目：顶上返回 + 项目名；上面是这个项目的会话（点了在右边分屏里开），下面是文件 / Git（同 Mac 新版的文件侧栏，
 /// 点文件、改动开成右边分屏里的标签）
-private struct PadProjectPane: View {
-    @Environment(AppModel.self) private var model
+private struct PadProjectPane: KLView {
+    @EnvModel private var model
     @Environment(\.openRoute) private var open
     @AppStorage("padProject.sessionsShare") private var share = 0.4
     @State private var dragStart: Double?
@@ -269,7 +269,7 @@ private struct PadProjectPane: View {
     let project: ProjectInfo
     let back: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         let lives = model.sessions.filter { $0.sourceId == project.sourceId && $0.cwd == project.cwd }
             .sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
         let codeKey = lives.first?.key ?? project.sessionKey
@@ -343,7 +343,7 @@ private struct PadProjectPane: View {
                     Text("没有开着的会话").font(.ui(.footnote)).foregroundStyle(.secondary).padding(.horizontal, PadSide.text).padding(.vertical, 6)
                 }
                 if !recent.isEmpty {
-                    Button { withAnimation(.snappy(duration: 0.18)) { recentOpen.toggle() } } label: {
+                    Button { withAnimation(.klSnappy(duration: 0.18)) { recentOpen.toggle() } } label: {
                         HStack(spacing: 4) {
                             Text(L("最近的会话 %lld", count: recent.count))
                             Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
@@ -401,12 +401,13 @@ private struct PadProjectPane: View {
 }
 /// 项目里「最近的会话」：单独存一份（不跟视图走：打开项目时视图会重建几次，挂在视图上的请求被取消、取到的也丢了），
 /// 一分钟内不重取。先按这台电脑 + 目录取；取到空的（老版本电脑不认这两个参数）再按项目名取、按目录筛
-@MainActor @Observable
-final class PadRecent {
+@MainActor 
+final class PadRecent: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = PadRecent()
-    private(set) var past: [String: [PastSession]] = [:]
-    private var loadedAt: [String: Date] = [:]
-    private var loading: Set<String> = []
+    @Tracked private(set) var past: [String: [PastSession]] = [:]
+    @Tracked private var loadedAt: [String: Date] = [:]
+    @Tracked private var loading: Set<String> = []
 
     func load(_ project: ProjectInfo, api: MacAPI) {
         let id = project.id

@@ -54,7 +54,7 @@ final class ProjectStripState: ObservableObject {
     }
 }
 
-struct ProjectStrip: View {
+struct ProjectStrip: KLView {
     let height: CGFloat
     @ObservedObject private var model = KitelineModel.shared
     @ObservedObject private var projects = ProjectsModel.shared
@@ -64,7 +64,7 @@ struct ProjectStrip: View {
     @State private var lit = "@all"
     @Namespace private var glide
 
-    var body: some View {
+    var klBody: some View {
         // 固定顺序（同浏览器标签，见 ProjectStripState.order）；关掉的不列，当前项目哪怕关过也列
         let items = ordered()
         ScrollViewReader { proxy in
@@ -100,14 +100,14 @@ struct ProjectStrip: View {
                     .help(L("打开项目…"))
                 }
             }
-            .onChange(of: model.projectPane, initial: true) { _, id in
+            .klOnChange(of: model.projectPane, initial: true) { _, id in
                 // 别处切的项目（项目列表、跳到别的项目的会话……）：高亮跟过去
                 let target = id ?? "@all"
-                if lit != target { withAnimation(.snappy(duration: 0.28)) { lit = target } }
+                if lit != target { withAnimation(.klSnappy(duration: 0.28)) { lit = target } }
                 proxy.scrollTo(target)
             }
             // 新出现的项目接到最后，排过的位置不再变
-            .onChange(of: items.map { $0[0].id }, initial: true) { _, ids in state.adopt(ids) }
+            .klOnChange(of: items.map { $0[0].id }, initial: true) { _, ids in state.adopt(ids) }
         }
         .frame(height: height, alignment: .top)
         .onAppear { if !projects.loaded { projects.load() } }
@@ -117,7 +117,7 @@ struct ProjectStrip: View {
     private func pick(_ id: String?) {
         let target = id ?? "@all"
         guard lit != target || id != model.projectPane else { return }
-        withAnimation(.snappy(duration: 0.28)) { lit = target }
+        withAnimation(.klSnappy(duration: 0.28)) { lit = target }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
             guard lit == target else { return }   // 这期间又点了别的：以最后点的为准
             if let id { model.openProject(id, showList: false) } else { model.projectPane = nil }
@@ -169,7 +169,7 @@ struct ProjectStrip: View {
 }
 
 /// 顶上那排的一格：倒挂（上沿贴窗口顶、下面两角圆）；当前项目底亮一档、顶上一道强调色；指着出现 ×
-private struct ProjectStripTab: View {
+private struct ProjectStripTab: KLView {
     let title: String
     let symbol: String?
     let state: Activity
@@ -183,8 +183,8 @@ private struct ProjectStripTab: View {
     let action: () -> Void
     @State private var hovering = false
 
-    var body: some View {
-        let shape = UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 6, bottomTrailingRadius: 6, topTrailingRadius: 0, style: .continuous)
+    var klBody: some View {
+        let shape = KLUnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 6, bottomTrailingRadius: 6, topTrailingRadius: 0, style: .continuous)
         let scheme = Look.shared.scheme
         let activeFill = Color.tarsBrand.opacity(0.18)   // 当前项目整块染主题色（11-21）
         HStack(spacing: SideMetric.gap - 1) {

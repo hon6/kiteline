@@ -260,13 +260,13 @@ enum RichBuilder {
 }
 
 /// 一段能拖选的富文本。fill：撑满给的宽度；false 时贴着最长的一行（气泡跟着字走）
-struct RichText: View {
+struct RichText: KLView {
     let text: NSAttributedString
     var fill = true
     @Environment(\.richMenu) private var menu
     @Environment(\.openURL) private var openURL
 
-    var body: some View {
+    var klBody: some View {
         RichTextHost(text: text, fill: fill, link: RichColor(Theme.claude), menu: menu, open: openURL)
     }
 }
@@ -419,6 +419,7 @@ struct RichTextHost: NSViewRepresentable {
         if context.coordinator.set(text) || view.textStorage?.length != text.length { view.textStorage?.setAttributedString(text) }
     }
 
+    @available(macOS 13, *)
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: RichNSTextView, context: Context) -> CGSize? {
         context.coordinator.size(text, width: proposal.width, fill: fill)
     }

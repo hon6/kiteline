@@ -483,7 +483,7 @@ extension SelfTest {
             let wh = arg.split(separator: "x").compactMap { Double($0) }
             let size = NSSize(width: wh.first ?? 1300, height: wh.count > 1 ? wh[1] : 800)
             let hosting = NSHostingController(rootView: MainView().tarsLook())
-            hosting.sceneBridgingOptions = [.toolbars, .title]
+            if #available(macOS 14, *) { hosting.sceneBridgingOptions = [.toolbars, .title] }
             // 带标题栏的窗口一显示就会被系统挪回屏幕里：OffscreenPanel 不让挪，再设成全透明，万一出现在屏幕上也看不见
             let panel = OffscreenPanel(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size),
                                        styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView, .nonactivatingPanel],
@@ -772,7 +772,7 @@ extension SelfTest {
             let title = arg.hasSuffix(":anim") ? String(arg.dropLast(5)) : arg
             if let item = KitelineModel.shared.sessions.first(where: { $0.title == title }) {
                 let open = { KitelineKit.openSplit(item.id, down: name == "splitdown") }
-                if arg.hasSuffix(":anim") ? withAnimation(.snappy) { open() } : open() { KitelineModel.shared.selection = item.id } else { Log.write("[capture] 分不下「\(title)」") }
+                if arg.hasSuffix(":anim") ? withAnimation(.klSnappy) { open() } : open() { KitelineModel.shared.selection = item.id } else { Log.write("[capture] 分不下「\(title)」") }
             } else { Log.write("[capture] 没找到会话「\(title)」") }
         case "newpane":
             // 点当前块的「一分为二」：newpane（自己判断方向）/ newpane:down / newpane:right
@@ -781,7 +781,7 @@ extension SelfTest {
             // 关掉某一块（按标题）；标题后加「:anim」= 带动画（同点「×」）
             let title = arg.hasSuffix(":anim") ? String(arg.dropLast(5)) : arg
             if let item = KitelineModel.shared.sessions.first(where: { $0.title == title }) {
-                if arg.hasSuffix(":anim") { withAnimation(.snappy) { KitelineKit.panes.close(key: item.id) } } else { KitelineKit.panes.close(key: item.id) }
+                if arg.hasSuffix(":anim") { withAnimation(.klSnappy) { KitelineKit.panes.close(key: item.id) } } else { KitelineKit.panes.close(key: item.id) }
             }
         case "drop", "ghost":
             // 把会话放到当前块的某一边（drop:标题:trailing），和从左边拖进来一样；ghost 只画「拖着停在那儿」的样子（ghost: 收起）
@@ -953,7 +953,7 @@ extension SelfTest {
         // 世界模式：world:on / off；worldjs:<脚本>（在世界的网页里跑，比如 World.world.view('rooms')）；worldshot:<png>（截网页，含 WebGL）
         case "world": KitelineModel.shared.setWorld(arg != "off", page: "world"); delay = 3
         case "flow": KitelineModel.shared.setWorld(arg != "off", page: "flow"); delay = 4
-        case "sidebarcollapse": withAnimation(.snappy(duration: 0.32)) { SidebarState.shared.toggle() }; delay = 1   // 世界模式左上角的收起 / 展开会话列表
+        case "sidebarcollapse": withAnimation(.klSnappy(duration: 0.32)) { SidebarState.shared.toggle() }; delay = 1   // 世界模式左上角的收起 / 展开会话列表
         case "worldjs":
             WorldHost.shared.webView.evaluateJavaScript(arg) { result, error in
                 Log.write("[capture] 世界脚本：\(result.map { "\($0)" } ?? "-")\(error.map { " 出错 \($0)" } ?? "")")

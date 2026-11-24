@@ -327,37 +327,37 @@ public struct LookPalette {
 }
 
 /// 这台设备上的外观设置（存在本机偏好里，各端各管各的）。界面读 Look.shared 的属性，改了自动重画
-@Observable
-public final class Look {
+public final class Look: KLObservable {
+    public let _klRegistrar = KLRegistrar.make()
     public static let shared = Look()
 
-    @ObservationIgnored private var defaults: UserDefaults = .standard
+    private var defaults: UserDefaults = .standard
     /// 正在从偏好里读：这时改属性不存、不刷新导航栏（init 里 Look.shared 还没建好）
-    @ObservationIgnored private var loading = false
+    private var loading = false
 
     /// LookTheme 的 id，或 "custom"（自定义颜色，见 customColor）
-    public var themeID: String { didSet { if themeID != oldValue { palette = LookPalette(theme, scheme: scheme); save() } } }
+    @Tracked public var themeID: String { didSet { if themeID != oldValue { palette = LookPalette(theme, scheme: scheme); save() } } }
     /// 自定义的颜色（0xRRGGBB），themeID 是 custom 时用
-    public var customColor: UInt32 = 0xD97757 { didSet { if customColor != oldValue { palette = LookPalette(theme, scheme: scheme); save() } } }
+    @Tracked public var customColor: UInt32 = 0xD97757 { didSet { if customColor != oldValue { palette = LookPalette(theme, scheme: scheme); save() } } }
     /// VS Code 配色方案（LookScheme 的 id）；空 = 跟随系统（原来的样子）
-    public var schemeID: String = "" { didSet { if schemeID != oldValue { palette = LookPalette(theme, scheme: scheme); save(); schemeChanged?() } } }
+    @Tracked public var schemeID: String = "" { didSet { if schemeID != oldValue { palette = LookPalette(theme, scheme: scheme); save(); schemeChanged?() } } }
     /// 配色方案选了 / 换了：Mac 主程序据此把窗口改成深色或浅色
-    @ObservationIgnored public var schemeChanged: (() -> Void)?
+    public var schemeChanged: (() -> Void)?
     public var scheme: LookScheme? { LookScheme.named(schemeID) }
-    public var fontID: String { didSet { if fontID != oldValue, !loading { save(); prepareFont() } } }
+    @Tracked public var fontID: String { didSet { if fontID != oldValue, !loading { save(); prepareFont() } } }
     /// LookSize 的 id，或 LookSize.system（跟随系统，只有 iPhone）
-    public var sizeID: String { didSet { if sizeID != oldValue { save() } } }
+    @Tracked public var sizeID: String { didSet { if sizeID != oldValue { save() } } }
 
-    public private(set) var palette: LookPalette
+    @Tracked public private(set) var palette: LookPalette
 
     /// 中文字体：已经能用的（装着的、下载好的）、正在下载的进度（0…1）、下载失败的原因
-    public private(set) var readyFonts: Set<String> = []
-    public private(set) var downloads: [String: Double] = [:]
-    public private(set) var failures: [String: String] = [:]
+    @Tracked public private(set) var readyFonts: Set<String> = []
+    @Tracked public private(set) var downloads: [String: Double] = [:]
+    @Tracked public private(set) var failures: [String: String] = [:]
 
     #if os(iOS)
     /// 系统的文字大小（「跟随系统」时用）
-    private var systemScale: CGFloat = 1
+    @Tracked private var systemScale: CGFloat = 1
     #endif
 
     private init() {
@@ -462,7 +462,8 @@ public final class Look {
             let font = Font.custom(name, fixedSize: size)
             return weight.map { font.weight($0) } ?? font
         }
-        return .system(size: size, weight: weight, design: design ?? font.design)
+        if #available(macOS 13, iOS 16, watchOS 9, *) { return .system(size: size, weight: weight, design: design ?? font.design) }
+        return .system(size: size, weight: weight ?? .regular, design: design ?? font.design ?? .default)
     }
 
     #if os(iOS)
@@ -681,10 +682,10 @@ extension Font {
 /// 根视图上挂一次：界面语言、强调色、默认字（没写字体的字、系统控件的标签用它）、（iPhone）文字大小。
 /// 不在环境里挂 fontDesign：它会连明确写的等宽字（代码、命令、路径；Menlo、.monospaced 都会）一起换成普通字（ccpulse-cf 实测）。
 /// 圆体、宋体这些靠 Font.ui / Font.app / 这里的默认字生效；列表分组标题这类系统自己定字体的地方保持系统字
-public struct LookRoot: ViewModifier {
+public struct LookRoot: KLViewModifier {
     public init() {}
 
-    public func body(content: Content) -> some View {
+    public func klBody(content: Content) -> some View {
         let look = Look.shared
         content
             // SwiftUI 按环境里的语言查 en.lproj：写死的 Text("会话") 这类字跟着设置里的语言换，不用重启（见 Lang）
@@ -711,7 +712,7 @@ extension View {
 /// 分段选择（内容 / 改动记录、现在开始 / 每天……）。iPhone 用系统的分段控件（字由 styleSystemControls 换）；
 /// Mac 上系统的分段控件不吃设置里的字体（实测 .font 加在哪都没用），照它的样子自己画一个：浅灰底槽、选中的一格浮起来。
 /// 工具栏里的分段控件是窗口外框的一部分（和窗口标题一样是系统字），不用换
-public struct LookSegmented<Value: Hashable>: View {
+public struct LookSegmented<Value: Hashable>: KLView {
     @Binding var selection: Value
     let options: [(value: Value, label: String)]
 
@@ -720,7 +721,7 @@ public struct LookSegmented<Value: Hashable>: View {
         self.options = options.map { (value: $0.0, label: $0.1) }
     }
 
-    public var body: some View {
+    public var klBody: some View {
         #if os(iOS)
         Picker("", selection: $selection) {
             ForEach(options.indices, id: \.self) { Text(L(options[$0].label)).tag(options[$0].value) }
@@ -758,7 +759,7 @@ public struct LookSegmented<Value: Hashable>: View {
         }
         .padding(2)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .animation(.snappy(duration: 0.18), value: selection)
+        .animation(.klSnappy(duration: 0.18), value: selection)
         #endif
     }
 }
@@ -766,7 +767,7 @@ public struct LookSegmented<Value: Hashable>: View {
 // MARK: - 设置里共用的几块（iPhone 的「外观」页和 Mac 的「设置 → 通用」都用）
 
 /// 主题色圆点：外圈是强调色、里面是气泡色，选中的带勾；最后一个是「自定义」（彩色外圈，里面是自己挑的颜色，颜色在下面的「自定义颜色」里挑）
-public struct LookThemePicker: View {
+public struct LookThemePicker: KLView {
     @Binding var selection: String
     var diameter: CGFloat
     var columns: Int
@@ -778,7 +779,7 @@ public struct LookThemePicker: View {
         self.columns = columns
     }
 
-    public var body: some View {
+    public var klBody: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columns), spacing: 14) {
             ForEach(LookTheme.all) { theme in
                 swatch(theme, ring: nil)
@@ -841,10 +842,10 @@ extension Look {
 }
 
 /// 预览：一来一回两个气泡、一个强调色的图标和按钮，按当前主题、字体、字号画
-public struct LookPreview: View {
+public struct LookPreview: KLView {
     public init() {}
 
-    public var body: some View {
+    public var klBody: some View {
         let look = Look.shared
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {

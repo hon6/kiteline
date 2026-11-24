@@ -12,8 +12,8 @@ import UserNotifications
 ///
 /// App 开着时 Mac 不推锁屏（只在 App 里弹横幅，见 AppModel.startPresence），同一条不会两样都来
 @MainActor
-@Observable
-final class PushSetup: NSObject, UNUserNotificationCenterDelegate {
+final class PushSetup: NSObject, UNUserNotificationCenterDelegate, KLObservable {
+    let _klRegistrar = KLRegistrar.make()
     static let shared = PushSetup()
 
     /// 点了通知要打开的：会话 key 或页面（today / usage），MainView 看到就推进去；
@@ -27,17 +27,17 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate {
     /// 通知长按出来的按钮（通知扩展按推送内容挑类别）
     nonisolated static let reconnectCategory = "reconnect"
     nonisolated static let reconnectAction = "reconnect"
-    var open: Open?
+    @Tracked var open: Open?
 
-    @ObservationIgnored private var token: String?
-    @ObservationIgnored private weak var model: AppModel?
+    private var token: String?
+    private weak var model: AppModel?
     /// 报给了哪台电脑（电脑的设备令牌 + 订阅地址）、什么时候报的：一分钟内连上好几次（网络来回切）不重复报。
     /// 主电脑和另加的 Kiteline 设备（LinkedHost）各报各的，按设备令牌分开记
-    @ObservationIgnored private var subscribed: [String: (mark: String, at: Date)] = [:]
+    private var subscribed: [String: (mark: String, at: Date)] = [:]
     /// 订阅时用的连接（按设备令牌）：断开配对、移除电脑时拿它去退订（那时 AppModel 可能已经没了）
-    @ObservationIgnored private var subscribedVia: [String: (api: MacAPI, endpoint: String)] = [:]
+    private var subscribedVia: [String: (api: MacAPI, endpoint: String)] = [:]
     /// 另加的电脑：拿到推送令牌后要补报
-    @ObservationIgnored private var linkedAPIs: [String: MacAPI] = [:]
+    private var linkedAPIs: [String: MacAPI] = [:]
 
     /// App 一启动就调：接上通知回调，允许过通知的直接要推送令牌（令牌会变，苹果建议每次启动都要）
     func start() {

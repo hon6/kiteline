@@ -298,6 +298,11 @@ public sealed partial class AppModel : ObservableObject
                     chat.Add(items);
                 }
                 break;
+            case "live":
+                // 正在生成的文字：只给开着的会话（没打开的等记录）
+                if (json.Str("key") is string liveKey && chats.TryGetValue(liveKey, out var lc) && (lc.Loaded || IsOpen(liveKey)))
+                    lc.ApplyLive(json);
+                break;
             case "reset":
                 if (json.Str("key") is string reset && chats.TryGetValue(reset, out var c))
                 {

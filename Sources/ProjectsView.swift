@@ -323,11 +323,11 @@ final class ProjectsModel: ObservableObject {
 }
 
 /// 主窗口右侧的「项目」：所有机器上的项目，在跑的会话、未提交的改动、没推送的提交、最近一次提交
-struct ProjectsView: View {
+struct ProjectsView: KLView {
     @ObservedObject var model = ProjectsModel.shared
     @ObservedObject var tars = KitelineModel.shared
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 LookSegmented(selection: $model.filter, options: [("all", L("全部")), ("active", L("有活动")), ("dirty", L("有改动"))])
@@ -363,14 +363,14 @@ struct ProjectsView: View {
     }
 }
 
-struct ProjectCard: View {
+struct ProjectCard: KLView {
     let project: ProjectItem
     let live: [SessionItem]
     let cost: Double
     let expanded: Bool
     let past: [PastItem]?
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 10) {
                 SessionAvatar(key: project.id, title: project.name, activity: state, size: 30)

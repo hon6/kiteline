@@ -1,15 +1,15 @@
 import SwiftUI
 
 /// 对话页右上角「⋯」：从底部弹出的会话菜单（和网页版一样）——顶上一排常用工具，下面分组列表，开关就地切换
-struct SessionMenuSheet: View {
-    @Environment(AppModel.self) private var model
+struct SessionMenuSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let key: String
     /// 关掉菜单以后再做（推页面、弹别的面板）
     let perform: (SessionAction) -> Void
     @State private var showBatch = false
 
-    var body: some View {
+    var klBody: some View {
         let session = model.session(key)
         let past = model.pastMeta[key]
         ScrollView {
@@ -118,8 +118,8 @@ struct SessionMenuSheet: View {
         #if os(macOS)
         .navigationTitle(L("会话菜单"))   // Mac 面板的标题栏（同别的弹窗）
         #endif
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .klPresentationDetents([.medium, .large])
+        .klPresentationDragIndicator(.visible)
         .sheet(isPresented: $showBatch) { BatchRestartSheet(onDone: { dismiss() }) }
     }
 
@@ -142,12 +142,12 @@ enum CloseSessionText {
 /// menu、speak：横着的 iPhone 没有导航栏，分屏标题条上的「⋯」「朗读」经 externalAction 交给对话页
 enum SessionAction { case search, files, changes, tests, agents, stop, mode, model, goal, compact, newTask, info, agentInfo, bottom, close, menu, speak, terminal, group, share, brag }
 
-struct MenuTile: View {
+struct MenuTile: KLView {
     let symbol: String
     let title: String
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             VStack(spacing: 6) {
                 TarsIcon(symbol: symbol, size: 32)
@@ -161,16 +161,16 @@ struct MenuTile: View {
     }
 }
 
-struct MenuGroup<Content: View>: View {
+struct MenuGroup<Content: View>: KLView {
     @ViewBuilder let content: Content
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) { content }
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
 /// 菜单里的一行：彩色圆角图标 + 名字（+ 小字）+ 右边的值 / 箭头
-struct MenuRow: View {
+struct MenuRow: KLView {
     let symbol: String
     let title: String
     var note: String? = nil
@@ -180,7 +180,7 @@ struct MenuRow: View {
     var trailing: AnyView? = nil
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 TarsIcon(symbol: symbol, tint: danger ? Theme.removed : Theme.claude)
@@ -200,13 +200,13 @@ struct MenuRow: View {
     }
 }
 
-struct MenuToggle: View {
+struct MenuToggle: KLView {
     let symbol: String
     let title: String
     var note: String? = nil
     @Binding var isOn: Bool
 
-    var body: some View {
+    var klBody: some View {
         SwitchRow(isOn: $isOn) {
             HStack(spacing: 12) {
                 TarsIcon(symbol: symbol)
@@ -221,9 +221,9 @@ struct MenuToggle: View {
 }
 
 /// 上下文占用：一小条 + 百分比（70% 以上变橙，90% 以上变红）
-struct ContextBar: View {
+struct ContextBar: KLView {
     let percent: Int
-    var body: some View {
+    var klBody: some View {
         let color: Color = percent >= 90 ? Theme.removed : (percent >= 70 ? .orange : Theme.added)
         HStack(spacing: 6) {
             Capsule().fill(Color.primary.opacity(0.1)).frame(width: 46, height: 5)
@@ -235,13 +235,13 @@ struct ContextBar: View {
 
 // MARK: 模式（同 VS Code 里输入框下面的模式菜单）
 
-struct ModeSheet: View {
-    @Environment(AppModel.self) private var model
+struct ModeSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let key: String
     @State private var busy = false
 
-    var body: some View {
+    var klBody: some View {
         let session = model.session(key)
         let current = model.permissionMode(key)
         FitSheet(title: L("权限模式")) {
@@ -295,12 +295,12 @@ enum ModelLabel {
     }
 }
 
-struct ModelSheet: View {
-    @Environment(AppModel.self) private var model
+struct ModelSheet: KLView {
+    @EnvModel private var model
     @PanelDismiss private var dismiss
     let key: String
 
-    var body: some View {
+    var klBody: some View {
         let session = model.session(key)
         let current = modelName(model.currentModel(key))
         let effort = model.currentEffort(key)
@@ -339,7 +339,7 @@ struct ModelSheet: View {
                             let on = (effort ?? "auto") == level.id
                             Button {
                                 guard !on else { return }
-                                withAnimation(.snappy(duration: 0.2)) { model.setEffort(key, level: level.id, level.name) }
+                                withAnimation(.klSnappy(duration: 0.2)) { model.setEffort(key, level: level.id, level.name) }
                             } label: {
                                 VStack(spacing: 5) {
                                     Circle().fill(on ? Theme.wechatGreen : Color.primary.opacity(0.15)).frame(width: on ? 16 : 9, height: on ? 16 : 9)
@@ -382,15 +382,15 @@ struct ModelSheet: View {
 }
 
 /// 批量重启会话：列出所有在跑、能重启的会话（默认全选），勾掉不要的，一起重启；正在工作的等这一轮做完再重启
-struct BatchRestartSheet: View {
-    @Environment(AppModel.self) private var model
+struct BatchRestartSheet: KLView {
+    @EnvModel private var model
     @Environment(\.dismiss) private var dismiss
     var onDone: () -> Void = {}
     @State private var chosen: Set<String>? = nil
 
     private var candidates: [SessionInfo] { model.sessions.filter { $0.canReply && $0.can("close") } }
 
-    var body: some View {
+    var klBody: some View {
         let list = candidates
         let picked = chosen ?? Set(list.map(\.key))
         VStack(spacing: 0) {
@@ -444,17 +444,17 @@ struct BatchRestartSheet: View {
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 520)
         #endif
-        .presentationDetents([.large])
+        .klPresentationDetents([.large])
     }
 }
 
 #if KITELINE_MAC
 extension KitelineKit {
     /// Mac 主窗口的「批量重启会话…」面板（标题栏「⋯」、菜单栏「会话」里点开）
-    public struct BatchRestartView: View {
+    public struct BatchRestartView: KLView {
         public init() {}
-        public var body: some View {
-            if let model = KitelineKit.model { BatchRestartSheet().environment(model) }
+        public var klBody: some View {
+            if let model = KitelineKit.model { BatchRestartSheet().environment(\.appModelSlot, model) }
         }
     }
 }

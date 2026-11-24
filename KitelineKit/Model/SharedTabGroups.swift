@@ -12,18 +12,19 @@ struct SharedTabGroup: Codable, Identifiable, Equatable, Hashable {
     var keys: [String]
 }
 
-@Observable @MainActor
-final class SharedTabGroups {
-    private(set) var items: [SharedTabGroup] = []
+@MainActor
+final class SharedTabGroups: KLObservable {
+    let _klRegistrar = KLRegistrar.make()
+    @Tracked private(set) var items: [SharedTabGroup] = []
     /// 电脑上的版本号：0 = 电脑上还没存过（Mac 升级上来时用本机原有的组补上去）
-    private(set) var rev = 0
+    @Tracked private(set) var rev = 0
     /// 取到过电脑上的那份（没取到前不往上推，免得空的盖掉电脑上的）
-    private(set) var loaded = false
+    @Tracked private(set) var loaded = false
     /// 电脑有这个接口（老版本电脑端没有：手机上不显示标签组）
-    var supported = false
+    @Tracked var supported = false
     /// 电脑推来新的一份时（Mac 的 TabGroups 接着并进分屏）
-    @ObservationIgnored var onRemote: (([SharedTabGroup], Int) -> Void)?
-    @ObservationIgnored weak var api: MacAPI?
+    var onRemote: (([SharedTabGroup], Int) -> Void)?
+    weak var api: MacAPI?
 
     private static let cacheKey = "tabGroupsCache"
 

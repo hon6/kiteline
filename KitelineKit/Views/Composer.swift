@@ -7,8 +7,8 @@ import UniformTypeIdentifiers
 /// 输入栏（同微信）：左边语音 / 键盘切换，中间输入框或「按住 说话」，右边「+」，有字时换成绿色「发送」；
 /// Claude 在干活时「+」左边多一个停止键。键盘上的换行键就是发送。「+」点开是相册、拍摄、常用语这些格子。
 /// 群聊页用的也是它（group 不为空）：发到群里，下面那排换成「发给全部成员」
-struct Composer: View {
-    @Environment(AppModel.self) private var model
+struct Composer: KLView {
+    @EnvModel private var model
     @Environment(\.homeBottom) private var homeBottom
     let key: String
     let session: SessionInfo?
@@ -22,7 +22,7 @@ struct Composer: View {
     var onTodos: () -> Void = {}
     /// 发到群里（群聊页）：没有停止键、权限模式那排；按住说话松开先转成文字再发到群里
     var group: ComposeGroup? = nil
-    @State private var picks: [PhotosPickerItem] = []
+    @State private var picks: [KLPhotoItem] = []
     @State private var attachments: [Attachment] = []
     @State private var showCamera = false
     @State private var showPhrases = false
@@ -73,7 +73,7 @@ struct Composer: View {
         return session.readOnlyNote
     }
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 0) {
             // 横着的 iPhone 键盘一弹就只剩一百多点高：快捷短语这一行不放（「+」→ 常用语里有）
             if focused, enabled, empty, !talking, !(session?.isWaiting ?? false), !model.quickReplies.isEmpty, chat.quote == nil, verticalSize != .compact {
@@ -123,12 +123,12 @@ struct Composer: View {
                 } else {
                     RoundIcon(symbol: "plus", label: chat.panelOpen ? L("收起更多功能") : L("更多功能")) {
                         focused = false
-                        withAnimation(.snappy(duration: 0.25)) { chat.panelOpen.toggle() }
+                        withAnimation(.klSnappy(duration: 0.25)) { chat.panelOpen.toggle() }
                         #if os(iOS)
                         if chat.panelOpen, canAttach {
                             Task {
                                 let shot = await RecentScreenshot.find()
-                                withAnimation(.snappy) { recentShot = shot }
+                                withAnimation(.klSnappy) { recentShot = shot }
                             }
                         }
                         #endif
@@ -148,8 +148,8 @@ struct Composer: View {
             }
             .padding(.horizontal, Bar.edge - Bar.iconInset)
             .padding(.vertical, verticalSize == .compact ? 4 : Bar.spacing)
-            .animation(.snappy(duration: 0.2), value: empty)
-            .animation(.snappy, value: session?.isBusy)
+            .animation(.klSnappy(duration: 0.2), value: empty)
+            .animation(.klSnappy, value: session?.isBusy)
             if let session, session.canReply {
                 if verticalSize != .compact {
                     toolbar(session)
@@ -174,27 +174,27 @@ struct Composer: View {
         // 横着的 iPhone 那排挪进 Home 横条两边的空白里，整排沉到底
         .padding(.bottom, band != nil ? -max(0, Bar.home(homeBottom) - 2) : (toolbarIsLast ? -Bar.homeOverlap(bottom: Bar.home(homeBottom)) : 0))
         // 只要左右位置（高度变了不用重算）
-        .onGeometryChange(for: CGRect.self) { let f = $0.frame(in: .global); return CGRect(x: f.minX, y: 0, width: f.width, height: 0) } action: { barFrame = $0 }
+        .klOnGeometryChange(for: CGRect.self) { let f = $0.frame(in: .global); return CGRect(x: f.minX, y: 0, width: f.width, height: 0) } action: { barFrame = $0 }
         .background(Theme.inputBar)
         .overlay(alignment: .top) { Divider() }
-        .onChange(of: picks) { _, items in
+        .klOnChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             picks = []
             chat.panelOpen = false
             Task { await load(items) }
         }
         // 别给整个输入栏挂「焦点一变就做动画」：输入栏跟着键盘升降，自己再按另一套节奏动，两个动画打架，弹出 / 收起键盘时一顿一顿的
-        .onChange(of: focused) { _, on in
-            if on, chat.panelOpen { withAnimation(.snappy(duration: 0.2)) { chat.panelOpen = false } }
+        .klOnChange(of: focused) { _, on in
+            if on, chat.panelOpen { withAnimation(.klSnappy(duration: 0.2)) { chat.panelOpen = false } }
             if on { checkClipboard() }
         }
-        .onChange(of: chat.panelOpen) { _, open in if open { checkClipboard() } }
+        .klOnChange(of: chat.panelOpen) { _, open in if open { checkClipboard() } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
         .onAppear(perform: checkClipboard)
         .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in checkClipboard() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in checkClipboard() }
-        .onChange(of: voice.transcript) { _, text in
+        .klOnChange(of: voice.transcript) { _, text in
             // 「转文字」回来了：放进输入框，切回键盘，改好再发
             guard let text else { return }
             voice.transcript = nil
@@ -254,8 +254,8 @@ struct Composer: View {
                 .padding(.top, Bar.badgeRoom)
         }
         .padding(.top, -Bar.badgeRoom)
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-        .defaultScrollAnchor(side.leading ? .leading : .trailing)
+        .klScrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .klDefaultScrollAnchor(side.leading ? .leading : .trailing)
         .frame(minWidth: 0, idealWidth: 0, maxWidth: side.width)
         .frame(maxWidth: .infinity, alignment: side.leading ? .leading : .trailing)
         .padding(.horizontal, Bar.edge)
@@ -275,7 +275,7 @@ struct Composer: View {
                 .padding(.top, Bar.badgeRoom)
         }
         .padding(.top, -Bar.badgeRoom)
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .klScrollBounceBehavior(.basedOnSize, axes: .horizontal)
         // 横着滚的一排别把自己的总宽当成「理想宽度」往上报：字大了、小标签多了，会把整个对话页撑得比屏幕宽（左右被裁）
         .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
         .padding(.bottom, Bar.spacing)
@@ -285,14 +285,14 @@ struct Composer: View {
     /// 同微信：小气泡里是刚截的图，点一下加进要发的图（收起「+」面板，输入框旁边变成「发送」）；10 秒没点就收起
     private func shotBubble(_ shot: RecentScreenshot.Shot) -> some View {
         Button {
-            withAnimation(.snappy) { recentShot = nil }
+            withAnimation(.klSnappy) { recentShot = nil }
             Task {
                 guard let data = await RecentScreenshot.data(shot.asset), let prepared = ImagePrep.prepare(data) else {
                     model.flash(L("无法读取此截图"))
                     return
                 }
                 attachments.append(Attachment(name: "screenshot-\(attachments.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
-                withAnimation(.snappy(duration: 0.25)) { chat.panelOpen = false }
+                withAnimation(.klSnappy(duration: 0.25)) { chat.panelOpen = false }
             }
         } label: {
             VStack(alignment: .leading, spacing: 6) {
@@ -307,15 +307,15 @@ struct Composer: View {
         }
         .buttonStyle(PressableStyle())
         .task(id: shot.id) {
-            try? await Task.sleep(for: .seconds(10))
-            withAnimation(.snappy) { if recentShot?.id == shot.id { recentShot = nil } }
+            try? await Task.sleep(seconds: 10)
+            withAnimation(.klSnappy) { if recentShot?.id == shot.id { recentShot = nil } }
         }
     }
     #endif
 
     private var field: some View {
-        TextField(placeholder, text: text, axis: .vertical)
-            .lineLimit(1...5)
+        KLTextField(placeholder, text: text, axis: .vertical)
+            .klLineLimit(1...5)
             .focused($focused)
             .submitLabel(.send)
             .padding(.horizontal, 10)
@@ -323,7 +323,7 @@ struct Composer: View {
             .frame(minHeight: 40)
             .background(Theme.field, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .disabled(!enabled)
-            .onChange(of: draft) { old, new in
+            .klOnChange(of: draft) { old, new in
                 // 换行键 = 发送（同微信）：只认「在末尾多打了一个换行」，粘贴进来的多行文字不算
                 if new == old + "\n" {
                     model.setDraft(key, old)
@@ -415,12 +415,12 @@ struct Composer: View {
                 Task { await paste(providers) }
             }
             .labelStyle(.titleAndIcon)
-            .buttonBorderShape(.capsule)
+            .klButtonBorderShape(.capsule)
             .controlSize(.small)
             .tint(Theme.wechatGreen)
             Button {
                 ClipboardImage.handled = ClipboardImage.changeCount
-                withAnimation(.snappy) { clipboardImage = false }
+                withAnimation(.klSnappy) { clipboardImage = false }
             } label: {
                 Image(systemName: "xmark").font(.ui(.footnote).weight(.semibold)).foregroundStyle(.secondary)
                     .frame(width: 30, height: 30).contentShape(Rectangle())
@@ -434,20 +434,20 @@ struct Composer: View {
 
     private func checkClipboard() {
         let offer = ClipboardImage.offer
-        if offer != clipboardImage { withAnimation(.snappy) { clipboardImage = offer } }
+        if offer != clipboardImage { withAnimation(.klSnappy) { clipboardImage = offer } }
     }
 
     /// 粘贴进来的图：同相册选的，长边缩到 2048、转 JPEG
     private func paste(_ providers: [NSItemProvider]) async {
         ClipboardImage.handled = ClipboardImage.changeCount
-        withAnimation(.snappy) { clipboardImage = false }
+        withAnimation(.klSnappy) { clipboardImage = false }
         let images = await DroppedImages.load(providers)
         guard !images.isEmpty else { model.flash(L("无法读取剪贴板里的图片")); return }
         for data in images where attachments.count < 6 {
             guard let prepared = ImagePrep.prepare(data) else { continue }
             attachments.append(Attachment(name: "image-\(attachments.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
         }
-        withAnimation(.snappy(duration: 0.25)) { chat.panelOpen = false }
+        withAnimation(.klSnappy(duration: 0.25)) { chat.panelOpen = false }
     }
 
     /// 「+」面板：一格一个功能（同微信）。横着的 iPhone 高度只有三百多点，排成一行小图标，面板矮一半多
@@ -458,7 +458,7 @@ struct Composer: View {
         return LazyVGrid(columns: columns, spacing: 18) {
             // 群：老版本电脑端群里只收文字，不给相册、拍摄、文件
             if canAttach {
-            PhotosPicker(selection: $picks, maxSelectionCount: 6, matching: .images) {
+            KLPhotosPicker(selection: $picks, maxSelectionCount: 6) {
                 PanelTile(symbol: "photo", title: L("相册"), size: icon)
             }
             .buttonStyle(.steady(.plain))
@@ -555,7 +555,7 @@ struct Composer: View {
     }
 
     /// 和网页版一样：长边缩到 2048、转 JPEG 再发，手机拍的大图也很快
-    private func load(_ items: [PhotosPickerItem]) async {
+    private func load(_ items: [KLPhotoItem]) async {
         for (index, item) in items.enumerated() {
             guard let raw = try? await item.loadTransferable(type: Data.self),
                   let prepared = ImagePrep.prepare(raw) else { continue }
@@ -638,13 +638,13 @@ extension EnvironmentValues {
     @Entry var homeBottom: CGFloat? = nil
 }
 
-struct ToolChip: View {
+struct ToolChip: KLView {
     @Environment(\.chipHeight) private var height
     let symbol: String
     let text: String
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: symbol).font(.app(size: 11, weight: .semibold))
@@ -659,8 +659,8 @@ struct ToolChip: View {
 
 /// 输入框下面那排小按钮（同 VS Code 里输入框下面那排）：权限模式、模型和思考等级、上下文、任务清单进度、派过的子 agent。
 /// 手机、Mac 共用，外面自己套横着滚的 ScrollView
-struct SessionChips: View {
-    @Environment(AppModel.self) private var model
+struct SessionChips: KLView {
+    @EnvModel private var model
     @Environment(\.chipHeight) private var height
     let key: String
     let session: SessionInfo
@@ -676,7 +676,8 @@ struct SessionChips: View {
     @State private var confirmCompact = false
     #endif
 
-    var body: some View {
+    var klBody: some View {
+        #if os(iOS) || KL_MODERN
         AnyLayout(wrap ? AnyLayout(FlowLayout(spacing: Bar.spacing)) : AnyLayout(HStackLayout(spacing: Bar.spacing))) {
             if session.can("mode") || session.can("model") {
                 claudeTune
@@ -724,6 +725,55 @@ struct SessionChips: View {
             // 会话里的终端（开在会话所在的电脑上）：点开从底下升起终端面板，角标是开着几个
             if session.can("term") { TerminalChip(session: session, chat: chat) }
         }
+        #else
+        FlowOrRow(wrap: wrap, spacing: Bar.spacing) {
+            if session.can("mode") || session.can("model") {
+                claudeTune
+            } else {
+                // 没有权限模式、换模型的 agent（Codex、OpenCode……）：只标出是谁、用的什么模型
+                HStack(spacing: 5) {
+                    AgentGlyph(session.agent, size: 12)
+                    Text(session.usage?.model ?? Agents.info(session.agent).name).foregroundStyle(.primary.opacity(0.75))
+                }
+                .font(.chip).lineLimit(1)
+                .chipFace(height: height)
+            }
+            if let percent = session.usage?.percent {
+                // 压缩上下文：电脑端说有才能点（caps）
+                Button {
+                    #if os(iOS)
+                    confirmCompact = true
+                    #else
+                    onCompact()
+                    #endif
+                } label: {
+                    HStack(spacing: 4) {
+                        ContextRing(percent: percent)
+                        Text("\(percent)%").font(.chip.monospacedDigit())
+                    }
+                    .foregroundStyle(.secondary)
+                    .chipFace(height: height, hPad: 8)
+                }
+                .buttonStyle(PressableStyle())
+                .allowsHitTesting(session.can("compact"))
+                #if os(iOS)
+                // 手机上确认框从这颗胶囊弹出、箭头指着它（不小心碰到时知道是点了哪里）；Mac 照旧交给对话页弹小卡片
+                .confirmPanel(L("压缩上下文等同于在 Claude Code 中输入 /compact：将此前的对话总结为摘要以释放空间，部分细节可能丢失"),
+                              isPresented: $confirmCompact, confirm: L("压缩上下文"), anchored: true) {
+                    model.send(key, text: "/compact", images: [])
+                }
+                #endif
+            }
+            // 目标（/goal）：没设时点开写一个，设了的显示进行中 / 暂停（会话支持才有）
+            if session.can("goal"), session.canReply { GoalChip(key: key, session: session) }
+            TodoChip(todos: chat.todos, action: onTodos)
+            if session.subagents > 0, session.can("subagents") {
+                ToolChip(symbol: "point.3.connected.trianglepath.dotted", text: L("子 agent %@", "\(session.subagents)"), action: onAgents)
+            }
+            // 会话里的终端（开在会话所在的电脑上）：点开从底下升起终端面板，角标是开着几个
+            if session.can("term") { TerminalChip(session: session, chat: chat) }
+        }
+        #endif
     }
 
     /// 权限模式 + 同 VS Code 的「Opus 5.5 Extra high」：点开换模型、调思考等级
@@ -748,9 +798,9 @@ struct SessionChips: View {
 }
 
 /// 上下文占用的小圆环
-struct ContextRing: View {
+struct ContextRing: KLView {
     let percent: Int
-    var body: some View {
+    var klBody: some View {
         let color: Color = percent >= 90 ? Theme.removed : (percent >= 70 ? .orange : Theme.added)
         ZStack {
             Circle().stroke(Color.primary.opacity(0.12), lineWidth: 2.5)
@@ -762,7 +812,7 @@ struct ContextRing: View {
 }
 
 /// 输入栏两边的圆圈图标（同微信：细线圆圈里一个图标）
-struct RoundIcon: View {
+struct RoundIcon: KLView {
     let symbol: String
     /// 读屏念的名字（只有图标的按钮，不写的话 VoiceOver 念的是图标名）
     var label: String
@@ -771,7 +821,7 @@ struct RoundIcon: View {
     var size: CGFloat = 15
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .semibold))
@@ -787,12 +837,12 @@ struct RoundIcon: View {
 }
 
 /// 「+」面板里的一格
-struct PanelTile: View {
+struct PanelTile: KLView {
     let symbol: String
     let title: String
     var size: CGFloat = 58
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: size < 40 ? 4 : 7) {
             TarsIcon(symbol: symbol, size: size)
             Text(title).font(size < 40 ? .ui(.caption2) : .ui(.caption)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
@@ -875,7 +925,7 @@ enum ImagePrep {
 }
 
 /// Claude 在干活：「纸鸢 Smooshing… (1m 20s · Bash)」，左边是晃着的小纸鸢（代替 Claude Code 的 ✻），状态词和 Claude Code 一样
-struct WorkingView: View {
+struct WorkingView: KLView {
     let since: Date
     let activity: String?
     /// 正在干活却很久没动静（可能卡在不会自己结束的命令上）：这一行变红提示，中断用输入框旁边的停止键
@@ -895,7 +945,7 @@ struct WorkingView: View {
                                 "Spinning", "Stewing", "Sussing", "Synthesizing", "Thinking", "Tinkering", "Transmuting", "Unfurling",
                                 "Unraveling", "Vibing", "Wandering", "Whirring", "Wibbling", "Working", "Wrangling"]
 
-    var body: some View {
+    var klBody: some View {
         HStack(spacing: 8) {
             if let minutes = stuckMinutes {
                 Label {
@@ -1006,11 +1056,11 @@ enum Bar {
 }
 
 /// 任务清单进度（「任务 3/7」）：没有清单、或者都做完了就不显示；点开看清单
-struct TodoChip: View {
+struct TodoChip: KLView {
     let todos: [JSONValue]
     let action: () -> Void
 
-    var body: some View {
+    var klBody: some View {
         let done = todos.filter { $0["status"]?.string == "completed" }.count
         if !todos.isEmpty, done < todos.count {
             ToolChip(symbol: "checklist", text: L("任务 %@/%@", "\(done)", "\(todos.count)"), action: action)

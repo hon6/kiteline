@@ -121,11 +121,11 @@ final class TodayModel: ObservableObject {
 // MARK: - 视图
 
 /// Mac 主窗口右侧的「今日动态」：今天每个项目做了什么（包括已经关掉的会话）
-struct TodayView: View {
+struct TodayView: KLView {
     @ObservedObject var model = TodayModel.shared
     @ObservedObject var tars = KitelineModel.shared
 
-    var body: some View {
+    var klBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let report = model.report {
@@ -187,11 +187,11 @@ struct TodayView: View {
     }
 }
 
-struct StatsGrid: View {
+struct StatsGrid: KLView {
     let totals: DigestTotals
     @State private var width: CGFloat = 0
 
-    var body: some View {
+    var klBody: some View {
         // 5 格：够宽一排 5 个，窄了 3 + 2（别排成 4 + 1，最后一格孤零零的）
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: width >= 560 ? 5 : 3), spacing: 10) {
             tile("bubble.left.and.bubble.right", "\(totals.prompts)", L("轮对话", plural: "%lld 轮对话", count: totals.prompts), L("%lld 个会话", count: totals.sessions))
@@ -203,7 +203,7 @@ struct StatsGrid: View {
         }
         // 量外面给的宽，不量格子自己：5 格挤不下撑宽了格子，量到的宽就一直够 5 格，缩窄窗口也回不到 3 + 2
         .frame(minWidth: 0, maxWidth: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 
     private func tile(_ symbol: String, _ value: String, _ label: String, _ detail: String) -> some View {
@@ -218,12 +218,12 @@ struct StatsGrid: View {
     }
 }
 
-struct DigestCard: View {
+struct DigestCard: KLView {
     let session: DigestSession
     var open: (String) -> Void
     @State private var showAllFiles = false
 
-    var body: some View {
+    var klBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 SessionAvatar(key: session.id, title: session.displayTitle,
@@ -346,11 +346,11 @@ struct DigestCard: View {
 }
 
 /// Claude 发来的截图缩略图：会话关了也能看（按来源 + 会话 id 去 watcher 取）
-struct ShotStrip: View {
+struct ShotStrip: KLView {
     let session: DigestSession
     @State private var images: [String: NSImage] = [:]
 
-    var body: some View {
+    var klBody: some View {
         KiteHScroll {
             HStack(spacing: 8) {
                 ForEach(session.shots, id: \.self) { shot in
@@ -393,12 +393,12 @@ struct ShotStrip: View {
 
 /// 页面里「还没有……」的空状态：图标 + 标题 + 一段说明，居中、最宽 420。
 /// 不用系统的 ContentUnavailableView：放在滚动区里时它不撑满宽度，说明文字会被截掉半个字
-struct EmptyHint: View {
+struct EmptyHint: KLView {
     let symbol: String
     let title: String
     let detail: String
 
-    var body: some View {
+    var klBody: some View {
         VStack(spacing: 10) {
             Image(systemName: symbol).font(.app(size: 34, weight: .light)).foregroundStyle(.tertiary).padding(.bottom, 2)
             Text(title).font(.app(size: 15, weight: .semibold))
@@ -414,19 +414,19 @@ struct EmptyHint: View {
 
 /// 主窗口右边几页（今日动态、用量、项目、历史）的自动刷新：切过来、来源连上或断开时重新拉一次；every 不为空时开着的时候定时再拉。
 /// 只在第一次打开时拉的话，App 刚启动、来源还没连上那一下拉到的残缺数据会一直挂着
-struct LiveReload: ViewModifier {
+struct LiveReload: KLViewModifier {
     var every: TimeInterval?
     let reload: () -> Void
     @ObservedObject private var tars = KitelineModel.shared
 
-    func body(content: Content) -> some View {
+    func klBody(content: Content) -> some View {
         content
             .onAppear(perform: reload)
-            .onChange(of: tars.onlineSources) { _, _ in reload() }
+            .klOnChange(of: tars.onlineSources) { _, _ in reload() }
             .task {
                 guard let every else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(every))
+                    try? await Task.sleep(seconds: every)
                     if !Task.isCancelled { reload() }
                 }
             }
@@ -439,8 +439,24 @@ extension View {
     }
 }
 
+#if KL_MODERN
+typealias ChipFlow = ChipFlowImpl
+#else
 /// 一行排不下就换行的横排（标签、小按钮用），每个子视图按自己的大小放
-struct ChipFlow: Layout {
+struct ChipFlow<Content: View>: KLView {
+    var spacing: CGFloat = 6
+    let content: () -> Content
+
+    init(spacing: CGFloat = 6, @ViewBuilder content: @escaping () -> Content) { self.spacing = spacing; self.content = content }
+
+    var klBody: some View {
+        if #available(macOS 13, *) { ChipFlowImpl(spacing: spacing) { content() } } else { KLFlowFallback(spacing: spacing, content: content) }
+    }
+}
+#endif
+
+@available(macOS 13, *)
+struct ChipFlowImpl: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
