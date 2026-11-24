@@ -404,7 +404,7 @@ struct GitError: LocalizedError {
 @MainActor
 enum CodeAPI {
     /// 慢的操作（要连远端、要跑提交钩子）：先拿任务号，再一秒问一次结果。手机那边的请求等不了几分钟
-    static let slowOps: Set<String> = ["push", "pull", "fetch", "remote_branch_delete", "commit", "merge", "rebase", "cherry_pick",
+    static let slowOps: Set<String> = ["push", "pr_create", "pull", "fetch", "remote_branch_delete", "commit", "merge", "rebase", "cherry_pick",
                                        "revert", "continue", "skip", "worktree_add"]
 
     static func overview(_ model: AppModel, key: String) async throws -> RepoOverview {

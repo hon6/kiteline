@@ -73,10 +73,14 @@ public static class Translator
     /// 第一次点「翻译」：由界面弹设置，确认后翻这一条
     public static Action<string, string>? AskSetup;
 
-    public static State? StateOf(string id) => states.GetValueOrDefault(id);
+    /// 逐字显示的那条（ChatStore.live）：id 永远是 live、内容一直在长，不参与翻译（同 iOS Translator.skips）。
+    /// 以前按 id 记下的译文会套到之后每一次逐字显示上，开着自动翻译时对话页总先冒出同一句旧译文、一两秒后才消失（11-24 截图）
+    public static bool Skips(string id) => id == "live";
+
+    public static State? StateOf(string id) => Skips(id) ? null : states.GetValueOrDefault(id);
     /// 气泡里该显示的：翻好且没切回原文时是译文，否则 null
     public static string? Shown(string id) =>
-        states.TryGetValue(id, out var s) && s.Phase == Phase.Done && !original.Contains(id) ? s.Text : null;
+        !Skips(id) && states.TryGetValue(id, out var s) && s.Phase == Phase.Done && !original.Contains(id) ? s.Text : null;
     public static bool IsTranslated(string id) => Shown(id) is not null;
 
     public static void Tap(string id, string text)
@@ -117,7 +121,7 @@ public static class Translator
     /// 自动翻译：消息出现在屏幕上时调用。只翻和目标语言不同的；翻过、正在翻、点过「原文」、失败过的都不动
     public static void AutoTranslate(string id, string text)
     {
-        if (!AutoTranslateOn || !Configured || states.ContainsKey(id) || original.Contains(id) || sameAsTarget.Contains(id)) return;
+        if (Skips(id) || !AutoTranslateOn || !Configured || states.ContainsKey(id) || original.Contains(id) || sameAsTarget.Contains(id)) return;
         var sample = string.Join("\n", new TranslateDoc(text).Pieces);
         if (sample.Length == 0) return;
         if (Source != "auto" ? SameLanguage(Source, Target) : LooksLike(sample, Target)) { sameAsTarget.Add(id); return; }
@@ -162,6 +166,7 @@ public static class Translator
 
     public static void Translate(string id, string text, bool gated = false)
     {
+        if (Skips(id)) return;
         var engine = Engine; var source = Source; var target = Target;
         var cacheKey = $"{engine}|{source}|{target}|{text}";
         original.Remove(id);
@@ -329,7 +334,20 @@ public static class Translator
         if (json["responseDetails"]?.ToString()?.Contains("DISTINCT LANGUAGES", StringComparison.OrdinalIgnoreCase) == true) return text;
         if (translated is null || (status is not null && status != "200"))
             throw new TranslateException(json["responseDetails"]?.ToString() is { Length: > 0 } d ? d : L("MyMemory 翻译失败"));
-        return translated;
+        return MyMemoryClean(translated, text);
+    }
+
+    /// MyMemory 的译文有时带着翻译记忆库里的排版标记和 HTML 转义（「这是一项重要的<em>新</em>规则」「it&#39;s」，11-24 实测）：
+    /// 原文里没有的标记去掉、转义还原（同 iOS Translator.myMemoryClean）
+    public static string MyMemoryClean(string translated, string source)
+    {
+        var output = translated;
+        if (!source.Contains('<'))
+            output = Regex.Replace(output, @"</?(em|strong|b|i|u|g|x|bx|ex|bpt|ept|ph)\b[^>]*>", "", RegexOptions.IgnoreCase);
+        if (!source.Contains('&'))
+            foreach (var (entity, ch) in new[] { ("&#39;", "'"), ("&#039;", "'"), ("&apos;", "'"), ("&quot;", "\""), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "), ("&amp;", "&") })
+                output = output.Replace(entity, ch);
+        return output;
     }
 }
 

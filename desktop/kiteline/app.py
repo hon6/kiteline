@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
-from . import agent_skill, aggregate, alerts, config, delivery, editor_windows, faces, log, netinfo, reminders, remotessh, setup_tools, tls, tts, voice, vscode_a11y, vscreen
+from . import agent_skill, aggregate, alerts, config, delivery, editor_windows, faces, log, netinfo, reminders, remotessh, setup_tools, storage, tls, tts, voice, vscode_a11y, vscreen
 from .devices import DeviceStore, Pairing
 from .httpd import HTTPServer, Response
 from .p2p import P2P
@@ -37,7 +37,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.59"
+VERSION = "1.0.60"
 
 
 class App:
@@ -61,7 +61,8 @@ class App:
         self.audit = Audit()
         self.voices = VoiceStore()
         self.media = MediaCache()
-        threading.Thread(target=self.media.prune, daemon=True).start()
+        threading.Thread(target=lambda: self.media.prune(int(self.cfg.mobile.get("storageDays") or 14)), daemon=True).start()
+        self._start_storage_timer()
         self.p2p = P2P(self.devices)
         self.devices.on_p2p_change = self.p2p.refresh_allowlist
         self._state_timer = None
@@ -76,6 +77,7 @@ class App:
         self.store.on_lost = self._sessions_lost
         delivery.LOOKUP = self.store.record
         self.server = MobileServer(self)
+        self.guest.on_ask = self.server.guest_asked   # 看分享链接的同事申请发言：推送提醒分享的人
         self.terms = TermRelay(self)   # 会话终端的设备名、agent 的 term run 跨电脑转发
         self.store.term_count = self.terms.count
         self.todos = Todos(self.store, self.server.publish)
@@ -119,6 +121,7 @@ class App:
         agent_skill.STAGE_ENABLED = bool(self.cfg.mobile.get("installStageSkill", True))
         agent_skill.SHRINK_IMAGES = bool(self.cfg.mobile.get("shrinkAgentImages", False))
         agent_skill.COMPACT_WINDOW = agent_skill.compact_window(self.cfg.mobile.get("compactWindow"))
+        watcher_module.STORAGE.update(auto=bool(self.cfg.mobile.get("storageAuto", True)), days=int(self.cfg.mobile.get("storageDays") or 14))
         watcher_module.BROWSER.update(on=self.cfg.mobile.get("browserOn") or "client", max=int(self.cfg.mobile.get("browserMax") or 4),
                                       idle=int(self.cfg.mobile.get("browserIdle") or 10),
                                       record=bool(self.cfg.mobile.get("browserRecord", True)))
@@ -206,6 +209,19 @@ class App:
             self.server.secure_status = "启动失败：%s" % exc
             log.write("手机 HTTPS 服务启动失败：%s" % exc)
             return
+        # 网页版（https://IP:8766/app/）连的小程序隧道加密入口：小程序入口端口 + 1
+        from .server import webapp_root
+        for _ in range(50):     # 小程序入口在主线程里随后才建：等它一下（最多 5 秒）
+            gate = getattr(self, "mpgate", None)
+            if gate or not m.get("mpEnabled", True):
+                break
+            time.sleep(0.1)
+        if gate and webapp_root():
+            mp_port = int(m.get("mpPort") or 8768)
+            try:
+                gate.start_secure(m["bindAddress"], mp_port + 1, identity[0], identity[1])
+            except OSError as exc:
+                log.write("网页版加密入口启动失败：%s" % exc)
         if m["remoteEnabled"]:
             self.p2p.start(self.cfg.relay(), port)
         if m["bindAddress"] not in ("127.0.0.1", "::1", "localhost"):
@@ -385,6 +401,22 @@ class App:
                     current.restart(entry)
                 else:
                     self._start_source(entry)
+
+    def _start_storage_timer(self):
+        """每 6 小时看一次要不要自动清存储（每天最多清一次，见 storage.auto_clean_if_due）"""
+        def tick():
+            try:
+                storage.auto_clean_if_due(self.media, bool(self.cfg.mobile.get("storageAuto", True)),
+                                          int(self.cfg.mobile.get("storageDays") or 14))
+            finally:
+                timer = threading.Timer(6 * 3600, tick)
+                timer.daemon = True
+                self._storage_timer = timer
+                timer.start()
+        first = threading.Timer(600, tick)
+        first.daemon = True
+        self._storage_timer = first
+        first.start()
 
     def stop(self):
         for source in list(self.store.sources.values()):

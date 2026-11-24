@@ -304,6 +304,9 @@ struct GeneralPane: KLView {
     /// 节省 token 分组里开关下面的说明：图片缩小省了多少、哪台电脑缩不了图（问各台在线的 watcher，见 loadSavers）
     @State private var leanSaved: String?
     @State private var leanUnable: String?
+    @State private var storageInfo: [String: Any]?
+    @State private var storageBusy = false
+    @State private var storageFreed: String?
 
     var klBody: some View {
         Form {
@@ -493,6 +496,35 @@ struct GeneralPane: KLView {
                 Text("Agent 操作网页时使用 Kiteline 提供的浏览器，会话中会显示实时画面，可以放大查看，也可以接管操作。选择「这台电脑」时，远端服务器上的会话也使用这台电脑上的浏览器，网页的登录状态保存在这台电脑上，服务器上不运行浏览器；选择「Agent 所在的电脑」时，浏览器运行在会话所在的电脑上。浏览器在 Agent 首次使用时打开，空闲到设定时间后自动关闭，同时打开的数量还会根据可用内存自动减少。录下的操作可以倍速回放、跳过等待，只保存画面有变化的部分，保留 3 天。")
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("自动清理长期没用的缓存", isOn: binding(\.mobile.storageAuto))
+                Picker("超过多久没使用就清", selection: binding(\.mobile.storageDays)) {
+                    Text("7 天").tag(7)
+                    Text("14 天").tag(14)
+                    Text("30 天").tag(30)
+                    Text("60 天").tag(60)
+                }
+                .klOnChange(of: config.mobile.storageDays) { _, _ in loadStorage() }
+                if let info = storageInfo, let rows = info["categories"] as? [[String: Any]] {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        KLLabeledContent(L((row["name"] as? String) ?? ""),
+                                         value: L("%@，可清 %@", storageText(row["bytes"]), storageText(row["cleanable"])))
+                    }
+                } else {
+                    Text("正在统计…").foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button(storageBusy ? "清理中…" : "立即清理") { cleanStorage() }
+                        .disabled(storageBusy || storageInfo == nil)
+                    if let freed = storageFreed { Text(freed).foregroundStyle(.secondary) }
+                }
+            } header: {
+                Text("存储")
+            } footer: {
+                Text("这些都是从 Agent 的会话记录衍生出来的缓存：手机看过的图片、会话浏览器的用户数据、手机发来的图片、旧的测试报告。按最后一次使用的时间算，超过设定天数没用过的会清掉，需要时会重新从 Agent 的会话记录里获取。清掉会话浏览器的数据后，网页的登录状态需要重新登录。Agent 自己的会话记录、待办、收藏和设置不会被清理。")
+                    .foregroundStyle(.secondary)
+            }
+            .onAppear { loadStorage() }
             Section("启动") {
                 Toggle("登录时自动打开 Kiteline", isOn: $launchAtLogin)
                     .klOnChange(of: launchAtLogin) { _, on in
@@ -582,6 +614,32 @@ struct GeneralPane: KLView {
         group.notify(queue: .main) {
             leanSaved = images > 0 ? String(format: L("已缩小 %lld 张图片，少占上下文约 %@ token"), images, UsageInfo.compact(saved)) : nil
             leanUnable = unable.isEmpty ? nil : String(format: L("%@ 上没有可用的缩图工具，图片不会缩小"), unable.joined(separator: "、"))
+        }
+    }
+
+    private func storageText(_ value: Any?) -> String {
+        ByteCountFormatter.string(fromByteCount: (value as? NSNumber)?.int64Value ?? 0, countStyle: .file)
+    }
+
+    private func loadStorage() {
+        let days = config.mobile.storageDays
+        DispatchQueue.global(qos: .utility).async {
+            let info = StorageCleaner.scan(days: days)
+            DispatchQueue.main.async { storageInfo = info }
+        }
+    }
+
+    private func cleanStorage() {
+        storageBusy = true
+        let days = config.mobile.storageDays
+        DispatchQueue.global(qos: .utility).async {
+            let freed = StorageCleaner.clean(days: days)
+            let info = StorageCleaner.scan(days: days)
+            DispatchQueue.main.async {
+                storageBusy = false
+                storageInfo = info
+                storageFreed = String(format: L("已清理 %@"), ByteCountFormatter.string(fromByteCount: freed, countStyle: .file))
+            }
         }
     }
 

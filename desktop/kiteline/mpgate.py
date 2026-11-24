@@ -16,6 +16,9 @@ class Gate:
     def start(self, host, port):
         raise OSError("not included in this build")
 
+    def start_secure(self, host, port, cert, key):
+        pass
+
     def stop(self):
         pass
 

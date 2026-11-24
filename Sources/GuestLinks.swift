@@ -25,6 +25,23 @@ final class GuestLinks {
 
     static let hourChoices = [1, 24, 168]
 
+    /// 发言申请（11-24 起）：看链接的同事可以写一条消息申请发言，分享的人在手机上点「允许」后才送进会话（以本人名义，开头注明是谁说的）；
+    /// 「拒绝」或 30 分钟没处理就作废。游客只能申请、不能直接操作会话（用户定：只读 + 需放行发言）
+    struct Ask: Codable {
+        var id: String
+        var shareId: String
+        var sessionKey: String
+        var name: String
+        var text: String
+        var at: Double
+        /// pending 等你决定 / sent 已送进会话 / declined 已拒绝 / expired 过期
+        var status: String
+    }
+    private var asks: [Ask] = []
+    /// 每个来源地址最近的申请时间（限流：一个地址一小时最多 20 条）
+    private var askTimes: [String: [Double]] = [:]
+    static let askTTL: Double = 1800
+
     private var shares: [Share] = []
     /// 编号 → 上次生成的快照（会话没变就直接给，免得每个看的人每 8 秒都去机器上取一次记录）
     private var cache: [String: (mark: String, body: Data)] = [:]
@@ -68,7 +85,9 @@ final class GuestLinks {
         guard active, listener == nil else { return }
         let host = AppState.shared.mobile.config.bindAddress
         let server = HTTPServer(host: host, port: UInt16(clamping: port)) { [weak self] request, reply in
-            guard request.method == "GET", request.path.hasPrefix("/g/"), let self else { reply(.response(.text("not found", status: 404))); return }
+            // 只认 /g/ 下的路径：看（GET）和申请发言（POST /g/api/<编号>/ask）
+            let isAsk = request.method == "POST" && request.path.hasPrefix("/g/api/") && request.path.hasSuffix("/ask")
+            guard request.method == "GET" || isAsk, request.path.hasPrefix("/g/"), let self else { reply(.response(.text("not found", status: 404))); return }
             self.serve(request) { reply(.response($0)) }
         }
         do {
@@ -121,9 +140,16 @@ final class GuestLinks {
     // MARK: - 看的人（GET /g/<编号> 页面、GET /g/api/<编号> 内容；不要令牌）
 
     func serve(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
-        let parts = request.path.split(separator: "/").map(String.init)   // ["g", 编号] 或 ["g", "api", 编号]
+        let parts = request.path.split(separator: "/").map(String.init)   // ["g", 编号] 或 ["g", "api", 编号]（申请发言再加 "ask"）
         if parts.count == 2 {
             respond(Self.page())
+            return
+        }
+        if parts.count == 4, parts[1] == "api", parts[3] == "ask", request.method == "POST" {
+            let body = request.jsonBody ?? [:]
+            let result = ask(shareId: parts[2], name: body["name"] as? String ?? "", text: body["text"] as? String ?? "", from: request.remoteAddress)
+            if let ask = result.ask { respond(Self.json(["ok": true, "id": ask.id], status: 200)) }
+            else { respond(Self.json(["ok": false, "error": result.error ?? "申请失败"], status: 400)) }
             return
         }
         guard parts.count == 3, parts[1] == "api" else { respond(.text("not found", status: 404)); return }
@@ -134,7 +160,9 @@ final class GuestLinks {
         }
         let record = AppState.shared.store.record(withKey: share.sessionKey)
         let snap = record?.snapshot
-        let mark = snap.map { "\($0.act.rawValue)|\(Int64($0.transcriptUpdatedAt ?? $0.statusUpdatedAt ?? $0.updatedAt ?? 0))|\($0.displayTitle)" } ?? "ended"
+        let shareAsks = asksFor(shareId: id)
+        let askMark = shareAsks.map { "\($0.id):\($0.status)" }.joined(separator: ",")
+        let mark = (snap.map { "\($0.act.rawValue)|\(Int64($0.transcriptUpdatedAt ?? $0.statusUpdatedAt ?? $0.updatedAt ?? 0))|\($0.displayTitle)" } ?? "ended") + "|" + askMark
         let etag = "\"\(String(UInt64(bitPattern: Int64(mark.hashValue)), radix: 36))\""
         if request.headers["if-none-match"] == etag {
             respond(HTTPResponse(status: 304, headers: ["ETag": etag, "Cache-Control": "no-store", "X-Share-Expires": String(Int64(share.expires))]))
@@ -150,7 +178,10 @@ final class GuestLinks {
                 respond(Self.json(["ok": false, "error": "取不到这个会话的记录（所在电脑可能离线）"], status: 502))
                 return
             }
-            let body = (try? JSONSerialization.data(withJSONObject: Self.snapshot(share: share, record: record, items: items, more: more))) ?? Data("{}".utf8)
+            var snapshot = Self.snapshot(share: share, record: record, items: items, more: more)
+            snapshot["asks"] = shareAsks.suffix(20).map { ["id": $0.id, "name": $0.name, "text": String($0.text.prefix(300)), "status": $0.status, "at": $0.at] }
+            snapshot["canAsk"] = true
+            let body = (try? JSONSerialization.data(withJSONObject: snapshot)) ?? Data("{}".utf8)
             self.lock.withLock { self.cache[id] = (mark, body) }
             respond(Self.snapshotResponse(body, etag: etag, expires: share.expires))
         }
@@ -214,7 +245,60 @@ final class GuestLinks {
 
     // MARK: - 小工具（调用方持锁的带 Locked）
 
+    // MARK: - 发言申请
+
+    func ask(shareId: String, name rawName: String, text rawText: String, from remote: String) -> (ask: Ask?, error: String?) {
+        let name = String(rawName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(20))
+        let text = String(rawText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000))
+        guard !name.isEmpty else { return (nil, "请填写你的名字") }
+        guard !text.isEmpty else { return (nil, "请填写要说的话") }
+        let now = Date().timeIntervalSince1970
+        let made: Ask? = lock.withLock {
+            pruneLocked()
+            guard let share = shares.first(where: { $0.id == shareId }) else { return nil }
+            var times = (askTimes[remote] ?? []).filter { now - $0 < 3600 }
+            guard times.count < 20, asks.filter({ $0.shareId == shareId && $0.status == "pending" }).count < 5 else { return Ask(id: "", shareId: "", sessionKey: "", name: "", text: "", at: 0, status: "limited") }
+            times.append(now)
+            askTimes[remote] = times
+            let ask = Ask(id: Self.randomID(), shareId: shareId, sessionKey: share.sessionKey, name: name, text: text, at: now, status: "pending")
+            asks.append(ask)
+            cache[shareId] = nil
+            return ask
+        }
+        guard let ask = made else { return (nil, "链接已失效") }
+        if ask.status == "limited" { return (nil, "申请太多了，请等对方处理后再发") }
+        Log.write("「\(name)」在分享的会话里申请发言（\(remote)）")
+        DispatchQueue.main.async { AppState.shared.mobile.guestAsked(ask) }
+        return (ask, nil)
+    }
+
+    func asksFor(shareId: String) -> [Ask] { lock.withLock { pruneLocked(); return asks.filter { $0.shareId == shareId } } }
+    func pendingAsks(sessionKey: String?) -> [Ask] {
+        lock.withLock { pruneLocked(); return asks.filter { $0.status == "pending" && (sessionKey == nil || $0.sessionKey == sessionKey) } }
+    }
+
+    /// 分享的人决定：允许（返回这条申请，由调用方送进会话）或拒绝
+    func decide(id: String, allow: Bool) -> Ask? {
+        lock.withLock {
+            pruneLocked()
+            guard let i = asks.firstIndex(where: { $0.id == id && $0.status == "pending" }) else { return nil }
+            asks[i].status = allow ? "sent" : "declined"
+            cache[asks[i].shareId] = nil
+            return asks[i]
+        }
+    }
+
+    /// 允许后送进会话的文字：开头注明是谁说的，Agent 知道这句话不是本人写的
+    static func deliveredText(_ ask: Ask) -> String { "（来自「\(ask.name)」的留言，已经我同意）\n\(ask.text)" }
+
+    static func askPayload(_ ask: Ask) -> [String: Any] {
+        ["id": ask.id, "shareId": ask.shareId, "key": ask.sessionKey, "name": ask.name, "text": ask.text, "at": ask.at, "status": ask.status]
+    }
+
     private func pruneLocked() {
+        let nowAsk = Date().timeIntervalSince1970
+        for i in asks.indices where asks[i].status == "pending" && nowAsk - asks[i].at > Self.askTTL { asks[i].status = "expired" }
+        asks.removeAll { ask in nowAsk - ask.at > 86_400 || !shares.contains(where: { $0.id == ask.shareId }) }
         let now = Date().timeIntervalSince1970
         let before = shares.count
         shares.removeAll { $0.expires <= now }

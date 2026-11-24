@@ -114,7 +114,7 @@ public static class CodeApi
 {
     static Net.Api Api => AppModel.Shared.Api;
     /// 慢的操作（要连远端、要跑提交钩子）：先拿任务号，再隔一会儿问一次结果（同 iOS 版）
-    static readonly HashSet<string> SlowOps = ["push", "pull", "fetch", "remote_branch_delete", "commit", "merge", "rebase", "cherry_pick",
+    static readonly HashSet<string> SlowOps = ["push", "pr_create", "pull", "fetch", "remote_branch_delete", "commit", "merge", "rebase", "cherry_pick",
         "revert", "continue", "skip", "worktree_add"];
 
     static Dictionary<string, string> Q(string key, params (string, string?)[] more)

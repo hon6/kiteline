@@ -298,6 +298,13 @@ public struct TarsTodosView: KLView {
                 TodosView()
                     .font(.ui(.body))
                     .tint(Theme.claude)
+                    #if os(macOS) && !KL_MODERN
+                    // 兼容包：macOS 13 的 NavigationStack 里拿不到外面传的 AppModel，页面一开就崩（11-25 macOS 13.6 虚拟机实测），里面再传一次
+                    .environment(\.appModelSlot, model)
+                    .environment(\.openRoute, OpenRoute { route in
+                        if case .chat(let key) = route { KitelineKit.openSession(key) }
+                    })
+                    #endif
             }
             .environment(\.appModelSlot, model)
             .environment(\.openRoute, OpenRoute { route in
@@ -376,6 +383,13 @@ public struct TarsFavoritesView: KLView {
                 FavoritesView()
                     .font(.ui(.body))
                     .tint(Theme.claude)
+                    #if os(macOS) && !KL_MODERN
+                    // 兼容包：macOS 13 的 NavigationStack 里拿不到外面传的 AppModel，页面一开就崩（11-25 macOS 13.6 虚拟机实测），里面再传一次
+                    .environment(\.appModelSlot, model)
+                    .environment(\.openRoute, OpenRoute { route in
+                        if case .chat(let key) = route { KitelineKit.openSession(key) }
+                    })
+                    #endif
             }
             .environment(\.appModelSlot, model)
             .environment(\.openRoute, OpenRoute { route in
@@ -742,6 +756,11 @@ public struct TarsGroupsView: KLView {
         if let model = KitelineKit.model {
             KLNavigationStack {
                 GroupsView().font(.ui(.body)).tint(Theme.claude)
+                    #if os(macOS) && !KL_MODERN
+                    // 兼容包：macOS 13 的 NavigationStack 里拿不到外面传的 AppModel，页面一开就崩（11-25 macOS 13.6 虚拟机实测），里面再传一次
+                    .environment(\.appModelSlot, model)
+                    .environment(\.openRoute, KitelineKit.groupRoutes)
+                    #endif
             }
             .environment(\.appModelSlot, model)
             .environment(\.openRoute, KitelineKit.groupRoutes)

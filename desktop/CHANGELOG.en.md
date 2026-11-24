@@ -1,5 +1,23 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.60 (2026-11-25)
+
+### New
+
+- **Use it from your phone's browser**: on your computer's Wi-Fi, scan the pairing QR code with your phone camera to use Kiteline in the browser without installing an app. Kiteline is also available as an Android app (download from the website).
+- **Colleagues can ask to post**: people viewing a shared read-only link can ask to post a message; it reaches the session on your behalf, marked with who wrote it, only after you tap Allow in the share panel.
+- **One-tap pull requests**: choose Create Pull Request in a branch's menu under Code to push the branch and create the PR, or open the new pull request page on the website.
+- **More agents over ACP** (Linux): when starting a new task you can choose Gemini CLI, Goose, GitHub Copilot CLI, Augment or Factory Droid, and Kiteline runs it in the background.
+
+### New
+
+- **New Storage cleanup**: Settings → General → Storage shows how much space image cache, session browser data, images sent from your phone and old test reports take. Caches unused for more than 14 days (choose 7, 14, 30 or 60) are cleaned automatically every day, and you can click Clean Now at any time. Everything removed can be fetched again from the agent's session records; after session browser data is cleaned, websites need a new sign-in. Agent session records, to-dos, favorites and settings are never touched.
+
+### Bug Fixes
+
+- **An unrelated sentence occasionally flashed in the conversation**: With auto-translate on, an old translation could briefly appear at the end of the conversation while a reply was being written, then disappear a second or two later. Replies in progress are now shown as written and translated automatically once complete.
+- **Stray symbols in translations**: Translations from MyMemory no longer include stray markup such as `<em>` or `&#39;`.
+
 ## 1.0.59 (2026-11-24)
 
 ### New Features

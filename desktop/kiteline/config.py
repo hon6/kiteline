@@ -53,6 +53,8 @@ DEFAULT_MOBILE = {
     "browserMax": 4,               # 最多同时开几个浏览器（再按可用内存往下压）
     "browserIdle": 10,             # 空闲多少分钟回收
     "browserRecord": True,         # 录下浏览器操作，可以回放
+    "storageAuto": True,           # 存储清理：自动清超过 N 天没用的缓存（图片缓存、会话浏览器数据、收件图片，见 storage.py）
+    "storageDays": 14,
     "httpsEnabled": True,
     "httpsPort": 0,
     "mpEnabled": True,             # 微信小程序入口（加密隧道，见 mpgate.py）

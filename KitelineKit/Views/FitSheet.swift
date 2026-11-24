@@ -111,7 +111,7 @@ private struct FitSheetClose: KLViewModifier {
 
     func klBody(content: Content) -> some View {
         if cancel {
-            content.klBareToolbarItem(.cancellationAction) { Button(L("取消"), action: close).keyboardShortcut(.cancelAction).panelToolbarButton() }
+            content.toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("取消"), action: close).keyboardShortcut(.cancelAction).panelToolbarButton() } }
         } else {
             content.doneButton(close)
         }

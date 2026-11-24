@@ -170,8 +170,24 @@ def mymemory(pieces, source, target):
             data = reply.get("responseData") or {}
             if str(reply.get("responseStatus", 200)) != "200" or not data.get("translatedText"):
                 raise TranslateError(str(reply.get("responseDetails") or "MyMemory 翻译失败"))
-            parts.append(data["translatedText"])
+            parts.append(mymemory_clean(data["translatedText"], chunk))
         out.append(" ".join(parts))
+    return out
+
+
+_MM_TAGS = re.compile(r"</?(em|strong|b|i|u|g|x|bx|ex|bpt|ept|ph)\b[^>]*>", re.I)
+_MM_ENTITIES = [("&#39;", "'"), ("&#039;", "'"), ("&apos;", "'"), ("&quot;", '"'), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "), ("&amp;", "&")]
+
+
+def mymemory_clean(translated, source):
+    """MyMemory 的译文有时带着翻译记忆库里的排版标记和 HTML 转义（「这是一项重要的<em>新</em>规则」「it&#39;s」，11-24 实测）：
+    原文里没有的标记去掉、转义还原（同 iOS Translator.myMemoryClean）"""
+    out = translated
+    if "<" not in source:
+        out = _MM_TAGS.sub("", out)
+    if "&" not in source:
+        for entity, char in _MM_ENTITIES:
+            out = out.replace(entity, char)
     return out
 
 

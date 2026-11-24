@@ -19,6 +19,9 @@ datas = [
     # 游客链接（局域网只读分享）看的页面（后台 /g/<编号> 给，见 kiteline/guest.py）
     (os.path.join(ROOT, "Resources", "guest"), "guest"),
 ]
+# 网页版（手机浏览器打开 https://电脑IP:8766/app/，见 kiteline/server.webapp_root）：build-windows.ps1 先从小程序源码编到 web-app/dist；开源版没有就不带
+if os.path.isfile(os.path.join(ROOT, "web-app", "dist", "index.html")):
+    datas.append((os.path.join(ROOT, "web-app", "dist"), "webapp"))
 datas += collect_data_files("tzdata")
 datas += collect_data_files("certifi")   # edge-tts 连微软时校验证书用的根证书包
 # 远程访问库（p2p/ 编出来的；开源版没有，打出来的包只能在同一个网络里连）

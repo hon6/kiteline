@@ -32,6 +32,7 @@ final class AppState {
         AgentSkill.openCodePlugin = config.mobile.installOpenCodePlugin
         AgentSkill.shrinkImages = config.mobile.shrinkAgentImages
         AgentSkill.compactWindow = config.mobile.compactWindow
+        AgentSkill.storage = (config.mobile.storageAuto, config.mobile.storageDays)
         AgentSkill.browser = (config.mobile.browserOn, config.mobile.browserMax, config.mobile.browserIdle, config.mobile.browserRecord)
         store.delegate = self
         mobile.onClientsChange = { [weak self] in
@@ -145,6 +146,7 @@ final class AppState {
         AgentSkill.openCodePlugin = newConfig.mobile.installOpenCodePlugin
         AgentSkill.shrinkImages = newConfig.mobile.shrinkAgentImages
         AgentSkill.compactWindow = newConfig.mobile.compactWindow
+        AgentSkill.storage = (newConfig.mobile.storageAuto, newConfig.mobile.storageDays)
         AgentSkill.browser = (newConfig.mobile.browserOn, newConfig.mobile.browserMax, newConfig.mobile.browserIdle, newConfig.mobile.browserRecord)
         mobile.update(config: newConfig.mobile)
         // 端口、令牌可能变了：主窗口的原生对话页跟着重连（没变时什么也不做）
@@ -223,6 +225,7 @@ final class AppState {
         AgentSkill.openCodePlugin = next.mobile.installOpenCodePlugin
         AgentSkill.shrinkImages = next.mobile.shrinkAgentImages
         AgentSkill.compactWindow = next.mobile.compactWindow
+        AgentSkill.storage = (next.mobile.storageAuto, next.mobile.storageDays)
         AgentSkill.browser = (next.mobile.browserOn, next.mobile.browserMax, next.mobile.browserIdle, next.mobile.browserRecord)
         mobile.update(config: next.mobile)
         mobile.publishState()   // 快捷短语等设置要同步到已连着的手机

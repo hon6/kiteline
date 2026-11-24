@@ -15,11 +15,12 @@ import re
 import sys
 import threading
 import time
+import urllib.parse
 import uuid
 
-from . import aggregate, bark, config, delivery, editor_windows, faces, guest, i18n, log, netinfo, setup_tools, tls, tts
+from . import aggregate, bark, config, delivery, editor_windows, faces, guest, i18n, log, netinfo, setup_tools, storage, tls, tts
 from . import translate as translator
-from .httpd import Response, StreamReply
+from .httpd import Request, Response, StreamReply
 from .store import hostable as store_hostable
 
 AUDIO_TYPES = ("audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac",
@@ -83,6 +84,30 @@ def world_root():
         if folder and os.path.isfile(os.path.join(folder, "index.html")):
             return os.path.realpath(folder)
     return None
+
+
+def webapp_root():
+    """网页版（微信小程序编译成的网页，web-app/build.py）在哪：打包后在 _MEIPASS/webapp 或 desktop/webapp，开发时用 web-app/dist"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [os.environ.get("KITELINE_WEBAPP_ROOT") or ""]
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        candidates.append(os.path.join(base, "webapp"))
+    candidates += [os.path.join(here, "..", "webapp"), os.path.join(here, "..", "..", "web-app", "dist")]
+    for folder in candidates:
+        if folder and os.path.isfile(os.path.join(folder, "index.html")):
+            return os.path.realpath(folder)
+    return None
+
+
+# 网页版只连这台电脑（加密隧道）和官方中继（订阅状态、经中继远程），不加载任何外部脚本（同 Mac WebApp.csp）
+WEBAPP_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tars.betac.cn; "
+              "media-src 'self' blob: data:; connect-src 'self' wss: https://tars.betac.cn; worker-src 'self' blob:; "
+              "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+WEBAPP_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+                ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp", ".mp3": "audio/mpeg",
+                ".wav": "audio/wav", ".m4a": "audio/mp4", ".woff2": "font/woff2", ".ttf": "font/ttf"}
 
 
 def image_response(data, mime):
@@ -318,6 +343,14 @@ class MobileServer:
         if targets:
             app.push.send(english, urgency=urgency, only=targets)
 
+    def guest_asked(self, ask):
+        """看分享链接的同事申请发言（guest.py）：推送提醒，在线的手机刷新分享面板（同 Mac MobileServer.guestAsked）"""
+        session = next((x for x in self.app.state_payload().get("sessions") or [] if x.get("key") == ask["sessionKey"]), None) or {}
+        title = session.get("title") or ""
+        self.notify("guest_ask", "「%s」想在会话里发言" % ask["name"], ((title + "：") if title else "") + ask["text"][:120],
+                    ask["sessionKey"], route="share", english=("%s wants to post in a session" % ask["name"], ((title + ": ") if title else "") + ask["text"][:120]))
+        self.publish("share_ask", {k: ask[k] for k in ("id", "shareId", "name", "text", "at", "status")})
+
     def notify_goal(self, title, head, body, body_en, key):
         """目标（/goal）达成、做不到、停下：标题「会话 · 目标已达成」，正文是目标和结果；中英两份在源头拼好（正文里夹着目标原文）（同 Mac 版 notifyGoal）"""
         shown, shown_en = "%s · %s" % (title, head), "%s · %s" % (title, i18n.translate(head))
@@ -442,7 +475,12 @@ class MobileServer:
         if method == "GET" and path == "/ca.mobileconfig":
             return self._mobileconfig()
         if path == "/pair" and method in ("GET", "POST"):
-            return self._pair(request)
+            # 手机相机扫配对码直接打开的（不带配对码）：转到网页版，让网页版自己配对（同 Mac WebApp.pairRedirect）
+            redirect = self._pair_redirect(request)
+            return redirect or self._pair(request)
+        if method == "GET" and (path == "/app" or path.startswith("/app/")):
+            # 网页版（11-24 重新开放，只走 HTTPS）：小程序编译成的网页，数据走加密隧道（mpgate 的 wss 入口）
+            return self._webapp_file(path)
         if path == "/desktop" or path.startswith("/api/desktop/"):
             # 主令牌（本机的单实例检查、脚本）或控制台页面自己的会话令牌（票据进门时发的，只管 /api/desktop/*）
             auth = self._authorize(request)
@@ -457,8 +495,14 @@ class MobileServer:
             status, headers, body = self.app.guest.serve(path, request.headers.get("if-none-match"))
             return Response(status, headers, body)
         if method == "GET" and not path.startswith("/api/"):
-            # 网页版已下线：根路径只有说明页，别的路径（app.js、manifest……）一律 404
-            return self._notice() if path in ("/", "", "/index.html") else Response.text("not found", 404)
+            # 根路径：有网页版就转过去，没有只给说明页；别的路径一律 404
+            if path in ("/", "", "/index.html"):
+                # 手机相机扫配对码打开的是 /?t=…&mk=…：带着参数转到网页版，由网页版完成配对
+                redirect = self._pair_redirect(request)
+                if redirect:
+                    return redirect
+                return Response(302, {"Location": "/app/", "Cache-Control": "no-store"}, b"") if webapp_root() else self._notice()
+            return Response.text("not found", 404)
 
         auth = self._authorize(request)
         if not auth:
@@ -497,6 +541,13 @@ class MobileServer:
         if path == "/api/tabgroups" or path.startswith("/api/tabgroups/"):
             status, result = self.app.tab_groups.handle(method, path, request.json)
             return Response.json(result, status)
+        if path == "/api/storage" and method == "GET":
+            days = int(request.query.get("days") or self.app.cfg.mobile.get("storageDays") or 14)
+            return Response.json(storage.scan(self.app.media, max(1, days)))
+        if path == "/api/storage/clean" and method == "POST":
+            body = request.json or {}
+            freed = storage.clean(self.app.media, max(1, int(body.get("days") or self.app.cfg.mobile.get("storageDays") or 14)), body.get("only") or [])
+            return Response.json({"ok": True, "freed": freed})
         if path == "/api/favorites" or path.startswith("/api/favorites/"):
             status, result = self.app.favorites.handle(method, path, request.json, request.query)
             if isinstance(result, tuple):
@@ -536,6 +587,40 @@ class MobileServer:
         kind = WORLD_TYPES.get(os.path.splitext(target)[1].lower(), "application/octet-stream")
         return Response(200, {"Content-Type": kind, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff",
                               "Content-Security-Policy": WORLD_CSP, "Referrer-Policy": "no-referrer"}, data)
+
+    @staticmethod
+    def _pair_redirect(request):
+        """配对二维码被手机相机直接打开（不带配对码、带 t 和 mk）：转到网页版，带着原参数（同 Mac WebApp.pairRedirect）"""
+        q = request.query
+        if request.method != "GET" or "code" in q or not q.get("t") or not q.get("mk") or not webapp_root():
+            return None
+        query = urllib.parse.urlencode(sorted(q.items()))
+        return Response(302, {"Location": "/app/?" + query, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}, b"")
+
+    @staticmethod
+    def _webapp_file(path):
+        root = webapp_root()
+        if not root:
+            return Response.text("网页版未包含在这个版本中", 404)
+        rel = urllib.parse.unquote(path[len("/app"):])
+        if not rel:
+            return Response(302, {"Location": "/app/"}, b"")
+        if rel.endswith("/"):
+            rel += "index.html"
+        parts = [x for x in rel.split("/") if x]
+        if not parts or any(x in (".", "..") or x.startswith(".") for x in parts):
+            return Response.text("not found", 404)
+        target = os.path.realpath(os.path.join(root, *parts))
+        if not target.startswith(root + os.sep):
+            return Response.text("not found", 404)
+        try:
+            with open(target, "rb") as handle:
+                data = handle.read()
+        except OSError:
+            return Response.text("not found", 404)
+        kind = WEBAPP_TYPES.get(os.path.splitext(target)[1].lower(), "application/octet-stream")
+        return Response(200, {"Content-Type": kind, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff",
+                              "Content-Security-Policy": WEBAPP_CSP, "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow"}, data)
 
     @staticmethod
     def _notice():
@@ -1794,9 +1879,27 @@ def r_push_subscribe(s, request, kind, who, device_id):
 
 
 def r_share_list(s, request, *_):
-    """游客链接（局域网只读分享，见 guest.py）：这个会话正在分享的网址"""
+    """游客链接（局域网只读分享，见 guest.py）：这个会话正在分享的网址，和待处理的发言申请"""
     port = guest.guest_port(s.app)
-    return Response.json({"ok": True, "shares": [guest.payload_of(x, port) for x in s.app.guest.list(request.query.get("key") or None)]})
+    key = request.query.get("key") or None
+    return Response.json({"ok": True, "shares": [guest.payload_of(x, port) for x in s.app.guest.list(key)],
+                          "asks": [{k: a[k] for k in ("id", "shareId", "name", "text", "at", "status")} | {"key": a["sessionKey"]}
+                                   for a in s.app.guest.pending_asks(key)]})
+
+
+def r_share_ask(s, request, kind, who, device_id):
+    """发言申请：允许就以本人名义送进会话（开头注明是谁说的），拒绝就作废（同 Mac /api/share/ask）"""
+    body = request.json or {}
+    allow = body.get("action") == "allow"
+    ask = s.app.guest.decide(body.get("id") or "", allow)
+    if not ask:
+        return Response.error("这条申请已处理或已过期", 404)
+    s.publish("share_ask", {})
+    if not allow:
+        return Response.json({"ok": True})
+    payload = json.dumps({"text": guest.GuestLinks.delivered_text(ask), "submit": True}, ensure_ascii=False).encode("utf-8")
+    send = Request("POST", "/api/send?key=" + urllib.parse.quote(ask["sessionKey"]), request.headers, payload, request.remote)
+    return r_send(s, send, kind, who, device_id)
 
 
 def r_share_create(s, request, *_):
@@ -2073,7 +2176,7 @@ ROUTES = {
     ("GET", "/api/agent-info"): r_agent_info, ("GET", "/api/machine"): r_machine, ("POST", "/api/feedback"): r_feedback,
     ("POST", "/api/watch/status"): r_watch_status, ("POST", "/api/p2p/join"): r_p2p_join, ("POST", "/api/clientlog"): r_clientlog,
     ("POST", "/api/presence"): r_presence, ("GET", "/api/push/key"): r_push_key, ("POST", "/api/push/subscribe"): r_push_subscribe, ("POST", "/api/live/register"): r_live_register,
-    ("GET", "/api/share"): r_share_list, ("POST", "/api/share"): r_share_create, ("POST", "/api/share/stop"): r_share_stop,
+    ("GET", "/api/share"): r_share_list, ("POST", "/api/share"): r_share_create, ("POST", "/api/share/stop"): r_share_stop, ("POST", "/api/share/ask"): r_share_ask,
     ("POST", "/api/push/unsubscribe"): r_push_unsubscribe, ("POST", "/api/push/test"): r_push_test,
     ("GET", "/api/readiness"): r_readiness, ("POST", "/api/readiness/fix"): r_readiness_fix, ("GET", "/api/changelog"): r_changelog, ("GET", "/api/schedules"): r_schedules,
     ("GET", "/api/host-update"): r_host_update, ("POST", "/api/host-update"): r_host_update_post,

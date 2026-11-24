@@ -33,8 +33,9 @@ final class Store: KLObservable {
     @Tracked var paywall: Reason?
 
     /// 开发版（Xcode 装的）默认全部放开，免得还没在 App Store Connect 建好商品就把自己锁住；
-    /// 设置里打开「模拟免费版」才按真的订阅状态来
-    #if DEBUG
+    /// 设置里打开「模拟免费版」才按真的订阅状态来。
+    /// KL_DEVBUILD：ios/build.sh device 装到手机上的开发版（含 CONFIG=Release 的优化版）都带这个标记，同样放开；App Store / TestFlight 版不带
+    #if DEBUG || KL_DEVBUILD
     @Tracked var simulateFree = UserDefaults.standard.bool(forKey: "simulateFree") {
         didSet { UserDefaults.standard.set(simulateFree, forKey: "simulateFree"); publish() }
     }
@@ -49,7 +50,7 @@ final class Store: KLObservable {
         if Demo.active { return true }
         #if SNAPSHOT
         return ProcessInfo.processInfo.environment["TARS_DEMO_FREE"] == nil
-        #elseif DEBUG
+        #elseif DEBUG || KL_DEVBUILD
         return !simulateFree || entitled
         #else
         return entitled

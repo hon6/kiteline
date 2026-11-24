@@ -28,6 +28,8 @@ cp "$HERE/CHANGELOG.en.md" "$DEST/CHANGELOG.en.md"   # 英文手机看的更新�
 cp "$HERE/packaging/kiteline.png" "$DEST/kiteline.png"
 # 世界模式的网页（包里在 desktop/world；后台按 $DEST/world 找，见 server.world_root）。从仓库直接装时没有这个目录，后台用仓库的 Resources/world
 if [ -d "$HERE/world" ]; then rm -rf "$DEST/world"; cp -R "$HERE/world" "$DEST/world"; fi
+# 网页版（包里在 desktop/webapp；后台按 $DEST/webapp 找，见 server.webapp_root）
+if [ -d "$HERE/webapp" ]; then rm -rf "$DEST/webapp"; cp -R "$HERE/webapp" "$DEST/webapp"; fi
 # 原生客户端（主窗口，托盘「打开 Kiteline」打开它）
 if [ -d "$HERE/app" ]; then
   rm -rf "$DEST/app"

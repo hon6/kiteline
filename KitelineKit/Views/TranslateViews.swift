@@ -371,7 +371,7 @@ public struct TranslateAppleHost: KLView {
 /// 消息菜单里的「翻译 / 显示原文」
 extension Translator {
     func menuAction(id: String, text: String) -> MenuAction? {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard !Self.skips(id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         if isTranslated(id) {
             return MenuAction(title: L("显示原文"), symbol: "arrow.uturn.backward") { self.restore(id) }
         }

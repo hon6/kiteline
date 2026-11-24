@@ -160,7 +160,7 @@ final class HTTPServer {
     /// 握手时把本机根证书一起发出去：Kiteline iOS App 配对时从握手里拿到它，核对二维码里的指纹后记下来，
     /// 之后只认它签的证书（不用像网页版那样去「设置」里装描述文件）。浏览器不受影响。
     /// （证书数组里只放服务器证书之后的部分：服务器证书本身系统会自己带上，放进去会发两遍）
-    private static func withChain(_ identity: SecIdentity) -> sec_identity_t? {
+    static func withChain(_ identity: SecIdentity) -> sec_identity_t? {
         guard let ca = LocalTLS.caCertificate else { return sec_identity_create(identity) }
         return sec_identity_create_with_certificates(identity, [ca] as CFArray)
     }

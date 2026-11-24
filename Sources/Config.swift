@@ -97,6 +97,7 @@ enum ConfigKey: String, CodingKey {
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
     case shrinkAgentImages, compactWindow
     case browserOn, browserMax, browserIdle, browserRecord
+    case storageAuto, storageDays
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
     case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal, hostedCloseEditor
     case quietStart, quietEnd, mutedSessions, pinnedSessions, markedSessions, myName, avatar, remoteEnabled, relayURL, watch, usageStats
@@ -139,6 +140,9 @@ struct MobileConfig: Codable, Equatable {
     var browserIdle: Int = 10
     /// 录下浏览器操作，可以回放（只存画面变了的帧，保留 3 天）
     var browserRecord: Bool = true
+    /// 存储清理：自动清超过 N 天没用的会话缓存（图片缓存、会话浏览器数据、收件图片，见 Storage.swift）；默认开、14 天（11-24）
+    var storageAuto: Bool = true
+    var storageDays: Int = 14
     /// 同时开一个 HTTPS 端口（本机签发证书）：iOS 网页推送必须走 HTTPS
     var httpsEnabled: Bool = true
     /// 0 = 普通端口 + 1
@@ -271,6 +275,8 @@ struct MobileConfig: Codable, Equatable {
         browserMax = max(1, min(16, (try? c.decodeIfPresent(Int.self, forKey: .browserMax)) ?? nil ?? 4))
         browserIdle = max(1, min(240, (try? c.decodeIfPresent(Int.self, forKey: .browserIdle)) ?? nil ?? 10))
         browserRecord = flag(.browserRecord, true)
+        storageAuto = flag(.storageAuto, true)
+        storageDays = max(1, min(365, (try? c.decodeIfPresent(Int.self, forKey: .storageDays)) ?? nil ?? 14))
         httpsEnabled = flag(.httpsEnabled, true)
         httpsPort = (try? c.decodeIfPresent(Int.self, forKey: .httpsPort)) ?? nil ?? 0
         pushContact = text(.pushContact, "mailto:ccpulse@users.noreply.github.com")

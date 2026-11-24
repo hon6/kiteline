@@ -159,7 +159,8 @@ public final class ChatPanes: KLObservable {
     /// 拖着时按了 Esc：松手前都不再跟
     private var tabDragCancelled = false
     #if os(macOS)
-    private var escMonitor: Any?
+    /// 拖标签时的按键 / 松手监听：Esc 取消，松手兜底收尾（见 dragTab）
+    private var dragMonitor: Any?
 
     /// 指着展开的标签（Mac，11-04 起）：鼠标停在一个标题被截短的标签上，它按完整标题变宽——不超出这一块，
     /// 这块的会话、分屏按钮先收进「更多」，别的标签缩窄；离开这块的标签栏收回。key 是空串 = 「选择会话」新标签
@@ -484,9 +485,16 @@ public final class ChatPanes: KLObservable {
             // 展开着的标签先收回：落点、插入竖线按平时的位置算
             peekWork?.cancel()
             if peek != nil { peek = nil }
-            if escMonitor == nil {
-                escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                    guard event.keyCode == 53, let self, self.tabDrag != nil else { return event }
+            if dragMonitor == nil {
+                dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseUp]) { [weak self] event in
+                    guard let self else { return event }
+                    if event.type == .leftMouseUp {
+                        // 兜底：拖动手势半路被系统取消（拖着的标签那一刻被换掉、重画）时 onEnded 不会来，
+                        // 跟手的标签和对话区上的落点高亮会一直留着（11-24 截图）。松手后等手势自己收尾，没收就在这里收
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.settleTabDrag() }
+                        return event
+                    }
+                    guard event.keyCode == 53, self.tabDrag != nil else { return event }
                     withAnimation(.klSnappy(duration: 0.15)) { self.cancelTabDrag() }
                     return nil
                 }
@@ -519,7 +527,7 @@ public final class ChatPanes: KLObservable {
     func endTabDrag() {
         let drag = tabDragCancelled ? nil : tabDrag, target = tabTarget
         tabDragCancelled = false
-        stopEscMonitor()
+        stopDragMonitor()
         tabDrag = nil
         tabTarget = nil
         guard let drag else { return }
@@ -530,18 +538,28 @@ public final class ChatPanes: KLObservable {
         }
     }
 
-    /// 拖着时按 Esc：标签回原处，松手前不再跟
+    /// 拖着时按 Esc：标签回原处，松手前不再跟（监听留到松手，松手时把「已取消」也清掉）
     func cancelTabDrag() {
         tabDragCancelled = true
-        stopEscMonitor()
         tabDrag = nil
         tabTarget = nil
     }
 
-    private func stopEscMonitor() {
+    /// 已经松开鼠标、拖动状态还挂着（手势没送 onEnded）：收尾。拖的标签还在就照常放下，已经没了（草稿换成了会话、被关掉）就不放
+    func settleTabDrag() {
         #if os(macOS)
-        if let escMonitor { NSEvent.removeMonitor(escMonitor) }
-        escMonitor = nil
+        guard tabDrag != nil || tabDragCancelled || dragMonitor != nil else { return }
+        #else
+        guard tabDrag != nil || tabDragCancelled else { return }
+        #endif
+        if let drag = tabDrag, pane(holding: drag.key) == nil { tabDrag = nil }
+        withAnimation(.klSnappy(duration: 0.15)) { endTabDrag() }
+    }
+
+    private func stopDragMonitor() {
+        #if os(macOS)
+        if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
+        dragMonitor = nil
         #endif
     }
 
@@ -1531,6 +1549,8 @@ private struct PaneView<Content: View>: KLView {
             }
             .animation(.klSnappy(duration: 0.15), value: shown)
             .animation(.klSnappy(duration: 0.15), value: tabZone)
+            // 松手后接住拖放的那层会撤掉，可能等不到 dropExited：拖完就清掉落点，别让高亮留着
+            .klOnChange(of: PaneDrag.state.active) { _, on in if !on, zone != nil { zone = nil } }
             #else
             // 别让内容画到别的块上；贴着屏幕底的那块，输入栏的底色照样延伸到 Home 横条那一带
             .mask(Rectangle().ignoresSafeArea())

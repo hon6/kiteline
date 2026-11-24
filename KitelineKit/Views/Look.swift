@@ -589,8 +589,12 @@ public final class Look: KLObservable {
     private static func installed(_ name: String) -> Bool {
         #if canImport(UIKit)
         UIFont(name: name, size: 12) != nil
-        #else
+        #elseif KL_MODERN
         NSFont(name: name, size: 12) != nil
+        #else
+        // macOS 12 / 13（兼容包）：按名字建一个还没下载的系统字体，系统会弹「需要下载字体」的模态框、卡住主线程，
+        // 启动时每种没下载的中文字体弹一次（11-24 macOS 12.6 虚拟机实测）。只查已装的字体名单，不会触发下载提示
+        NSFontManager.shared.availableFonts.contains(name)
         #endif
     }
 

@@ -374,8 +374,14 @@ try:
         with open(W.LIVE_SESSIONS_FILE, "w") as handle:
             json.dump({"sessions": live_rows}, handle)
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        W.command_peers_active(["--cwd", CWD])
+    # 「调这个命令的会话自己」按运行环境猜（没有会话编号时可能猜成这里造的会话）：测试里固定成没有
+    saved_target = W.target_session
+    W.target_session = lambda _sid: (None, None)
+    try:
+        with contextlib.redirect_stdout(out):
+            W.command_peers_active(["--cwd", CWD])
+    finally:
+        W.target_session = saved_target
     listed = [line.split("\t")[0] for line in out.getvalue().splitlines()]
     W.SESSIONS_DIR, W.LIVE_SESSIONS_FILE, W.STAGE_DIR = saved
     check("peers-active：正在工作、等确认、规划了没报完成的列出来，已报完成的空闲会话不列", sorted(listed) == ["kl-busy", "kl-plan", "kl-wait"], out.getvalue())
@@ -1888,6 +1894,43 @@ finally:
     proc.terminate()
     fake.kill()
     shutil.rmtree(root, ignore_errors=True)
+
+# 一键开 PR（repo_op pr_create）：推送当前分支；不是 GitHub 或没有 gh 时给网站上新建合并请求的地址
+print("== 一键开 PR")
+for url, want in (("git@github.com:o/r.git", "https://github.com/o/r/compare/main...feat/x?expand=1"),
+                  ("https://gitlab.com/g/r.git", "https://gitlab.com/g/r/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat%2Fx&merge_request%5Btarget_branch%5D=main"),
+                  ("https://gitee.com/o/r", "https://gitee.com/o/r/compare/main...feat/x")):
+    check("合并请求地址：%s" % re.split(r"[@:/]+", url)[1 if "@" in url else 2], W._pr_compare_url(url, "main", "feat/x") == want, W._pr_compare_url(url, "main", "feat/x"))
+pr_root = tempfile.mkdtemp(prefix="kl-pr-")
+try:
+    git = lambda *a, cwd=None: subprocess.run(["git"] + list(a), cwd=cwd or pr_root, capture_output=True, text=True)
+    git("init", "-q", "--bare", "origin.git")
+    work = os.path.join(pr_root, "work")
+    git("clone", "-q", os.path.join(pr_root, "origin.git"), work)
+    for args in (("config", "user.email", "t@t"), ("config", "user.name", "t"), ("checkout", "-qb", "main")):
+        git(*args, cwd=work)
+    with open(os.path.join(work, "a"), "w") as handle:
+        handle.write("a")
+    git("add", "a", cwd=work); git("commit", "-qm", "init", cwd=work); git("push", "-q", "origin", "main", cwd=work)
+    try:
+        W._repo_op(work, "pr_create", {})
+        on_base = None
+    except Exception as exc:  # noqa: BLE001
+        on_base = str(exc)
+    check("在目标分支上不能发起 PR", bool(on_base) and "目标分支" in on_base, str(on_base))
+    git("checkout", "-qb", "feat/y", cwd=work)
+    with open(os.path.join(work, "b"), "w") as handle:
+        handle.write("b")
+    git("add", "b", cwd=work); git("commit", "-qm", "feat", cwd=work)
+    try:
+        W._repo_op(work, "pr_create", {"base": "main"})
+        pushed_err = None
+    except Exception as exc:  # noqa: BLE001
+        pushed_err = str(exc)
+    remote_has = git("ls-remote", "origin", "feat/y", cwd=work).stdout
+    check("发起 PR 先把分支推上去（本地远端认不出网站时说明原因）", "feat/y" in remote_has and pushed_err and "认不出远端网站" in pushed_err, str(pushed_err))
+finally:
+    shutil.rmtree(pr_root, ignore_errors=True)
 
 print("\nwatcher：%d 项通过，%d 项失败" % (PASS[0], len(FAIL)))
 sys.exit(1 if FAIL else 0)

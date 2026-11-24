@@ -1,0 +1,27 @@
+{
+ "id": "acp",
+ "name": "ACP",
+ "version": "1.0.0",
+ "summary": "通过 ACP（Agent Client Protocol）协议从手机新建并操作 Gemini CLI、Goose、GitHub Copilot CLI、Augment、Factory Droid 等 agent 的任务：看回复、回复、审批、中断",
+ "summaryEn": "Start and drive tasks in Gemini CLI, Goose, GitHub Copilot CLI, Augment, Factory Droid and other agents over ACP (Agent Client Protocol) from your phone: read replies, reply, approve and interrupt",
+ "needs": ["proc", "fs.read"],
+ "detect": {"commands": ["gemini", "goose", "copilot", "auggie", "droid"]},
+ "support": {
+  "mac": {"cli": {"abilities": ["view", "reply", "approve", "interrupt"], "verified": false, "note": "只接 Kiteline 新建的任务"}},
+  "linux": {"cli": {"abilities": ["view", "reply", "approve", "interrupt"], "verified": true, "note": "只接 Kiteline 新建的任务（协议用 OpenCode 的 ACP 入口 + 假模型实测）"}},
+  "windows": {"cli": {"abilities": [], "note": "Windows 上还没实测，暂不在新任务面板里列出"}}
+ },
+ "limitsNote": "这些 agent 用你自己的账号或 API Key，额度和余额请在对应服务的控制台查看，「今日用量」中不显示",
+ "limitsNoteEn": "These agents use your own accounts or API keys; check quota and balance in each service's console, as it isn't shown under Today's usage",
+ "gaps": [
+  {"kind": "unsupported", "text": "只接 Kiteline 新建的任务：ACP 只能由客户端拉起新的 agent 进程，接不了你在终端里已经开着的会话", "textEn": "Only tasks started from Kiteline: ACP can only launch a new agent process, so sessions you already opened in a terminal can't be attached"},
+  {"kind": "unsupported", "text": "电脑上的 Kiteline 重启后，这些任务会结束（agent 是 Kiteline 拉起的子进程）；记录保存在电脑上", "textEn": "These tasks end when Kiteline on your computer restarts (the agents run as its child processes); transcripts stay on the computer"},
+  {"kind": "untested", "text": "Gemini CLI、Goose、Copilot CLI、Augment、Droid 各家没有逐个真机实测（要各自的账号），协议本身已用 OpenCode 的 ACP 入口实测", "textEn": "Gemini CLI, Goose, Copilot CLI, Augment and Droid haven't each been tested on real accounts yet; the protocol itself was tested with OpenCode's ACP mode"},
+  {"kind": "untested", "text": "Windows 上还没实测，暂不开放", "textEn": "Not tested on Windows yet, so it's off there"}
+ ],
+ "mark": [{"d": "M12 2 3 7v10l9 5 9-5V7zm0 2.3 6.8 3.8L12 11.9 5.2 8.1zM5 9.8l6 3.4v6.6l-6-3.4zm8 10v-6.6l6-3.4v6.6z", "opacity": 1}],
+ "speaker": "Agent",
+ "caps": [],
+ "notes": "新建任务时在 Agent 里选「Gemini CLI（ACP）」等条目，由 Kiteline 以 ACP 客户端身份在后台运行它。电脑上要先装好对应的命令行 agent 并登录。",
+ "notesEn": "When starting a new task, choose an entry such as \"Gemini CLI (ACP)\" and Kiteline runs it in the background as an ACP client. Install and sign in to the agent's command-line tool on your computer first."
+}

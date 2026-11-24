@@ -359,7 +359,7 @@ extension View {
 
     /// 面板的「完成」，Esc 也能关：放在右上角（Mac 的面板是能拖动的小窗，「完成」和标题都在小窗的工具栏里，同 FitSheet）
     func doneButton(_ action: @escaping () -> Void) -> some View {
-        klBareToolbarItem(.confirmationAction) { Button("完成", action: action).keyboardShortcut(.cancelAction).panelToolbarButton() }
+        toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成", action: action).keyboardShortcut(.cancelAction).panelToolbarButton() } }
     }
 }
 

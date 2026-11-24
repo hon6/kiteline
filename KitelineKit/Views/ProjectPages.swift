@@ -794,7 +794,7 @@ struct NewTaskView: KLView {
                     adopt(path, source: source)
                 }
             }
-            .klBareToolbarItem(.cancellationAction) { Button("取消") { dismiss() }.panelToolbarButton() }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.panelToolbarButton() } }
         }
         .task {
             if let preset { picked = preset }

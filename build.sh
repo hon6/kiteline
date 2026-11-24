@@ -191,6 +191,10 @@ fi
 cp -R "$ROOT/Resources/editor" "$APP/Contents/Resources/"
 # 游客链接（局域网只读分享）看的页面：电脑自己在 /g/<编号> 给（见 Sources/GuestLinks.swift）
 cp -R "$ROOT/Resources/guest" "$APP/Contents/Resources/"
+# 网页版（手机浏览器打开 https://电脑IP:8766/app/，见 Sources/WebApp.swift）：从微信小程序源码编译；没有小程序源码（开源版）就不带
+if [ -d "$ROOT/miniprogram" ] && [ -f "$ROOT/web-app/build.py" ]; then
+  python3 "$ROOT/web-app/build.py" --target web --out "$APP/Contents/Resources/webapp" >/dev/null
+fi
 # 本机离线语音识别库（sherpa-onnx，只有 arm64）：运行时 dlopen，加载不到就退回系统语音识别（见 Sources/LocalASR.swift）
 if ls "$ROOT/vendor/sherpa-onnx/lib/"*.dylib >/dev/null 2>&1; then
   mkdir -p "$APP/Contents/Frameworks"

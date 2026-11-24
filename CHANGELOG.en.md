@@ -1,5 +1,30 @@
 # Kiteline Release Notes
 
+## 3.49.56 (2026-11-25)
+
+### New
+
+- **Android app and web version** (Android, phone browsers): Kiteline is now on Android (download from the website) with the same look and features as the iPhone app. Prefer not to install anything? On your computer's Wi-Fi, scan the pairing QR code on the computer with your phone camera to use Kiteline right in the browser. You can also try demo mode in your browser on the website. Everything is free on the same Wi-Fi; remote access for Android and the web version is subscribed in the Kiteline WeChat Mini Program and links to the device automatically.
+- **Colleagues can ask to post** (iPhone, iPad, Mac, Windows, Linux, Mini Program): people viewing a shared read-only link can write a message asking to post. It reaches the session on your behalf, marked with who wrote it, only after you tap Allow in the share panel; Deny, or 30 minutes without a decision, discards it. You get a notification for each new request.
+- **One-tap pull requests** (iPhone, iPad, Mac, Windows, Linux): choose Create Pull Request in a branch's menu under Code. Kiteline pushes the branch and creates the PR directly when GitHub CLI is installed on the computer, or opens the new pull request page on GitHub, GitLab, Gitee and similar sites. Together with Check Out in New Worktree, several tasks can run side by side on their own branches.
+- **More agents over ACP** (Mac, Linux): when starting a new task you can choose Gemini CLI, Goose, GitHub Copilot CLI, Augment or Factory Droid (installed and signed in on the computer). Kiteline runs it in the background, and you can read replies, continue the conversation, approve and interrupt from your phone.
+
+### New
+
+- **New Storage cleanup** (Mac, Windows, Linux, iPhone, iPad): Settings → General → Storage (on iPhone: Settings → Storage on Your Computer on Your Computer) shows how much space image cache, session browser data, images sent from your phone and old test reports take. Caches unused for more than 14 days (choose 7, 14, 30 or 60) are cleaned automatically every day, and you can tap Clean Now at any time. Everything removed can be fetched again from the agent's session records; after session browser data is cleaned, websites need a new sign-in. Agent session records, to-dos, favorites and settings are never touched.
+
+### Improvements
+
+- **Consistent buttons in dialog title bars** (Mac): Cancel, Open, Done, Copy All and the "…" menu in the title bars of dialogs such as Choose Folder, Session Info and Select Text now use the same Liquid Glass buttons as the image viewer, with Open shown in your theme color so it stands out.
+
+### Bug Fixes
+
+- **Crash when opening To-dos, Favorites or Group Chats on macOS 13** (Mac, macOS 12 / 13 edition): On macOS 13, opening the To-dos, Favorites or Group Chats page from the sidebar made Kiteline quit. This is now fixed.
+- **Font download prompts at launch on macOS 12 / 13** (Mac, macOS 12 / 13 edition): Each launch showed a system "needs to download the font" prompt for every Chinese font in Appearance that had not been downloaded, and the window only appeared after closing them all. Fonts are now downloaded only when you choose them, and these prompts no longer appear.
+- **An unrelated sentence occasionally flashed in the conversation** (iPhone, iPad, Mac, Windows, Linux): With auto-translate on, an old translation could briefly appear at the end of the conversation while a reply was being written, then disappear a second or two later. Replies in progress are now shown as written and translated automatically once complete.
+- **Stray symbols in translations** (iPhone, iPad, Mac, Windows, Linux): Translations from MyMemory no longer include stray markup such as `<em>` or `&#39;`.
+- **Highlight left behind after dragging a tab** (Mac): If the tab being dragged was closed or switched to another session mid-drag, the floating tab and the drop highlight over the conversation could stay on screen after releasing the mouse. They now always clear when you let go.
+
 ## 3.49.55 (2026-11-24)
 
 ### Bug Fixes
@@ -11,7 +36,7 @@
 ### New Features
 
 - **Replies appear as they are written** (iPhone, iPad, Mac, Windows, Linux, Mini Program): Claude's reply now shows up in the conversation word by word, in step with the terminal on your computer, instead of appearing only after the whole passage is finished. Applies to Claude Code sessions started after this update.
-- **Support for macOS 12, 13 and older Intel Macs**: A new Mac edition for macOS 12 Monterey and macOS 13 Ventura lets Intel Macs from 2015 onward that can only upgrade to macOS 12 or 13 install and use Kiteline (choose "Mac (macOS 12 / 13)" on the download page). On these systems some visual details (such as charts, certain animations, and layout touches) are simplified; all features work the same. The edition for macOS 14 and later is unchanged.
+- **Support for macOS 12, 13 and older Intel Macs**: A new Mac edition for macOS 12 Monterey and macOS 13 Ventura lets Intel Macs from 2015 onward that can only upgrade to macOS 12 or 13 install and use Kiteline (on the download page, choose the Mac download marked "macOS 12 / 13"). On these systems some visual details (such as charts, certain animations, and layout touches) are simplified; all features work the same. The edition for macOS 14 and later is unchanged.
 
 ### Improvements
 

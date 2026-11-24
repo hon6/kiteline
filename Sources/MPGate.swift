@@ -14,6 +14,8 @@ final class MPGate {
         throw NSError(domain: "MPGate", code: 1, userInfo: [NSLocalizedDescriptionKey: "not included in this build"])
     }
 
+    func startSecure(host: String, port: UInt16, identity: SecIdentity) {}
+
     func stop() {}
 }
 

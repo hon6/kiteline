@@ -152,57 +152,18 @@ struct FolderPicker: KLView {
         #if os(iOS) || KL_MODERN
         .toolbar {
             if let cancel {
-                ToolbarItem(placement: .cancellationAction) { Button("取消", action: cancel).panelToolbarButton() }.panelBare()
+                ToolbarItem(placement: .cancellationAction) { Button("取消", action: cancel).panelToolbarButton() }
             }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button { newFolder() } label: { Label("新建文件夹…", systemImage: "folder.badge.plus") }
-                    Toggle(isOn: $hidden) { Label("显示隐藏文件夹", systemImage: "eye") }
-                    if let listing {
-                        Divider()
-                        Button { Task { await load(listing.home) } } label: { Label("主目录", systemImage: "house") }
-                        ForEach(listing.roots, id: \.self) { drive in
-                            Button { Task { await load(drive) } } label: { Label(drive, systemImage: "internaldrive") }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .panelToolbarItem()
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("打开") { if let listing { pick(listing.path) } }
-                    .disabled(listing == nil || loading)
-                    .panelToolbarButton()
-            }.panelBare()
+            ToolbarItem(placement: .primaryAction) { moreMenu }
+            ToolbarItem(placement: .confirmationAction) { openButton }
         }
         #else
         .klApply { view in
-            if let cancel { view.klBareToolbarItem(.cancellationAction) { Button("取消", action: cancel).panelToolbarButton() } } else { view }
+            if let cancel { view.toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消", action: cancel).panelToolbarButton() } } } else { view }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button { newFolder() } label: { Label("新建文件夹…", systemImage: "folder.badge.plus") }
-                    Toggle(isOn: $hidden) { Label("显示隐藏文件夹", systemImage: "eye") }
-                    if let listing {
-                        Divider()
-                        Button { Task { await load(listing.home) } } label: { Label("主目录", systemImage: "house") }
-                        ForEach(listing.roots, id: \.self) { drive in
-                            Button { Task { await load(drive) } } label: { Label(drive, systemImage: "internaldrive") }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .panelToolbarItem()
-            }
-        }
-        .klBareToolbarItem(.confirmationAction) {
-            Button("打开") { if let listing { pick(listing.path) } }
-                .disabled(listing == nil || loading)
-                .panelToolbarButton()
-        }
+        // 兼容包：一项一个 .toolbar（两项写进同一个 .toolbar，12 的 SDK 推断不出类型）
+        .toolbar { ToolbarItem(placement: .primaryAction) { moreMenu } }
+        .toolbar { ToolbarItem(placement: .confirmationAction) { openButton } }
         #endif
         .codeAsks(.constant(nil), $nameAsk)
         .task { await load(start) }
@@ -263,6 +224,41 @@ struct FolderPicker: KLView {
         .fixedSize(horizontal: keep > 1, vertical: false)
     }
 
+    /// 标题栏的「打开」：选当前所在的文件夹（单独成属性：兼容包的工具栏里直接写这段闭包，类型推断不出来）
+    private var openButton: some View {
+        Button("打开") { if let listing { pick(listing.path) } }
+            .disabled(listing == nil || loading)
+            .panelToolbarButton(prominent: true)
+    }
+
+    /// 标题栏上的「…」：新建文件夹、显示隐藏文件夹、跳到主目录 / 别的磁盘。
+    /// Mac 上和两边的「取消」「打开」一样是一块液态玻璃（同看大图工具栏的图标按钮），只画「…」、不画下拉箭头（11-24 反馈：按钮样式不统一）；iPhone / iPad 照系统
+    @ViewBuilder
+    private var moreMenu: some View {
+        let menu = Menu {
+            Button { newFolder() } label: { Label("新建文件夹…", systemImage: "folder.badge.plus") }
+            Toggle(isOn: $hidden) { Label("显示隐藏文件夹", systemImage: "eye") }
+            if let listing {
+                Divider()
+                Button { Task { await load(listing.home) } } label: { Label("主目录", systemImage: "house") }
+                ForEach(listing.roots, id: \.self) { drive in
+                    Button { Task { await load(drive) } } label: { Label(drive, systemImage: "internaldrive") }
+                }
+            }
+        } label: {
+            #if os(macOS)
+            Image(systemName: "ellipsis")
+            #else
+            Image(systemName: "ellipsis.circle")
+            #endif
+        }
+        #if os(macOS)
+        menu.menuIndicator(.hidden).panelToolbarItem(edge: .horizontal).help(L("更多"))
+        #else
+        menu
+        #endif
+    }
+
     private func newFolder() {
         guard let listing else { return }
         nameAsk = NameAsk(title: L("新建文件夹"), message: L("在「%@」中新建", listing.name), placeholder: L("文件夹名称"), confirm: L("新建")) { name in
@@ -315,6 +311,10 @@ public struct TarsFolderPicker: KLView {
                     pick(path)
                     dismiss()
                 }
+                #if os(macOS) && !KL_MODERN
+                // 兼容包：macOS 13 的 NavigationStack 里拿不到外面传的 AppModel（同 MacEmbed 的待办页），里面再传一次
+                .environment(\.appModelSlot, model)
+                #endif
             }
             .environment(\.appModelSlot, model)
             .lookRoot()

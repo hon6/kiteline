@@ -138,7 +138,17 @@ public sealed partial class CodeWindow
                 if (await Prompt(L("重命名分支"), null, b.Name, b.Name, L("重命名")) is { } name && name != b.Name)
                     await repo.Perform("branch_rename", new JsonObject { ["name"] = b.Name, ["to"] = name }, L("正在重命名"), L("已重命名为「%@」", name));
             }));
-            if (b.Current && o.Remotes.Count > 0) items.Add(Ui.Item(L("推送到远端"), () => _ = repo.Perform("push", null, L("正在推送"), L("已推送"))));
+            if (b.Current && o.Remotes.Count > 0)
+            {
+                items.Add(Ui.Item(L("推送到远端"), () => _ = repo.Perform("push", null, L("正在推送"), L("已推送"))));
+                // 一键开 PR：推送这个分支，电脑上有 gh 就直接建好，否则打开网站上「新建合并请求」的页面（watcher pr_create）
+                items.Add(Ui.Item(L("发起合并请求（PR）"), async () =>
+                {
+                    var result = await repo.Perform("pr_create", null, L("正在推送并发起合并请求"));
+                    if (result?.Str("url") is { Length: > 0 } url)
+                        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+                }));
+            }
             items.Add(Ui.Item(L("拷贝分支名"), () => Copy(b.Name)));
             if (!b.Current && !elsewhere)
             {

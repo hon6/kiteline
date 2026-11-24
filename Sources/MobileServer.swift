@@ -5,10 +5,11 @@ import Network
 import KitelineKit
 
 /// 手机端（iPhone 上的 Kiteline App、Mac 主窗口的对话页）的服务端：鉴权、会话列表、实时事件（SSE）、历史、图片、发送。
-/// 网页版已下线（10-22 起顾客打不开网页）：根路径只回一张「请用 Kiteline App 连接」的说明页，不再托管 Resources/web。
+/// 网页版 11-24 重新开放（只走 HTTPS）：/app/ 是小程序编译成的网页（见 WebApp.swift），根路径转过去；旧的 Resources/web 不再用。
 ///
 /// 接口一览（除说明页与配对外都要令牌）：
-///   GET  /                       说明页（不是网页版）
+///   GET  /                       转到网页版 /app/（这个版本没带网页版时是说明页）
+///   GET  /app/…                  网页版静态文件（WebApp.swift）；数据走 MPGate 的加密隧道
 ///   GET  /pair?code=123456       用电脑上显示的 6 位配对码换令牌
 ///   GET  /api/state              会话列表 + 来源状态
 ///   GET  /api/events             SSE：state / entries / reset / notify
@@ -22,7 +23,8 @@ import KitelineKit
 ///   GET  /api/info               连接信息（https 地址、推送订阅数、辅助功能权限）
 ///   GET  /api/push/key           推送公钥；POST /api/push/subscribe|unsubscribe|test
 ///   POST /api/live/register      iPhone 实时活动的令牌和开关（见 LiveActivities.swift）
-///   GET  /api/share[?key=]       游客链接（局域网只读分享）；POST /api/share {key, hours}、POST /api/share/stop {id}（见 GuestLinks.swift）
+///   GET  /api/share[?key=]       游客链接（局域网只读分享）＋待处理的发言申请 asks；POST /api/share {key, hours}、POST /api/share/stop {id}、
+///                                POST /api/share/ask {id, action: allow|deny}（允许就送进会话；见 GuestLinks.swift）
 ///   GET  /g/<编号>、/g/api/<编号>  游客看的页面和内容（不要令牌，只认分享中的编号）
 ///   POST /api/voice?key=         按住说话：{data(base64), mime, duration, mode: send|text} → 转写（并发送）
 ///   GET  /api/voices?key=        这个会话发过的语音（手机按文字认出哪条消息是语音）
@@ -69,6 +71,7 @@ final class MobileServer {
     private var foreground: [String: Date] = [:]
     private let lock = NSLock()
     private var heartbeat: DispatchSourceTimer?
+    private var storageTimer: DispatchSourceTimer?
     private var lastStateJSON = ""
     /// 上一份广播出去的完整状态和它的序号（主线程用）。连接时带 patch=1 的客户端之后只收变了的部分（statepatch，见 statePatch）：
     /// 整份 26 KB（10 个会话），两次之间通常只变一个会话的两三个字段（10-26 实测，约 3 秒一份）
@@ -139,7 +142,21 @@ final class MobileServer {
         push.contact = config.pushContact
         if config.enabled && config.httpsEnabled { startSecure() }
         startHeartbeat()
-        MediaCache.prune()
+        MediaCache.prune(days: config.storageDays)
+        startStorageTimer()
+    }
+
+    /// 每 6 小时看一次要不要自动清存储（每天最多清一次，见 StorageCleaner.autoCleanIfDue）
+    private func startStorageTimer() {
+        storageTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 600, repeating: 6 * 3600)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            StorageCleaner.autoCleanIfDue(enabled: self.config.storageAuto, days: self.config.storageDays)
+        }
+        timer.resume()
+        storageTimer = timer
     }
 
     /// HTTPS 端口：证书生成要调 openssl（约一秒），放后台做
@@ -179,6 +196,8 @@ final class MobileServer {
                     do {
                         try gate.start(host: config.bindAddress, port: UInt16(clamping: config.port + 3))
                         self.mpGate = gate
+                        // 网页版（https 打开）连的加密入口：小程序入口端口 + 1
+                        if WebApp.available { gate.startSecure(host: config.bindAddress, port: UInt16(clamping: config.port + 4), identity: identity) }
                         if config.remoteEnabled, MPGate.remoteAllowed, let link = MPRelayLink(gate: gate, relay: config.effectiveRelay) {
                             gate.relay = link   // 远程：电脑主动连中继，小程序经中继找到这台电脑
                             link.start()
@@ -533,6 +552,17 @@ final class MobileServer {
         if !targets.isEmpty { push.send(en, urgency: urgency, only: targets) }
     }
 
+    /// 看分享链接的同事申请发言：推送提醒、在线的手机刷新分享面板（GuestLinks.ask 调，主线程）
+    func guestAsked(_ ask: GuestLinks.Ask) {
+        let title = AppState.shared.store.record(withKey: ask.sessionKey)?.snapshot.displayTitle ?? ""
+        let zh: [String: Any] = ["title": "「\(ask.name)」想在会话里发言", "body": (title.isEmpty ? "" : "「\(title)」：") + String(ask.text.prefix(120)),
+                                 "kind": "guest_ask", "key": ask.sessionKey, "route": "share"]
+        let en: [String: Any] = ["title": "\(ask.name) wants to post in a session", "body": (title.isEmpty ? "" : "\(title): ") + String(ask.text.prefix(120)),
+                                 "kind": "guest_ask", "key": ask.sessionKey, "route": "share"]
+        pushLocalized(zh, en, except: [])
+        broadcast(event: "share_ask", json: (try? String(decoding: JSONSerialization.data(withJSONObject: GuestLinks.askPayload(ask)), as: UTF8.self)) ?? "{}")
+    }
+
     private func broadcastRaw(_ data: Data) {
         lock.lock()
         let all = Array(streams.values)
@@ -573,13 +603,22 @@ final class MobileServer {
             ], body: profile))
             return
         case ("GET", "/pair"), ("POST", "/pair"):
+            // 手机相机扫配对码直接打开的（不带配对码）：转到网页版，让网页版自己配对
+            if let redirect = WebApp.pairRedirect(request) { respond(redirect); return }
             pair(request, respond: respond); return
+        case ("GET", let path) where path == "/app" || path.hasPrefix("/app/"):
+            // 网页版（11-24 重新开放）：小程序编译成的网页，数据走加密隧道（MPGate 的 wss 入口）
+            respond(WebApp.serve(path)); return
         case ("GET", let path) where path.hasPrefix("/g/"):
             // 游客链接（局域网只读分享）：页面和内容都由这台电脑给，只认分享中的编号
             GuestLinks.shared.serve(request, respond: respond); return
         case ("GET", _) where !request.path.hasPrefix("/api/"):
-            // 网页版已下线：浏览器打开根路径只看到说明页，别的路径（app.js、manifest……）一律 404
-            respond(["/", "", "/index.html"].contains(request.path) ? MobileServer.noticePage() : .text("not found", status: 404)); return
+            // 根路径：有网页版就转过去，没有（开源自行编译的版本）只给说明页；别的路径一律 404
+            // 手机相机扫配对码打开的是 /?t=…&mk=…：带着参数转到网页版，由网页版完成配对
+            if ["/", "", "/index.html"].contains(request.path) {
+                respond(WebApp.pairRedirect(request) ?? (WebApp.available ? .redirect("/app/") : MobileServer.noticePage())); return
+            }
+            respond(.text("not found", status: 404)); return
         default:
             break
         }
@@ -1163,7 +1202,20 @@ final class MobileServer {
             case ("POST", "/api/push/subscribe"):
                 self.subscribe(request, deviceId: auth.deviceId, respond: respond)
             case ("GET", "/api/share"):
-                respond(.json(["ok": true, "shares": GuestLinks.shared.list(sessionKey: request.query["key"]).map(GuestLinks.payload)]))
+                respond(.json(["ok": true, "shares": GuestLinks.shared.list(sessionKey: request.query["key"]).map(GuestLinks.payload),
+                               "asks": GuestLinks.shared.pendingAsks(sessionKey: request.query["key"]).map(GuestLinks.askPayload)]))
+            case ("POST", "/api/share/ask"):
+                // 发言申请：允许就以本人名义送进会话（开头注明是谁说的），拒绝就作废
+                let allow = (request.jsonBody?["action"] as? String) == "allow"
+                guard let ask = GuestLinks.shared.decide(id: request.jsonBody?["id"] as? String ?? "", allow: allow) else {
+                    respond(.error("这条申请已处理或已过期", status: 404)); return
+                }
+                self.broadcast(event: "share_ask", json: "{}")
+                guard allow else { respond(.json(["ok": true])); return }
+                let body = (try? JSONSerialization.data(withJSONObject: ["text": GuestLinks.deliveredText(ask), "submit": true])) ?? Data()
+                let send = HTTPRequest(method: "POST", path: "/api/send", query: ["key": ask.sessionKey], headers: request.headers, body: body,
+                                       remoteAddress: request.remoteAddress)
+                self.send(send, respond: respond)
             case ("POST", "/api/share"):
                 guard let key = request.jsonBody?["key"] as? String, !key.isEmpty else { respond(.error("缺少会话", status: 400)); return }
                 guard let share = GuestLinks.shared.create(sessionKey: key, hours: request.jsonBody?["hours"] as? Int ?? 24) else {
@@ -1186,6 +1238,18 @@ final class MobileServer {
                 }
             case (_, let path) where path == "/api/todos" || path.hasPrefix("/api/todos/"):
                 respond(Todos.shared.handle(request))
+            case ("GET", "/api/storage"):
+                // 存储：每类占多大、按 days 天（默认设置里的天数）能清多少
+                let days = request.query["days"].flatMap { Int($0) } ?? self.config.storageDays
+                DispatchQueue.global(qos: .utility).async { respond(.json(StorageCleaner.scan(days: max(1, days)))) }
+            case ("POST", "/api/storage/clean"):
+                let body = request.jsonBody ?? [:]
+                let days = (body["days"] as? Int) ?? self.config.storageDays
+                let only = Set((body["only"] as? [String]) ?? [])
+                DispatchQueue.global(qos: .utility).async {
+                    let freed = StorageCleaner.clean(days: max(1, days), only: only)
+                    respond(.json(["ok": true, "freed": freed]))
+                }
             case (_, let path) where path == "/api/favorites" || path.hasPrefix("/api/favorites/"):
                 respond(Favorites.shared.handle(request))
             case (_, let path) where path == "/api/tabgroups" || path.hasPrefix("/api/tabgroups/"):
@@ -2455,11 +2519,11 @@ enum MediaCache {
         try? mime.write(to: base.appendingPathExtension("mime"), atomically: true, encoding: .utf8)
     }
 
-    /// 启动时清掉 14 天没碰过的缓存
-    static func prune() {
+    /// 清掉超过 days 天（默认 14）没碰过的缓存：启动时清一次，之后每天自动清（设置 → 存储可改天数、关自动清，见 StorageCleaner）
+    static func prune(days: Int = 14) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentAccessDateKey]) else { return }
-        let cutoff = Date().addingTimeInterval(-14 * 86400)
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
         for file in files {
             let accessed = (try? file.resourceValues(forKeys: [.contentAccessDateKey]))?.contentAccessDate ?? .distantPast
             if accessed < cutoff { try? fm.removeItem(at: file) }

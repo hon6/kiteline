@@ -46,6 +46,20 @@ h1{font-size:22px;line-height:30px;margin:0 0 6px;font-weight:600;text-wrap:bala
 .center{min-height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--sub);gap:8px;padding:0 16px}
 .center b{color:var(--text);font-size:17px;font-weight:600}
 footer{max-width:760px;margin:0 auto;padding:0 16px 32px;color:var(--faint);font-size:12px;line-height:18px}
+.ask{position:sticky;bottom:0;z-index:2;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--line)}
+.ask-in{max-width:760px;margin:0 auto;padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px}
+.ask-row{display:flex;gap:8px;align-items:flex-end}
+.ask input,.ask textarea{font:inherit;font-size:15px;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;outline:none}
+.ask input{width:9em;flex:none}
+.ask textarea{flex:1;min-height:40px;max-height:140px;resize:none}
+.ask button{font:inherit;font-size:15px;font-weight:600;border:0;border-radius:10px;padding:9px 14px;background:var(--accent);color:#fff;cursor:pointer;flex:none}
+.ask button:disabled{opacity:.5}
+.ask-tip{font-size:12px;color:var(--faint)}
+.asks{margin:4px 0 16px;display:flex;flex-direction:column;gap:6px}
+.askitem{font-size:13px;color:var(--sub);border:1px dashed var(--line);border-radius:10px;padding:6px 10px}
+.askitem b{color:var(--text);font-weight:600}
+.askitem .st{float:right;font-size:12px}
+.askitem .st.pending{color:var(--warn)}.askitem .st.sent{color:var(--ok)}
 footer a{color:var(--sub)}
 </style>
 </head>
@@ -56,6 +70,10 @@ footer a{color:var(--sub)}
 </div></header>
 <main id="main"><div class="center"><b id="loading">正在载入…</b></div></main>
 <footer id="foot"></footer>
+<div class="ask" id="ask" hidden><div class="ask-in">
+<div class="ask-row"><input id="askName" maxlength="20" autocomplete="nickname"><textarea id="askText" maxlength="2000" rows="1"></textarea><button id="askSend"></button></div>
+<div class="ask-tip" id="askTip"></div>
+</div></div>
 <script>
 (function () {
   "use strict";
@@ -67,7 +85,10 @@ footer a{color:var(--sub)}
     more: "Earlier messages are not included", until: "Link valid until ", updated: "Updated ",
     foot: "Shared from Kiteline. This address only works on the local network. The content comes straight from the sharer's computer and never passes through any server. Claude Code is a product of Anthropic; Kiteline is an independent third-party tool.",
     title: "Shared session · Kiteline", untitled: "Untitled session",
-    page: "Sent a web page", images: function (n) { return "Sent " + n + (n === 1 ? " image" : " images") + " (not included in this share)"; }
+    page: "Sent a web page", images: function (n) { return "Sent " + n + (n === 1 ? " image" : " images") + " (not included in this share)"; },
+    name: "Your name", text: "Message for the agent…", send: "Request", tip: "Your message goes into the session only after the sharer approves it.",
+    sentTip: "Request sent. Waiting for the sharer to approve.", needName: "Please enter your name",
+    st: { pending: "Waiting", sent: "Approved", declined: "Declined", expired: "Expired" }, asks: "Requests"
   } : {
     loading: "正在载入…", ro: "只读", busy: "进行中", waiting: "等待确认", idle: "空闲",
     gone: "链接已失效", goneHint: "对方已停止分享、链接已过期，或者对方的电脑不在这个网络里。",
@@ -75,7 +96,10 @@ footer a{color:var(--sub)}
     more: "更早的消息未包含在内", until: "链接有效至 ", updated: "更新于 ",
     foot: "由 Kiteline 分享。这个网址只在局域网内能打开，内容直接来自对方的电脑，不经过任何服务器。Claude Code 是 Anthropic 的产品，Kiteline 是独立的第三方工具。",
     title: "分享的会话 · Kiteline", untitled: "未命名会话",
-    page: "发来网页", images: function (n) { return "发来 " + n + " 张图片（未包含在分享中）"; }
+    page: "发来网页", images: function (n) { return "发来 " + n + " 张图片（未包含在分享中）"; },
+    name: "你的名字", text: "想对 Agent 说的话…", send: "申请", tip: "你写的话要分享的人同意后才会送进会话。",
+    sentTip: "已提交，等对方同意。", needName: "请先填写你的名字",
+    st: { pending: "等待同意", sent: "已送达", declined: "未同意", expired: "已过期" }, asks: "发言申请"
   };
   if (en) document.documentElement.lang = "en";
   document.getElementById("ro").textContent = T.ro;
@@ -179,8 +203,44 @@ footer a{color:var(--sub)}
         main.appendChild(el("div", "note", T.images(item.n || 1)));
       }
     });
+    if (snap.asks && snap.asks.length) {
+      var list = el("div", "asks");
+      snap.asks.forEach(function (a) {
+        var row = el("div", "askitem");
+        row.appendChild(el("span", "st " + a.status, T.st[a.status] || a.status));
+        row.appendChild(el("b", "", a.name + "："));
+        row.appendChild(document.createTextNode(a.text));
+        list.appendChild(row);
+      });
+      main.appendChild(list);
+    }
+    document.getElementById("ask").hidden = !snap.canAsk;
     if (first || atBottom) window.scrollTo(0, document.body.scrollHeight);
   }
+
+  // 申请发言：名字记在这个浏览器里，下次不用再填
+  (function () {
+    var name = document.getElementById("askName"), text = document.getElementById("askText"), send = document.getElementById("askSend"), tip = document.getElementById("askTip");
+    name.placeholder = T.name; text.placeholder = T.text; send.textContent = T.send; tip.textContent = T.tip;
+    try { name.value = localStorage.getItem("kl.guest.name") || ""; } catch (e) { /* 被禁 */ }
+    text.addEventListener("input", function () { text.style.height = "auto"; text.style.height = Math.min(140, text.scrollHeight) + "px"; });
+    send.addEventListener("click", async function () {
+      var n = name.value.trim(), t = text.value.trim();
+      if (!n) { tip.textContent = T.needName; name.focus(); return; }
+      if (!t) { text.focus(); return; }
+      send.disabled = true;
+      try {
+        var res = await fetch("/g/api/" + encodeURIComponent(id) + "/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n, text: t }) });
+        var body = await res.json().catch(function () { return {}; });
+        if (!res.ok || !body.ok) throw new Error(body.error || ("HTTP " + res.status));
+        try { localStorage.setItem("kl.guest.name", n); } catch (e) { /* 被禁 */ }
+        text.value = ""; text.style.height = "";
+        tip.textContent = T.sentTip;
+        etag = ""; clearTimeout(timer); load();
+      } catch (e) { tip.textContent = String(e.message || e); }
+      send.disabled = false;
+    });
+  })();
 
   async function load() {
     try {

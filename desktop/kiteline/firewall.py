@@ -41,6 +41,7 @@ def ports(cfg):
     result = [https, int(m["port"]) + 2]
     if m.get("mpEnabled", True):
         result.append(int(m.get("mpPort") or 8768))
+        result.append(int(m.get("mpPort") or 8768) + 1)   # 网页版连的加密入口
     return sorted(set(result))
 
 

@@ -278,7 +278,7 @@ public sealed class ChatView : Grid
                     _ => BotText.Make(key, b.Item, b.First, openLink),
                 };
                 return new MessageRow(false, b.First, b.Item.Ts, body, agent, width, b.Item.T == "text" ? (b.Item.Text ?? "", b.Item.Id) : null, key,
-                    translate: b.Item.Peer is null && b.Item.T == "text" && !string.IsNullOrWhiteSpace(b.Item.Text) ? (b.Item.Text!, b.Item.Id) : null);
+                    translate: b.Item.Peer is null && b.Item.T == "text" && !Translator.Skips(b.Item.Id) && !string.IsNullOrWhiteSpace(b.Item.Text) ? (b.Item.Text!, b.Item.Id) : null);
             case StepsRow st:
                 return new MessageRow(false, st.First, st.Steps.LastOrDefault()?.Item.Ts, StepsCard.Make(key, st), agent, width, key: key);
             case Kiteline.Model.EventRow e:

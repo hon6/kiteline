@@ -208,6 +208,7 @@ class Console:
         "installTestSkill": bool, "installTodoSkill": bool, "installStageSkill": bool,
         "shrinkAgentImages": bool, "compactWindow": (0, 200000, 300000, 400000),
         "browserOn": ("client", "server"), "browserMax": (1, 2, 3, 4, 5, 6, 8, 10, 12, 16), "browserIdle": (5, 10, 30, 60), "browserRecord": bool,
+        "storageAuto": bool, "storageDays": (7, 14, 30, 60),
     }
     TOP_LEVEL = ("notifyOnNeedsAttention", "notifyOnConclusion")
 
@@ -251,6 +252,9 @@ class Console:
                     agent_skill.SHRINK_IMAGES = bool(changes.get("shrinkAgentImages", agent_skill.SHRINK_IMAGES))
                     agent_skill.COMPACT_WINDOW = agent_skill.compact_window(changes.get("compactWindow", agent_skill.COMPACT_WINDOW))
                     agent_skill.sync_live(app.store.sources.values())
+                if {"storageAuto", "storageDays"} & set(changes):
+                    from . import watcher as watcher_module
+                    watcher_module.STORAGE.update(auto=bool(app.cfg.mobile.get("storageAuto", True)), days=int(app.cfg.mobile.get("storageDays") or 14))
                 if {"browserOn", "browserMax", "browserIdle", "browserRecord"} & set(changes):
                     # 会话浏览器：开在哪变了要换远端的 watcher 进程（ssh 的反向转发、远端环境变量在启动时定）；上限、回收时间当场生效
                     from . import watcher as watcher_module

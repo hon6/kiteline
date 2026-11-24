@@ -395,15 +395,10 @@ struct SelectTextSheet: KLView {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            #if os(iOS) || KL_MODERN
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("全部复制") { Clipboard.copy(text); dismiss() }.panelToolbarButton() }.panelBare()
-                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton() }.panelBare()
+                ToolbarItem(placement: .cancellationAction) { Button("全部复制") { Clipboard.copy(text); dismiss() }.panelToolbarButton() }
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton() }
             }
-            #else
-            .klBareToolbarItem(.cancellationAction) { Button("全部复制") { Clipboard.copy(text); dismiss() }.panelToolbarButton() }
-            .klBareToolbarItem(.confirmationAction) { Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).panelToolbarButton() }
-            #endif
         }
     }
 }
@@ -498,7 +493,7 @@ struct BotText: KLView {
 
     /// 助手的文字回复能翻译（会话之间的信件、图片、网页、待办卡片这些不翻）
     static func translatable(_ item: ChatItem) -> (text: String, id: String)? {
-        guard item.t == "text", item.peer == nil, let text = item.text,
+        guard item.t == "text", item.peer == nil, !Translator.skips(item.id), let text = item.text,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return (text, item.id)
     }

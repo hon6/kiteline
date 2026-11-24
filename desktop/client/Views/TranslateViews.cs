@@ -147,7 +147,7 @@ public static class TranslateUi
     /// 右键菜单里的「翻译 / 显示原文」
     public static (string, Action)? MenuAction(string id, string text)
     {
-        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (string.IsNullOrWhiteSpace(text) || Translator.Skips(id)) return null;
         Ensure();
         return Translator.IsTranslated(id) ? (L("显示原文"), () => Translator.Restore(id)) : (L("翻译"), () => Translator.Tap(id, text));
     }

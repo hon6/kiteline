@@ -4,6 +4,7 @@ import SwiftUI
 struct GitBranchesView: KLView {
     @EnvModel private var model
     @Environment(\.openRoute) private var open
+    @Environment(\.openURL) private var openURL
     @KLBindable var store: RepoStore
     var openCommit: (String) -> Void
     @State private var ask: CodeAsk?
@@ -245,6 +246,14 @@ struct GitBranchesView: KLView {
         } label: { Label("重命名…", systemImage: "pencil") }
         if b.current && !o.remotes.isEmpty {
             Button { Task { await store.perform("push", label: L("正在推送"), done: L("已推送")) } } label: { Label("推送到远端", systemImage: "arrow.up") }
+            // 一键开 PR：推送这个分支，电脑上有 gh 就直接建好，否则打开网站上「新建合并请求」的页面（watcher pr_create）
+            Button {
+                Task {
+                    guard let result = await store.perform("pr_create", label: L("正在推送并发起合并请求")),
+                          let link = result["url"] as? String, let url = URL(string: link) else { return }
+                    openURL(url)
+                }
+            } label: { Label("发起合并请求（PR）", systemImage: "arrow.triangle.pull") }
         }
         Button { Clipboard.copy(b.name) } label: { Label("拷贝分支名", systemImage: "doc.on.doc") }
         if !b.current && !elsewhere {

@@ -75,14 +75,22 @@ status, _, _ = request("/api/state", token=None)
 check("不带令牌返回 401", status == 401)
 status, _, _ = request("/api/state", token="wrong")
 check("错误令牌返回 401", status == 401)
+# 网页版 11-24 重新开放（只走 HTTPS）：根路径转到 /app/；这版没带网页版（开源自编）时仍是说明页
 status, page, page_headers = request("/", token=None, raw=True)
-check("网页版已下线：根路径只有说明页（请用 Kiteline App 连接）", status == 200 and "Kiteline App".encode() in page and b"<script" not in page, page[:200])
-csp = page_headers.get("Content-Security-Policy", "")
-check("说明页禁止脚本、不许被嵌进 iframe", "default-src 'none'" in csp and "frame-ancestors 'none'" in csp and page_headers.get("X-Frame-Options") == "DENY", csp)
-check("说明页不往外带 Referer、不许猜类型", page_headers.get("Referrer-Policy") == "no-referrer" and page_headers.get("X-Content-Type-Options") == "nosniff")
+if b"kl-stage" in page:
+    csp = page_headers.get("Content-Security-Policy", "")
+    check("网页版：根路径转到 /app/，脚本只许本站、不许被嵌进 iframe", status == 200 and "script-src 'self'" in csp and "'unsafe-eval'" not in csp
+          and "frame-ancestors 'none'" in csp, csp)
+    check("网页版：不往外带 Referer、不许猜类型", page_headers.get("Referrer-Policy") == "no-referrer" and page_headers.get("X-Content-Type-Options") == "nosniff")
+    traversal = {p: request(p, token=None, raw=True)[0] for p in ["/app/../ca.mobileconfig", "/app/%2e%2e/config.json", "/app/.hidden", "/app/nope.js"]}
+    check("网页版：跑出目录、隐藏文件、不存在的一律 404", set(traversal.values()) == {404}, str(traversal))
+    status, page, _ = request("/app/mp.js", token=None, raw=True)
+    check("网页版：编出来的小程序脚本能取到", status == 200 and b"R.define(" in page)
+else:
+    check("没带网页版：根路径只有说明页（请用 Kiteline App 连接）", status == 200 and "Kiteline App".encode() in page and b"<script" not in page, page[:200])
 gone = {path: request(path + "?t=%s" % TOKEN, token=None, raw=True)[0]
         for path in ["/app.js", "/app.css", "/sw.js", "/manifest.webmanifest", "/apple-touch-icon.png", "/icon-192.png"]}
-check("网页版的文件一律 404（带令牌也一样）", set(gone.values()) == {404}, str(gone))
+check("旧网页版的文件一律 404（带令牌也一样）", set(gone.values()) == {404}, str(gone))
 print("== 防拖垮：慢速请求、陌生人的大请求体")
 _host, _port = urllib.parse.urlparse(BASE).hostname, urllib.parse.urlparse(BASE).port
 with socket.create_connection((_host, _port), timeout=30) as sock:
@@ -1783,6 +1791,37 @@ status, body, _ = request("/api/groups/delete", "POST", {"id": gid})
 check("解散群", status == 200 and gid not in [g["id"] for g in body.get("items", [])])
 status, body, _ = request("/api/groups/messages?id=%s" % q(gid))
 check("解散后消息一并删除", status == 404)
+
+print("== 游客链接的发言申请（只读 + 需放行发言）")
+status, made, _ = request("/api/share", "POST", {"key": busy["key"], "hours": 1})
+share_id = made.get("id", "") if isinstance(made, dict) else ""
+guest_base = "http://127.0.0.1:%d" % (int(HTTP_PORT) + 2)
+def guest_post(path, body):
+    req = urllib.request.Request(guest_base + path, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return res.status, json.loads(res.read() or b"{}")
+    except urllib.error.HTTPError as err:
+        return err.code, json.loads(err.read() or b"{}")
+time.sleep(0.5)
+st, body = guest_post("/g/api/%s/ask" % share_id, {"name": "小周", "text": "顺便跑一下测试"})
+check("游客能提交发言申请", st == 200 and body.get("ok"), str(body))
+st, bad = guest_post("/g/api/%s/ask" % share_id, {"name": "", "text": "x"})
+check("没填名字的申请被拒", st == 400 and "名字" in (bad.get("error") or ""), str(bad))
+st, nope = guest_post("/g/api/no-such-share/ask", {"name": "a", "text": "b"})
+check("失效链接不能申请", st == 400, str(nope))
+status, listed, _ = request("/api/share?key=%s" % q(busy["key"]))
+asks = listed.get("asks") or []
+check("分享面板列出待处理的申请", len(asks) == 1 and asks[0].get("name") == "小周" and asks[0].get("text") == "顺便跑一下测试", str(asks))
+ask_id = asks[0]["id"] if asks else ""
+status, sent, _ = request("/api/share/ask", "POST", {"id": ask_id, "action": "allow"})
+check("允许后送进会话", status == 200 and sent.get("ok"), str(sent))
+status, again, _ = request("/api/share/ask", "POST", {"id": ask_id, "action": "allow"})
+check("同一条申请不能处理两次", status == 404, str(again))
+with urllib.request.urlopen(guest_base + "/g/api/" + share_id, timeout=10) as res:
+    snap = json.loads(res.read())
+check("游客看到申请已送达", snap.get("canAsk") and [(a["name"], a["status"]) for a in snap.get("asks") or []] == [("小周", "sent")], str(snap.get("asks")))
+request("/api/share/stop", "POST", {"id": share_id})
 
 print("\n接口：%d 项通过，%d 项失败%s" % (PASS[0], len(FAIL), "，%d 项不适用（跳过）" % len(SKIP) if SKIP else ""))
 sys.exit(1 if FAIL else 0)

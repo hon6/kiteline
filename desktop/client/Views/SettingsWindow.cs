@@ -234,6 +234,7 @@ public sealed class SettingsWindow : Window
             Form.Row(L("空闲多久后关闭"), idleBox),
             Form.Toggle(L("录下浏览器操作，可以回放"), config["browserRecord"] is null || config.Truthy("browserRecord"), on => Set("browserRecord", on)),
         ], L("Agent 操作网页时使用 Kiteline 提供的浏览器，会话中会显示实时画面，可以放大查看，也可以接管操作。选择「这台电脑」时，远端服务器上的会话也使用这台电脑上的浏览器，网页的登录状态保存在这台电脑上，服务器上不运行浏览器；选择「Agent 所在的电脑」时，浏览器运行在会话所在的电脑上。浏览器在 Agent 首次使用时打开，空闲到设定时间后自动关闭，同时打开的数量还会根据可用内存自动减少。录下的操作可以倍速回放、跳过等待，只保存画面有变化的部分，保留 3 天。")));
+        form.Children.Add(StorageSection(config, Set));
         form.Children.Add(Form.Section(L("启动"), [
             Form.Toggle(OperatingSystem.IsWindows() ? L("开机时自动启动 Kiteline") : L("登录时自动启动 Kiteline"), status.Truthy("autostart"),
                 on => Post("/api/desktop/settings", new JsonObject { ["autostart"] = on })),
@@ -243,6 +244,50 @@ public sealed class SettingsWindow : Window
         ], L("定期发送设备数量与型号、会话的 Agent、模型、token 用量、上下文长度与时长，以及你在 Kiteline 中的名字，用于改进产品。不包含对话、代码、文件和项目路径。")));
         return form;
     });
+
+    /// 存储清理（同 Mac 版 设置 → 存储）：超过 N 天没使用的会话缓存（图片缓存、会话浏览器数据、手机发来的图片、旧报告）自动清，也可以立即清；
+    /// 口径是最后一次使用的时间；清掉的都能从 Agent 的会话记录里重新取（会话浏览器的登录状态要重登）
+    static Control StorageSection(JsonNode? config, Action<string, JsonNode?> set)
+    {
+        var days = config.Int("storageDays") ?? 14;
+        var host = new StackPanel { Spacing = 0 };
+        var rowsHost = new ContentControl { Content = Form.Row(L("正在统计…"), null) };
+        var freed = Ui.Text("", 13, color: "Text2");
+        string Size(long n) => n < 1000000 ? string.Format("{0:0.#} KB", n / 1000.0) : n < 1000000000 ? string.Format("{0:0.#} MB", n / 1e6) : string.Format("{0:0.##} GB", n / 1e9);   // 1000 进制，同 Mac / iPhone 的 ByteCountFormatter
+        async void Refresh()
+        {
+            try
+            {
+                var info = await Api.Get("/api/storage?days=" + days);
+                var rows = (info?.Arr("categories")?.Items() ?? []).Select(item => (Control?)Form.Value(L(item.Str("name") ?? ""),
+                    L("%@，可清 %@", Size((long)(item.Num("bytes") ?? 0)), Size((long)(item.Num("cleanable") ?? 0))))).ToList();
+                var stack = new StackPanel();
+                foreach (var row in rows) stack.Children.Add(row!);
+                rowsHost.Content = stack;
+            }
+            catch (Exception e) { rowsHost.Content = Form.Row(e.Message, null); }
+        }
+        var choices = new[] { 7, 14, 30, 60 };
+        var box = new ComboBox { Width = 120, ItemsSource = choices.Select(n => string.Format(L("{0} 天"), n)).ToList(),
+                                 SelectedIndex = Math.Max(0, Array.IndexOf(choices, days)) };
+        box.SelectionChanged += (_, _) => { if (box.SelectedIndex >= 0) { days = choices[box.SelectedIndex]; set("storageDays", days); Refresh(); } };
+        var button = Form.Button(L("立即清理"), () =>
+        {
+            freed.Text = L("清理中…");
+            Post("/api/storage/clean", new JsonObject { ["days"] = days }, reply =>
+            {
+                freed.Text = L("已清理 %@", Size((long)(reply.Num("freed") ?? 0)));
+                Refresh();
+            });
+        });
+        Refresh();
+        return Form.Section(L("存储"), [
+            Form.Toggle(L("自动清理长期没用的缓存"), config["storageAuto"] is null || config.Truthy("storageAuto"), on => set("storageAuto", on)),
+            Form.Row(L("超过多久没使用就清"), box),
+            rowsHost,
+            Form.Row("", Ui.H(8, button, freed)),
+        ], L("这些都是从 Agent 的会话记录衍生出来的缓存：手机看过的图片、会话浏览器的用户数据、手机发来的图片、旧的测试报告。按最后一次使用的时间算，超过设定天数没用过的会清掉，需要时会重新从 Agent 的会话记录里获取。清掉会话浏览器的数据后，网页的登录状态需要重新登录。Agent 自己的会话记录、待办、收藏和设置不会被清理。"));
+    }
 
     /// 「VS Code 在虚拟屏幕中运行」：开关 + 开着时虚拟屏幕里有几个窗口；底栏按钮、托盘菜单里开关了也跟着变
     static Control VirtualScreenSection()

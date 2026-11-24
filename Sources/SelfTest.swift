@@ -854,17 +854,19 @@ extension SelfTest {
                 delay = 1
             }
         case "dragto":
-            // 按住从一点拖到另一点（坐标从窗口左上角算）：dragto:x1,y1,x2,y2[,停几秒再松手]——停着的时候后面的步骤照跑，能截到拖到一半的样子
+            // 按住从一点拖到另一点（坐标从窗口左上角算）：dragto:x1,y1,x2,y2[,停几秒再松手[,1]]——停着的时候后面的步骤照跑，能截到拖到一半的样子。
+            // 第六个数写 1：松手那一下走 App 的事件队列（同真鼠标，本地事件监听收得到；测拖标签手势半路被取消后松手能不能收尾）
             let n = arg.split(separator: ",").compactMap { Double($0) }
             if n.count >= 4 {
                 let height = window.contentView?.bounds.height ?? window.frame.height
                 let start = NSPoint(x: n[0], y: height - n[1]), end = NSPoint(x: n[2], y: height - n[3])
                 let hold = n.count > 4 ? n[4] : 0
+                let queuedUp = n.count > 5 && n[5] == 1
                 func post(_ type: NSEvent.EventType, _ point: NSPoint, after: Double) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + after) {
                         guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
-                        window.sendEvent(event)
+                        if type == .leftMouseUp, queuedUp { NSApp.postEvent(event, atStart: false) } else { window.sendEvent(event) }
                     }
                 }
                 window.makeKey()

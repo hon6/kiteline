@@ -10330,6 +10330,8 @@ def _repo_op(root, op, request):
         exists = subprocess.run(["git", "-C", root, "show-ref", "--verify", "-q", "refs/heads/" + name], **_no_window()).returncode == 0
         git_run(root, ["worktree", "add", path, name] if exists else ["worktree", "add", "-b", name, path, _check_rev(request.get("from") or "HEAD")])
         return {"path": path, "branch": name}
+    elif op == "pr_create":
+        return _pr_create(root, request, slow)
     elif op == "worktree_remove":
         path = request.get("path") or ""
         trees = _worktrees(root)
@@ -10339,6 +10341,78 @@ def _repo_op(root, op, request):
     else:
         raise RuntimeError("未知操作：%s" % op)
     return {}
+
+
+def _web_repo(url):
+    """远端地址 → (网站, 所有者/仓库)。认 git@host:o/r.git、ssh://git@host/o/r、https://host/o/r(.git)"""
+    url = (url or "").strip()
+    m = re.match(r"^(?:ssh://)?[\w.-]+@([^:/]+)(?::\d+)?[:/](.+?)(?:\.git)?/?$", url) or re.match(r"^https?://(?:[^@/]+@)?([^/]+)/(.+?)(?:\.git)?/?$", url)
+    if not m:
+        return None, None
+    return m.group(1).lower(), m.group(2)
+
+
+def _pr_compare_url(remote_url, base, branch):
+    """没有 gh 或不是 GitHub 时：各家网站「新建合并请求」的网址，手机打开后点一下就能提交"""
+    from urllib.parse import quote as q
+    host, path = _web_repo(remote_url)
+    if not host:
+        return ""
+    if "gitlab" in host:
+        return "https://%s/%s/-/merge_requests/new?merge_request%%5Bsource_branch%%5D=%s&merge_request%%5Btarget_branch%%5D=%s" % (host, path, q(branch, safe=""), q(base, safe=""))
+    if "bitbucket" in host:
+        return "https://%s/%s/pull-requests/new?source=%s&dest=%s" % (host, path, q(branch, safe=""), q(base, safe=""))
+    # GitHub、Gitee、Gitea / Forgejo 都是 compare/基础...分支
+    suffix = "?expand=1" if "github" in host else ""
+    return "https://%s/%s/compare/%s...%s%s" % (host, path, q(base, safe="/"), q(branch, safe="/"), suffix)
+
+
+def _pr_create(root, request, slow):
+    """一键开 PR（工作树并行做完一个任务后用）：推送当前分支（没关联远端就关联上），本机有 gh 且是 GitHub 就直接建 PR，
+    否则给出网站上「新建合并请求」的网址。返回 {url, created, branch, base}"""
+    branch = run_git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+    if branch == "HEAD":
+        raise RuntimeError("当前不在任何分支上（游离 HEAD），先切到要提交的分支")
+    remotes = [l.strip() for l in run_git(root, ["remote"]).splitlines() if l.strip()]
+    if not remotes:
+        raise RuntimeError("还没有配置远端仓库")
+    remote = request.get("remote") if request.get("remote") in remotes else ("origin" if "origin" in remotes else remotes[0])
+    # 目标分支：指定的 > 远端默认分支（origin/HEAD）> main / master
+    base = (request.get("base") or "").strip()
+    if not base:
+        head = subprocess.run(["git", "-C", root, "symbolic-ref", "-q", "--short", "refs/remotes/%s/HEAD" % remote],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **_no_window())
+        base = head.stdout.decode("utf-8", "replace").strip().split("/", 1)[-1] if head.returncode == 0 else ""
+    if not base:
+        for name in ("main", "master"):
+            if subprocess.run(["git", "-C", root, "show-ref", "--verify", "-q", "refs/remotes/%s/%s" % (remote, name)], **_no_window()).returncode == 0:
+                base = name
+                break
+    base = base or "main"
+    if branch == base:
+        raise RuntimeError("当前就在目标分支「%s」上：PR 要从另一个分支（比如工作树里的分支）发起" % base)
+    _check_branch_name(branch)
+    git_run(root, ["push", "--porcelain", "-u", remote, branch], timeout=slow)
+    remote_url = run_git(root, ["remote", "get-url", remote]).strip()
+    host, _ = _web_repo(remote_url)
+    title = (request.get("title") or "").strip()[:200]
+    body = (request.get("body") or "").strip()[:20000]
+    if host and "github" in host and shutil.which("gh"):
+        args = ["gh", "pr", "create", "--base", base, "--head", branch]
+        args += ["--title", title, "--body", body or ""] if title else ["--fill"]
+        try:
+            out = subprocess.run(args, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90, env=git_env(root), **_no_window())
+            text = (out.stdout + out.stderr).decode("utf-8", "replace")
+            link = re.findall(r"https://\S+/pull/\d+", text)
+            if link:
+                # 已经有这个分支的 PR 时 gh 会报错并给出它的地址：一样当作成功
+                return {"url": link[-1], "created": out.returncode == 0, "existing": out.returncode != 0, "branch": branch, "base": base}
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    url = _pr_compare_url(remote_url, base, branch)
+    if not url:
+        raise RuntimeError("已推送「%s」，但认不出远端网站（%s），请在网站上手动发起合并请求" % (branch, remote_url))
+    return {"url": url, "created": False, "branch": branch, "base": base}
 
 
 def repo_request(cwd, request, sessions):
@@ -18260,6 +18334,10 @@ class BrowserPool:
         if now - self.pruned_at > 600:
             self.pruned_at = now
             self.prune_recordings()
+            try:
+                storage_auto_clean()   # 超过 14 天没用的会话浏览器数据等，每天最多清一次
+            except Exception as exc:
+                log("storage auto clean failed: %s" % exc)
         state = self.state()
         if state != self.last_state:
             self.last_state = state
@@ -22253,6 +22331,157 @@ def collect_snapshots(debug_state):
     return snapshots
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# 存储清理（11-24 用户要的：Mac 盘被占满，会话衍生的缓存本来就能从 agent 的会话记录里重新拉，不必长期留着）
+#   口径：「超过 N 天（默认 14）没有使用」，按最后一次使用算，不是按创建时间算（用户 11-24 强调）。
+#   清的只有我们自己存的衍生数据：会话浏览器的用户数据（登录状态会丢，需要时重登）、手机发来的图片（inbox）、旧的报告；
+#   不碰 agent 自己的会话记录、待办、收藏、配置、正在开着的浏览器（最近有写入就算在用）。
+#   命令行：ccpulse-watch.py storage scan|clean [--days 14] [--only browser,inbox,reports] [--json]；watcher 每天自动清一次
+#   （环境变量 CCPULSE_STORAGE_AUTO=0 关闭，CCPULSE_STORAGE_DAYS 改天数；电脑端设置里改了经环境变量带来）。
+STORAGE_DAYS = int(float(os.environ.get("CCPULSE_STORAGE_DAYS") or 14))
+STORAGE_AUTO = (os.environ.get("CCPULSE_STORAGE_AUTO") or "1") != "0"
+STORAGE_STATE = os.path.join(DATA_DIR, "storage-clean.json")
+
+
+def _tree_usage(path):
+    """目录 → (总字节, 最近一次修改的时间戳)。文件不存在 / 读不了的跳过"""
+    total, newest = 0, 0.0
+    try:
+        newest = os.path.getmtime(path)
+    except OSError:
+        return 0, 0.0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                info = os.lstat(os.path.join(root, name))
+            except OSError:
+                continue
+            total += info.st_size
+            if info.st_mtime > newest:
+                newest = info.st_mtime
+    return total, newest
+
+
+def storage_items(days=None):
+    """扫一遍，列出每个类别里能清的项 → [{category, name, path, bytes, lastUsed, idleDays, stale}]。stale = 超过 days 天没用"""
+    days = STORAGE_DAYS if days is None else days
+    now = time.time()
+    rows = []
+
+    def add(category, name, path, size, used):
+        idle = (now - used) / 86400.0 if used else 9999.0
+        rows.append({"category": category, "name": name, "path": path, "bytes": size,
+                     "lastUsed": int(used * 1000), "idleDays": round(idle, 1), "stale": idle > days})
+    try:
+        folders = sorted(os.listdir(BROWSER_DIR))
+    except OSError:
+        folders = []
+    for name in folders:
+        path = os.path.join(BROWSER_DIR, name)
+        if os.path.isdir(path):   # ua.json 之类的单个文件不算
+            size, used = _tree_usage(path)
+            add("browser", name, path, size, used)
+    try:
+        names = os.listdir(INBOX_DIR)
+    except OSError:
+        names = []
+    for name in names:
+        path = os.path.join(INBOX_DIR, name)
+        size, used = _tree_usage(path) if os.path.isdir(path) else (0, 0.0)
+        if not os.path.isdir(path):
+            try:
+                info = os.lstat(path)
+                size, used = info.st_size, info.st_mtime
+            except OSError:
+                continue
+        add("inbox", name, path, size, used)
+    try:
+        names = os.listdir(REPORTS_DIR)
+    except OSError:
+        names = []
+    for name in names:
+        path = os.path.join(REPORTS_DIR, name)
+        if os.path.isdir(path):
+            size, used = _tree_usage(path)
+            add("reports", name, path, size, used)
+    return rows
+
+
+def storage_clean(days=None, only=None, dry=False):
+    """清掉超过 days 天没用的项 → {freed, removed, categories}。dry=True 只算不删"""
+    rows = storage_items(days)
+    freed, removed, per = 0, 0, {}
+    for row in rows:
+        if not row["stale"] or (only and row["category"] not in only):
+            continue
+        if not dry:
+            try:
+                if os.path.isdir(row["path"]) and not os.path.islink(row["path"]):
+                    shutil.rmtree(row["path"])
+                else:
+                    os.remove(row["path"])
+            except OSError:
+                continue
+        freed += row["bytes"]
+        removed += 1
+        per[row["category"]] = per.get(row["category"], 0) + row["bytes"]
+    return {"freed": freed, "removed": removed, "categories": per, "days": STORAGE_DAYS if days is None else days}
+
+
+def storage_summary(days=None):
+    """类别汇总 → [{category, bytes, cleanable, items, staleItems}]，给设置页用"""
+    out = {}
+    for row in storage_items(days):
+        item = out.setdefault(row["category"], {"category": row["category"], "bytes": 0, "cleanable": 0, "items": 0, "staleItems": 0})
+        item["bytes"] += row["bytes"]
+        item["items"] += 1
+        if row["stale"]:
+            item["cleanable"] += row["bytes"]
+            item["staleItems"] += 1
+    return sorted(out.values(), key=lambda item: -item["bytes"])
+
+
+def storage_auto_clean():
+    """每天最多自动清一次（时间记在 storage-clean.json）；关了自动清就什么都不做"""
+    if not STORAGE_AUTO:
+        return None
+    state = _json_file(STORAGE_STATE) or {}
+    if time.time() - float(state.get("last") or 0) < 20 * 3600:
+        return None
+    result = storage_clean()
+    _write_json(STORAGE_STATE, {"last": time.time(), "freed": result["freed"], "removed": result["removed"], "days": result["days"]})
+    if result["removed"]:
+        log("storage auto clean: removed %d items, freed %d MB" % (result["removed"], result["freed"] // 1048576))
+    return result
+
+
+def command_storage(argv):
+    action = argv[0] if argv else "scan"
+    days, only, as_json = None, None, "--json" in argv
+    for index, word in enumerate(argv):
+        if word == "--days" and index + 1 < len(argv):
+            days = float(argv[index + 1])
+        if word == "--only" and index + 1 < len(argv):
+            only = set(argv[index + 1].split(","))
+    if action == "clean":
+        result = storage_clean(days, only, dry="--dry" in argv)
+        print(json.dumps(result, ensure_ascii=False) if as_json else
+              "%s %d 项，%.1f MB" % ("可清" if "--dry" in argv else "已清", result["removed"], result["freed"] / 1048576.0))
+        return 0
+    if action == "scan":
+        rows = storage_summary(days)
+        if as_json:
+            print(json.dumps({"days": STORAGE_DAYS if days is None else days, "categories": rows}, ensure_ascii=False))
+        else:
+            names = {"browser": "会话浏览器数据", "inbox": "手机发来的图片", "reports": "测试报告"}
+            for row in rows:
+                print("%-12s 共 %7.1f MB，可清 %7.1f MB（%d / %d 项）" % (names.get(row["category"], row["category"]), row["bytes"] / 1048576.0,
+                                                                  row["cleanable"] / 1048576.0, row["staleItems"], row["items"]))
+        return 0
+    print("用法：storage scan|clean [--days 14] [--only browser,inbox,reports] [--dry] [--json]")
+    return 2
+
+
 def main():
     log("starting v%s on %s (pid %d)" % (WATCHER_VERSION, sys.platform, os.getpid()))
     emit({
@@ -22993,6 +23222,8 @@ if __name__ == "__main__":
         sys.exit(command_todo(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "keyinfo":
         sys.exit(command_keyinfo(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "storage":
+        sys.exit(command_storage(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "stage":
         sys.exit(command_stage(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "peers-active":

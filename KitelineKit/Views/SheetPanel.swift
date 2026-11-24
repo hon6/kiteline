@@ -126,11 +126,20 @@ extension View {
         #endif
     }
 
-    /// Mac 面板工具栏里的文字按钮（完成、取消……）：自己画成系统的带边框按钮（macOS 26 上就是液态玻璃按钮），系统字、不染主题色。
-    /// 交给工具栏套玻璃底的话，有的面板里系统只按字宽套（「完成」比玻璃底还宽、靠右的被窗口边裁掉）
-    public func panelToolbarButton() -> some View {
+    /// Mac 面板工具栏里的文字按钮（完成、取消、打开、全部复制……）：和看大图工具栏的「完成」一样，交给系统画成液态玻璃按钮
+    /// （11-24 反馈：弹窗标题栏的按钮全部用看大图那种玻璃按钮；原来自己画带边框的小按钮、再去掉玻璃底，和看大图、「…」菜单不是一套）。
+    /// 单独成一块玻璃，字两边各多留 4 点（panelToolbarItem(edge: .horizontal)），不然系统按字宽套玻璃底、字贴着边。
+    /// 外面的 ToolbarItem 别再 panelBare / klBareToolbarItem（那会去掉玻璃底）。
+    /// prominent = 这个面板的主要操作（打开）：主题色玻璃、白字（11-24 反馈：改成主题色玻璃，亮一点）；macOS 26 以前是主题色的带底按钮
+    @ViewBuilder
+    public func panelToolbarButton(prominent: Bool = false) -> some View {
         #if os(macOS)
-        font(.body).tint(Color.primary).buttonStyle(PanelTextButtonStyle())
+        if prominent {
+            // 左右留白和普通按钮一样（panelToolbarItem(edge: .horizontal) 的 6 + 4），不然系统按字宽把这块玻璃缩成一个圆
+            font(.body).buttonStyle(.borderedProminent).tint(Theme.claude).padding(.horizontal, 10)
+        } else {
+            panelToolbarItem(edge: .horizontal)
+        }
         #else
         self
         #endif
@@ -486,16 +495,6 @@ private struct PanelRoot: KLView {
             .modifier(LookRoot())
     }
 }
-
-#if os(macOS)
-/// 面板工具栏里的文字按钮：系统的带边框按钮（macOS 26 上是液态玻璃按钮），字两侧比系统默认多留 4 点，别贴着玻璃底的边
-struct PanelTextButtonStyle: PrimitiveButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        Button(role: configuration.role, action: configuration.trigger) { configuration.label.padding(.horizontal, 4) }
-            .kiteButton()
-    }
-}
-#endif
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {

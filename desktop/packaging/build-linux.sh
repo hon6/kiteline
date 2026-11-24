@@ -30,6 +30,9 @@ mkdir -p "$PKG/desktop/packaging" "$PKG/watcher" "$OUT"
 cp -R "$DESKTOP/kiteline" "$PKG/desktop/"
 cp -R "$ROOT/Resources/world" "$PKG/desktop/world"   # 世界模式的网页（后台 /world/ 路由读它）
 cp -R "$ROOT/Resources/guest" "$PKG/desktop/guest"   # 游客链接看的页面（后台 /g/<编号> 给，见 kiteline/guest.py）
+# 网页版（后台 /app/ 路由读它，见 kiteline/server.webapp_root）：从微信小程序源码编译；开源版没有小程序源码就不带
+if [ -f "$ROOT/web-app/dist/index.html" ]; then cp -R "$ROOT/web-app/dist" "$PKG/desktop/webapp"   # 发版脚本先编好的
+elif [ -d "$ROOT/miniprogram" ] && [ -f "$ROOT/web-app/build.py" ]; then python3 "$ROOT/web-app/build.py" --target web --out "$PKG/desktop/webapp" >/dev/null; fi
 cp "$DESKTOP/requirements.lock" "$DESKTOP/requirements.txt" "$DESKTOP/install-linux.sh" "$DESKTOP"/CHANGELOG*.md "$PKG/desktop/"
 cp "$HERE/kiteline.png" "$PKG/desktop/packaging/"
 [ -n "$CLIENT" ] && cp -R "$CLIENT" "$PKG/desktop/app"

@@ -140,12 +140,17 @@ final class Translator: KLObservable {
     @Tracked private var cache: [String: String] = [:]
     @Tracked private var tasks: [String: Task<Void, Never>] = [:]
 
+    /// 逐字显示的那条（ChatStore.live）：id 永远是 live、内容一直在长，不参与翻译。
+    /// 以前按 id 记下的译文会套到之后每一次逐字显示上：开着自动翻译时，某次英文半句「This is an important new rule (」
+    /// 翻好记在 live 名下，之后任何会话逐字显示时都先冒出「这是一个重要的新规则（」，一两秒后正式消息到了才消失（11-24 截图）
+    static func skips(_ id: String) -> Bool { id == "live" }
+
     /// 气泡里该显示的文字：翻译好且没切回原文时是译文，否则 nil（照常显示原文）
     func shown(_ id: String) -> String? {
-        guard case .done(let text) = states[id], !showingOriginal.contains(id) else { return nil }
+        guard !Self.skips(id), case .done(let text) = states[id], !showingOriginal.contains(id) else { return nil }
         return text
     }
-    func state(_ id: String) -> State? { states[id] }
+    func state(_ id: String) -> State? { Self.skips(id) ? nil : states[id] }
 
     /// 自测用：每条翻译试过哪些服务、为什么换下一个
     private var notes: [String: [String]] = [:]
@@ -211,7 +216,7 @@ final class Translator: KLObservable {
 
     /// 自动翻译：消息出现在屏幕上时调用。只翻和目标语言不同的；翻过、正在翻、点过「原文」、失败过的都不动
     func autoTranslate(_ id: String, text: String) {
-        guard auto, configured, states[id] == nil, !showingOriginal.contains(id), !sameAsTarget.contains(id) else { return }
+        guard !Self.skips(id), auto, configured, states[id] == nil, !showingOriginal.contains(id), !sameAsTarget.contains(id) else { return }
         let sample = TranslateDoc(text).pieces.joined(separator: "\n")
         guard !sample.isEmpty else { return }
         if source != "auto" ? Self.sameLanguage(source, target) : (Self.detect(sample).map { Self.sameLanguage($0, target) } ?? true) {
@@ -221,6 +226,7 @@ final class Translator: KLObservable {
     }
 
     func translate(_ id: String, text: String, gated: Bool = false) {
+        guard !Self.skips(id) else { return }
         let cacheKey = "\(engine.rawValue)|\(source)|\(target)|\(text)"
         if let hit = cache[cacheKey] { states[id] = .done(hit); showingOriginal.remove(id); return }
         states[id] = .working
@@ -573,22 +579,37 @@ final class Translator: KLObservable {
         return pieces.indices.map { index in (results[index] ?? [:]).sorted { $0.key < $1.key }.map(\.value).joined(separator: " ") }
     }
 
-    private nonisolated static func myMemoryOne(_ text: String, source: String, target: String) async throws -> String {
+    private nonisolated static func myMemoryOne(_ original: String, source: String, target: String) async throws -> String {
         var request = URLRequest(url: URL(string: "https://api.mymemory.translated.net/get")!, timeoutInterval: 12)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded;charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.httpBody = "q=\(formEscape(text))&langpair=\(myMemoryCode(source))|\(myMemoryCode(target))".data(using: .utf8)
+        request.httpBody = "q=\(formEscape(original))&langpair=\(myMemoryCode(source))|\(myMemoryCode(target))".data(using: .utf8)
         let data: Data
         do { data = try await URLSession.shared.data(for: request).0 } catch { throw TranslateError(L("连不上 MyMemory"), pause: 600) }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw TranslateError(L("MyMemory 返回了无法识别的内容")) }
         if json["quotaFinished"] as? Bool == true { throw TranslateError(L("MyMemory 今日免费额度已用完"), pause: 3600) }
         // 自动检测出来和目标语言相同（「16px」这种被认成英文）：原样保留
-        if (json["responseDetails"] as? String)?.localizedCaseInsensitiveContains("DISTINCT LANGUAGES") == true { return text }
+        if (json["responseDetails"] as? String)?.localizedCaseInsensitiveContains("DISTINCT LANGUAGES") == true { return original }
         guard let reply = json["responseData"] as? [String: Any], let text = reply["translatedText"] as? String,
               (json["responseStatus"] as? Int ?? Int(json["responseStatus"] as? String ?? "") ?? 200) == 200 else {
             throw TranslateError((json["responseDetails"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? L("MyMemory 翻译失败"))
         }
-        return text
+        return myMemoryClean(text, source: original)
+    }
+
+    /// MyMemory 的译文有时带着翻译记忆库里的排版标记和 HTML 转义（「这是一项重要的<em>新</em>规则」「it&#39;s」，11-24 实测）：
+    /// 原文里没有的标记去掉、转义还原
+    nonisolated static func myMemoryClean(_ text: String, source: String) -> String {
+        var out = text
+        if !source.contains("<") {
+            out = out.replacingOccurrences(of: "</?(em|strong|b|i|u|g|x|bx|ex|bpt|ept|ph)\\b[^>]*>", with: "", options: [.regularExpression, .caseInsensitive])
+        }
+        if !source.contains("&") {
+            for (entity, char) in [("&#39;", "'"), ("&#039;", "'"), ("&apos;", "'"), ("&quot;", "\""), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "), ("&amp;", "&")] {
+                out = out.replacingOccurrences(of: entity, with: char)
+            }
+        }
+        return out
     }
 
     private nonisolated static func formEscape(_ text: String) -> String {

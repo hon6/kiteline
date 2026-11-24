@@ -161,6 +161,7 @@ static class SelfTest
                     if (Enum.TryParse<SessionAction>(arg, true, out var act) && main.Selection is string current) ChatActions.Perform(current, act);
                     break;
                 case "openfile": if (main.Selection is string fileKey) ChatSheets.File(fileKey, arg); break;
+                case "share": if (main.Selection is string shareKey) Views.GuestShare.Open(shareKey); break;   // 分享只读链接面板（含发言申请）
                 case "closedialog": Views.Dialog.Last?.Close(); break;
                 // 代码 IDE：code:<explorer|scm|branches>、codefile:<路径>、codetab:history / diff:<路径> / commit:<提交号>
                 case "code": if (main.Selection is string codeKey) Views.Code.CodeWindow.Open(codeKey, arg.Length > 0 ? arg : "explorer"); break;

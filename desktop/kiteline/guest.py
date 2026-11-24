@@ -23,6 +23,8 @@ from . import config, log, netinfo
 from .httpd import HTTPServer, Response
 
 HOUR_CHOICES = (1, 24, 168)
+# 发言申请（11-24 起，同 Mac GuestLinks）：看链接的同事写一条消息申请发言，分享的人允许后才送进会话；30 分钟没处理就作废
+ASK_TTL = 1800
 AGENT_NAMES = {"claude-code": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "cursor": "Cursor",
                "qwen": "Qwen Code", "dsh": "DeepSeek Harness", "proma": "Proma"}
 PAGE_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; "
@@ -116,6 +118,9 @@ class GuestLinks:
         self._cache = {}              # 编号 → (会话的样子, 快照)：没变就直接给
         self._listener = None         # 游客端口（有分享时开着）
         self._listener_port = 0
+        self._asks = []               # 发言申请：{id, shareId, sessionKey, name, text, at, status}
+        self._ask_times = {}          # 来源地址 → 最近的申请时间（一小时最多 20 条）
+        self.on_ask = None            # 新申请：server 设成推送提醒
         try:
             with open(_path(), encoding="utf-8") as f:
                 saved = json.load(f)
@@ -148,6 +153,8 @@ class GuestLinks:
         log.write("游客链接端口监听 %s:%s" % (host, port))
 
     def _route(self, request):
+        if request.method == "POST" and request.path.startswith("/g/api/") and request.path.endswith("/ask"):
+            return self.ask_request(request)
         if request.method != "GET" or not request.path.startswith("/g/"):
             return Response.text("not found", 404)
         status, headers, body = self.serve(request.path, request.headers.get("if-none-match"))
@@ -208,7 +215,9 @@ class GuestLinks:
         if not share:
             return 404, json_head, json.dumps({"ok": False, "error": "链接已失效"}, ensure_ascii=False).encode("utf-8")
         session = self._session(share["sessionKey"])
+        share_asks = self.asks_for(share_id)
         mark = "%s|%s|%s" % (session.get("activity"), session.get("updatedAt"), session.get("title")) if session else "ended"
+        mark += "|" + ",".join("%s:%s" % (a["id"], a["status"]) for a in share_asks)
         etag = '"%s"' % hashlib.sha256(("%s|%s" % (share_id, mark)).encode("utf-8")).hexdigest()[:16]
         head = dict(json_head, ETag=etag)
         head["X-Share-Expires"] = str(int(share["expires"]))
@@ -226,10 +235,80 @@ class GuestLinks:
             response = source.request({"cmd": "history", "sessionId": session_id, "limit": 150}, timeout=30)
         except Exception as exc:  # noqa: BLE001
             return 502, json_head, json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
-        body = json.dumps(snapshot(share, session, response.get("items") or [], response.get("hasMore")), ensure_ascii=False).encode("utf-8")
+        snap = snapshot(share, session, response.get("items") or [], response.get("hasMore"))
+        snap["asks"] = [{"id": a["id"], "name": a["name"], "text": a["text"][:300], "status": a["status"], "at": a["at"]} for a in share_asks[-20:]]
+        snap["canAsk"] = True
+        body = json.dumps(snap, ensure_ascii=False).encode("utf-8")
         with self._lock:
             self._cache[share_id] = (mark, body)
         return 200, head, body
+
+    # MARK: 发言申请
+
+    def ask_request(self, request):
+        parts = [p for p in request.path.split("/") if p]   # ["g", "api", 编号, "ask"]
+        body = request.json or {}
+        ask, error = self.ask(parts[2] if len(parts) == 4 else "", body.get("name") or "", body.get("text") or "", request.remote)
+        if ask:
+            return Response.json({"ok": True, "id": ask["id"]})
+        return Response.json({"ok": False, "error": error or "申请失败"}, 400)
+
+    def ask(self, share_id, name, text, remote):
+        name = str(name).strip()[:20]
+        text = str(text).strip()[:2000]
+        if not name:
+            return None, "请填写你的名字"
+        if not text:
+            return None, "请填写要说的话"
+        now = time.time()
+        with self._lock:
+            self._prune()
+            share = next((s for s in self._shares if s["id"] == share_id), None)
+            if not share:
+                return None, "链接已失效"
+            times = [t for t in self._ask_times.get(remote, []) if now - t < 3600]
+            pending = [a for a in self._asks if a["shareId"] == share_id and a["status"] == "pending"]
+            if len(times) >= 20 or len(pending) >= 5:
+                return None, "申请太多了，请等对方处理后再发"
+            times.append(now)
+            self._ask_times[remote] = times
+            ask = {"id": base64.urlsafe_b64encode(secrets.token_bytes(16)).rstrip(b"=").decode("ascii"), "shareId": share_id,
+                   "sessionKey": share["sessionKey"], "name": name, "text": text, "at": now, "status": "pending"}
+            self._asks.append(ask)
+            self._cache.pop(share_id, None)
+        log.write("「%s」在分享的会话里申请发言（%s）" % (name, remote))
+        if self.on_ask:
+            try:
+                self.on_ask(dict(ask))
+            except Exception as exc:  # noqa: BLE001
+                log.write("发言申请提醒失败：%s" % exc)
+        return ask, None
+
+    def asks_for(self, share_id):
+        with self._lock:
+            self._prune()
+            return [dict(a) for a in self._asks if a["shareId"] == share_id]
+
+    def pending_asks(self, session_key=None):
+        with self._lock:
+            self._prune()
+            return [dict(a) for a in self._asks if a["status"] == "pending" and (not session_key or a["sessionKey"] == session_key)]
+
+    def decide(self, ask_id, allow):
+        """分享的人决定：允许（返回这条申请，由调用方送进会话）或拒绝"""
+        with self._lock:
+            self._prune()
+            ask = next((a for a in self._asks if a["id"] == ask_id and a["status"] == "pending"), None)
+            if not ask:
+                return None
+            ask["status"] = "sent" if allow else "declined"
+            self._cache.pop(ask["shareId"], None)
+            return dict(ask)
+
+    @staticmethod
+    def delivered_text(ask):
+        """允许后送进会话的文字：开头注明是谁说的，Agent 知道这句话不是本人写的"""
+        return "（来自「%s」的留言，已经我同意）\n%s" % (ask["name"], ask["text"])
 
     # MARK: 小工具
 
@@ -241,6 +320,11 @@ class GuestLinks:
 
     def _prune(self):
         now = time.time()
+        for a in self._asks:
+            if a["status"] == "pending" and now - a["at"] > ASK_TTL:
+                a["status"] = "expired"
+        alive_shares = {s["id"] for s in self._shares if s["expires"] > now}
+        self._asks = [a for a in self._asks if now - a["at"] <= 86400 and a["shareId"] in alive_shares]
         before = len(self._shares)
         self._shares = [s for s in self._shares if s["expires"] > now]
         if len(self._shares) != before:

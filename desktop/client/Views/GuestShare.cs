@@ -9,7 +9,8 @@ using static Kiteline.Lang;
 namespace Kiteline.Views;
 
 /// 会话菜单「分享只读链接」（同 iOS / Mac 版 GuestShareSheet）：生成一个局域网网址，同一网络里的人用浏览器就能看这个会话（对话和步骤，只读）。
-/// 页面和内容都由电脑直接给（见 desktop/kiteline/guest.py），不经过任何服务器；可选有效期，随时停止分享
+/// 页面和内容都由电脑直接给（见 desktop/kiteline/guest.py），不经过任何服务器；可选有效期，随时停止分享。
+/// 看链接的人可以申请发言（11-24 起）：这里列出待处理的申请，点「允许」才以你的名义送进会话（开头注明是谁说的）
 public static class GuestShare
 {
     static Net.Api Api => AppModel.Shared.Api;
@@ -18,17 +19,52 @@ public static class GuestShare
     {
         var box = new StackPanel { Spacing = 14, Margin = new Avalonia.Thickness(18, 4, 18, 18) };
         JsonNode? current = null;
-        try { current = (await Api.Get("/api/share", new Dictionary<string, string> { ["key"] = key })).Arr("shares").Items().FirstOrDefault(); }
+        List<JsonNode> asks = [];
+        try
+        {
+            var reply = await Api.Get("/api/share", new Dictionary<string, string> { ["key"] = key });
+            current = reply.Arr("shares").Items().FirstOrDefault();
+            asks = reply.Arr("asks").Items().ToList();
+        }
         catch (Exception e) { box.Children.Add(Ui.Text(L("无法读取分享状态：%@", e.Message), 12, color: "Red", lines: 3)); }
-        Draw(box, key, current);
+        Draw(box, key, current, asks);
         return NavSheet.Scroll(box);
     }), 480, 400);
 
-    static void Draw(StackPanel box, string key, JsonNode? share)
+    static void Draw(StackPanel box, string key, JsonNode? share, List<JsonNode>? asks = null)
     {
         box.Children.Clear();
-        box.Children.Add(Ui.Text(L("生成一个局域网网址，和这台电脑在同一网络（Wi-Fi）里的人用浏览器就能查看这个会话，不用装 Kiteline：对话和执行的步骤，不含思考过程、图片和关键信息。会话有进展时，对方的页面自动更新。"), 12, color: "Text2", lines: 5));
+        box.Children.Add(Ui.Text(L("生成一个局域网网址，和这台电脑在同一网络（Wi-Fi）里的人用浏览器就能查看这个会话，不用装 Kiteline：对话和执行的步骤，不含思考过程、图片和关键信息。会话有进展时，对方的页面自动更新。对方可以申请发言，你同意后才会送进会话。"), 12, color: "Text2", lines: 6));
         var status = Ui.Text("", 12, color: "Red", lines: 3);
+        if (asks is { Count: > 0 })
+        {
+            box.Children.Add(Ui.Text(L("发言申请"), 13, FontWeight.Medium));
+            foreach (var ask in asks)
+            {
+                var id = ask.Str("id") ?? "";
+                var at = ask.Num("at") ?? 0;
+                var text = Ui.Text(ask.Str("text") ?? "", 13, lines: 8);
+                text.TextWrapping = TextWrapping.Wrap;
+                GlassButton? allow = null, deny = null;
+                async Task Decide(bool ok)
+                {
+                    allow!.IsEnabled = deny!.IsEnabled = false;
+                    try
+                    {
+                        await Api.Post("/api/share/ask", new Dictionary<string, object> { ["id"] = id, ["action"] = ok ? "allow" : "deny" });
+                        Draw(box, key, share, asks.Where(x => x.Str("id") != id).ToList());
+                    }
+                    catch (Exception e) { status.Text = e.Message; allow.IsEnabled = deny.IsEnabled = true; }
+                }
+                allow = new GlassButton(L("允许"), null, () => _ = Decide(true), prominent: true, height: 28);
+                deny = new GlassButton(L("拒绝"), null, () => _ = Decide(false), height: 28);
+                var head = Ui.H(6, Ui.Text(ask.Str("name") ?? "", 13, FontWeight.SemiBold),
+                    Ui.Text(DateTimeOffset.FromUnixTimeSeconds((long)at).LocalDateTime.ToString("t"), 11, color: "Text2"));
+                box.Children.Add(new Border { Padding = new Avalonia.Thickness(10), CornerRadius = new Avalonia.CornerRadius(8), BorderThickness = new Avalonia.Thickness(1),
+                    Child = Ui.V(6, head, text, Ui.H(8, deny, allow)) }.Res(Border.BorderBrushProperty, "Separator"));
+            }
+            box.Children.Add(Ui.Text(L("允许后以你的名义送进会话，开头注明是谁说的；30 分钟没处理自动作废。"), 11, color: "Text2", lines: 3));
+        }
         if (share is null)
         {
             var hours = "24";
@@ -43,7 +79,7 @@ public static class GuestShare
                 {
                     var made = await Api.Post("/api/share", new Dictionary<string, object> { ["key"] = key, ["hours"] = int.Parse(hours) });
                     if (made.Str("url") is { } url) SessionMenu.Copy(url);   // 生成了就顺手复制好
-                    Draw(box, key, made);
+                    Draw(box, key, made, asks);
                 }
                 catch (Exception e) { status.Text = e.Message; create.IsEnabled = true; }
             }, prominent: true, height: 32);
@@ -67,7 +103,7 @@ public static class GuestShare
                 try
                 {
                     await Api.Post("/api/share/stop", new Dictionary<string, object> { ["id"] = share.Str("id") ?? "" });
-                    Draw(box, key, null);
+                    Draw(box, key, null, asks);
                 }
                 catch (Exception e) { status.Text = e.Message; stop.IsEnabled = true; }
             }, height: 32);

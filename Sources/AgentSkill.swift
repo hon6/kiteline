@@ -20,6 +20,8 @@ enum AgentSkill {
     static var openCodePlugin = true
     /// 会话浏览器（设置 → Agent 浏览器）：开在哪（client 用户这台电脑 / server agent 所在的电脑）、最多几个、空闲几分钟回收。
     /// 开在哪变了要重连远端（ssh 的反向转发和远端 watcher 的环境变量都在启动时定）；上限、回收时间当场告诉在线的 watcher
+    /// 存储清理（设置 → 存储）：自动清开不开、超过几天没用的清；经环境变量带给 watcher（下次启动 watcher 时生效），Mac 自己的图片缓存由 StorageCleaner 按同一设置清
+    static var storage: (auto: Bool, days: Int) = (true, 14)
     static var browser: (on: String, max: Int, idle: Int, record: Bool) = ("client", 4, 10, true) {
         didSet {
             guard browser != oldValue else { return }
@@ -54,6 +56,8 @@ enum AgentSkill {
         env["CCPULSE_BROWSER_MAX"] = String(browser.max)
         env["CCPULSE_BROWSER_IDLE"] = String(browser.idle)
         env["CCPULSE_BROWSER_REC"] = browser.record ? "1" : "0"
+        env["CCPULSE_STORAGE_AUTO"] = storage.auto ? "1" : "0"   // 存储清理：watcher 每天自动清超过 N 天没用的浏览器数据等
+        env["CCPULSE_STORAGE_DAYS"] = String(storage.days)
         // 测试实例的入口不用 9339（见 BrowserRelay.gatePort）
         if BrowserRelay.gatePort != 9339 { env["CCPULSE_BROWSER_PORT"] = String(BrowserRelay.gatePort) }
         return env
