@@ -1,5 +1,16 @@
 # Kiteline Release Notes
 
+## 3.49.57 (2026-11-25)
+
+### Improvements
+
+- **The Files column is collapsed by default in the new layout** (Mac, Windows, Linux): click its header or the fold button to expand it, and your choice is remembered; existing users see it collapsed once after updating.
+- **Start a new Codex session from your phone** (Mac, Linux): choose Codex when creating a task, type the first message, and Kiteline launches Codex in the background on your computer so you can keep chatting from your phone; finished Codex sessions can also be continued. Windows computers are not supported yet.
+
+### Fixes
+
+- **Images, to-dos and similar no longer land in the wrong session when several sessions share one folder** (Mac, Windows, Linux): when the calling session can't be identified, Kiteline no longer guesses by folder and asks for an explicit session id; command output no longer includes the session name, so one session's content can't appear in another.
+
 ## 3.49.56 (2026-11-25)
 
 ### New

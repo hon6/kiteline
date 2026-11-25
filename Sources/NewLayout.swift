@@ -858,6 +858,13 @@ final class PanelCollapse: ObservableObject {
         var set = Set(AppConfig.defaults.stringArray(forKey: Self.storeKey) ?? [])
         // 老版本按标题各存一个布尔值（会话、文件）
         for title in [L("会话"), L("文件")] where AppConfig.defaults.bool(forKey: "panelCollapsed." + title) { set.insert("panel." + title) }
+        // 11-25 反馈：新版界面的文件列默认收起（点标题条展开；展开后记住）。只在第一次执行，之后以用户自己的选择为准
+        if !AppConfig.defaults.bool(forKey: "filesColumnCollapsedByDefault1125") {
+            set.insert("column.files")             // 右边单独一列的文件（默认摆法）
+            set.insert("panel." + L("文件"))       // 叠在左栏里的文件块
+            AppConfig.defaults.set(true, forKey: "filesColumnCollapsedByDefault1125")
+            AppConfig.defaults.set(Array(set), forKey: Self.storeKey)
+        }
         keys = set
     }
 

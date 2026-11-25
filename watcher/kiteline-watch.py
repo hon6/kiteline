@@ -5959,10 +5959,14 @@ def write_live_sessions(snapshots, last=[None]):
         pass
 
 
+_AMBIGUOUS_SESSIONS = []   # 按目录认不出唯一会话时，同目录的候选会话 id
+
+
 def find_calling_session():
     """子命令在 agent 的 Bash 里执行时，认出是哪个会话 → {sessionId, name, agent}；认不出返回 None。
     先看 Claude Code 的会话注册表（父进程链里有它的进程）；再看守护进程写的会话表：父进程链里有某个会话的进程就是它，
     否则在当前目录里找正在干活的会话（agent 跑命令时会话一定在忙），找不到再退回最近活跃的"""
+    _AMBIGUOUS_SESSIONS[:] = []
     payload = resolve_calling_session(pid_only=True)
     if payload:
         return {"sessionId": payload["sessionId"], "name": payload.get("name"), "agent": "claude-code"}
@@ -5971,6 +5975,12 @@ def find_calling_session():
     except ValueError:
         table = {}
     rows = [r for r in table.get("sessions") or [] if isinstance(r, dict) and r.get("sessionId")]
+    # 环境变量里带着会话 id 的（Codex 的 CODEX_THREAD_ID、Kiteline 的 KITELINE_SESSION）直接认
+    for var in ("KITELINE_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"):
+        sid = os.environ.get(var)
+        for row in rows:
+            if sid and row["sessionId"] == sid:
+                return row
     chain = set(ancestors(os.getpid()))
     for row in rows:
         if isinstance(row.get("pid"), int) and row["pid"] in chain:
@@ -5985,12 +5995,17 @@ def find_calling_session():
         return cwd == root or cwd.startswith(root.rstrip(os.sep) + os.sep)
 
     here = [r for r in rows if inside(r)]
-    here.sort(key=lambda r: (bool(r.get("busy")), len(r.get("cwd") or ""), r.get("updatedAt") or 0), reverse=True)
     if here:
-        return here[0]
-    payload = resolve_calling_session()
-    if payload:
-        return {"sessionId": payload["sessionId"], "name": payload.get("name"), "agent": "claude-code"}
+        # 按目录只在能唯一确定时才认：同一目录有多个会话时猜错会把图和消息发进别的会话
+        deepest = max(len(r.get("cwd") or "") for r in here)
+        here = [r for r in here if len(r.get("cwd") or "") == deepest]
+        busy = [r for r in here if r.get("busy")]
+        pool = busy or here
+        if len(pool) == 1:
+            return pool[0]
+        _AMBIGUOUS_SESSIONS[:] = [r["sessionId"] for r in pool]
+        return None
+    payload = resolve_calling_session(pid_only=True)
     return None
 
 
@@ -6003,9 +6018,14 @@ def target_session(session_id):
         return session_id, None
     found = find_calling_session()
     if not found:
-        print("找不到当前所在的会话（Kiteline 在这台电脑上运行着吗？），可以用 --session <会话id> 指定。", file=sys.stderr)
+        if _AMBIGUOUS_SESSIONS:
+            print("这个目录里有多个会话在运行，认不出是哪一个调用的，没有发送。请用 --session <会话id> 指定，候选：%s"
+                  % "、".join(i[:8] for i in _AMBIGUOUS_SESSIONS), file=sys.stderr)
+        else:
+            print("找不到当前所在的会话（Kiteline 在这台电脑上运行着吗？），可以用 --session <会话id> 指定。", file=sys.stderr)
         return None, None
-    return found["sessionId"], found.get("name")
+    # 只返回会话 id，不带会话名：名字来自用户第一句话，打进工具输出会被当成新指令
+    return found["sessionId"], None
 
 
 def append_outbox(session_id, entry):
@@ -15756,6 +15776,18 @@ class CodexPlugin(AgentPlugin):
         self.ipc = CodexIpcLink()
         self.view_only = {}   # 只读兜底列出的会话 → 只读的原因（codex_fallback_snapshots）：别交给后台服务去附着
         self.queued = {}      # 兜底列出、能经排队消息发过去的会话（新版桌面版、--no-daemon 终端）→ 快照
+
+    def launch(self, cwd, resume=None):
+        """Kiteline 在后台伪终端里起 Codex 命令行（手机上选 Codex 新建任务 / 对已结束的会话接着聊）。
+        起的是默认的 `codex`（连共享后台服务，回复、审批走 CodexLink）；字样照 Codex 0.172（11-25）实测的画面写：
+        输入框提示「Ask Codex to do anything」，第一次运行要登录（交给用户本人）。新版本提示（Update available）按它画面上写的 esc 跳过"""
+        if resume and not (8 <= len(str(resume)) <= 64 and all(c.isalnum() or c in "-_" for c in str(resume))):
+            return None
+        return {"argv": ["codex"] + (["resume", str(resume)] if resume else []),
+                "ready": ["Ask Codex to do anything", "Ask Codex"],
+                "answers": [{"when": "Update available", "keys": ["Escape"]},
+                            {"when": "Unarchive and resume", "keys": ["Enter"]}],   # 接着聊已关闭（归档）的会话
+                "needsUser": ["Sign in with ChatGPT", "Press enter to continue"], "settle": 1.5}
 
     def normalizer_for(self, path):
         return codex_dedup_normalizer(path)

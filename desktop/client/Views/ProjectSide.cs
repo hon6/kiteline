@@ -299,6 +299,12 @@ public sealed class SideProjects : Grid
         {
             this.id = id;
             this.body = body;
+            // 11-25 反馈：新版界面的文件列默认收起（点标题条展开；展开后记住）。只在第一次执行，之后以用户自己的选择为准
+            if (id == "files" && !Prefs.Bool("filesCollapsedByDefault1125"))
+            {
+                Prefs.Set("panel.collapsed.files", true);
+                Prefs.Set("filesCollapsedByDefault1125", true);
+            }
             title.Text = text;
             this.accessory.Content = accessory;
             var head = new DockPanel { Height = SideMetric.Header, Background = Brushes.Transparent, Margin = new Thickness(SideMetric.Edge, 2, SideMetric.Edge, 2) };

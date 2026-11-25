@@ -1,5 +1,16 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.61（2026-11-25）
+
+### Improvements
+
+- **Files are collapsed by default in the new layout** (Windows, Linux): click the header to expand; your choice is remembered, and existing users see it collapsed once after updating.
+- **Start a new Codex session from your phone** (Linux): choose Codex when creating a task, type the first message, and Kiteline launches Codex in the background so you can keep chatting from your phone; finished Codex sessions can also be continued. Windows computers are not supported yet.
+
+### Fixes
+
+- **Images, to-dos and similar no longer land in the wrong session when several sessions share one folder**: when the calling session can't be identified, Kiteline no longer guesses by folder and asks for an explicit session id; command output no longer includes the session name, so one session's content can't appear in another.
+
 ## 1.0.60 (2026-11-25)
 
 ### New

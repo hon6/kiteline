@@ -62,7 +62,8 @@ struct GuestShareSheet: KLView {
             .disabled(busy || !loaded)
         }
         // 打开面板时可能正在重连电脑：连上了再读一次
-        .task(id: model.connected) {
+        // 会话变了也重读（截图版先拿列表里第一个会话打开、目标会话后到时换 key：不重读就停在上一个会话的空状态）
+        .task(id: "\(model.connected)|\(key)") {
             guard model.connected else { return }
             await load()
             // 面板开着时每 5 秒看一次有没有新的发言申请
