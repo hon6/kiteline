@@ -1,5 +1,7 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.62（2026-11-25）
+
 ## 1.0.61（2026-11-25）
 
 ### Improvements

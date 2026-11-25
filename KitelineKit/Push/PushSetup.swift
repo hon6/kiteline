@@ -145,9 +145,11 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate, KLObservable 
     /// 实时连接已经连上的话，同一条 App 里会弹横幅，系统通知就不弹了；没连上照常弹
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // 推送网关直接发的收款提醒（kind sale，relay/push/owner.go）不是电脑发的，App 里没有对应横幅：照常弹
+        let sale = notification.request.content.userInfo["kind"] as? String == "sale"
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                let live = UIApplication.shared.applicationState == .active && self.model?.connected == true
+                let live = !sale && UIApplication.shared.applicationState == .active && self.model?.connected == true
                 completionHandler(live ? [] : [.banner, .list, .sound])
             }
         }
@@ -160,8 +162,18 @@ final class PushSetup: NSObject, UNUserNotificationCenterDelegate, KLObservable 
         let key = info["key"] as? String
         let route = info["route"] as? String
         let reconnect = response.actionIdentifier == Self.reconnectAction ? info["alert"] as? String : nil
+        // 推送网关直接发的收款提醒（relay/push/owner.go）带后台地址：交给 Safari 打开。只认我们自己的 https 域名
+        let web = (info["url"] as? String).flatMap(URL.init(string:)).flatMap { url -> URL? in
+            guard url.scheme == "https", let host = url.host, host == "betac.cn" || host.hasSuffix(".betac.cn") else { return nil }
+            return url
+        }
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
+                if let web {
+                    UIApplication.shared.open(web)
+                    completionHandler()
+                    return
+                }
                 self.open = Open(key: key, route: route, reconnect: reconnect)
                 completionHandler()
             }

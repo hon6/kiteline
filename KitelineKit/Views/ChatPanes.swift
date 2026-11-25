@@ -38,7 +38,38 @@ final class PaneResize: KLObservable {
     private func update() {
         let now = window || divider
         if active != now { active = now }
+        #if os(macOS)
+        if now { watchRelease() }
+        #endif
     }
+
+    #if os(macOS)
+    private var watching = false
+    /// 兜底：拖动中途被打断（拖着时分屏变了、窗口失焦……）系统不报松手，active 会一直是 true，
+    /// 对话页一直按「拖动中」把远处的行换成空白、不再换回，往上翻全是空的（11-25 截图）。
+    /// 拖着期间每半秒看一眼鼠标左键，已经松开了就当松手
+    private func watchRelease() {
+        guard !watching else { return }
+        watching = true
+        func check() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                MainActor.assumeIsolated {
+                    let shared = PaneResize.shared
+                    guard shared.active else { shared.watching = false; return }
+                    if NSEvent.pressedMouseButtons & 1 == 0 {
+                        shared.watching = false
+                        shared.window = false
+                        shared.divider = false
+                        shared.update()
+                    } else {
+                        check()
+                    }
+                }
+            }
+        }
+        check()
+    }
+    #endif
 }
 
 // MARK: 模型
@@ -1084,6 +1115,8 @@ extension EnvironmentValues {
     @Entry var paneAccessory: TarsPaneAccessory?
     /// 分屏铺进了窗口工具栏那一带（Mac 主窗口）：工具栏多高。最上面一排的标题条往上长到窗口顶
     @Entry var paneBand: CGFloat = 0
+    /// 顶上那排项目 / 会话组单独占了一行（画在分屏外面）：最上面一排标题条少往上长这么多，分屏的分隔线就不会穿过那一行
+    @Entry var paneRiseTaken: CGFloat = 0
     #endif
 }
 
@@ -1332,13 +1365,44 @@ struct ChatPanesView<Content: View>: KLView {
         #endif
     }
 
-    private var tree: some View {
+    @ViewBuilder private var tree: some View {
+        #if KITELINE_MAC
+        // 顶上那排项目 / 会话组是独立的一行（11-25 反馈：分屏之间的分隔线不要穿到这一行里）：画在分屏上面，分屏整个排在它下面
+        if let strip = stripHeight {
+            // 那一排照旧浮在最上面画（直接放进 VStack 里时横向滚动视图整个画不出来，11-25 自测），VStack 里只占住它的高
+            VStack(spacing: 0) {
+                ZStack(alignment: .bottom) {
+                    Theme.chatBackground
+                    MacPalette.tabStrip
+                }
+                .frame(height: strip)
+                .modifier(WindowDragArea())
+                treeBody.environment(\.paneRiseTaken, strip)
+            }
+            .overlay(alignment: .topLeading) { groupStrip }
+        } else {
+            treeBody
+        }
+        #else
+        treeBody
+        #endif
+    }
+
+    #if KITELINE_MAC
+    /// 顶上那排单独占的高：整排往上长出来的高减 1（留 1 点隔开对话的滚动视图，见 PaneHeader.rise）；不画那一排时 nil
+    private var stripHeight: CGFloat? {
+        let rise = fillsTitlebar ? PaneHeader.rise(band: band, panes: panes) : 0
+        guard panes === KitelineKit.panes, rise >= PaneHeader.groupStrip else { return nil }
+        let groups = KitelineKit.tabGroupsInTitlebar && KitelineKit.tabGroupCount > 0
+        guard groups || (KitelineKit.showsProjectStrip && KitelineKit.projectStrip != nil) else { return nil }
+        return rise - 1
+    }
+    #endif
+
+    private var treeBody: some View {
         RootNodeView(root: panes.root, panes: panes, content: content)
             .environment(\.peerRopeTree, ropeTree)
             .coordinateSpace(name: ChatPanes.space)
-            #if KITELINE_MAC
-            .overlay(alignment: .topLeading) { groupStrip }
-            #endif
             // 同一封信在两列里的两张卡片之间的绳子（只有分屏时）
             .overlay { if panes.count > 1 { PeerRopeLayer(tree: ropeTree) } }
             .overlay { TabDragGhost(panes: panes) }
@@ -1756,6 +1820,7 @@ private struct PaneHeader: KLView {
     #if os(macOS)
     @Environment(\.paneAccessory) private var accessory
     @Environment(\.paneBand) private var paneBand
+    @Environment(\.paneRiseTaken) private var riseTaken
     /// 这一条有多宽（外面给的）：决定按钮放得下几个
     @State private var width: CGFloat = 1000
     /// 窗口左上角的红绿灯：左边栏收起、标签栏铺到窗口左上角时让开
@@ -1897,7 +1962,7 @@ private struct PaneHeader: KLView {
         .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             width = frame.width
             // 红绿灯在窗口左上角 78 点以内：铺进工具栏那一带、又贴着窗口左边时让开
-            let inset = rise > 0 ? max(0, 78 - frame.minX) : 0
+            let inset = rise > 0 && riseTaken == 0 ? max(0, 78 - frame.minX) : 0
             if abs(inset - lightsInset) > 0.5 { lightsInset = inset }
             // 贴着窗口右上角（铺进工具栏那一带、右边到分屏的最右边）：右边要给工具栏上的按钮让位
             let right = rise > 0 && frame.maxX >= panes.origin.x + panes.bounds.width - 1.5
@@ -1934,7 +1999,9 @@ private struct PaneHeader: KLView {
     }
 
     /// 最上面一排往上长到窗口顶（工具栏那一带）多出来的高；多 1 点：对话的滚动视图贴着工具栏底边时会往上伸到工具栏底下，盖住标签栏
-    private var rise: CGFloat { atTop ? Self.rise(band: paneBand, panes: panes) : 0 }
+    private var rise: CGFloat { max(0, fullRise - riseTaken) }
+    /// 连顶上那排项目 / 会话组在内往上长的高（那一排单独画在分屏上面时，标题条自己只长剩下的）
+    private var fullRise: CGFloat { atTop ? Self.rise(band: paneBand, panes: panes) : 0 }
 
     /// band：窗口标题栏 + 工具栏多高（没铺进工具栏时是 0）。整个分屏顶上那排会话组也按这个高度画（ChatPanesView.groupStrip）
     static func rise(band: CGFloat, panes: ChatPanes) -> CGFloat {
@@ -1958,13 +2025,14 @@ private struct PaneHeader: KLView {
     private func tabRoom(_ level: Int) -> CGFloat { max(0, width - 12 - lightsInset - trailInset - actionsWidth(level) - 30 - groupChipWidth) }
 
     /// 贴着窗口右上角时右边让出来的宽度（工具栏最右边主程序的按钮）
-    private var trailInset: CGFloat { atTrailingCorner ? panes.trailingReserve : 0 }
+    /// 新版界面顶上那排项目单独成行时，右上角的按钮在那一行里（那一排自己让位），标签栏不用让；经典版按钮在标签栏这一行，照让
+    private var trailInset: CGFloat { atTrailingCorner && !(riseTaken > 0 && KitelineKit.showsProjectStrip) ? panes.trailingReserve : 0 }
 
     #if KITELINE_MAC
     /// 主窗口最左上那一块：标签栏最前面放标签组的色块组名（同 Edge 标签栏上的组名），点开切组、改名改色
     private var showsGroupChip: Bool { KitelineKit.tabGroupsInTitlebar && panes === KitelineKit.panes && KitelineKit.tabGroupCount > 0 && panes.panes.first?.id == pane.id }
     /// 标签栏上面那一带够高就把组画成一排倒挂在窗口顶边的标签（横跨整个分屏，由 ChatPanesView.groupStrip 画）；不够高退回色块菜单
-    private var showsGroupStrip: Bool { showsGroupChip && rise >= Self.groupStrip }
+    private var showsGroupStrip: Bool { showsGroupChip && fullRise >= Self.groupStrip }
     private var groupChipWidth: CGFloat { showsGroupChip && !showsGroupStrip ? 112 : 0 }
     /// 正显示某个标签组时，标签栏底边那道线用组的颜色（同 Edge 组里标签下面的色线）
     private var groupTint: Color? { KitelineKit.tabGroupsInTitlebar && panes === KitelineKit.panes ? KitelineKit.activeTabGroupTint : nil }
@@ -2994,6 +3062,8 @@ struct PaneDivider: KLView {
     /// 线多长：把手别画出头；线的起点在窗口里的位置：按下的那一点换算到线上
     @State private var length: CGFloat = 0
     @State private var start: CGFloat = 0
+    /// 正按着拖：手势被打断（不报 onEnded）时系统也会把它复位，借此补报一次松手（见下面 klOnChange）
+    @GestureState private var pressing = false
 
     static let thickness: CGFloat = 1
     #if os(macOS)
@@ -3019,6 +3089,7 @@ struct PaneDivider: KLView {
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .updating($pressing) { _, state, _ in state = true }
                             .onChanged { value in
                                 if pressAlong == nil { pressAlong = (horizontal ? value.startLocation.y : value.startLocation.x) - start }
                                 if let pressAlong { along = pressAlong + (horizontal ? value.translation.height : value.translation.width) }
@@ -3031,6 +3102,15 @@ struct PaneDivider: KLView {
                             }
                     )
                     .onTapGesture(count: 2, perform: reset)
+                    // 拖动被打断没报 onEnded：照样当松手（不然分屏一直按「拖动中」摆着，见 PaneResize）
+                    .klOnChange(of: pressing) { _, now in
+                        if !now, pressAlong != nil {
+                            pressAlong = nil
+                            if !hover { along = nil }
+                            ended()
+                        }
+                    }
+                    .onDisappear { if pressAlong != nil { pressAlong = nil; ended() } }
                     .onHover { inside in
                         guard inside != hover else { return }
                         hover = inside

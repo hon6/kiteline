@@ -142,20 +142,41 @@ struct LayoutSwitchCorner: KLView {
     @ObservedObject var model: KitelineModel
     /// 按钮底下是标签栏（要让位）。新版界面最右一栏是文件侧栏这类时按钮落在那一栏上方，标签栏不用让（keyuanchuangmei-56 发现多让了 112）
     var overTabs = true
+    /// 新版界面：界面切换左边的侧栏开关（文件侧栏等），同 VS Code 标题栏右边那几个
+    var toggles: [SideToggle] = []
     @State private var hovering = false
     @State private var width: CGFloat = 0
 
     var klBody: some View {
-        LayoutSwitch(model: model)
-            .buttonStyle(CornerButtonStyle(hovering: hovering))
-            .tourAnchor("layoutSwitch")
-            .onHover { hovering = $0 }
-            // 右上角那一块标签栏让出：按钮宽 + 右边 6 + 和标签栏按钮之间留 8（中英文字数不同，按实际宽度）
-            .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; reserve() }
-            .klOnChange(of: overTabs) { reserve() }
-            .frame(height: TitlebarInset.band)   // 在标题栏 + 工具栏那一带里上下居中，同工具栏上的按钮
-            .padding(.trailing, 6)
-            .ignoresSafeArea(.container, edges: .top)
+        if model.newLayout {
+            // 新版界面（11-25）：右上角只留侧栏开关，放在顶上那排项目那一行里、上下居中；切回经典界面挪到左边图标栏
+            HStack(spacing: 2) { ForEach(toggles) { SideToggleButton(toggle: $0) } }
+                .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; reserve() }
+                .klOnChange(of: overTabs) { reserve() }
+                .frame(height: 24)   // 顶上那排项目的高（KitelineKit 里 PaneHeader.groupStrip）
+                .padding(.trailing, 6)
+                .ignoresSafeArea(.container, edges: .top)
+        } else {
+            LayoutSwitch(model: model)
+                .buttonStyle(CornerButtonStyle(hovering: hovering))
+                .tourAnchor("layoutSwitch")
+                .onHover { hovering = $0 }
+                // 右上角那一块标签栏让出：按钮宽 + 右边 6 + 和标签栏按钮之间留 8（中英文字数不同，按实际宽度）
+                .klOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; reserve() }
+                .klOnChange(of: overTabs) { reserve() }
+                // 在标签栏那一行里上下居中（11-25）：标签栏高 36，顶边 = 往上长的高（工具栏那一带 - 36 + 1；有会话组时至少 25，
+                // 同 KitelineKit 的 PaneHeader.rise）
+                .frame(height: 36)
+                .padding(.top, tabRowTop)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.trailing, 6)
+                .ignoresSafeArea(.container, edges: .top)
+        }
+    }
+
+    private var tabRowTop: CGFloat {
+        let base = max(0, TitlebarInset.band - 36) + 1
+        return KitelineKit.tabGroupCount > 0 ? max(base, 25) : base
     }
 
     private func reserve() { KitelineKit.reserveTitlebarTrailing(overTabs ? ceil(width) + 14 : 0) }
@@ -165,13 +186,12 @@ struct LayoutSwitchCorner: KLView {
 
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
-                .font(.system(size: 13))
-                .imageScale(.large)
-                .padding(.horizontal, 12)
-                .frame(height: 36)
+                .font(.system(size: 12))
+                .padding(.horizontal, 9)
+                .frame(height: 26)
                 .background(Capsule().fill(Color.primary.opacity(configuration.isPressed ? 0.12 : hovering ? 0.06 : 0)))
                 .contentShape(Capsule())
-                .tarsGlass(cornerRadius: 18)
+                .tarsGlass(cornerRadius: 13)
         }
     }
 }
@@ -497,6 +517,9 @@ struct SidebarView: KLView {
                         if showsView { viewMenu }
                     }
                 }
+                // 新版界面「会话」页：筛选下面一个「新会话」（11-25）。选了项目 = 在中间开这个项目的新会话标签（同项目栏里的「新会话」）；
+                // 没选项目 = 弹新任务面板选文件夹（新版界面工具栏没有「新任务」）
+                if model.newLayout { newSessionRow }
                 if bySource || byProject {
                     if scopeOpen {
                         if bySource {
@@ -513,6 +536,25 @@ struct SidebarView: KLView {
         }
         .padding(.top, 10)
         .padding(.bottom, 2)
+    }
+
+    private var newSessionRow: some View {
+        Button {
+            // 选了项目（和设备）：按这个项目里最近的会话取设备、目录、agent
+            let latest = activeProject.flatMap { project in
+                model.sessions.filter { $0.folder == project && (activeSource == nil || $0.sourceId == activeSource?.id) }
+                    .max { ($0.updatedAt ?? 0) < ($1.updatedAt ?? 0) }
+            }
+            if let latest {
+                model.selection = NewDraftKey.make(.init(sourceId: latest.sourceId, cwd: latest.cwd, agent: latest.agent))
+            } else {
+                model.newTask()
+            }
+        } label: {
+            KiteLabel(L("新会话"), symbol: "plus")
+        }
+        .kiteButton(expand: true)
+        .help(activeProject.map { L("在「%@」中新建会话（在中间新开一个标签页）", $0) } ?? L("选择项目文件夹，新建会话"))
     }
 
     /// 收起时的一行：「🖥 全部设备 · 📁 ccpulse ⌄」；筛着的那项用品牌色。点一下展开 / 收起两排胶囊

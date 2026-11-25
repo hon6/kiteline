@@ -1,5 +1,16 @@
 # Kiteline Release Notes
 
+## 3.49.58（2026-11-25）
+
+### Improvements
+
+- **Easier side bar toggles in the new layout** (Mac): a side bar toggle now sits in the top-right corner of the window, with an icon showing whether the bar is on the left or right; click it to hide or show the bar. Hiding a bar no longer leaves a half-cut round button at the window edge. The project tabs at the top now sit on their own row instead of being crossed by the split-view dividers.
+- **Start a new session from the Sessions page in the new layout** (Mac): a New Session button sits below the filters; with a project selected it starts the session in that project, otherwise you pick a project folder first. Switching back to the classic layout has moved to the activity bar on the left, and the switch button in the classic layout's top-right corner is smaller.
+
+### Fixes
+
+- **No more large blank areas when scrolling back in split view** (Mac, iPad): if dragging a divider or the window edge was interrupted, the chat could stay in its "resizing" state and show earlier messages as blank space; it now recovers as soon as the mouse is released.
+
 ## 3.49.57 (2026-11-25)
 
 ### Improvements

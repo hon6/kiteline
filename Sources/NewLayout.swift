@@ -80,6 +80,9 @@ struct SidebarRail: KLView {
             page(KitelineModel.usageID, "chart.bar", L("用量"))
             Spacer(minLength: 8)
             UpdateButton(size: 24)
+            // 切回经典界面（11-25 反馈：从右上角挪到这里，虚拟屏幕上面；右上角只留侧栏开关）
+            RailButton(symbol: "rectangle.split.2x1", help: L("切换回经典界面（顶部入口格子 + 会话列表）")) { LayoutSwitch.toggle(model) }
+                .tourAnchor("layoutSwitch")
             if VirtualScreen.supported {
                 RailButton(symbol: "display", help: screen.helpText, tint: screen.isOn) { screen.toggle() }
             }
@@ -183,16 +186,18 @@ private struct RailButton: KLView {
 /// 工具栏最右边的按钮：经典版上写「新版界面」，新版上写「经典界面」，点了就换（右边的会话不动）
 struct LayoutSwitch: KLView {
     @ObservedObject var model: KitelineModel
+
+    static func toggle(_ model: KitelineModel) {
+        model.newLayout.toggle()
+        // 切到新版：先弹布局设置（拖着摆会话列表、文件侧栏放哪边），勾过「下次不再询问」的直接切
+        if model.newLayout, model.askLayoutOnSwitch { model.showLayoutSetup = true; return }
+        KitelineKit.flash(model.newLayout ? L("已切换到新版界面，左边图标栏可随时切回经典界面") : L("已切换回经典界面"))
+    }
     /// 这个按钮在工具栏上占多宽（连两边的空）：右上角那块会话的标签栏照这个数让位
     static let reserve: CGFloat = 112
 
     var klBody: some View {
-        Button {
-            model.newLayout.toggle()
-            // 切到新版：先弹布局设置（拖着摆会话列表、文件侧栏放哪边），勾过「下次不再询问」的直接切
-            if model.newLayout, model.askLayoutOnSwitch { model.showLayoutSetup = true; return }
-            KitelineKit.flash(model.newLayout ? L("已切换到新版界面，右上角可随时切回经典界面") : L("已切换回经典界面"))
-        } label: {
+        Button { Self.toggle(model) } label: {
             Label(model.newLayout ? L("经典界面") : L("新版界面"), systemImage: model.newLayout ? "rectangle.split.2x1" : "sparkles.rectangle.stack")
                 .labelStyle(.titleAndIcon)
         }
@@ -433,8 +438,6 @@ struct NewLayoutRoot: KLView {
     @ObservedObject private var collapse = PanelCollapse.shared
     /// 世界 / 数据流里工具栏的「收起会话列表」：新版界面收起导航栏那一栏（11-23 反馈：数据流模式下侧栏收不起来）
     @ObservedObject private var sidebar = SidebarState.shared
-    /// 收起的侧栏列的展开按钮画在哪（键 = 那一列的收起键）
-    @State private var unfoldSpots: [String: UnfoldSpot] = [:]
 
     var klBody: some View {
         let open = ProjectBlock.visible(model)
@@ -450,7 +453,7 @@ struct NewLayoutRoot: KLView {
             //（挂在外层会被系统的分栏 HSplitView 盖住）
             if model.statusOnTop {
                 StatusBar(model: model, top: true).modifier(TitlebarInset())
-                    .overlay(alignment: .topTrailing) { LayoutSwitchCorner(model: model, overTabs: false) }
+                    .overlay(alignment: .topTrailing) { LayoutSwitchCorner(model: model, overTabs: false, toggles: sideToggles(columns)) }
             }
             HSplitView {
                 // 收起的侧栏列不占宽度（11-21）：不画它，在它旁边那一栏贴着它的那条边、上下居中浮一个小按钮，点了展开
@@ -468,18 +471,10 @@ struct NewLayoutRoot: KLView {
                     let side = !column.contains("nav") && !column.contains("tabs")
                     let edge: HorizontalEdge = (tabsIndex.map { index > $0 } ?? false) ? .leading : .trailing
                     let key = "column." + column.joined(separator: ",")
-                    // 右边紧挨着一栏收起的：按钮在本栏右边缘；左边紧挨着收起的、而它左边没有别的栏可挂：按钮在本栏左边缘
-                    let rightHidden = index + 1 < columns.count && hidden.contains(index + 1) ? columns[index + 1] : nil
-                    let leftHidden = index >= 1 && hidden.contains(index - 1) && !visible.contains(index - 2) ? columns[index - 1] : nil
                     columnView(column, first: position == 0, inset: !model.statusOnTop, last: position == visible.count - 1,
                                fold: side ? ColumnFold(edge: edge) { withAnimation(.klSnappy(duration: 0.18)) { collapse.toggle(key) } } : nil)
-                        // 展开按钮要压在两栏的分隔线上（一半在这栏外面），挂在栏自己身上会被分栏裁掉一半：报出位置，画在外层（见下面 overlay）
-                        .klOnGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-                            if let rightHidden { unfoldSpots["column." + rightHidden.joined(separator: ",")] = UnfoldSpot(column: rightHidden, toward: .trailing, frame: frame) }
-                            if let leftHidden { unfoldSpots["column." + leftHidden.joined(separator: ",")] = UnfoldSpot(column: leftHidden, toward: .leading, frame: frame) }
-                        }
                         .overlay(alignment: .topTrailing) {
-                            if !model.statusOnTop, position == visible.count - 1 { LayoutSwitchCorner(model: model, overTabs: column.contains("tabs")) }
+                            if !model.statusOnTop, position == visible.count - 1 { LayoutSwitchCorner(model: model, overTabs: column.contains("tabs"), toggles: sideToggles(columns)) }
                         }
                 }
             }
@@ -492,20 +487,6 @@ struct NewLayoutRoot: KLView {
         .background(SplitWidths(columns: columns.filter { column in
             !(!column.contains("nav") && !column.contains("tabs") && collapse.has("column." + column.joined(separator: ",")))
         }, epoch: model.layoutEpoch))
-        .overlay {
-            GeometryReader { geo in
-                let origin = geo.frame(in: .global).origin
-                ForEach(Array(unfoldSpots.keys).sorted(), id: \.self) { key in
-                    if let spot = unfoldSpots[key], collapse.has(key) {
-                        FloatingUnfold(column: spot.column, toward: spot.toward) {
-                            withAnimation(.klSnappy(duration: 0.22)) { collapse.toggle(key) }
-                            unfoldSpots[key] = nil
-                        }
-                        .position(x: (spot.toward == .trailing ? spot.frame.maxX : spot.frame.minX) - origin.x, y: spot.frame.midY - origin.y)
-                    }
-                }
-            }
-        }
         .ignoresSafeArea(edges: .top)
         // 各栏都铺进标题栏那一带（文件侧栏顶上的文件 / Git / 分支 / 历史四个按钮就在那里）：标题栏一直透明，
         // 不透明时标题栏把那一带的点击全收走（拖窗口用）。原来只有对话分屏显示时才透明，右边换成历史会话、用量这类整页时
@@ -534,6 +515,20 @@ struct NewLayoutRoot: KLView {
                 .help(L("AR 模式：界面变为透明，所有会话悬浮在桌面前方的空间中；WASD 移动、拖动转向（⇧⌘A）"))
             }
             // 右上角的界面切换不放工具栏（前面垫的弹性空位会接走标签栏的点击），挂在上面的栏上，见 MainWindow.swift 的 LayoutSwitchCorner
+        }
+    }
+
+    /// 右上角的侧栏开关（照 VS Code 标题栏右边的「切换主侧栏 / 辅助侧栏」）：每个能左右收起的侧栏列一个，
+    /// 图标画出它在窗口哪一边、亮着 = 开着。收起后不在栏边留浮动按钮（原来压在窗口边上被裁掉一半、箭头方向也说不清）
+    private func sideToggles(_ columns: [[String]]) -> [SideToggle] {
+        let tabsIndex = columns.firstIndex { $0.contains("tabs") } ?? 0
+        return columns.indices.compactMap { index in
+            let column = columns[index]
+            guard !column.contains("nav"), !column.contains("tabs") else { return nil }
+            let key = "column." + column.joined(separator: ",")
+            return SideToggle(key: key, right: index > tabsIndex, files: column.contains("files"), open: !collapse.has(key)) {
+                withAnimation(.klSnappy(duration: 0.18)) { collapse.toggle(key) }
+            }
         }
     }
 
@@ -919,44 +914,32 @@ struct ColumnFoldIcon: KLView {
     }
 }
 
-/// 收起的侧栏列留下的展开按钮（11-21）：浮在旁边那一栏贴边、上下居中，不占宽度。平时是这一栏的图标（文件 / 会话），
-/// 指上去换成朝展开方向的双箭头、略放大，点了展开
-struct UnfoldSpot: Equatable {
-    let column: [String]
-    let toward: HorizontalEdge
-    let frame: CGRect
+/// 右上角的一个侧栏开关（见 NewLayoutRoot.sideToggles）
+struct SideToggle: Identifiable {
+    let key: String
+    let right: Bool    // 侧栏在标签页区域右边
+    let files: Bool
+    let open: Bool
+    let action: () -> Void
+    var id: String { key }
 }
 
-struct FloatingUnfold: KLView {
-    let column: [String]
-    /// 收起的那栏在按钮的哪一边（展开朝哪边）
-    let toward: HorizontalEdge
-    let action: () -> Void
+struct SideToggleButton: KLView {
+    let toggle: SideToggle
     @State private var hovering = false
-    static let size: CGFloat = 28
 
     var klBody: some View {
-        // 圆形，圆心压在两栏之间的分隔线上（11-21 反馈：放在边线中间、显示文件夹标识、边线过圆心）
-        let symbol = column.contains("files") ? "folder" : "bubble.left.and.bubble.right"
-        let arrows = toward == .trailing ? "chevron.right.2" : "chevron.left.2"
-        Button(action: action) {
-            ZStack {
-                Image(systemName: symbol).opacity(hovering ? 0 : 1).scaleEffect(hovering ? 0.5 : 1)
-                Image(systemName: arrows).opacity(hovering ? 1 : 0).scaleEffect(hovering ? 1 : 0.5)
-                    .offset(x: hovering ? 0 : (toward == .trailing ? -4 : 4))
-            }
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(hovering ? Color.white : Color.secondary)
-            .frame(width: Self.size, height: Self.size)
-            .background(hovering ? AnyShapeStyle(Color.tarsBrand) : AnyShapeStyle(.regularMaterial), in: Circle())
-            .overlay(Circle().strokeBorder(Color.primary.opacity(hovering ? 0 : 0.18), lineWidth: 1))
-            .shadow(color: .black.opacity(0.2), radius: 5, y: 1)
-            .scaleEffect(hovering ? 1.12 : 1)
-            .contentShape(Circle())
+        Button(action: toggle.action) {
+            Image(systemName: toggle.right ? "sidebar.right" : "sidebar.left")
+                .font(.system(size: 13))
+                .foregroundStyle(toggle.open ? Color.primary : Color.secondary)
+                .frame(width: 26, height: 22)
+                .background(Color.primary.opacity(hovering ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { inside in withAnimation(.klSnappy(duration: 0.18)) { hovering = inside } }
-        .help(column.contains("files") ? L("展开文件侧栏") : L("展开侧栏"))
+        .onHover { hovering = $0 }
+        .help(toggle.open ? (toggle.files ? L("收起文件侧栏") : L("收起侧栏")) : (toggle.files ? L("展开文件侧栏") : L("展开侧栏")))
     }
 }
 
@@ -1351,7 +1334,9 @@ struct KeepTitlebarTransparent: NSViewRepresentable {
             if newWindow == nil, counted {
                 counted = false
                 Self.live -= 1
-                if Self.live == 0, let window, let saved = Self.savedVisibility { window.titleVisibility = saved; Self.savedVisibility = nil }
+                // 不还原标题：经典版的标签栏同样铺在标题栏那一带，标题一显示就横在标签上、接走整排点击。
+                // 启动就在新版界面时记下的是系统默认「显示」，切回经典版后标签、「新版界面」都点不动、还多一行会话名（11-25 截图）
+                if Self.live == 0 { Self.savedVisibility = nil }
             }
             super.viewWillMove(toWindow: newWindow)
         }
