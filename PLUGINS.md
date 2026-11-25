@@ -19,7 +19,7 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 | **DeepSeek Harness** <br><sub>built-in plugin, opt-in</sub> | Desktop app | Full ✓ | Full ✓ | — <sup>3</sup> |
 |  | CLI | Full | Full | Full ✓ |
 | **Proma** <br><sub>built-in plugin</sub> | Desktop app | View only <sup>4</sup> | View only <sup>4</sup> | View only ✓ <sup>4</sup> |
-| **ACP** <br><sub>[plugin](plugins/acp), coming soon</sub> | CLI | View · Reply · Approve · Interrupt <sup>5</sup> | — <sup>6</sup> | View · Reply · Approve · Interrupt ✓ <sup>7</sup> |
+| **ACP** <br><sub>[plugin](plugins/acp)</sub> | CLI | View · Reply · Approve · Interrupt <sup>5</sup> | — <sup>6</sup> | View · Reply · Approve · Interrupt ✓ <sup>7</sup> |
 | **Antigravity** <br><sub>[plugin](plugins/antigravity)</sub> | CLI | Full <sup>8</sup> | Full ✓ <sup>9</sup> | Full ✓ <sup>8</sup> |
 |  | Desktop app | View only <sup>10</sup> | View only <sup>10</sup> | View only <sup>10</sup> |
 | **CodeBuddy / WorkBuddy** <br><sub>[plugin](plugins/codebuddy)</sub> | CLI | Full <sup>11</sup> | View only <sup>12</sup> | Full ✓ <sup>11</sup> |

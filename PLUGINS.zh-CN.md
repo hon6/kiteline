@@ -19,7 +19,7 @@
 | **DeepSeek Harness** <br><sub>内置插件，需手动开启</sub> | 桌面版 | 全部 ✓ | 全部 ✓ | — <sup>3</sup> |
 |  | 命令行 | 全部 | 全部 | 全部 ✓ |
 | **Proma** <br><sub>内置插件</sub> | 桌面版 | 只读 <sup>4</sup> | 只读 <sup>4</sup> | 只读 ✓ <sup>4</sup> |
-| **ACP** <br><sub>[插件](plugins/acp)，即将上线</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>5</sup> | — <sup>6</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>7</sup> |
+| **ACP** <br><sub>[插件](plugins/acp)</sub> | 命令行 | 查看 · 回复 · 确认 · 中断 <sup>5</sup> | — <sup>6</sup> | 查看 · 回复 · 确认 · 中断 ✓ <sup>7</sup> |
 | **Antigravity** <br><sub>[插件](plugins/antigravity)</sub> | 命令行 | 全部 <sup>8</sup> | 全部 ✓ <sup>9</sup> | 全部 ✓ <sup>8</sup> |
 |  | 桌面版 | 只读 <sup>10</sup> | 只读 <sup>10</sup> | 只读 <sup>10</sup> |
 | **CodeBuddy / WorkBuddy** <br><sub>[插件](plugins/codebuddy)</sub> | 命令行 | 全部 <sup>11</sup> | 只读 <sup>12</sup> | 全部 ✓ <sup>11</sup> |
