@@ -446,6 +446,20 @@ public sealed partial class AppModel : ObservableObject
         }
         catch (Exception e) { Show(e); }
         finally { chat.Loading = false; }
+        if (!older) await ReachPending(key);
+    }
+
+    /// 还挂着等回显的消息，回显可能已经在最新一页之前了：Claude 忙时插的话交给它以后它又跑了几百步，
+    /// 重新打开只拉最新 60 条认不出已送到，占位一直垫在对话最下面（11-26 用户遇到）。往前多翻几页直到盖住它发出的时刻
+    async Task ReachPending(string key)
+    {
+        var chat = Chat(key);
+        for (var i = 0; i < 8; i++)
+        {
+            var sent = chat.Pending.Where(p => !p.IsFailed && !p.InQueueStrip).Select(p => (double?)p.At).Min();
+            if (!chat.HasMore || chat.Loading || sent is null || chat.OldestTs is not double oldest || oldest <= sent - 120_000) return;
+            await LoadHistory(key, true);
+        }
     }
 
     /// 打开一个会话：离开超过 10 分钟的，标出「以下是新消息」。分屏里不是当前块的（focus = false）不抢朗读

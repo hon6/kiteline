@@ -282,33 +282,10 @@ struct Composer: KLView {
     }
 
     #if os(iOS)
-    /// 同微信：小气泡里是刚截的图，点一下加进要发的图（收起「+」面板，输入框旁边变成「发送」）；10 秒没点就收起
     private func shotBubble(_ shot: RecentScreenshot.Shot) -> some View {
-        Button {
-            withAnimation(.klSnappy) { recentShot = nil }
-            Task {
-                guard let data = await RecentScreenshot.data(shot.asset), let prepared = ImagePrep.prepare(data) else {
-                    model.flash(L("无法读取此截图"))
-                    return
-                }
-                attachments.append(Attachment(name: "screenshot-\(attachments.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
-                withAnimation(.klSnappy(duration: 0.25)) { chat.panelOpen = false }
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("最近的截图").font(.ui(.caption2)).foregroundStyle(.secondary)
-                Image(uiImage: shot.thumb).resizable().scaledToFill()
-                    .frame(width: 84, height: 136)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-            .padding(8)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
-        }
-        .buttonStyle(PressableStyle())
-        .task(id: shot.id) {
-            try? await Task.sleep(seconds: 10)
-            withAnimation(.klSnappy) { if recentShot?.id == shot.id { recentShot = nil } }
+        RecentShotBubble(shot: shot, current: $recentShot) { prepared in
+            attachments.append(Attachment(name: "screenshot-\(attachments.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
+            withAnimation(.klSnappy(duration: 0.25)) { chat.panelOpen = false }
         }
     }
     #endif
@@ -675,6 +652,20 @@ struct SessionChips: KLView {
     #if os(iOS)
     @State private var confirmCompact = false
     #endif
+    /// 上下文构成面板（点上下文百分比）
+    @State private var showContext = false
+    /// 测试入口打开的撤回面板（见 TransparencyRequest）
+    @State private var testRewind: RewindTarget?
+
+    private func openRequested(_ ask: String?) {
+        guard let ask else { return }
+        TransparencyRequest.shared.ask = nil
+        if ask == "context" { showContext = true; return }
+        let parts = ask.split(separator: ":")
+        guard parts.first == "rewind", parts.count == 2, let n = Int(parts[1]), n > 0 else { return }
+        let turns = chat.items.values.filter { $0.t == "user" && $0.queued != true }.sorted(by: ChatItem.ordered)
+        if turns.indices.contains(n - 1) { testRewind = RewindTarget(offset: turns[n - 1].offset) }
+    }
 
     var klBody: some View {
         #if os(iOS) || KL_MODERN
@@ -693,6 +684,8 @@ struct SessionChips: KLView {
             if let percent = session.usage?.percent {
                 // 压缩上下文：电脑端说有才能点（caps）
                 Button {
+                    // 电脑端能给上下文构成的：点开看被什么占着（压缩按钮在里面）；老版本电脑端照旧直接问要不要压缩
+                    if session.can("context") { showContext = true; return }
                     #if os(iOS)
                     confirmCompact = true
                     #else
@@ -707,7 +700,10 @@ struct SessionChips: KLView {
                     .chipFace(height: height, hPad: 8)
                 }
                 .buttonStyle(PressableStyle())
-                .allowsHitTesting(session.can("compact"))
+                .allowsHitTesting(session.can("compact") || session.can("context"))
+                .sheetPanel(isPresented: $showContext) { ContextSheet(key: key) }
+                .sheetPanel(item: $testRewind) { RewindSheet(key: key, offset: $0.offset) }
+                .klOnChange(of: TransparencyRequest.shared.ask) { _, ask in openRequested(ask) }
                 #if os(iOS)
                 // 手机上确认框从这颗胶囊弹出、箭头指着它（不小心碰到时知道是点了哪里）；Mac 照旧交给对话页弹小卡片
                 .confirmPanel(L("压缩上下文等同于在 Claude Code 中输入 /compact：将此前的对话总结为摘要以释放空间，部分细节可能丢失"),
@@ -741,6 +737,8 @@ struct SessionChips: KLView {
             if let percent = session.usage?.percent {
                 // 压缩上下文：电脑端说有才能点（caps）
                 Button {
+                    // 电脑端能给上下文构成的：点开看被什么占着（压缩按钮在里面）；老版本电脑端照旧直接问要不要压缩
+                    if session.can("context") { showContext = true; return }
                     #if os(iOS)
                     confirmCompact = true
                     #else
@@ -755,7 +753,10 @@ struct SessionChips: KLView {
                     .chipFace(height: height, hPad: 8)
                 }
                 .buttonStyle(PressableStyle())
-                .allowsHitTesting(session.can("compact"))
+                .allowsHitTesting(session.can("compact") || session.can("context"))
+                .sheetPanel(isPresented: $showContext) { ContextSheet(key: key) }
+                .sheetPanel(item: $testRewind) { RewindSheet(key: key, offset: $0.offset) }
+                .klOnChange(of: TransparencyRequest.shared.ask) { _, ask in openRequested(ask) }
                 #if os(iOS)
                 // 手机上确认框从这颗胶囊弹出、箭头指着它（不小心碰到时知道是点了哪里）；Mac 照旧交给对话页弹小卡片
                 .confirmPanel(L("压缩上下文等同于在 Claude Code 中输入 /compact：将此前的对话总结为摘要以释放空间，部分细节可能丢失"),
@@ -1067,3 +1068,42 @@ struct TodoChip: KLView {
         }
     }
 }
+
+#if os(iOS)
+/// 同微信：小气泡里是刚截的图，点一下加进要发的图；10 秒没点就收起。对话页、新会话页的「+」共用
+struct RecentShotBubble: KLView {
+    let shot: RecentScreenshot.Shot
+    /// 气泡显示的是哪张（点了或到时间就置空收起）
+    @Binding var current: RecentScreenshot.Shot?
+    let onPick: ((jpeg: Data, preview: Data)) -> Void
+    @EnvModel private var model
+
+    var klBody: some View {
+        Button {
+            withAnimation(.klSnappy) { current = nil }
+            Task {
+                guard let data = await RecentScreenshot.data(shot.asset), let prepared = ImagePrep.prepare(data) else {
+                    model.flash(L("无法读取此截图"))
+                    return
+                }
+                onPick(prepared)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("最近的截图").font(.ui(.caption2)).foregroundStyle(.secondary)
+                Image(uiImage: shot.thumb).resizable().scaledToFill()
+                    .frame(width: 84, height: 136)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .padding(8)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
+        }
+        .buttonStyle(PressableStyle())
+        .task(id: shot.id) {
+            try? await Task.sleep(seconds: 10)
+            withAnimation(.klSnappy) { if current?.id == shot.id { current = nil } }
+        }
+    }
+}
+#endif

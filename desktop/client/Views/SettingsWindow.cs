@@ -234,6 +234,20 @@ public sealed class SettingsWindow : Window
             Form.Row(L("空闲多久后关闭"), idleBox),
             Form.Toggle(L("录下浏览器操作，可以回放"), config["browserRecord"] is null || config.Truthy("browserRecord"), on => Set("browserRecord", on)),
         ], L("Agent 操作网页时使用 Kiteline 提供的浏览器，会话中会显示实时画面，可以放大查看，也可以接管操作。选择「这台电脑」时，远端服务器上的会话也使用这台电脑上的浏览器，网页的登录状态保存在这台电脑上，服务器上不运行浏览器；选择「Agent 所在的电脑」时，浏览器运行在会话所在的电脑上。浏览器在 Agent 首次使用时打开，空闲到设定时间后自动关闭，同时打开的数量还会根据可用内存自动减少。录下的操作可以倍速回放、跳过等待，只保存画面有变化的部分，保留 3 天。")));
+        // 模拟器（同 Mac 版）：最多同时开几台（自动 = 按内存的建议值，主机算好给 deviceSuggest）、多久没用就关闭
+        var deviceCounts = new[] { 0, 1, 2, 3, 4, 6, 8 };
+        var deviceBox = new ComboBox { Width = 220, ItemsSource = deviceCounts.Select(n => n == 0
+                                           ? L("自动（这台电脑建议 %lld 台）", status.Int("deviceSuggest") ?? 2) : L("%lld 台", n)).ToList(),
+                                       SelectedIndex = Math.Max(0, Array.IndexOf(deviceCounts, config.Int("deviceMax") ?? 0)) };
+        deviceBox.SelectionChanged += (_, _) => { if (deviceBox.SelectedIndex >= 0) Set("deviceMax", deviceCounts[deviceBox.SelectedIndex]); };
+        var deviceIdles = new[] { (10, L("10 分钟")), (30, L("30 分钟")), (60, L("1 小时")) };
+        var deviceIdleBox = new ComboBox { Width = 120, ItemsSource = deviceIdles.Select(i => i.Item2).ToList(),
+                                           SelectedIndex = Math.Max(0, Array.FindIndex(deviceIdles, i => i.Item1 == (config.Int("deviceIdle") ?? 30))) };
+        deviceIdleBox.SelectionChanged += (_, _) => { if (deviceIdleBox.SelectedIndex >= 0) Set("deviceIdle", deviceIdles[deviceIdleBox.SelectedIndex].Item1); };
+        form.Children.Add(Form.Section(L("模拟器"), [
+            Form.Row(L("最多同时开启"), deviceBox),
+            Form.Row(L("多久没用就关闭"), deviceIdleBox),
+        ], L("Agent 需要 iOS 模拟器或安卓模拟器时向 Kiteline 申请，会话中会显示模拟器的实时画面。模拟器占用内存较多（iOS 约 1.5 GB，安卓约 3 GB）：达到上限或可用内存不足时，后来的申请排队等候，前面的用完后依次轮到；每开一台前都会检查当时的可用内存，确保开启后仍有余量。会话结束、或持续设定时间没有使用的模拟器会自动关闭。「自动」按每台电脑的内存给出建议数量，远端电脑按它自己的内存计算。只会关闭 Kiteline 或 Agent 开启的模拟器，你自己打开的不受影响。")));
         form.Children.Add(StorageSection(config, Set));
         form.Children.Add(Form.Section(L("启动"), [
             Form.Toggle(OperatingSystem.IsWindows() ? L("开机时自动启动 Kiteline") : L("登录时自动启动 Kiteline"), status.Truthy("autostart"),

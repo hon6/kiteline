@@ -815,6 +815,20 @@ check("在独立分支里开新任务：会话目录换到 worktree", status == 
 check("交代给 Claude：独立分支、先别合并", "独立的 git worktree" in log_tail() and wt in log_tail())
 status, body, _ = request("/api/repo-info?sourceId=%s&cwd=%s" % (q(busy["sourceId"]), q(busy["cwd"])))
 check("仓库里能看到这个 Kiteline 分支", len(body.get("worktrees", [])) == 1)
+# 手机等不到回应拿同一个请求编号重发：同时到的等那一次的结果，做完的直接回上次的，不再多建分支、多开会话
+import threading
+same = {"sourceId": busy["sourceId"], "cwd": busy["cwd"], "text": "重发去重：独立分支", "worktree": True, "cid": "nw-dup-1"}
+racing = []
+threads = [threading.Thread(target=lambda: racing.append(request("/api/new-session", "POST", same))) for _ in range(2)]
+for t in threads: t.start()
+for t in threads: t.join()
+status, body, _ = request("/api/new-session", "POST", same)
+branches = {r[1].get("branch") for r in racing} | {body.get("branch")}
+check("新任务带同一请求编号重发：只建一个分支、回同一个结果", status == 200 and all(r[0] == 200 for r in racing) and len(branches) == 1
+      and None not in branches, str([r[1] for r in racing] + [body])[:300])
+_, info, _ = request("/api/repo-info?sourceId=%s&cwd=%s" % (q(busy["sourceId"]), q(busy["cwd"])))
+check("重发后仓库里仍只多了一个 Kiteline 分支", len(info.get("worktrees", [])) == 2, str(info.get("worktrees")))
+check("服务声明支持新任务去重（手机据此带请求编号）", "newSessionOnce" in (request("/api/state")[1].get("features") or []))
 status, body, _ = request("/api/new-session", "POST", {"sourceId": busy["sourceId"], "cwd": CONFIG_DIR, "text": "x", "worktree": True})
 check("不是 git 仓库时拒绝并说明", status == 409 and "不是 git 仓库" in body.get("error", ""), str(body))
 

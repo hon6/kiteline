@@ -896,6 +896,19 @@ def r_trace(s, request, *_):
     return s.forward_any(request, {"cmd": "trace", "expand": request.query.get("expand", ""), "rev": request.query.get("rev", "")})
 
 
+def r_context(s, request, *_):
+    """上下文构成（对话页上下文百分比胶囊点开）：被什么占着、这段上下文里谁最费钱（watcher 的 session_context；同 Mac）"""
+    return s.forward_any(request, {"cmd": "context"})
+
+
+def r_rewind(s, request, *_):
+    """撤回某一轮起的文件改动：op = plan / apply / undo；offset 是那句用户消息在记录里的位置（watcher 的 rewind_*；同 Mac）"""
+    body = request.json or {}
+    op = body.get("op") or "plan"
+    cmd = {"apply": "rewind", "undo": "rewind_undo"}.get(op, "rewind_plan")
+    return s.forward_any(request, {"cmd": cmd, "offset": body.get("offset", ""), "undo": body.get("undo", "")})
+
+
 def r_peers(s, request, *_):
     """会话之间的消息往来（默认最近一天）：手机刚连上、协作图用；之后的走实时事件 peers"""
     try:
@@ -2152,7 +2165,7 @@ def r_schedules_tick(s, request, *_):
 
 ROUTES = {
     ("GET", "/api/state"): r_state, ("GET", "/api/events"): r_events, ("GET", "/api/history"): r_history,
-    ("GET", "/api/agents"): r_agents, ("GET", "/api/trace"): r_trace, ("GET", "/api/peers"): r_peers, ("GET", "/api/task-output"): r_task_output, ("GET", "/api/media"): r_media,
+    ("GET", "/api/agents"): r_agents, ("GET", "/api/trace"): r_trace, ("GET", "/api/context"): r_context, ("POST", "/api/rewind"): r_rewind, ("GET", "/api/peers"): r_peers, ("GET", "/api/task-output"): r_task_output, ("GET", "/api/media"): r_media,
     ("GET", "/api/digest/media"): r_digest_media, ("POST", "/api/send"): r_send, ("POST", "/api/key"): r_key, ("POST", "/api/close"): r_close, ("POST", "/api/queue"): r_queue,
     ("POST", "/api/hosted/probe"): r_hosted_probe, ("POST", "/api/hosted/settings"): r_hosted_settings, ("POST", "/api/sources/rename"): r_sources_rename,
     ("POST", "/api/hosted/move"): r_hosted_move,

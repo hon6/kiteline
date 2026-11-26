@@ -72,6 +72,9 @@ struct StepRow: KLView {
                     }
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
+                    // 风险标签（删文件、推送、改写 Git 历史……）：一眼看到这一步要留意
+                    let risks = item.t == "tool" ? RiskTag.shown(item.risk) : []
+                    if !risks.isEmpty { RiskChips(codes: risks) }
                     if let stat = item.t == "tool" ? Tools.diffStat(item) : nil {
                         HStack(spacing: 3) {
                             Text("+\(stat.added)").foregroundStyle(Theme.added)
@@ -116,6 +119,13 @@ struct StepRow: KLView {
                 }
                 .buttonStyle(.steady(.plain))
                 .padding(.bottom, ChatType.px(2))
+            }
+            if item.t == "tool", StepPreview.lines(step)?.isEmpty == false {
+                // 改代码的前几行改动、命令出错时最后两行输出：不用点开就知道改了什么、错在哪；左边和标题文字对齐
+                StepPreview(step: step)
+                    .padding(.horizontal, ChatType.padH)
+                    .padding(.leading, 22)
+                    .padding(.bottom, ChatType.px(4))
             }
             if item.t == "tool", let images = step.result?.images, !images.isEmpty {
                 // 读图片、截图这类工具：结果里的图直接显示，不用点开这一步才看得到；左边和标题文字对齐
@@ -176,6 +186,18 @@ struct ToolDetailView: KLView {
     var klBody: some View {
         FitSheet(title: title, background: Theme.card) {
             VStack(alignment: .leading, spacing: 16) {
+                if step.item.t == "tool", let risk = step.item.risk, !risk.isEmpty {
+                    Section2(L("需要留意")) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(risk, id: \.self) { code in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    RiskChips(codes: [code], size: 12)
+                                    Text(RiskTag.explain(code)).font(.ui(.footnote)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                }
                 if step.item.t == "tool" { ToolInput(item: step.item) }
                 if step.item.t == "thinking" {
                     Section2(L("思考")) { MonoBlock(text: step.item.text ?? "") }

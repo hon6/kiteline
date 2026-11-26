@@ -245,6 +245,17 @@
 <key>other</key><string>%lld files changed</string>
 </dict>
 </dict>
+<key>%lld 个文件没能恢复，请在电脑上检查</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld file couldn't be restored. Check it on the computer.</string>
+<key>other</key><string>%lld files couldn't be restored. Check them on the computer.</string>
+</dict>
+</dict>
 <key>%lld 个新文件</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -861,6 +872,17 @@
 <key>other</key><string>On · %lld windows on the virtual screen</string>
 </dict>
 </dict>
+<key>已撤回 %lld 个文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Reverted %lld file</string>
+<key>other</key><string>Reverted %lld files</string>
+</dict>
+</dict>
 <key>已落后 %lld 个版本</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -936,6 +958,17 @@
 <key>NSStringFormatValueTypeKey</key><string>lld</string>
 <key>one</key><string>Mark %lld agent to-do not updated for 3+ days as done?</string>
 <key>other</key><string>Mark %lld agent to-dos not updated for 3+ days as done?</string>
+</dict>
+</dict>
+<key>撤回 %lld 个文件</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>Revert %lld File</string>
+<key>other</key><string>Revert %lld Files</string>
 </dict>
 </dict>
 <key>收起久未更新的 %lld 条</key>
@@ -1158,6 +1191,17 @@
 <key>other</key><string>Paste (%lld items)</string>
 </dict>
 </dict>
+<key>网页有 %lld 个错误</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld error on the page</string>
+<key>other</key><string>%lld errors on the page</string>
+</dict>
+</dict>
 <key>调用的工具（%lld）</key>
 <dict>
 <key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
@@ -1178,6 +1222,17 @@
 <key>NSStringFormatValueTypeKey</key><string>lld</string>
 <key>one</key><string>%lld more file</string>
 <key>other</key><string>%lld more files</string>
+</dict>
+</dict>
+<key>这段上下文已请求 %lld 次</key>
+<dict>
+<key>NSStringLocalizedFormatKey</key><string>%#@n@</string>
+<key>n</key>
+<dict>
+<key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+<key>NSStringFormatValueTypeKey</key><string>lld</string>
+<key>one</key><string>%lld request with this context</string>
+<key>other</key><string>%lld requests with this context</string>
 </dict>
 </dict>
 <key>：还有 %lld 个冲突</key>

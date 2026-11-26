@@ -97,6 +97,7 @@ enum ConfigKey: String, CodingKey {
     case port, bindAddress, token, publicURL, submitOnSend, installAgentSkill, installTestSkill, installTodoSkill, installStageSkill, installOpenCodePlugin
     case shrinkAgentImages, compactWindow
     case browserOn, browserMax, browserIdle, browserRecord
+    case deviceMax, deviceIdle
     case storageAuto, storageDays
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
     case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal, hostedCloseEditor
@@ -140,6 +141,10 @@ struct MobileConfig: Codable, Equatable {
     var browserIdle: Int = 10
     /// 录下浏览器操作，可以回放（只存画面变了的帧，保留 3 天）
     var browserRecord: Bool = true
+    /// 模拟器（agent 用的 iOS / 安卓模拟器，watcher 的 DevicePool 调度）：最多同时开几台（0 = 自动，按各台电脑的内存给建议值）、
+    /// 持有的会话多少分钟没用就收回
+    var deviceMax: Int = 0
+    var deviceIdle: Int = 30
     /// 存储清理：自动清超过 N 天没用的会话缓存（图片缓存、会话浏览器数据、收件图片，见 Storage.swift）；默认开、14 天（11-24）
     var storageAuto: Bool = true
     var storageDays: Int = 14
@@ -275,6 +280,8 @@ struct MobileConfig: Codable, Equatable {
         browserMax = max(1, min(16, (try? c.decodeIfPresent(Int.self, forKey: .browserMax)) ?? nil ?? 4))
         browserIdle = max(1, min(240, (try? c.decodeIfPresent(Int.self, forKey: .browserIdle)) ?? nil ?? 10))
         browserRecord = flag(.browserRecord, true)
+        deviceMax = max(0, min(16, (try? c.decodeIfPresent(Int.self, forKey: .deviceMax)) ?? nil ?? 0))
+        deviceIdle = max(5, min(240, (try? c.decodeIfPresent(Int.self, forKey: .deviceIdle)) ?? nil ?? 30))
         storageAuto = flag(.storageAuto, true)
         storageDays = max(1, min(365, (try? c.decodeIfPresent(Int.self, forKey: .storageDays)) ?? nil ?? 14))
         httpsEnabled = flag(.httpsEnabled, true)

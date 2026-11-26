@@ -21,7 +21,8 @@ final class MacAPI: @unchecked Sendable {
     /// 发消息、恢复会话、语音转写后发送、按键、回答提问、调整排队、关闭会话：电脑要把这件事做完才回应，
     /// 后台通道卡一下、恢复会话、转写长录音都可能要十几秒。原来和普通请求一样 12 秒超时：
     /// 发消息的会换一条路重发（电脑那头其实还在送，同一条进去两遍），按键、回答的直接报「无法确认电脑是否已收到」
-    private static let actionPaths: Set<String> = ["/api/send", "/api/resume", "/api/voice", "/api/key", "/api/answer", "/api/queue", "/api/close"]
+    private static let actionPaths: Set<String> = ["/api/send", "/api/resume", "/api/voice", "/api/key", "/api/answer", "/api/queue", "/api/close",
+                                                                   "/api/new-session"]
     /// 探路用：短超时，几个地址一起试
     private let pingClient: MacClient
     /// 连远程访问的本机转发（https://127.0.0.1:端口）被直接拒绝时调：多半是 App 被挂起期间 iOS 回收了监听端口（苹果 TN2277），

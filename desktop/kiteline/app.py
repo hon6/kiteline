@@ -125,6 +125,7 @@ class App:
         watcher_module.BROWSER.update(on=self.cfg.mobile.get("browserOn") or "client", max=int(self.cfg.mobile.get("browserMax") or 4),
                                       idle=int(self.cfg.mobile.get("browserIdle") or 10),
                                       record=bool(self.cfg.mobile.get("browserRecord", True)))
+        watcher_module.DEVICE.update(max=int(self.cfg.mobile.get("deviceMax") or 0), idle=int(self.cfg.mobile.get("deviceIdle") or 30))
         for source_config in self.cfg.sources:
             if not source_config.get("enabled", True):
                 continue
@@ -800,7 +801,7 @@ class App:
         payload["faces"] = self.faces.payload()          # 用户给会话、给某家 agent 设的头像和昵称（见 faces.py）
         # 收手机发来的文件、按路径取回文件；会话群、群里发图和文件；手机上看这台电脑的新版本、让它更新（手机按它决定给不给入口）
         # hostedSetup = 远端项目后台运行：出口检测、开关、把会话转到后台（/api/hosted/*）
-        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit"]
+        payload["features"] = ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit", "newSessionOnce"]
         # editorWindows = 能列出、关掉没有会话在运行的 VS Code 窗口（/api/editor/windows）；closeEditor 是自动关的开关
         payload["hosted"] = {"tipOff": bool(self.cfg.mobile.get("hostedTipOff")), "closeEditor": editor_windows.enabled(self)}
         return payload
@@ -1109,6 +1110,40 @@ class App:
     # MARK: 新任务 / 恢复会话
 
     def new_session(self, request):
+        """手机等不到回应会拿同一个请求编号（cid）重发（勾了独立分支要先建分支，常要十几秒）：还在做就等那一次的结果，
+        做成了的 10 分钟内直接回上次的结果，不再开第二个会话（同 resume、Mac 版 MobileServer.newSession）"""
+        cid = (request.json or {}).get("cid")
+        if not cid or not isinstance(cid, str):
+            return self._new_session_once(request)
+        cid = "new|%s" % cid
+        now = time.time()
+        entry = None
+        with self._resume_lock:
+            self._resume_recent = {k: v for k, v in self._resume_recent.items() if now - v[0] < 600}
+            done = self._resume_recent.get(cid)
+            first = None if done else self._resume_pending.get(cid)
+            if not done and first is None:
+                entry = self._resume_pending[cid] = {"done": threading.Event(), "response": None}
+        if done:
+            log.write("手机重发的新任务已经开过（%s），不再新建" % cid[-12:])
+            return done[1]
+        if first is not None:
+            log.write("手机重发的新任务还在处理（%s），等那一次的结果" % cid[-12:])
+            first["done"].wait(90)
+            return first["response"] or Response.json({"ok": False, "submitted": False, "message": "仍在新建会话，请稍后在会话列表中查看"}, 409)
+        response = None
+        try:
+            response = self._new_session_once(request)
+            return response
+        finally:
+            with self._resume_lock:
+                self._resume_pending.pop(cid, None)
+                if response is not None and response.status < 400 and _response_ok(response):
+                    self._resume_recent[cid] = (time.time(), response)
+            entry["response"] = response
+            entry["done"].set()
+
+    def _new_session_once(self, request):
         body = request.json
         if body is None:
             return Response.error("请求格式无效", 400)

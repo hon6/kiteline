@@ -249,6 +249,9 @@ enum DebugRemote {
                 // route 后面跟地址才是这条；route usage 之类的页面名转给 MainView
                 // 每个地址走哪张网卡（免费版不经 VPN 隧道连局域网的判断，见 LocalRoute），写进 remote-notes.txt
                 note("route " + LocalRoute.explain(Array(parts.dropFirst())))
+            } else if parts.first == "tp", parts.count >= 2 {
+                // tp context / tp rewind:1：打开当前对话页的上下文构成、第 N 轮的撤回面板（见 TransparencyRequest）
+                TransparencyRequest.shared.ask = parts[1]
             } else if parts.first == "pair", parts.count >= 2 {
                 // pair <配对链接>：照扫码配对（模拟器里点不了屏幕；测电脑互联、换电脑用）
                 Task {

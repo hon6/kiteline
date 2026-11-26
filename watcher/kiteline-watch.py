@@ -4225,10 +4225,10 @@ description: 要开终端窗口跑命令时（签名打包这类要桌面会话 
 
 _SKILL_BROWSER = """---
 name: kiteline-browser
-description: 要操作网页时（打开网页看效果、测网页功能、点按钮填表单、登录后台、抓网页内容、截网页图）一律用 Kiteline 的浏览器，不要自己另起浏览器（不要 playwright 的 launch()、不要 npx playwright open、不要自己开无界面 Chrome）。连固定入口 http://127.0.0.1:9339：agent-browser 用 `{{ab}} --session <会话> --cdp 9339 open 网址`，playwright-cli 用 `attach --cdp=http://127.0.0.1:9339`，脚本用 connectOverCDP；Playwright MCP 已经指到这里，直接用。用户在手机和电脑上能看到实时画面和你的每条指令；遇到登录、验证码、滑块用 `{{cmd}} browser ask --note "说明"` 请用户接管。
+description: 要操作网页时（打开网页看效果、测网页功能、点按钮填表单、登录后台、抓网页内容、截网页图）一律用 Kiteline 的浏览器，不要自己另起浏览器（不要 playwright 的 launch()、不要 npx playwright open、不要自己开无界面 Chrome）。连固定入口 http://127.0.0.1:9339：agent-browser 用 `{{ab}} --session <会话> --cdp 9339 open 网址`，playwright-cli 用 `attach --cdp=http://127.0.0.1:9339`，脚本用 connectOverCDP；Playwright MCP 已经指到这里，直接用。用户在手机和电脑上能看到实时画面和你的每条指令；遇到登录、验证码、滑块用 `{{cmd}} browser ask --note "说明"` 请用户接管；网页报错用 `{{cmd}} browser logs` 看。要用 iOS 模拟器、安卓模拟器时先 `{{cmd}} device acquire --kind ios|android` 申请（Kiteline 排队、按内存调度、闲置自动关），不要自己 simctl boot / emulator -avd。
 ---
 
-<!-- kiteline-browser v1 -->
+<!-- kiteline-browser v2 -->
 
 # 用 Kiteline 的浏览器操作网页
 
@@ -4272,6 +4272,34 @@ $AB --session "$S" --cdp 9339 screenshot /tmp/page.png
 ```
 
 用户手机上会收到提醒，在实时画面里自己操作，点「交还」后这条命令返回（带着用户的留言），你接着做。默认最多等 15 分钟（`--timeout 秒`）。
+
+## 网页报错：看控制台和网络
+
+```bash
+{{cmd}} browser logs          # 当前这一页的控制台报错、网页异常、失败的网络请求（4xx/5xx、连不上）
+{{cmd}} browser logs --all    # 最近 200 条（跨页面）
+```
+
+改完前端、点完按钮没反应时先看一眼，比截图猜快。要更深入（性能录制、看某个请求的详细内容）可以用 chrome-devtools-mcp 连同一个浏览器（见上）。
+
+## iOS 模拟器、安卓模拟器：经 Kiteline 申请
+
+模拟器很吃内存（iOS 约 1.5 GB、安卓约 3 GB），由 Kiteline 统一调度：同时开着的有上限，满了或内存不够会**排队**（命令会等，不是出错），
+闲置、会话结束会自动关。**不要自己 `xcrun simctl boot`、`emulator -avd` 开新的**，也不要新建模拟器。
+
+```bash
+D=$({{cmd}} device acquire --kind ios)       # 或 --kind android；要指定哪台加 --name "iPhone 17 Pro" / AVD 名
+echo "$D"                                      # {"kind": "ios", "id": "<UDID 或 emulator-5556>", "name": …}
+ID=$(echo "$D" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+xcrun simctl install "$ID" Build/App.app && xcrun simctl launch "$ID" com.example.app     # iOS
+adb -s "$ID" install app.apk && adb -s "$ID" shell am start -n com.example/.MainActivity  # 安卓
+{{cmd}} device release                         # 用完了交还（不还也会在 30 分钟没用后自动收回）
+```
+
+- 用户在手机和电脑上的会话小窗里能看到模拟器的实时画面、能接管（安卓直接能点；iOS 要这台电脑装了 AXe）。
+- 点、滑、截屏、读界面元素推荐用成熟的工具：mobile-mcp（iOS + 安卓）、XcodeBuildMCP / AXe（iOS）、adb（安卓），
+  操作的都是你申请到的那台（用上面的 id）。
+- `{{cmd}} device status` 看开着哪几台、谁在用、上限和排队；`{{cmd}} device list` 看有哪些能用。
 
 ## 其他
 
@@ -6706,13 +6734,520 @@ def stage_text_kind(text):
 
 def stage_hint(name, tool_input):
     """太长的命令给手机时会截断，后半截（常是跑测试、提交）就认不出了：截断前先按完整命令认好，记在条目的 _sk 里，
-    StageTracker.feed 取走它（不发给手机）。不长的不带"""
+    StageTracker.feed 取走它（不发给手机）。不长的不带。
+    风险（risk，见 tool_risk）也是：会被截断的长命令在这里按完整的认；不长的等发给客户端时再认（annotate_risk），
+    执行过程、搜索、统计这些整份读记录的地方用不上，不白算"""
     if (name or "").lower() != "bash" or not isinstance(tool_input, dict):
         return {}
     command = tool_input.get("command")
     if not isinstance(command, str) or len(command) <= TOOL_INPUT_STRING_MAX:
         return {}
-    return {"_sk": list(stage_command_kind(command))}
+    risk = tool_risk(name, tool_input)
+    return dict({"_sk": list(stage_command_kind(command))}, **({"risk": risk} if risk else {"risk": []}))
+
+
+def annotate_risk(items):
+    """发给客户端的对话条目：工具调用补上风险标签（没算过的；超长命令已在截断前算好）。空的 risk 不发"""
+    for item in items:
+        if not isinstance(item, dict) or item.get("t") != "tool":
+            continue
+        if "risk" not in item:
+            risk = tool_risk(item.get("name"), item.get("input"))
+            if risk:
+                item["risk"] = risk
+        elif not item["risk"]:
+            del item["risk"]
+    return items
+
+
+# 工具调用的风险标签（11-26 用户要「让用户放心」）：对话里每一步、等确认的卡片上标出删文件、改写 Git 历史、动数据库这类要留意的操作。
+# 危险命令的判定移植自 claude-code-command-guard（Yannick Seelig，MIT，github.com/Yodaisgaming/claude-code-command-guard，
+# hooks/destructive-command-guard.js + guard-rules.js，测试矩阵 test/matrix.test.js 一并移植到 tests/test_transparency.py）：
+# 拆复合命令、bash -c / python -c / heredoc / $(…) 里的再认一遍、rm 的目标分成受保护 / 安全 / 不认识、SQL 客户端的参数、强推到 main 和
+# 推到别的分支分开、Windows 和云服务命令。它判 deny 的我们标 2 级（高危），判 ask 的标 1 级（需留意）。
+# 它只管拦危险命令；Kiteline 还要让用户看得见的普通操作另加几样提示（推送、装软件、结束进程、提权、读写密钥、改系统配置），也是 1 级。
+# 只是标出来给人看，不拦 agent。代号固定，界面文字各端自己翻（i18n）。
+RISK_LEVELS = {"delete": 2, "rewrite": 2, "remote_exec": 2, "db": 2, "disk": 2, "secret_write": 2, "system": 2,
+               "delete_ask": 1, "rewrite_ask": 1, "deploy": 1, "perm": 1, "os": 1,
+               "push": 1, "install": 1, "kill": 1, "sudo": 1, "secret": 1}
+
+_G_RULES = [   # (id, 档位, 正则)：照 guard-rules.js
+    ("db_drop", "block", r"\bdrop\s+(?:database|table|schema|index)\b"),
+    ("db_truncate", "block", r"\btruncate\s+(?:table\s+)?[`\"'\[]?[\w.]+"),
+    ("db_dropdb", "block", r"\bdropdb\b"),
+    ("db_flush", "block", r"\b(?:flushall|flushdb)\b"),
+    ("dev_dd", "block", r"\bdd\b[^|&;\n]*\bof=/dev/"),
+    ("dev_mkfs", "block", r"\bmkfs(?:\.\w+)?\b"),
+    ("dev_shred", "block", r"\bshred\s+\S"),
+    ("dev_truncate_zero", "block", r"\btruncate\s+(?:-s\s*0|--size[= ]0)\b"),
+    ("dev_overwrite_device", "block", r">\s*/dev/(?:sd|nvme|hd|disk)"),
+    ("win_format_volume", "block", r"\bformat-volume\b"),
+    ("win_format_drive", "block", r"\bformat\s+[a-z]:"),
+    ("win_diskpart", "block", r"\bdiskpart\b"),
+    ("win_vssadmin", "block", r"\bvssadmin\s+delete\b"),
+    # Kiteline 改的：python3 / node 后面跟 -m、-c、-e 或脚本文件的是在解析下载的 JSON（curl … | python3 -m json.tool），不是执行下载的脚本
+    ("obf_pipe_to_shell", "block", r"\b(?:curl|wget|fetch|iwr|invoke-webrequest)\b[\s\S]*\|\s*(?:sudo\s+)?(?:bash|sh|zsh|dash|perl"
+                                   r"|(?:python3?|node)(?!\s+(?:-[mce]\b|-[A-Za-z]*[mce]\s|[\w./-]+\.(?:py|js|mjs)\b)))\b"),
+    ("obf_eval_base64", "block", r"\beval\b[\s\S]*base64|\bbase64\b[\s\S]*(?:-d|--decode)[\s\S]*\|\s*(?:bash|sh|zsh)\b"),
+    ("obf_fork_bomb", "block", r"\(\)\s*\{\s*[:\w.]+\s*\|\s*[:\w.]+\s*&\s*\}\s*;"),
+    ("wp_db_drop", "block", r"\bwp\s+db\s+(?:drop|reset|clean)\b"),
+    ("wp_site_empty", "block", r"\bwp\s+site\s+empty\b"),
+    ("win_reg_delete", "ask", r"\breg\s+delete\b"),
+    ("win_sc_delete", "ask", r"\bsc\s+(?:delete|stop)\b"),
+    ("win_schtasks_delete", "ask", r"\bschtasks\b[^|&;\n]*/delete\b"),
+    ("win_shutdown", "ask", r"\bshutdown(?=\s|$|/)|\b(?:restart-computer|stop-computer)\b"),
+    ("cloud_vercel_remove", "ask", r"\bvercel\s+(?:remove|rm)\b"),
+    ("cloud_railway_down", "ask", r"\brailway\s+(?:down|delete)\b"),
+    ("cloud_cloudflare_delete", "ask", r"\b(?:wrangler|cloudflare)\b[^|&;\n]*\bdelete\b"),
+    ("cloud_terraform", "ask", r"\bterraform\s+(?:destroy|apply)\b"),
+    ("cloud_kubectl_delete", "ask", r"\bkubectl\s+delete\b"),
+    ("cloud_helm_delete", "ask", r"\bhelm\s+(?:delete|uninstall)\b"),
+    ("cloud_docker_prune", "ask", r"\bdocker\s+(?:system\s+|volume\s+|image\s+|container\s+)?prune\b"),
+    ("cloud_aws_destructive", "ask", r"\baws\s+[^|&;\n]*(?:delete-|terminate-|remove-|deregister-|\brb\b|\brm\b)"),
+    ("cloud_gcloud_delete", "ask", r"\bgcloud\s+[^|&;\n]*\bdelete\b"),
+    ("cloud_az_delete", "ask", r"\baz\s+[^|&;\n]*\bdelete\b"),
+    ("pkg_chmod_777", "ask", r"\bchmod\s+(?:-[a-z]*r[a-z]*\s+)?[0-7]*777\b"),
+    ("pkg_chmod_setuid", "ask", r"\bchmod\s+(?:[0-7]?[4-7][0-7]{3}\b|[\s\S]*\+s\b)"),
+    ("fs_find_delete", "ask", r"\bfind\b[^|&;\n]*-delete\b"),
+    ("fs_find_exec_rm", "ask", r"\bfind\b[^|&;\n]*-exec\s+rm\b"),
+    ("fs_xargs_rm", "ask", r"\bxargs\b[^|]*\brm\s+-[a-z]*[rf]"),
+]
+# 每条规则要出现的字（小写）：先用字符串查找看在不在，在才跑那条正则（11-26 实测：几十条正则逐条试、或合成一条大的都太慢，
+# 读一个大会话要几十秒；先查字以后快几十倍）。字要取正则里一定会出现的部分
+_G_RULE_WORDS = {
+    "db_drop": ("drop",), "db_truncate": ("truncate",), "db_dropdb": ("dropdb",), "db_flush": ("flush",),
+    "dev_dd": ("of=/dev/",), "dev_mkfs": ("mkfs",), "dev_shred": ("shred",), "dev_truncate_zero": ("truncate",),
+    "dev_overwrite_device": ("/dev/",), "win_format_volume": ("format-volume",), "win_format_drive": ("format",),
+    "win_diskpart": ("diskpart",), "win_vssadmin": ("vssadmin",),
+    "obf_pipe_to_shell": ("curl", "wget", "fetch", "iwr", "invoke-webrequest"), "obf_eval_base64": ("base64",),
+    "obf_fork_bomb": ("(",), "wp_db_drop": ("wp",), "wp_site_empty": ("wp",), "win_reg_delete": ("reg",),
+    "win_sc_delete": ("sc",), "win_schtasks_delete": ("schtasks",), "win_shutdown": ("shutdown", "restart-computer", "stop-computer"),
+    "cloud_vercel_remove": ("vercel",), "cloud_railway_down": ("railway",), "cloud_cloudflare_delete": ("wrangler", "cloudflare"),
+    "cloud_terraform": ("terraform",), "cloud_kubectl_delete": ("kubectl",), "cloud_helm_delete": ("helm",),
+    "cloud_docker_prune": ("docker",), "cloud_aws_destructive": ("aws",), "cloud_gcloud_delete": ("gcloud",), "cloud_az_delete": ("az",),
+    "pkg_chmod_777": ("chmod",), "pkg_chmod_setuid": ("chmod",), "fs_find_delete": ("find",), "fs_find_exec_rm": ("find",),
+    "fs_xargs_rm": ("xargs",),
+}
+_G_RULES = [(rid, tier, re.compile(p, re.I), _G_RULE_WORDS[rid]) for rid, tier, p in _G_RULES]
+# 任何一条可能命中要有的字（删文件、git、SQL、脚本里删的也算上）
+_G_ALL_WORDS = tuple(sorted({w for words in _G_RULE_WORDS.values() for w in words if w != "("}
+                            | {"rm", "rimraf", "remove-item", "ri ", "del", "erase", "rd", "rmdir", "git", "delete", "rmtree", "removeall",
+                               "mysql", "mariadb", "psql", "sqlite", "sqlcmd", "mongo", "clickhouse", "cockroach", "(){", "() {"}))
+
+
+def _g_maybe(low):
+    return any(w in low for w in _G_ALL_WORDS)
+_G_PROTECTED = ("/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/dev", "/proc", "/sys", "/var", "/opt", "/root",
+                "c:/windows", "c:/programdata")
+_G_DB_CLIENTS = {"mysql", "mariadb", "psql", "sqlite", "sqlite3", "sqlcmd", "mongo", "mongosh", "clickhouse-client", "cockroach"}
+_G_SQL_FLAG = {"mysql": "(?:--execute|-e)", "mariadb": "(?:--execute|-e)", "psql": "(?:--command|-c)", "sqlcmd": "(?:-Q|-q)",
+               "clickhouse-client": "(?:--query|-q)", "mongosh": "(?:--eval)", "mongo": "(?:--eval)", "cockroach": "(?:--execute|-e)"}
+_G_WRAPPER_ARG = {"sudo": r"^-[uUgpCcrtThRD]$", "doas": r"^-[uC]$", "env": r"^-[uCS]$", "nice": r"^-n$", "time": r"^-[of]$",
+                  "nohup": r"^$", "command": r"^$", "exec": r"^-a$"}
+_G_WRAP_LONG = re.compile(r"^--(?:user|group|prompt|role|type|host|chroot|adjustment|unset|chdir|close-from|format|output)$", re.I)
+
+
+def _g_norm_root(path):
+    value = re.sub(r"^['\"]|['\"]$", "", str(path)).replace("\\", "/").lower()
+    return re.sub(r"/+$", "", re.sub(r"^/([a-z])/", r"\1:/", value))
+
+
+_G_HOME = _g_norm_root(HOME)
+_G_HOME_RE = re.compile("^" + re.escape(_G_HOME) + r"(?:/[^/]+)?/?$") if _G_HOME else None
+
+
+_G_SPACES = re.compile(r"\s+")
+_G_BINPATH = re.compile(r"^((?:(?:sudo|doas|env|nice|time|nohup|command|exec)\s+(?:-\S+\s+|[\w.]+=\S+\s+)*)?)/(?:usr/)?(?:local/)?s?bin/", re.I)
+_G_SPLIT = re.compile(r"&&|\|\||;|\n|\|")
+
+
+def _g_normalize(seg):
+    t = str(seg).strip()
+    while len(t) > 1 and t[0] == t[-1] and t[0] in "\"'`":
+        t = t[1:-1].strip()
+    if not t:
+        return t
+    t = _G_SPACES.sub(" ", t)
+    return _G_BINPATH.sub(r"\1", t) if "bin/" in t else t
+
+
+def _g_inner(text):
+    out = []
+
+    def strip_quote(v):
+        m = re.match(r"^\s*([\"'])([\s\S]*)\1\s*$", v)
+        return m.group(2) if m else v
+    for m in list(re.finditer(r"\b(?:bash|sh|zsh|dash|python3?|node|nodejs|perl|ruby|php|powershell|pwsh)\b(?:\s+-\w+)*\s+"
+                              r"(?:-c|-e|-command|--command)\s+(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|\S+)", text, re.I))[:200]:
+        out.append(strip_quote(m.group(1)))
+    for m in list(re.finditer(r"\bcmd(?:\.exe)?\s+/[ck]\s+(\"[^\"]*\"|'[^']*'|[^\n]+)", text, re.I))[:200]:
+        out.append(strip_quote(m.group(1)))
+    for m in list(re.finditer(r"<<-?\s*['\"]?(\w+)['\"]?\s*\n([\s\S]*?)\n\s*\1\b", text))[:200]:
+        out.append(m.group(2))
+    for m in list(re.finditer(r"\$\(([\s\S]*?)\)", text))[:200]:
+        out.append(strip_quote(m.group(1)))
+    for m in list(re.finditer(r"`([^`]*)`", text))[:200]:
+        out.append(strip_quote(m.group(1)))
+    # Kiteline 加的：ssh 主机 '远端命令' 里的也认（上游只整段匹配，ssh 里的 rm -rf 认不出目标）
+    for m in list(re.finditer(r"\bssh\b(?:\s+-\S+(?:\s+(?!['\"])\S+)?)*\s+[^\s'\"]+\s+('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")", text))[:50]:
+        out.append(strip_quote(m.group(1)))
+    return [x for x in out if x and x.strip()]
+
+
+def _g_collect(text, depth, out):
+    whole = _g_normalize(text)
+    if whole:
+        out.append(whole)
+    for piece in _G_SPLIT.split(str(text)):
+        n = _g_normalize(piece)
+        if n and n != whole:
+            out.append(n)
+        if len(out) > 3000:
+            raise ValueError("segment explosion")
+    if depth > 0:
+        for inner in _g_inner(text):
+            _g_collect(inner, depth - 1, out)
+
+
+def _g_clean_target(t):
+    v = re.sub(r"^['\"]|['\"]$", "", str(t)).replace("\\", "/").lower()
+    return re.sub(r"^/([a-z])/", r"\1:/", v)
+
+
+def _g_danger(t):
+    if t in ("~", "/", "..", "*", ".", "~/", "/*", "~/*", "./"):
+        return True
+    if re.match(r"^[a-z]:/?$", t) or re.search(r"(^|/)\.\.(/|$)", t) or re.search(r"(^|/)\*(/|$)", t) or t.endswith("/*"):
+        return True
+    if re.search(r"(^|/)\.(claude|codex|ssh|git|gnupg|aws)(/|$)", t):
+        return True
+    if _G_HOME_RE and _G_HOME_RE.match(t):
+        return True
+    return any(t == root or t.startswith(root + "/") for root in _G_PROTECTED)
+
+
+def _g_safe(t):
+    if re.search(r"[$`]", t) or re.search(r"%[^%\s]*%", t):
+        return False
+    if re.search(r"/appdata/local/temp/", t) or re.search(r"(^|/)tmp(/|$)", t) or t.startswith("/tmp/"):
+        return True
+    # Kiteline 加的：macOS 的临时目录、Claude Code 的草稿区
+    if t.startswith(("/private/tmp/", "/private/var/folders/", "/var/folders/")) or "/scratchpad" in t:
+        return True
+    if re.search(r"(^|/)(node_modules|\.next-prod|\.next|dist|build|__pycache__|\.cache)(/|$)", t):
+        return True
+    return not re.match(r"^([a-z]:|/|~)", t) and ".." not in t and "*" not in t
+
+
+def _g_classify(targets):
+    if not targets:
+        return "ask"
+    danger, all_safe = False, True
+    for t in targets:
+        if _g_danger(t):
+            danger = True
+        elif not _g_safe(t):
+            all_safe = False
+    return "block" if danger else ("allow" if all_safe else "ask")
+
+
+def _g_delete_targets(seg, env=None):
+    m = re.search(r"\b(?:rm|rimraf|remove-item|ri|del|erase|rd|rmdir)\b(.*)$", seg, re.I)
+    if not m:
+        return []
+    rest = re.split(r"[|&;><]", m.group(1))[0]
+    out = []
+    for t in rest.strip().split():
+        if t.startswith("-") or re.match(r"^/[a-z]$", t, re.I):
+            continue
+        if env:   # Kiteline 加的：同一条命令里前面赋过值的变量（T=/tmp/x; rm -rf $T）照赋值展开
+            t = re.sub(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", lambda v: env.get(v.group(1), v.group(0)), t.strip("'\""))
+        out.append(_g_clean_target(t))
+    return out
+
+
+def _g_fs_delete(seg):
+    return bool(re.search(r"\brm\b[^|&;]*\s-\w*r", seg, re.I) or re.search(r"\brm\b[^|&;]*--recursive\b", seg, re.I)
+                or (re.search(r"\brimraf\b", seg, re.I) and _g_delete_targets(seg))
+                or re.search(r"\b(?:remove-item|ri)\b[^|]*\s-r(?:ecurse)?\b", seg, re.I)
+                or re.search(r"\b(?:del|erase)\b[^|]*\s/s\b", seg, re.I) or re.search(r"\b(?:rd|rmdir)\b[^|]*\s/s\b", seg, re.I)
+                or re.search(r"\brm\s+(?:-\S+\s+)*(?:/|~|\*|\.\.)(?:\s|$)", seg, re.I))
+
+
+def _g_script_delete(seg):
+    for pattern in (r"\bshutil\.rmtree\s*\(\s*([^),]*)", r"\bos\.removeall\s*\(\s*([^),]*)", r"\bfs\.rm(?:sync|dirsync)?\s*\(\s*([^,)]*)",
+                    r"require\(\s*['\"](?:node:)?fs['\"]\s*\)\.rm(?:sync|dirsync)?\s*\(\s*([^,)]*)",
+                    r"\bfileutils\.rm_rf\s*\(?\s*([^)\s]*)", r"\brimraf(?:\.sync)?\s*\(\s*([^,)]*)",
+                    r"require\(\s*['\"]rimraf['\"]\s*\)(?:\.\w+)?\s*\(\s*([^,)]*)"):
+        m = re.search(pattern, seg, re.I)
+        if m:
+            lit = re.match(r"^['\"]([^'\"]*)['\"]", (m.group(1) or "").strip())
+            return _g_classify([_g_clean_target(lit.group(1))]) if lit else "ask"
+    return None
+
+
+def _g_force_push(seg):
+    return bool(re.search(r"\bgit\s+push\b", seg, re.I) and (re.search(r"--force(?:-with-lease)?\b", seg, re.I)
+                                                            or re.search(r"\s-f\b", seg, re.I) or re.search(r"\s\+[\w./-]+", seg)))
+
+
+def _g_push_hits_main(seg):
+    m = re.search(r"\bgit\s+push\b(.*)$", seg, re.I)
+    if not m:
+        return False
+    for t in [t for t in re.split(r"[|&;]", m.group(1))[0].strip().split() if not t.startswith("-")]:
+        dst = t.split(":")[-1] if ":" in t else t
+        dst = re.sub(r"^refs/heads/", "", dst.lstrip("+"), flags=re.I)
+        if re.match(r"^(?:main|master|head)$", dst, re.I):
+            return True
+    return False
+
+
+def _g_branch_delete(seg):
+    return bool(re.search(r"\bgit\s+push\b", seg, re.I) and (re.search(r"(?:--delete\b|\s-d\b)", seg, re.I) or re.search(r"\s:[\w./-]+", seg)))
+
+
+def _g_git(seg):
+    if _g_force_push(seg) or _g_branch_delete(seg):
+        return ("block", "git_main") if _g_push_hits_main(seg) else ("ask", "git_branch")
+    for pattern, rid in ((r"\bgit\s+reset\s+--hard\b", "git_reset_hard"), (r"\bgit\s+clean\s+-\S*f", "git_clean_force"),
+                         (r"\bgit\s+(?:filter-branch|filter-repo)\b", "git_filter"), (r"\bgit\s+reflog\s+expire\b", "git_reflog_expire"),
+                         (r"\bgit\s+gc\b[\s\S]*--prune", "git_gc_prune"), (r"\bgit\s+remote\s+(?:rm|remove)\b", "git_remote_remove")):
+        if re.search(pattern, seg, re.I):
+            return "ask", rid
+    return None
+
+
+def _g_leading(seg):
+    toks = seg.strip().split()
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if re.match(r"^[\w.]+=", t):
+            i += 1
+            continue
+        b = re.sub(r"^.*[/\\]", "", t).lower()
+        if b in _G_WRAPPER_ARG:
+            arg = re.compile(_G_WRAPPER_ARG[b])
+            i += 1
+            while i < len(toks):
+                o = toks[i]
+                if re.match(r"^[\w.]+=", o):
+                    i += 1
+                    continue
+                if not o.startswith("-") or o == "-":
+                    break
+                if o == "--":
+                    i += 1
+                    break
+                if o.startswith("--"):
+                    i += 2 if ("=" not in o and _G_WRAP_LONG.match(o)) else 1
+                    continue
+                cluster, consumed = o[1:], False
+                for k, ch in enumerate(cluster):
+                    if arg.match("-" + ch):
+                        i += 2 if k == len(cluster) - 1 else 1
+                        consumed = True
+                        break
+                if not consumed:
+                    i += 1
+            continue
+        return b
+    return ""
+
+
+def _g_sql(seg):
+    out = []
+    bare = bool(re.match(r"^\s*delete\b", seg, re.I))
+    cmd = _g_leading(seg)
+    client = cmd in _G_DB_CLIENTS
+    if not bare and not client:
+        return out
+    unquote = lambda v: re.sub(r"^['\"]|['\"]$", "", v)   # noqa: E731
+    if client:
+        if re.match(r"^sqlite3?$", cmd):
+            out += [unquote(m.group(1)) for m in list(re.finditer(r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')", seg))[:50]]
+        elif cmd in _G_SQL_FLAG:
+            out += [unquote(m.group(1)) for m in list(re.finditer(
+                _G_SQL_FLAG[cmd] + r"\s*=?\s*(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s\"']\S*)", seg, re.I))[:50]]
+    if bare:
+        out.append(seg)
+    return out
+
+
+_G_DEL_WORD = re.compile(r"\b(?:rm|rimraf|remove-item|ri|del|erase|rd|rmdir)\b", re.I)
+_G_SCRIPT_WORD = re.compile(r"rmtree|removeall|\.rm|rm_rf|rimraf", re.I)
+_G_SQL_WORD = re.compile(r"\bdelete\b", re.I)
+
+
+def _g_segment(seg, env=None):
+    """一段命令 → [(档位 block/ask, 规则 id)]"""
+    hits = []
+    low = seg.lower()
+    if not _g_maybe(low):
+        return hits
+    if _G_DEL_WORD.search(seg) and _g_fs_delete(seg):
+        c = _g_classify(_g_delete_targets(seg, env))
+        if c != "allow":
+            hits.append((c, "fs_delete"))
+    c = _g_script_delete(seg) if _G_SCRIPT_WORD.search(seg) else None
+    if c and c != "allow":
+        hits.append((c, "fs_delete"))
+    g = _g_git(seg) if "git" in seg.lower() else None
+    if g:
+        hits.append(g)
+    for payload in (_g_sql(seg) if _G_SQL_WORD.search(seg) else []):
+        sql = re.sub(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/", " ", payload)
+        sql = re.sub(r"--[ \t][^\n]*", " ", sql)
+        sql = re.sub(r"#[^\n]*", " ", sql)
+        sql = re.sub(r"\$\$[\s\S]*?\$\$", " ", sql)
+        sql = re.sub(r"'[^']*'", " ", sql)
+        sql = re.sub(r"\"[^\"]*\"", " ", sql)
+        if re.search(r"\bdelete\s+from\b", sql, re.I) and not re.search(r"\bwhere\b", sql, re.I):
+            hits.append(("block", "db_delete_no_where"))
+            break
+    for rid, tier, pattern, words in _G_RULES:
+        if any(w in low for w in words) and pattern.search(seg):
+            hits.append((tier, rid))
+    return hits
+
+
+def _g_segments(command):
+    """切好的一段段命令（去重）；切出来太多（上游的 segment explosion）为空"""
+    segs = []
+    try:
+        _g_collect(command, 1, segs)
+    except ValueError:
+        return []
+    return list(dict.fromkeys(segs))
+
+
+def guard_command(command, env=None, segs=None):
+    """危险命令判定（移植自 claude-code-command-guard 的 analyze）→ [(档位, 规则 id)]，没有就是空表"""
+    if not isinstance(command, str) or len(command.encode("utf-8", "ignore")) > 100 * 1024:
+        return []
+    if not _g_maybe(command.lower()):
+        return []   # 整条命令里一个相关的词都没有
+    hits = []
+    for seg in segs if segs is not None else _g_segments(command):
+        hits += _g_segment(seg, env)
+    full = _g_normalize(command)
+    if re.search(r"\bgit\s+reset\s+--hard\b", full, re.I) and re.search(r"\bgit\s+push\b", full, re.I):
+        hits.append(("block", "git_reset_hard_and_push"))
+    return hits
+
+
+def _risk_code(tier, rid):
+    """上游的规则 id → 我们的风险代号"""
+    high = tier == "block"
+    if rid.startswith(("fs_", "api_")):
+        return "delete" if high else "delete_ask"
+    if rid.startswith("git_"):
+        return "rewrite" if high else "rewrite_ask"
+    if rid.startswith(("db_", "wp_")):
+        return "db"
+    if rid.startswith(("dev_", "win_format", "win_diskpart", "win_vssadmin")):
+        return "disk"
+    if rid.startswith("obf_"):
+        return "remote_exec"
+    if rid.startswith("cloud_"):
+        return "deploy"
+    if rid.startswith("pkg_"):
+        return "perm"
+    if rid.startswith("win_"):
+        return "os"
+    return "delete_ask"
+
+
+_RISK_SECRET_PATH = re.compile(r"(?:^|[/\\])(?:\.env(?:\.(?!example$|sample$|template$|dist$|defaults?$)[\w.-]+)?|id_(?:rsa|ed25519|ecdsa|dsa)"
+                               r"|[\w.-]+\.(?:pem|p12|pfx|key|keystore|jks)"
+                               r"|\.netrc|\.npmrc|\.pypirc|credentials(?:\.json)?|secrets?\.(?:json|ya?ml|toml)|\.git-credentials)$", re.I)
+_RISK_SYSTEM_PATH = re.compile(r"^(?:/etc/|/usr/(?!local/(?:src|share/doc))|/System/|/Library/(?:LaunchDaemons|LaunchAgents)/|"
+                               r"~?/?(?:Users|home)/[^/]+/\.(?:bashrc|zshrc|bash_profile|zprofile|profile|ssh/)|~/\.(?:bashrc|zshrc|bash_profile|zprofile|profile|ssh/)|"
+                               r".*/Library/LaunchAgents/|[A-Za-z]:\\Windows\\)", re.I)
+# 上游不管、但用户想看得见的（1 级提示）：每段命令开头认
+_RISK_NOTICE = [
+    ("push", re.compile(r"^git\s+push\b(?!.*--dry-run)|^gh\s+(?:pr\s+(?:create|merge)|release\s+create|repo\s+create)\b|^(?:npm|pnpm|yarn)\s+publish\b"
+                        r"|^twine\s+upload\b|^cargo\s+publish\b")),
+    ("install", re.compile(r"^(?:npm|pnpm|yarn)\s+(?:i|install|add)\s+(?:.*\s)?(?:-g|--global)\b|^(?:pip3?|uv\s+pip)\s+install\b|^brew\s+install\b"
+                           r"|^(?:apt|apt-get|dnf|yum|pacman|winget|choco)\s+(?:-\S+\s+)*(?:install|-S)\b|^(?:cargo|go)\s+install\b")),
+    ("kill", re.compile(r"^(?:pkill|killall|taskkill)\b|^kill\s+-(?:9|KILL)\b")),
+    ("secret", re.compile(r"^(?:cat|less|head|tail|more|bat)\s+.*(?:\.env\b(?!\.example)|id_(?:rsa|ed25519)|\.pem\b|credentials)"
+                          r"|^security\s+find-(?:generic|internet)-password", re.I)),
+]
+
+
+_RISK_NOTICE_ANY = re.compile(r"\b(?:git|gh|npm|pnpm|yarn|twine|cargo|pip3?|uv|brew|apt|apt-get|dnf|yum|pacman|winget|choco|go|pkill"
+                              r"|killall|taskkill|kill|cat|less|head|tail|more|bat|security|sudo|doas)\b")
+
+
+def _risk_notices(command, segs=None):
+    found = []
+    if not _RISK_NOTICE_ANY.search(command):
+        return found
+    for seg in segs if segs is not None else _g_segments(command):
+        if not _RISK_NOTICE_ANY.match(seg):
+            continue
+        head = seg.split("\n", 1)[0]
+        if re.match(r"^(?:sudo|doas)\s", head):
+            found.append("sudo")
+            head = re.sub(r"^(?:sudo|doas)(?:\s+-\S+)*\s+", "", head)
+        for code, pattern in _RISK_NOTICE:
+            if pattern.search(head):
+                found.append(code)
+    return found
+
+
+_RISK_CACHE = collections.OrderedDict()   # (工具名, 命令或路径) → 结果：历史翻页、执行过程面板会反复认同一条
+
+
+def tool_risk(name, tool_input):
+    """一次工具调用要留意的地方 → ["delete", "push", …]（按级别从高到低、去重），没有就是空表。按完整参数认（截断前）"""
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    key = (name, tool_input.get("command") or tool_input.get("cmd") or tool_input.get("file_path") or tool_input.get("path")
+           or tool_input.get("notebook_path"))
+    if not isinstance(key[1], str):
+        key = None
+    if key is not None and key in _RISK_CACHE:
+        _RISK_CACHE.move_to_end(key)
+        return list(_RISK_CACHE[key])
+    result = _tool_risk(name, tool_input)
+    if key is not None:
+        _RISK_CACHE[key] = tuple(result)
+        if len(_RISK_CACHE) > 4096:
+            _RISK_CACHE.popitem(last=False)
+    return result
+
+
+def _tool_risk(name, tool_input):
+    low = (name or "").lower()
+    found = []
+    if low in ("bash", "shell", "powershell", "exec_command", "run_shell_command", "local_shell"):
+        command = tool_input.get("command") or tool_input.get("cmd")
+        if isinstance(command, list):
+            command = " ".join(str(x) for x in command)
+        if not isinstance(command, str) or not command.strip():
+            return []
+        env = {m.group(1): m.group(2).strip("'\"") for m in
+               re.finditer(r"(?:^|[\s;&(])(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s;&|]+)", command)}
+        segs = _g_segments(command) if (_g_maybe(command.lower()) or _RISK_NOTICE_ANY.search(command)) else []
+        found += [_risk_code(tier, rid) for tier, rid in guard_command(command, env, segs)]
+        found += _risk_notices(command, segs)
+        if "rewrite" in found or "rewrite_ask" in found:
+            found = [c for c in found if c != "push"]   # 强推已经标了改写历史，不再另标「推送」
+    elif low in _STAGE_EDIT_TOOLS or low in ("read", "notebookread"):
+        path = str(tool_input.get("file_path") or tool_input.get("path") or tool_input.get("notebook_path") or "")
+        if path:
+            if _RISK_SECRET_PATH.search(path):
+                found.append("secret" if low in ("read", "notebookread") else "secret_write")
+            elif low not in ("read", "notebookread") and _RISK_SYSTEM_PATH.match(path):
+                found.append("system")
+    found = set(found)
+    if "delete" in found:
+        found.discard("delete_ask")
+    if "rewrite" in found:
+        found.discard("rewrite_ask")
+    return sorted(found, key=lambda c: (-RISK_LEVELS.get(c, 0), c))
 
 
 def stage_tool_kind(name, tool_input, cwd=None):
@@ -8926,9 +9461,16 @@ def worktree_add(cwd, stamp=None):
     if not info["repo"]:
         raise RuntimeError("这个目录不是 git 仓库，没法开独立分支")
     root = info["root"]
-    stamp = stamp or time.strftime("%Y%m%d-%H%M%S")
-    branch = "tars/%s" % stamp
     base = os.path.join(os.path.dirname(root), os.path.basename(root) + "-worktrees")
+    if stamp is None:
+        # 同一秒里开了两个（两台手机、连点）：名字后面加 -2、-3，不报「目录已存在」
+        stamp = first = time.strftime("%Y%m%d-%H%M%S")
+        n = 1
+        while os.path.exists(os.path.join(base, stamp)) or subprocess.run(
+                ["git", "-C", root, "show-ref", "--verify", "-q", "refs/heads/tars/" + stamp], **_no_window()).returncode == 0:
+            n += 1
+            stamp = "%s-%d" % (first, n)
+    branch = "tars/%s" % stamp
     path = os.path.join(base, stamp)
     if os.path.exists(path):
         raise RuntimeError("目录已存在：%s" % path)
@@ -11028,6 +11570,456 @@ def _trace_file(path, normalize):
     tracer.used = time.time()
     tracer.refresh()
     return tracer
+
+
+# ---------------------------------------------------------------------------
+# 上下文构成（11-26，对话页上下文百分比那颗胶囊点开）：现在的上下文被什么占着、这段上下文里谁最费钱。
+# 只看最近一次压缩之后（压缩前的已经不在上下文里）。总量是 Claude 报的真实用量（最后一次请求的输入 + 输出）；
+# 第一次请求的输入减去它之前的对话内容 = 系统提示、工具定义、CLAUDE.md 与记忆这些固定开销；
+# 其余按每块内容的字数估 token（中文一字约 1 个、其余约 3.6 字符 1 个），再按比例缩放到真实总量，所以是估算。
+# 花费：一块内容进了上下文以后，之后每次请求都要再读一遍（读缓存 0.1 倍）、写进缓存那次 1.25 倍；模型写出来的另算输出 5 倍。
+# 按这个把这段上下文的花费摊到每一块上；会话写过 cost-state（Claude Code 记的实际花费）就换算成美元，没有就只给占比。
+# ---------------------------------------------------------------------------
+
+CONTEXT_KINDS = ("system", "summary", "you", "reminder", "reply", "thinking", "edit", "read", "bash", "search", "web", "agent", "mcp",
+                 "image", "other_tool")
+_CONTEXT_CACHE = {}   # path -> (signature, reply)
+
+
+def _est_tokens(text):
+    if not text:
+        return 0
+    cjk = len(re.findall(r"[　-鿿가-힯＀-￯]", text))
+    return int(cjk + (len(text) - cjk) / 3.6) + 1
+
+
+def _context_tool_kind(name):
+    low = (name or "").lower()
+    if low in ("read", "notebookread"):
+        return "read"
+    if low in _STAGE_EDIT_TOOLS:
+        return "edit"
+    if low in ("bash", "bashoutput", "shell", "powershell", "killshell", "taskoutput"):
+        return "bash"
+    if low in ("grep", "glob", "ls", "toolsearch"):
+        return "search"
+    if low in ("webfetch", "websearch"):
+        return "web"
+    if low in ("task", "agent"):
+        return "agent"
+    if low.startswith("mcp__"):
+        return "mcp"
+    return "other_tool"
+
+
+def _context_user_kind(text, entry):
+    """用户那一侧的文字：你自己打的字，还是钩子、技能、后台任务塞进来的提醒（<system-reminder>、<task-notification>……）"""
+    head = (text or "").lstrip()[:40]
+    if entry.get("isMeta") or head.startswith(("<system-reminder", "<task-notification", "<local-command", "<command-",
+                                                "<user-prompt-submit-hook", "Caveat:", "[Request interrupted")):
+        return "reminder"
+    return "you"
+
+
+def _block_text(content):
+    """tool_result / 用户消息的 content → (文字, 图片张数)"""
+    if isinstance(content, str):
+        return content, 0
+    text, images = [], 0
+    for part in content if isinstance(content, list) else []:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            text.append(part.get("text") or "")
+        elif part.get("type") == "image":
+            images += 1
+        elif part.get("type") == "tool_reference":
+            text.append(part.get("tool_name") or "")
+    return "\n".join(text), images
+
+
+def session_context(path):
+    """上下文构成：{context, window, baseline, parts[{k, tokens, count, share}], top[{k, label, tokens, share}], costUSD, ...}"""
+    try:
+        signature = (os.path.getsize(path), os.path.getmtime(path))
+    except OSError:
+        return {"unsupported": True}
+    hit = _CONTEXT_CACHE.get(path)
+    if hit and hit[0] == signature:
+        return hit[1]
+    # 先找最后一次压缩在哪（只看原文，不解析），从那里开始解析
+    start, rate = 0, None
+    try:
+        with open(path, "rb") as handle:
+            offset = 0
+            for raw in handle:
+                if b'"compact_boundary"' in raw:
+                    start = offset
+                elif b'"cost-state"' in raw[:60]:
+                    entry = parse_line(raw)
+                    rows = [(info.get("costUSD"), usage_weight(info.get("inputTokens") or 0, info.get("outputTokens") or 0,
+                                                              info.get("cacheReadInputTokens") or 0,
+                                                              info.get("cacheCreationInputTokens") or 0))
+                            for info in ((entry or {}).get("modelUsage") or {}).values() if isinstance(info, dict)]
+                    cost = sum(c for c, _ in rows if isinstance(c, (int, float)))
+                    weight = sum(w for _, w in rows)
+                    if weight > 0 and cost > 0:
+                        rate = cost / weight
+                offset += len(raw)
+    except OSError:
+        return {"unsupported": True}
+    blocks = []          # [kind, tokens, label, call_index_entered, output?, tool_use id]
+    calls = []           # 每次请求（按 message.id 去重）：(输入总量, 输出, 时刻)
+    seen_calls = {}
+    tools = {}           # tool_use id → (name, brief)
+    model, compacted_at = None, None
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(start)
+            for raw in handle:
+                entry = parse_line(raw)
+                if not isinstance(entry, dict) or entry.get("isSidechain"):
+                    continue
+                etype = entry.get("type")
+                if etype == "system" and entry.get("subtype") == "compact_boundary":
+                    blocks, calls, seen_calls, compacted_at = [], [], {}, parse_ts(entry.get("timestamp"))
+                    continue
+                message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+                if etype == "assistant":
+                    usage = message.get("usage") if isinstance(message.get("usage"), dict) else None
+                    if message.get("model") == "<synthetic>":
+                        continue
+                    mid = message.get("id") or entry.get("uuid")
+                    if usage and mid not in seen_calls:
+                        seen_calls[mid] = len(calls)
+                        calls.append([sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                                                             "cache_creation_input_tokens")),
+                                      int(usage.get("output_tokens") or 0), parse_ts(entry.get("timestamp"))])
+                        model = message.get("model") or model
+                    elif usage and mid in seen_calls:
+                        calls[seen_calls[mid]][1] = max(calls[seen_calls[mid]][1], int(usage.get("output_tokens") or 0))
+                    index = seen_calls.get(mid, len(calls) - 1)
+                    for block in message.get("content") or []:
+                        if not isinstance(block, dict):
+                            continue
+                        btype = block.get("type")
+                        if btype == "text" and (block.get("text") or "").strip():
+                            blocks.append(["reply", _est_tokens(block["text"]), None, index + 1, True, None])
+                        elif btype == "thinking" and (block.get("thinking") or "").strip():
+                            blocks.append(["thinking", _est_tokens(block["thinking"]), None, index + 1, True, None])
+                        elif btype == "tool_use":
+                            # 工具的参数（Edit 的新旧代码、Write 的整个文件）也占上下文：算进这个工具那一类
+                            name = block.get("name") or "tool"
+                            brief = tool_brief(name, block.get("input"))
+                            tools[block.get("id")] = (name, brief)
+                            size = _est_tokens(json.dumps(block.get("input"), ensure_ascii=False))
+                            blocks.append([_context_tool_kind(name), size, brief, index + 1, True, block.get("id")])
+                elif etype == "user":
+                    content = message.get("content")
+                    if entry.get("isCompactSummary"):
+                        text, _ = _block_text(content)
+                        blocks.append(["summary", _est_tokens(text), None, len(calls), False, None])
+                        continue
+                    if isinstance(content, str):
+                        if content.strip():
+                            blocks.append([_context_user_kind(content, entry), _est_tokens(content), None, len(calls), False, None])
+                        continue
+                    for block in content if isinstance(content, list) else []:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "tool_result":
+                            name, brief = tools.get(block.get("tool_use_id"), ("tool", "tool"))
+                            text, images = _block_text(block.get("content"))
+                            if text:
+                                blocks.append([_context_tool_kind(name), _est_tokens(text), brief, len(calls), False,
+                                               block.get("tool_use_id")])
+                            for _ in range(images):
+                                blocks.append(["image", 1600, brief, len(calls), False, block.get("tool_use_id")])
+                        elif block.get("type") == "text" and (block.get("text") or "").strip():
+                            blocks.append([_context_user_kind(block["text"], entry), _est_tokens(block["text"]), None, len(calls),
+                                           False, None])
+                        elif block.get("type") == "image":
+                            blocks.append(["image", 1600, None, len(calls), False, None])
+    except OSError:
+        return {"unsupported": True}
+    if not calls:
+        reply = {"context": 0, "window": context_window(model, 0), "parts": [], "top": [], "calls": 0, "compactedAt": compacted_at}
+        _CONTEXT_CACHE[path] = (signature, reply)
+        return reply
+    now_total = calls[-1][0] + calls[-1][1]
+    # 固定开销：第一次请求的输入减去它之前进来的内容
+    before_first = sum(b[1] for b in blocks if b[3] <= 0 and not b[4])
+    baseline = max(0, calls[0][0] - before_first)
+    if baseline > now_total:
+        baseline = calls[0][0]
+    est = sum(b[1] for b in blocks)
+    scale = max(0.3, min(3.0, (now_total - baseline) / float(est))) if est else 1.0
+    n_calls = len(calls)
+    # 花费（加权 token）：进上下文以后每次请求读一遍；第一次写缓存；模型写出来的算输出
+    def weight_of(tokens, entered, output):
+        later = max(0, n_calls - entered)
+        w = tokens * (1.25 + 0.1 * max(0, later - 1)) if later else 0.0
+        return w + (5.0 * tokens if output else 0.0)
+    base_weight = baseline * (1.25 + 0.1 * max(0, n_calls - 1))
+    parts = {"system": {"k": "system", "tokens": baseline, "count": 1, "w": base_weight}}
+    top = []
+    seen_tools = set()
+    for kind, tokens, label, entered, output, tool_id in blocks:
+        tokens = int(tokens * scale)
+        w = weight_of(tokens, entered, output)
+        row = parts.setdefault(kind, {"k": kind, "tokens": 0, "count": 0, "w": 0.0})
+        row["tokens"] += tokens
+        if tool_id is None or tool_id not in seen_tools or kind == "image":
+            row["count"] += 1   # 一次工具调用（参数 + 结果）算一次；图片一张算一次
+        if tool_id is not None:
+            seen_tools.add(tool_id)
+        row["w"] += w
+        if label and tool_id:
+            top.append({"k": kind, "label": label[:120], "tokens": tokens, "w": w, "id": tool_id})
+    # 同一个工具调用的参数和结果并成一项（Edit 的参数、Read 的结果）
+    merged = {}
+    for row in top:
+        key = row["id"]
+        if key in merged:
+            merged[key]["tokens"] += row["tokens"]
+            merged[key]["w"] += row["w"]
+        else:
+            merged[key] = dict(row)
+    total_w = sum(p["w"] for p in parts.values()) or 1.0
+    spent = sum(usage_weight(0, c[1], 0, 0) for c in calls) + sum(c[0] for c in calls) * 0.1   # 粗估这段的加权总量（给没写 cost-state 的会话）
+    out_parts = sorted(({"k": p["k"], "tokens": p["tokens"], "count": p["count"], "share": round(p["w"] / total_w, 4)}
+                        for p in parts.values() if p["tokens"] > 0), key=lambda p: -p["tokens"])
+    out_top = sorted(({"k": r["k"], "label": r["label"], "tokens": r["tokens"], "share": round(r["w"] / total_w, 4), "toolId": r["id"]}
+                      for r in merged.values()), key=lambda r: -r["tokens"])[:12]
+    reply = {"context": now_total, "window": context_window(model, now_total), "baseline": baseline, "calls": n_calls,
+             "compactedAt": compacted_at, "since": calls[0][2], "model": model, "parts": out_parts, "top": out_top,
+             "costUSD": round(total_w * rate, 4) if rate else None, "estimated": True,
+             "weight": int(total_w), "spentWeight": int(spent)}
+    _CONTEXT_CACHE[path] = (signature, reply)
+    if len(_CONTEXT_CACHE) > 16:
+        _CONTEXT_CACHE.pop(next(iter(_CONTEXT_CACHE)))
+    return reply
+
+
+# ---------------------------------------------------------------------------
+# 撤回某一轮起的文件改动（11-26）：用 Claude Code 自己记的文件快照（同 /rewind 的「只恢复代码」），不另打 Git 快照。
+# 记录里每句用户消息有一份 file-history-snapshot（那一刻已跟踪的文件各是哪一版备份）；这一轮里第一次改的文件
+# 另有一条 file-history-delta（改之前的样子，backupFileName 为空 = 这个文件是这一轮新建的）。备份在
+# <Claude 配置目录>/file-history/<会话>/<backupFileName>。「回到第 N 轮开始前」= 每个从这一轮起被跟踪的文件
+# 换回那一刻的样子：快照里有就用快照的，没有就用它第一次被改之前的那份（之后才第一次改的，那时还是那个样子）；新建的删掉。
+# 只认 Claude 用编辑工具改的文件：命令行里改的（sed、生成的文件、git 操作）快照里没有，撤不回，界面上写明。
+# 撤之前把这些文件现在的样子存一份到 DATA_DIR/rewind/<时刻>/，能「还原撤回」。
+# ---------------------------------------------------------------------------
+
+REWIND_DIR = os.path.join(DATA_DIR, "rewind")
+
+
+def _rewind_scan(path):
+    """→ (各轮 [{uuid, offset, ts, text}], 快照 {uuid: {相对路径: 备份}}, 增量 {uuid: {相对路径: 备份}}, cwd)"""
+    turns, snaps, deltas, cwd = [], {}, {}, None
+    offset = 0
+    try:
+        with open(path, "rb") as handle:
+            for raw in handle:
+                here = offset
+                offset += len(raw)
+                head = raw[:200]
+                if b'"file-history-snapshot"' in head:
+                    entry = parse_line(raw) or {}
+                    snap = entry.get("snapshot") if isinstance(entry.get("snapshot"), dict) else {}
+                    mid = snap.get("messageId") or entry.get("messageId")
+                    files = snap.get("trackedFileBackups") if isinstance(snap.get("trackedFileBackups"), dict) else {}
+                    if mid:
+                        if entry.get("isSnapshotUpdate"):
+                            snaps.setdefault(mid, {}).update(files)
+                        else:
+                            snaps[mid] = dict(files)
+                    continue
+                if b'"file-history-delta"' in head:
+                    entry = parse_line(raw) or {}
+                    mid, rel = entry.get("snapshotMessageId"), entry.get("trackingPath")
+                    if mid and rel and isinstance(entry.get("backup"), dict):
+                        deltas.setdefault(mid, {}).setdefault(rel, entry["backup"])
+                    continue
+                if b'"type":"user"' not in raw[:400] and b'"type": "user"' not in raw[:400]:
+                    continue
+                entry = parse_line(raw)
+                if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isSidechain") or entry.get("isMeta"):
+                    continue
+                cwd = entry.get("cwd") or cwd
+                content = (entry.get("message") or {}).get("content")
+                if isinstance(content, list):
+                    if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                        continue
+                    content = " ".join(b.get("text") or "" for b in content if isinstance(b, dict) and b.get("type") == "text")
+                if not isinstance(content, str) or not content.strip() or entry.get("isCompactSummary"):
+                    continue
+                turns.append({"uuid": entry.get("uuid"), "offset": here, "ts": parse_ts(entry.get("timestamp")),
+                              "text": content.strip()[:200]})
+    except OSError:
+        pass
+    return turns, snaps, deltas, cwd
+
+
+def _rewind_target(rel, backup, cwd):
+    parent = backup.get("realParentDir") if isinstance(backup, dict) else None
+    if parent:
+        return os.path.join(parent, os.path.basename(rel))
+    return rel if os.path.isabs(rel) else os.path.join(cwd or "", rel)
+
+
+def rewind_plan(path, session_id, item_offset):
+    """撤回「对话记录里偏移为 item_offset 的那句用户消息」起的改动 → {files: [{path, action: restore/delete/same}], ...}"""
+    import difflib
+    turns, snaps, deltas, cwd = _rewind_scan(path)
+    try:
+        item_offset = int(item_offset)
+    except (TypeError, ValueError):
+        return {"error": "看不懂要撤回哪一轮"}
+    index = next((i for i, t in enumerate(turns) if t["offset"] == item_offset), None)
+    if index is None:
+        return {"error": "这条消息不是一轮的开头（只能从你发的消息撤回）"}
+    turn = turns[index]
+    later = [t["uuid"] for t in turns[index:]]
+    if turn["uuid"] not in snaps and not any(u in snaps or u in deltas for u in later):
+        return {"files": [], "turn": turn, "note": "这一轮之后 Claude 没有用编辑工具改过文件"}
+    history = os.path.join(claude_config_dir(), "file-history", session_id)
+    base = snaps.get(turn["uuid"], {})
+    first_seen = {}
+    for uuid in later:
+        for rel, backup in list(deltas.get(uuid, {}).items()) + list(snaps.get(uuid, {}).items()):
+            first_seen.setdefault(rel, (uuid, backup))
+    # 这一轮快照里有的，用快照的那版；这一轮或之后才第一次改的，用第一次改之前的那份
+    wanted = {}
+    for rel in set(first_seen) | set(base):
+        if rel in base:
+            backup = base[rel]
+        elif rel in deltas.get(turn["uuid"], {}):
+            backup = deltas[turn["uuid"]][rel]
+        else:
+            # 这一轮之后才第一次改：第一次改之前那份（delta 记的；老版本 Claude Code 只有快照，快照记的是那一轮开始时的版本，
+            # 它之前没被跟踪过 = 没被编辑工具改过，那一版也就是这一轮开始时的样子）
+            backup = first_seen[rel][1]
+        wanted[rel] = backup
+    files, changed = [], False
+    for rel in sorted(wanted):
+        backup = wanted[rel] if isinstance(wanted[rel], dict) else {}
+        target = _rewind_target(rel, backup, cwd)
+        name = backup.get("backupFileName")
+        row = {"path": target, "rel": rel}
+        exists = os.path.exists(target)
+        if not name:
+            row["action"] = "delete" if exists else "same"
+        else:
+            source = os.path.join(history, name)
+            if not os.path.isfile(source):
+                row["action"], row["missing"] = "skip", True
+            else:
+                try:
+                    with open(source, "rb") as a:
+                        old = a.read()
+                    now = open(target, "rb").read() if exists else None
+                except OSError:
+                    old, now = b"", None
+                if now == old:
+                    row["action"] = "same"
+                else:
+                    row["action"] = "restore"
+                    if now is not None:
+                        try:
+                            oldl = old.decode("utf-8").splitlines()
+                            nowl = now.decode("utf-8").splitlines()
+                            diff = [l for l in difflib.unified_diff(nowl, oldl, lineterm="", n=0)
+                                    if not l.startswith(("---", "+++", "@@"))]
+                            row["added"] = sum(1 for l in diff if l.startswith("+"))
+                            row["removed"] = sum(1 for l in diff if l.startswith("-"))
+                        except UnicodeDecodeError:
+                            row["binary"] = True
+                    else:
+                        row["recreate"] = True
+        changed = changed or row["action"] in ("restore", "delete")
+        files.append(row)
+    return {"files": files, "turn": turn, "turnIndex": index + 1, "turns": len(turns), "cwd": cwd,
+            "nothing": not changed}
+
+
+def rewind_apply(path, session_id, item_offset):
+    """照 rewind_plan 把文件换回去；先把现在的样子存到 REWIND_DIR/<时刻>/（manifest.json 记着原路径），能还原"""
+    plan = rewind_plan(path, session_id, item_offset)
+    if plan.get("error") or plan.get("nothing"):
+        return plan
+    history = os.path.join(claude_config_dir(), "file-history", session_id)
+    stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + session_id[:8]
+    folder = os.path.join(REWIND_DIR, stamp)
+    os.makedirs(folder, exist_ok=True)
+    manifest = {"sessionId": session_id, "at": int(time.time() * 1000), "turn": plan["turn"], "files": []}
+    done, failed = 0, []
+    turns, snaps, deltas, _ = _rewind_scan(path)
+    for row in plan["files"]:
+        if row["action"] not in ("restore", "delete"):
+            continue
+        target = row["path"]
+        keep = None
+        try:
+            if os.path.exists(target):
+                keep = "%03d-%s" % (len(manifest["files"]), os.path.basename(target))
+                shutil.copy2(target, os.path.join(folder, keep))
+            if row["action"] == "delete":
+                os.remove(target)
+            else:
+                plan_backup = _rewind_backup_name(plan, row, snaps, deltas, turns)
+                os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+                shutil.copyfile(os.path.join(history, plan_backup), target)
+            manifest["files"].append({"path": target, "saved": keep, "action": row["action"]})
+            done += 1
+        except OSError as exc:
+            failed.append({"path": target, "error": str(exc)})
+    _write_json(os.path.join(folder, "manifest.json"), manifest)
+    log("撤回会话 %s 第 %s 轮起的改动：%d 个文件（备份在 %s）" % (session_id[:8], plan.get("turnIndex"), done, folder))
+    return {"done": done, "failed": failed, "undo": stamp, "files": plan["files"], "turnIndex": plan.get("turnIndex")}
+
+
+def _rewind_backup_name(plan, row, snaps, deltas, turns):
+    """rewind_plan 算出来的那一版备份文件名（再按同样的规则查一遍，免得把备份名塞进给手机的计划里）"""
+    turn_uuid = plan["turn"]["uuid"]
+    rel = row["rel"]
+    base = snaps.get(turn_uuid, {})
+    if rel in base:
+        return base[rel].get("backupFileName")
+    if rel in deltas.get(turn_uuid, {}):
+        return deltas[turn_uuid][rel].get("backupFileName")
+    start = next(i for i, t in enumerate(turns) if t["uuid"] == turn_uuid)
+    for t in turns[start:]:
+        for source in (deltas.get(t["uuid"], {}), snaps.get(t["uuid"], {})):
+            if rel in source:
+                return source[rel].get("backupFileName")
+    raise OSError("找不到 %s 的备份" % rel)
+
+
+def rewind_undo(stamp):
+    """还原一次撤回：把撤回前存下的样子放回去（撤回时删掉的、改回的都恢复；撤回时新建的再删掉）"""
+    if not re.match(r"^[0-9]{8}-[0-9]{6}-[A-Za-z0-9-]+$", stamp or ""):
+        return {"error": "看不懂要还原哪一次"}
+    folder = os.path.join(REWIND_DIR, stamp)
+    try:
+        with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, ValueError):
+        return {"error": "这次撤回的备份已经不在了"}
+    done, failed = 0, []
+    for row in manifest.get("files") or []:
+        try:
+            if row.get("saved"):
+                os.makedirs(os.path.dirname(row["path"]) or ".", exist_ok=True)
+                shutil.copy2(os.path.join(folder, row["saved"]), row["path"])
+            elif os.path.exists(row["path"]):
+                os.remove(row["path"])   # 撤回时是新建出来的（原来没有）
+            done += 1
+        except OSError as exc:
+            failed.append({"path": row["path"], "error": str(exc)})
+    if not failed:
+        shutil.rmtree(folder, ignore_errors=True)
+    return {"done": done, "failed": failed}
 
 
 def session_trace(path, normalize, title=None, busy=None, expand=None, subagents=True, rev=None):
@@ -17344,6 +18336,7 @@ BROWSER_GONE_GRACE = 120        # 会话结束后多久关
 BROWSER_MAX = int(os.environ.get("CCPULSE_BROWSER_MAX") or 4)   # 同时开着的上限（再按可用内存往下压）
 BROWSER_EST_MB = 500            # 估算每个浏览器占多少
 BROWSER_LOW_MEM_MB = 1024       # 可用内存低于这个：空闲的马上回收、不开新的（除非一个都没开）
+DEVLOG_MAX = 200               # 每个浏览器记最近多少条控制台、网络错误
 BROWSER_LEASE = 15              # 看画面的客户端每 5 秒续一次，15 秒没续就当没人看
 BROWSER_QUEUE_WAIT = 600        # browser cdp 排队最多等多久
 # 画面档位：缩略（小窗）/ 大画面。宽度上限、每秒帧数上限、JPEG 质量
@@ -17705,6 +18698,46 @@ class BrowserLink:
         self.sent_seq = 0
         self.alive = True
         self.closed = threading.Event()
+        self.devlog = collections.deque(maxlen=DEVLOG_MAX)   # [{t, kind, level, text, url}]
+        self.devcount = {"error": 0, "warn": 0}              # 这一页（主框架上次跳转以来）的错误、警告数
+        self.requests = collections.OrderedDict()            # requestId → url（失败的请求只给编号）
+
+    # --- 控制台与网络 ---
+    def _devlog(self, kind, level, text, url=""):
+        self.devlog.append({"t": int(time.time() * 1000), "kind": kind, "level": level, "text": (text or "")[:500],
+                            "url": (url or "")[:300]})
+        before = dict(self.devcount)
+        self.devcount[level] = self.devcount.get(level, 0) + 1
+        if before.get("error", 0) == 0 and level == "error":
+            self.pool.changed(self.sid)   # 第一个错误：小窗上马上标出来
+
+    def _dev_event(self, method, params):
+        if method == "Runtime.consoleAPICalled" and params.get("type") in ("error", "warning", "assert"):
+            text = " ".join(str(a.get("value") if "value" in a else a.get("description") or a.get("type") or "")
+                            for a in (params.get("args") or [])[:6])
+            frame = ((params.get("stackTrace") or {}).get("callFrames") or [{}])[0]
+            self._devlog("console", "warn" if params.get("type") == "warning" else "error", text, frame.get("url"))
+        elif method == "Runtime.exceptionThrown":
+            detail = params.get("exceptionDetails") or {}
+            text = ((detail.get("exception") or {}).get("description") or detail.get("text") or "").split("\n")[0]
+            self._devlog("exception", "error", text, detail.get("url"))
+        elif method == "Log.entryAdded":
+            entry = params.get("entry") or {}
+            if entry.get("level") in ("error", "warning") and entry.get("source") != "console-api":
+                self._devlog("log", "warn" if entry["level"] == "warning" else "error", entry.get("text"), entry.get("url"))
+        elif method == "Network.requestWillBeSent":
+            self.requests[params.get("requestId")] = ((params.get("request") or {}).get("url") or "")
+            while len(self.requests) > 500:
+                self.requests.popitem(last=False)
+        elif method == "Network.responseReceived":
+            response = params.get("response") or {}
+            status = int(response.get("status") or 0)
+            if status >= 400:
+                self._devlog("network", "error" if status >= 500 or params.get("type") in ("Document", "XHR", "Fetch") else "warn",
+                             "%d %s" % (status, response.get("statusText") or ""), response.get("url"))
+        elif method == "Network.loadingFailed":
+            if not params.get("canceled") and params.get("errorText") != "net::ERR_ABORTED":
+                self._devlog("network", "error", params.get("errorText") or "请求失败", self.requests.get(params.get("requestId")))
 
     # --- CDP ---
     def connect(self):
@@ -17790,6 +18823,10 @@ class BrowserLink:
         return created or not old or old["url"] != row["url"]
 
     def _event(self, method, params, session):
+        if method and method.startswith(("Runtime.", "Log.", "Network.")):
+            if session == self.page_session:
+                self._dev_event(method, params)
+            return
         if method == "Page.screencastFrame":
             self.post("Page.screencastFrameAck", {"sessionId": params.get("sessionId")}, session)
             if session != self.page_session:
@@ -17814,6 +18851,10 @@ class BrowserLink:
             return
         if method == "Page.frameNavigated" and session == self.page_session \
                 and not (params.get("frame") or {}).get("parentId"):
+            self.devcount = {"error": 0, "warn": 0}   # 换了一页：小窗上的错误数从这一页算起（记录还留着）
+            self.devlog.append({"t": int(time.time() * 1000), "kind": "nav", "level": "info", "text": "",
+                                "url": ((params.get("frame") or {}).get("url") or "")[:300]})
+            self.pool.changed(self.sid)
             self.recast()
             return
         if method in ("Page.domContentEventFired", "Page.loadEventFired", "Page.navigatedWithinDocument") \
@@ -17856,6 +18897,9 @@ class BrowserLink:
             session = self.call("Target.attachToTarget", {"targetId": tid, "flatten": True}).get("sessionId")
             self.page_session = session
             self.post("Page.enable", None, session)
+            # 控制台、网页报错、失败的网络请求（11-26）：存最近 DEVLOG_MAX 条，小窗上标出几个错误、点开能看；agent 用 browser logs 读
+            for method in ("Runtime.enable", "Log.enable", "Network.enable"):
+                self.post(method, None, session)
             self._refresh_title(session)   # 附着前已经加载完的网页收不到加载事件
             if self.casting:
                 level, self.casting = self.casting, None
@@ -18299,6 +19343,10 @@ class BrowserPool:
                     result = {"asked": True}
                 elif op == "status":
                     result = self.status()
+                elif op == "devlog":
+                    if not self.items.get(sid):
+                        raise RuntimeError("这个会话还没有打开浏览器")
+                    result = self.handle({"op": "devlog", "sessionId": sid})
                 else:
                     raise RuntimeError("不认识的操作：%s" % op)
                 _write_json(os.path.join(folder, rid + ".ok"), result)
@@ -18518,6 +19566,8 @@ class BrowserPool:
             if actions:
                 info["last"] = actions[-1]["text"]
                 info["actions"] = len(actions)
+            if link and (link.devcount.get("error") or link.devcount.get("warn")):
+                info["errors"], info["warns"] = link.devcount.get("error", 0), link.devcount.get("warn", 0)
             if sid in self.asks:
                 info["ask"] = self.asks[sid]["note"] or "请接管浏览器"
             snap["browser"] = info
@@ -18614,6 +19664,14 @@ class BrowserPool:
             return {}
         if op == "actions":
             return {"actions": self.actions(sid)}
+        if op == "devlog":
+            # 控制台与网络（小窗点开的「控制台」页、agent 的 browser logs）：最近的在后面；since 之后的
+            item = self.items.get(sid) or {}
+            link = item.get("link")
+            since = int(request.get("since") or 0)
+            rows = [r for r in (list(link.devlog) if link else []) if r["t"] > since]
+            return {"entries": rows[-DEVLOG_MAX:], "errors": link.devcount.get("error", 0) if link else 0,
+                    "warns": link.devcount.get("warn", 0) if link else 0}
         if op == "recordings":
             return {"recordings": self.recordings(sid)}
         if op == "recording":
@@ -19040,6 +20098,981 @@ def sync_browser_env(enabled):
 BROWSERS = BrowserPool()
 
 
+# ---------------------------------------------------------------------------
+# 模拟器调度（11-26）：agent 要用 iOS 模拟器 / 安卓模拟器时经 Kiteline 申请（device acquire），画面在会话的浏览器小窗里看、能接管。
+# 用户定的规矩：模拟器很吃内存（iOS 约 1.5 GB、安卓约 3 GB），一定要调度好——
+#   · 排队：同时开着的不超过上限，满了按到达顺序排队，前面的释放了轮到下一个；
+#   · 上限可在设置里改，默认「自动」= 按这台电脑的总内存给的建议值（device_suggest）；
+#   · 每开一个前看当时的可用内存：开完剩余低于 DEVICE_LOW_MEM_MB 就不开（先回收空着的，没有就排队），不会内存快满了还开；
+#   · 回收：会话结束 2 分钟后、或持有的会话 DEVICE_IDLE 分钟没再用（没人看画面）就释放；释放后没人接手的
+#     留 DEVICE_WARM 秒（同一个 agent 马上又要时不用重新开机），再关掉；可用内存不足时空着的马上关；
+#   · 只关 Kiteline 开的、和 agent 在会话里自己开起来的（看到它开机命令之后才开机的）；用户自己开的、之前就开着的一律不动；
+#   · 画面只在有人看时截（每次截屏是带超时的短命令，不留常驻进程），没人看就停。
+# 状态在 DEVICE_DIR/state.json，watcher 重启后接着管。
+# ---------------------------------------------------------------------------
+
+DEVICE_DIR = os.path.join(DATA_DIR, "devices")
+DEVICE_EST_MB = {"ios": 1500, "android": 3000}   # 估算每个占多少（安卓按 2 GB 内存的镜像 + 模拟器本身）
+DEVICE_LOW_MEM_MB = 2048        # 开完一个以后可用内存至少还剩这么多
+DEVICE_IDLE = int(float(os.environ.get("CCPULSE_DEVICE_IDLE") or 30) * 60)   # 持有的会话多久没用（也没人看）就释放
+DEVICE_WARM = 180               # 释放后没人接手：留几秒再关
+DEVICE_GONE_GRACE = 120         # 会话结束多久后释放
+DEVICE_QUEUE_WAIT = 900         # 排队最多等多久
+DEVICE_BOOT_TIMEOUT = 240
+DEVICE_LEVELS = {"thumb": (420, 1.0), "full": (900, 2.5)}   # 画面：宽度、每秒几帧（截屏一次约 0.4 秒，再快也截不出来）
+
+
+def device_tools():
+    """这台电脑上能用的：xcrun（iOS 模拟器，只有 Mac）、adb / emulator（安卓）、axe（iOS 模拟器的点按，可选）"""
+    found = {}
+    if sys.platform == "darwin" and shutil.which("xcrun"):
+        found["xcrun"] = shutil.which("xcrun")
+    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or ""
+    candidates = [sdk, os.path.join(HOME, "Library", "Android", "sdk"), os.path.join(HOME, "Android", "Sdk"),
+                  os.path.join(os.environ.get("LOCALAPPDATA") or "", "Android", "Sdk")]
+    for name, sub in (("adb", "platform-tools"), ("emulator", "emulator")):
+        path = shutil.which(name)
+        for root in candidates:
+            if path or not root:
+                continue
+            for exe in (name, name + ".exe"):
+                probe = os.path.join(root, sub, exe)
+                if os.path.isfile(probe):
+                    path = probe
+                    break
+        if path:
+            found[name] = path
+    for name in ("axe", "idb"):
+        path = shutil.which(name) or next((p for p in (os.path.join(HOME, ".ccpulse", "bin", name), "/opt/homebrew/bin/" + name,
+                                                        "/usr/local/bin/" + name) if os.path.isfile(p)), None)
+        if path:
+            found[name] = path
+    return found
+
+
+def _mem_total_mb():
+    probe = _SYS_PROBES.get("mem")
+    try:
+        return probe()[0] / 1048576.0 if probe else None
+    except Exception:
+        return None
+
+
+def device_suggest(total_mb=None):
+    """按总内存建议最多同时开几个模拟器：给系统、编辑器、agent 留 8 GB，其余按每个约 2.5 GB 算，至少 1、最多 6"""
+    total_mb = total_mb if total_mb is not None else _mem_total_mb()
+    if not total_mb:
+        return 2
+    return max(1, min(6, int((total_mb - 8192) // 2560)))
+
+
+def _run_quiet(args, timeout=10, **kw):
+    """跑一条短命令（超时会被结束，不留子进程）→ (退出码, 输出)"""
+    try:
+        result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout,
+                                stdin=subprocess.DEVNULL, **kw)
+        return result.returncode, result.stdout
+    except subprocess.TimeoutExpired:
+        return -9, b""
+    except OSError as exc:
+        return -1, str(exc).encode("utf-8")
+
+
+def _png_size(data):
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
+        return struct.unpack(">II", data[16:24])
+    return None
+
+
+def _emulator_pid(pid):
+    """这个进程号还是不是安卓模拟器（进程号可能被别的程序复用了：那就不能去结束它）"""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/%d/cmdline" % pid, "rb") as handle:
+                cmd = handle.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        elif IS_WINDOWS:
+            # 映像名（emulator.exe / qemu-system-x86_64.exe）；查不到就是这个进程号已经没了
+            cmd = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/FO", "CSV", "/NH"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, timeout=5, creationflags=0x08000000).stdout.decode("utf-8", "replace")
+        else:
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 timeout=5).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "emulator" in cmd or "qemu-system" in cmd
+
+
+class DevicePool:
+    """模拟器的调度器（见本节开头）"""
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.items = {}          # 设备 key（ios:<udid> / android:<serial>）→ 条目
+        self.live = {}           # 在跑的会话 id → 对话记录路径
+        self.gone_at = {}
+        self.queue = []          # 排队的申请 rid（按到达顺序）
+        self.max = "auto"
+        self.tools = {}
+        self.tools_at = 0.0
+        self.booted = {}         # 上次看到在开机状态的设备 key → {name, since}（认 agent 自己开的）
+        self.booted_at = 0.0
+        self.booted_seen = False
+        self.scan_cache = {}     # 会话 id → (记录大小, [(时刻, 设备 key 或 "ios:*"…, 是开机命令)])
+        self.runner = None
+        self.last_state = None
+        self.failed = {}         # 会话 id → (时刻, 种类, 原因)：刚开机失败的，一分钟内再要直接报错，不反复开机
+        self.reaping = {}        # 正在关的安卓模拟器进程号 → 最迟等到什么时候（记进状态，watcher 重启后接着关）
+
+    # --- 设置 ---
+    def limit(self):
+        return self.max if isinstance(self.max, int) and self.max > 0 else device_suggest()
+
+    def config(self, request=None):
+        if request:
+            value = request.get("max")
+            if value in ("auto", "", None, 0, "0"):
+                self.max = "auto"
+            else:
+                self.max = max(1, min(16, int(value)))
+            if request.get("idle"):
+                global DEVICE_IDLE
+                DEVICE_IDLE = max(300, int(float(request["idle"]) * 60))
+            _write_json(os.path.join(DEVICE_DIR, "config.json"), {"max": self.max, "idle": DEVICE_IDLE // 60})
+        total = _mem_total_mb()
+        return {"max": self.max, "limit": self.limit(), "suggest": device_suggest(total), "idle": DEVICE_IDLE // 60,
+                "totalMB": int(total) if total else None, "freeMB": int(_free_mem_mb() or 0) or None,
+                "est": DEVICE_EST_MB, "tools": sorted(self.available_tools())}
+
+    def available_tools(self):
+        if time.time() - self.tools_at > 300:
+            self.tools, self.tools_at = device_tools(), time.time()
+        return self.tools
+
+    # --- 列设备 ---
+    def list_ios(self):
+        xcrun = self.available_tools().get("xcrun")
+        if not xcrun:
+            return []
+        code, out = _run_quiet([xcrun, "simctl", "list", "devices", "available", "-j"], timeout=20)
+        if code != 0:
+            return []
+        try:
+            data = json.loads(out.decode("utf-8", "replace"))
+        except ValueError:
+            return []
+        rows = []
+        for runtime, devices in (data.get("devices") or {}).items():
+            version = re.findall(r"(\d+)-(\d+)", runtime)
+            for dev in devices or []:
+                rows.append({"kind": "ios", "id": dev.get("udid"), "name": dev.get("name"), "state": dev.get("state"),
+                             "type": dev.get("deviceTypeIdentifier") or "", "runtime": runtime,
+                             "ver": tuple(int(x) for x in version[-1]) if version else (0, 0)})
+        return rows
+
+    def list_android(self):
+        tools = self.available_tools()
+        rows = []
+        if tools.get("emulator"):
+            code, out = _run_quiet([tools["emulator"], "-list-avds"], timeout=20)
+            if code == 0:
+                for name in out.decode("utf-8", "replace").split():
+                    if name and not name.startswith(("INFO", "WARNING")):
+                        rows.append({"kind": "android", "avd": name, "name": name, "state": "Shutdown"})
+        if tools.get("adb"):
+            for serial, avd in self.android_running().items():
+                hit = next((r for r in rows if r.get("avd") == avd), None)
+                if hit:
+                    hit.update({"id": serial, "state": "Booted"})
+                else:
+                    rows.append({"kind": "android", "id": serial, "avd": avd, "name": avd or serial, "state": "Booted"})
+        return rows
+
+    def android_running(self):
+        """在跑的安卓模拟器：序列号 → AVD 名"""
+        adb = self.available_tools().get("adb")
+        if not adb:
+            return {}
+        code, out = _run_quiet([adb, "devices"], timeout=10)
+        found = {}
+        for line in out.decode("utf-8", "replace").splitlines()[1:] if code == 0 else []:
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device" and parts[0].startswith("emulator-"):
+                code2, name = _run_quiet([adb, "-s", parts[0], "emu", "avd", "name"], timeout=5)
+                found[parts[0]] = (name.decode("utf-8", "replace").split("\n")[0].strip() if code2 == 0 else "") or parts[0]
+        return found
+
+    def booted_now(self):
+        """现在开着的：设备 key → 名字（10 秒最多查一次）"""
+        now = time.time()
+        if now - self.booted_at < 10:
+            return {k: v["name"] for k, v in self.booted.items()}
+        self.booted_at = now
+        current = {}
+        for row in self.list_ios():
+            if row["state"] == "Booted":
+                current["ios:" + row["id"]] = row["name"]
+        for serial, avd in self.android_running().items():
+            current["android:" + serial] = avd
+        for key, name in current.items():
+            # fresh：是在我们看着的时候开机的（第一次查时已经开着的不算：那可能是用户自己开的）
+            self.booted.setdefault(key, {"name": name, "since": now, "fresh": self.booted_seen})
+        for key in list(self.booted):
+            if key not in current:
+                self.booted.pop(key)
+        self.booted_seen = True
+        return current
+
+    # --- 申请 / 释放 ---
+    def acquire(self, sid, kind, want=None):
+        """给会话一台模拟器 → (条目, None)；要排队 → (None, 原因)；出错抛异常"""
+        if kind not in ("ios", "android"):
+            raise RuntimeError("--kind 只能是 ios 或 android")
+        tools = self.available_tools()
+        if kind == "ios" and not tools.get("xcrun"):
+            raise RuntimeError("这台电脑上没有 iOS 模拟器（要 Mac 并装好 Xcode）")
+        if kind == "android" and not (tools.get("adb") and tools.get("emulator")):
+            raise RuntimeError("这台电脑上没找到安卓模拟器（要装 Android SDK 的 emulator 和 platform-tools，或设 ANDROID_HOME）")
+        with self.lock:
+            now = time.time()
+            # 已经拿着同一种的：直接给（指定了别的名字的除外）
+            for item in self.items.values():
+                if item["holder"] == sid and item["kind"] == kind and (not want or want in (item["id"], item["name"], item.get("avd"))):
+                    item["used"] = now
+                    return item, None
+            # 释放了还没关的：接着用（指定名字的要对得上）
+            for item in self.items.values():
+                if item["kind"] == kind and not item["holder"] and item["state"] == "ready" \
+                        and (not want or want in (item["id"], item["name"], item.get("avd"))):
+                    item.update(holder=sid, used=now, released=None)
+                    self.save()
+                    log("模拟器 %s 交给会话 %s（接着用，不用重新开机）" % (item["name"], sid[:8]))
+                    return item, None
+            running = [i for i in self.items.values() if i["state"] in ("ready", "booting")]
+            if len(running) >= self.limit():
+                spare = self._spare()
+                if spare:
+                    self.shutdown(spare, "腾出位置给排队的会话")
+                    return None, "正在关掉一台空着的模拟器腾位置"
+                return None, "模拟器已开满（%d/%d 台在用）" % (len(running), self.limit())
+            free = _free_mem_mb()
+            need = DEVICE_EST_MB[kind]
+            if free is not None and free - need < DEVICE_LOW_MEM_MB:
+                spare = self._spare()
+                if spare:
+                    self.shutdown(spare, "可用内存不够开新的（%d MB）" % free)
+                    return None, "可用内存不够，正在关掉一台空着的模拟器"
+                return None, "可用内存不够（剩 %d MB，再开一台约要 %d MB，至少要留 %d MB）" % (free, need, DEVICE_LOW_MEM_MB)
+            target = self._pick(kind, want)
+            key = "%s:%s" % (kind, target.get("id") or "avd-" + target["avd"])
+            if target.get("state") == "Booted":
+                # 已经开着（用户或别的程序开的）：借来用，但不归我们关
+                item = {"key": key, "kind": kind, "id": target.get("id"), "name": target["name"], "avd": target.get("avd"),
+                        "type": target.get("type"), "holder": sid, "started": now, "used": now, "state": "ready",
+                        "ours": False, "viewers": {}, "pid": None, "released": None}
+                self.items[key] = item
+                self.save()
+                log("模拟器 %s 已经开着，交给会话 %s（不是 Kiteline 开的，用完不关）" % (item["name"], sid[:8]))
+                return item, None
+            item = {"key": key, "kind": kind, "id": target.get("id"), "name": target["name"], "avd": target.get("avd"),
+                    "type": target.get("type"), "holder": sid, "started": now, "used": now, "state": "booting",
+                    "ours": True, "viewers": {}, "pid": None, "released": None}
+            self.items[key] = item
+        self._boot(item)
+        return item, None
+
+    def _pick(self, kind, want):
+        rows = self.list_ios() if kind == "ios" else self.list_android()
+        taken = {i["id"] for i in self.items.values() if i.get("id")} | {i.get("avd") for i in self.items.values() if i.get("avd")}
+        if want:
+            hit = next((r for r in rows if want in (r.get("id"), r.get("name"), r.get("avd"))), None)
+            if not hit:
+                raise RuntimeError("没找到名叫 %s 的%s" % (want, "iOS 模拟器" if kind == "ios" else "安卓模拟器（AVD）"))
+            if hit.get("id") in taken or (hit.get("avd") and hit.get("avd") in taken):
+                raise RuntimeError("%s 正被别的会话用着" % want)
+            return hit
+        free = [r for r in rows if r.get("id") not in taken and (not r.get("avd") or r["avd"] not in taken)]
+        if kind == "ios":
+            # 默认挑最新系统的 iPhone、关着的（开着的可能是用户在用的）
+            free = [r for r in free if "iPhone" in (r.get("type") or r.get("name") or "") and r["state"] != "Booted"]
+            free.sort(key=lambda r: r["ver"], reverse=True)
+        else:
+            free = [r for r in free if r["state"] != "Booted"]
+        if not free:
+            raise RuntimeError("没有空着的%s可用（都在用，或还没建）" % ("iPhone 模拟器" if kind == "ios" else "安卓模拟器（AVD）"))
+        return free[0]
+
+    def _boot(self, item):
+        def run():
+            try:
+                tools = self.available_tools()
+                if item["kind"] == "ios":
+                    code, out = _run_quiet([tools["xcrun"], "simctl", "boot", item["id"]], timeout=60)
+                    if code != 0 and b"Booted" not in out:
+                        raise RuntimeError(out.decode("utf-8", "replace").strip()[:200] or "开机失败")
+                    code, out = _run_quiet([tools["xcrun"], "simctl", "bootstatus", item["id"], "-b"], timeout=DEVICE_BOOT_TIMEOUT)
+                    if code != 0:
+                        raise RuntimeError("等开机超时")
+                else:
+                    port = self._free_emu_port()
+                    os.makedirs(DEVICE_DIR, exist_ok=True)
+                    logf = open(os.path.join(DEVICE_DIR, "emulator-%d.log" % port), "ab")
+                    # 无窗口、不放声音；新开进程组：关的时候连同子进程一起结束
+                    proc = subprocess.Popen([tools["emulator"], "-avd", item["avd"], "-port", str(port), "-no-window", "-no-audio",
+                                             "-no-boot-anim", "-no-snapshot-save"], stdout=logf, stderr=subprocess.STDOUT,
+                                            stdin=subprocess.DEVNULL, start_new_session=True)
+                    logf.close()
+                    item["pid"], item["id"] = proc.pid, "emulator-%d" % port
+                    new_key = "android:" + item["id"]
+                    with self.lock:
+                        self.items.pop(item["key"], None)
+                        item["key"] = new_key
+                        self.items[new_key] = item
+                    threading.Thread(target=proc.wait, daemon=True).start()   # 退出时收尸，不留僵尸进程
+                    deadline = time.time() + DEVICE_BOOT_TIMEOUT
+                    while time.time() < deadline:
+                        if proc.poll() is not None:
+                            raise RuntimeError("模拟器进程退出了（见 %s）" % os.path.join(DEVICE_DIR, "emulator-%d.log" % port))
+                        code, out = _run_quiet([tools["adb"], "-s", item["id"], "shell", "getprop", "sys.boot_completed"], timeout=5)
+                        if out.strip() == b"1":
+                            break
+                        time.sleep(2)
+                    else:
+                        raise RuntimeError("等开机超时")
+                item["state"] = "ready"
+                log("模拟器 %s 开好了（会话 %s）" % (item["name"], (item["holder"] or "")[:8]))
+            except Exception as exc:
+                item["state"], item["error"] = "failed", str(exc)
+                self.failed[item["holder"] or "shared"] = (time.time(), item["kind"], "%s 开机失败：%s" % (item["name"], exc))
+                log("模拟器 %s 开机失败：%s" % (item["name"], exc))
+                self.shutdown(item, "开机失败")
+            self.save()
+        threading.Thread(target=run, name="device-boot", daemon=True).start()
+
+    def _free_emu_port(self):
+        """模拟器的控制台端口（偶数）和 adb 端口（+1）都要空着：11-26 宿主机上有个 node 程序占着 5555，
+        开在 5554 的模拟器开机了 adb 却一直连不上（device offline / not found），等到超时"""
+        used = {int(i["id"].split("-")[1]) for i in self.items.values() if (i.get("id") or "").startswith("emulator-")}
+        used |= {int(s.split("-")[1]) for s in self.android_running()}
+
+        def free(port):
+            for host in ("127.0.0.1", "0.0.0.0"):
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    sock.bind((host, port))
+                except OSError:
+                    return False
+                finally:
+                    sock.close()
+            return True
+        for port in range(5554, 5684, 2):
+            if port not in used and free(port) and free(port + 1):
+                return port
+        raise RuntimeError("找不到空着的模拟器端口（5554～5682 都被占了）")
+
+    def _spare(self):
+        """空着（没人持有、没人看）的、我们能关的那台，最久没用的先"""
+        rows = [i for i in self.items.values() if not i["holder"] and i["ours"] and not self.viewers(i) and i["state"] == "ready"]
+        return min(rows, key=lambda i: i["used"]) if rows else None
+
+    def release(self, item, why):
+        if item["holder"]:
+            log("模拟器 %s 从会话 %s 释放：%s" % (item["name"], item["holder"][:8], why))
+        item["holder"], item["released"] = None, time.time()
+        if not item["ours"]:
+            with self.lock:
+                self.items.pop(item["key"], None)   # 借来的：还回去，不关
+        self.save()
+
+    def shutdown(self, item, why):
+        with self.lock:
+            self.items.pop(item["key"], None)
+        self.save()
+        if not item.get("ours"):
+            return
+        log("关掉模拟器 %s：%s" % (item["name"], why))
+        tools = self.available_tools()
+        if item["kind"] == "ios" and item.get("id") and tools.get("xcrun"):
+            threading.Thread(target=_run_quiet, args=([tools["xcrun"], "simctl", "shutdown", item["id"]],), kwargs={"timeout": 60},
+                             daemon=True).start()
+        elif item["kind"] == "android":
+            pid = item.get("pid")
+            if pid:
+                self.reaping[pid] = time.time() + 20   # 先记下来（watcher 这时退出，下次启动接着关）
+                self.save()
+            if item.get("id") and tools.get("adb"):
+                _run_quiet([tools["adb"], "-s", item["id"], "emu", "kill"], timeout=10)
+            if pid:
+                threading.Thread(target=self._reap, args=(pid,), daemon=True).start()
+
+    def _reap(self, pid):
+        """等模拟器自己退出；到点还在就结束整个进程组（开的时候 start_new_session，进程组号 = 进程号）"""
+        while pid_alive(pid) and time.time() < self.reaping.get(pid, 0):
+            time.sleep(1)
+        if pid_alive(pid) and _emulator_pid(pid):
+            log("模拟器进程 %d 没有自己退出：结束它" % pid)
+            try:
+                if hasattr(os, "killpg"):
+                    os.killpg(pid, signal.SIGTERM)
+                    time.sleep(3)
+                    if pid_alive(pid):
+                        os.killpg(pid, signal.SIGKILL)
+                else:
+                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        self.reaping.pop(pid, None)
+        self.save()
+
+    def viewers(self, item):
+        now = time.time()
+        return {v: lv for v, (lv, until) in (item.get("viewers") or {}).items() if until > now}
+
+    # --- agent 自己开的：认出来也归调度器管 ---
+    def adopt_from_sessions(self):
+        """agent 没经 device acquire、在会话里自己用 simctl boot / emulator -avd 开的：看到开机命令之后才开机的那台，归这个会话"""
+        booted = self.booted_now()
+        for sid, path in list(self.live.items()):
+            for at, target, is_boot in self.session_uses(sid, path):
+                keys = self._match(target, booted)
+                for key in keys:
+                    item = self.items.get(key)
+                    if item:
+                        if item["holder"] == sid or not item["holder"]:
+                            item["holder"] = sid
+                            item["used"] = max(item["used"], at)
+                        continue
+                    seen = self.booted.get(key) or {}
+                    if is_boot and seen.get("fresh") and seen.get("since", 0) >= at - 5 and seen.get("since", 0) - at < 300:
+                        kind = key.split(":", 1)[0]
+                        self.items[key] = {"key": key, "kind": kind, "id": key.split(":", 1)[1], "name": booted[key], "avd": None,
+                                           "type": "", "holder": sid, "started": seen["since"], "used": at, "state": "ready",
+                                           "ours": True, "viewers": {}, "pid": None, "released": None, "adopted": True}
+                        log("会话 %s 自己开了模拟器 %s：归调度器管（闲置会回收）" % (sid[:8], booted[key]))
+                        self.save()
+
+    def _match(self, target, booted):
+        if target in booted:
+            return [target]
+        kind, _, rest = target.partition(":")
+        if rest == "*":
+            same = [k for k in booted if k.startswith(kind + ":")]
+            return same if len(same) == 1 else []
+        return [k for k, name in booted.items() if k.startswith(kind + ":") and name == rest]
+
+    _USE_IOS = re.compile(r"\bsimctl\s+(boot|io|launch|install|openurl|terminate|spawn|ui|status_bar|push|privacy|uninstall|shutdown|bootstatus)\s+"
+                          r"(?:-\S+\s+)*(\"[^\"]+\"|'[^']+'|\S+)")
+    _USE_ANDROID = re.compile(r"\badb\s+(?:-s\s+(\S+)\s+)?(?:shell|install|exec-out|push|pull|logcat|emu|reverse|forward|uninstall)\b"
+                              r"|\bemulator\s+(?:-\S+\s+)*-avd\s+(\S+)")
+
+    def session_uses(self, sid, path):
+        """会话最近（DEVICE_IDLE 之内）用到模拟器的命令 → [(时刻, 目标, 是不是开机)]；目标是 key、ios:名字 或 ios:*（booted）"""
+        try:
+            size = os.path.getsize(path)
+        except (OSError, TypeError):
+            return []
+        cached = self.scan_cache.get(sid)
+        if cached and cached[0] == size:
+            return cached[1]
+        found = list(cached[1]) if cached else []
+        start = cached[0] if cached and cached[0] < size else max(0, size - 400000)
+        cutoff = time.time() - DEVICE_IDLE
+        try:
+            with open(path, "rb") as handle:
+                handle.seek(start)
+                data = handle.read()
+        except OSError:
+            return found
+        for raw in data.split(b"\n"):
+            if b'"tool_use"' not in raw or not (b"simctl" in raw or b"adb" in raw or b"emulator" in raw or b"mcp__mobile" in raw):
+                continue
+            entry = parse_line(raw)
+            if not isinstance(entry, dict):
+                continue
+            at = (parse_ts(entry.get("timestamp")) or 0) / 1000.0
+            for block in ((entry.get("message") or {}).get("content") or []):
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = block.get("name") or ""
+                if name.startswith("mcp__mobile"):
+                    found.append((at, "ios:*", False))
+                    found.append((at, "android:*", False))
+                    continue
+                command = (block.get("input") or {}).get("command")
+                if not isinstance(command, str):
+                    continue
+                for m in self._USE_IOS.finditer(command):
+                    arg = m.group(2).strip("'\"")
+                    target = "ios:*" if arg == "booted" else ("ios:" + arg if re.match(r"^[0-9A-F-]{36}$", arg) else "ios:" + arg)
+                    found.append((at, target, m.group(1) == "boot"))
+                for m in self._USE_ANDROID.finditer(command):
+                    if m.group(2):
+                        found.append((at, "android:" + m.group(2), True))
+                    else:
+                        found.append((at, "android:" + m.group(1) if m.group(1) else "android:*", False))
+        found = [row for row in found if row[0] >= cutoff][-50:]
+        self.scan_cache[sid] = (size, found)
+        return found
+
+    # --- 主循环 ---
+    def start(self):
+        if self.runner:
+            return
+        os.makedirs(os.path.join(DEVICE_DIR, "requests"), exist_ok=True)
+        # 上限、回收时间：电脑端设置经环境变量带来的优先（CCPULSE_DEVICE_MAX，0 = 自动），没带的用本机 device config 存的
+        conf = _json_file(os.path.join(DEVICE_DIR, "config.json")) or {}
+        env_max = os.environ.get("CCPULSE_DEVICE_MAX")
+        value = int(env_max) if (env_max or "").isdigit() else conf.get("max")
+        if isinstance(value, int) and value > 0:
+            self.max = min(16, value)
+        global DEVICE_IDLE
+        if not os.environ.get("CCPULSE_DEVICE_IDLE") and conf.get("idle"):
+            DEVICE_IDLE = max(300, int(conf["idle"]) * 60)
+        state = _json_file(os.path.join(DEVICE_DIR, "state.json")) or {}
+        for item in state.get("items") or []:
+            if not isinstance(item, dict) or not item.get("key"):
+                continue
+            if item.get("state") != "ready":
+                # 上次正开着机 watcher 就退出了：开机线程没了，没人等它开好——当成要关的
+                if item.get("pid") and pid_alive(item["pid"]) and _emulator_pid(item["pid"]):
+                    self.reaping[item["pid"]] = time.time() + 20
+                elif item.get("kind") == "ios" and item.get("id"):
+                    item.update(viewers={}, state="ready")
+                    self.items[item["key"]] = item   # 下一轮核对：开着就当空着的管起来（没人要会被关），没开就丢掉
+                continue
+            if item.get("pid") and not pid_alive(item["pid"]):
+                continue
+            item.update(viewers={}, casting=False)
+            self.items[item["key"]] = item   # watcher 重启：上次管着的接着管（下一轮核对它还开没开着）
+        for pid in state.get("reaping") or []:
+            if isinstance(pid, int) and pid_alive(pid) and _emulator_pid(pid):
+                self.reaping[pid] = time.time() + 5
+        for pid in list(self.reaping):
+            threading.Thread(target=self._reap, args=(pid,), daemon=True).start()
+        self.runner = threading.Thread(target=self._loop, name="device-pool", daemon=True)
+        self.runner.start()
+
+    def save(self):
+        rows = [{k: v for k, v in item.items() if k not in ("viewers", "frame", "casting", "drag")}
+                for item in list(self.items.values()) if item.get("ours")]
+        _write_json(os.path.join(DEVICE_DIR, "state.json"), {"items": rows, "reaping": sorted(self.reaping)})
+
+    def _loop(self):
+        while True:
+            try:
+                self._requests()
+                self._sweep()
+            except Exception as exc:
+                log("模拟器调度出错：%r" % exc)
+            time.sleep(0.5)
+
+    def _requests(self):
+        folder = os.path.join(DEVICE_DIR, "requests")
+        try:
+            names = sorted(n for n in os.listdir(folder) if n.endswith(".req"))
+        except OSError:
+            return
+        now = time.time()
+        waiting = 0   # 这一轮里排着没拿到的：后面来的不插队（先来先到）
+        queue = []
+        for name in names:
+            rid = name[:-4]
+            path = os.path.join(folder, name)
+            request = _json_file(path)
+            if not request:
+                continue
+            if not os.path.exists(os.path.join(folder, rid + ".taken")):
+                _write_json(os.path.join(folder, rid + ".taken"), {"at": now})
+            if now - (request.get("at") or now) > DEVICE_QUEUE_WAIT + DEVICE_BOOT_TIMEOUT + 30:
+                _remove_quiet(path)
+                continue
+            op, sid = request.get("op"), request.get("sessionId") or "shared"
+            try:
+                if op == "acquire":
+                    kind = request.get("kind") or "ios"
+                    mine = any(i["holder"] == sid and i["kind"] == kind for i in self.items.values())
+                    failed = self.failed.get(sid)
+                    if failed and now - failed[0] < 60 and failed[1] == kind:
+                        raise RuntimeError(failed[2])
+                    if waiting and not mine:
+                        queue.append(rid)
+                        _write_json(os.path.join(folder, rid + ".wait"), {"why": "前面还有 %d 个在排队" % waiting, "position": waiting})
+                        waiting += 1
+                        continue
+                    item, why = self.acquire(sid, kind, request.get("name"))
+                    if item is None:
+                        queue.append(rid)
+                        _write_json(os.path.join(folder, rid + ".wait"), {"why": why, "position": waiting})
+                        waiting += 1
+                        continue
+                    if item["state"] == "booting":
+                        _write_json(os.path.join(folder, rid + ".wait"), {"why": "正在开机（%s）……" % item["name"], "booting": True})
+                        continue
+                    result = {"kind": item["kind"], "id": item["id"], "name": item["name"], "ours": item["ours"]}
+                elif op == "release":
+                    hits = [i for i in self.items.values() if i["holder"] == sid
+                            and (not request.get("name") or request["name"] in (i["id"], i["name"]))]
+                    for item in hits:
+                        self.release(item, "agent 用完了")
+                    result = {"released": [i["name"] for i in hits]}
+                elif op == "status":
+                    result = self.status()
+                else:
+                    raise RuntimeError("不认识的操作：%s" % op)
+                _write_json(os.path.join(folder, rid + ".ok"), result)
+            except Exception as exc:
+                _write_json(os.path.join(folder, rid + ".err"), {"error": str(exc) or repr(exc)})
+            for ext in ("req", "wait", "taken"):
+                _remove_quiet(os.path.join(folder, "%s.%s" % (rid, ext)))
+        self.queue = queue   # 排队的人走了（子命令被中断、请求文件没了）自然就不在队里
+
+    def _sweep(self):
+        now = time.time()
+        # 没有管着的、也没有会话最近碰过模拟器：什么都不用查（不去列设备，省得每 10 秒起一次 simctl / adb）
+        if not self.items and not any(self.session_uses(sid, path) for sid, path in list(self.live.items())):
+            # 平时 30 秒看一眼开着哪几台（只在装了 Xcode / 安卓 SDK 的电脑上）：之后 agent 自己开了一台，才认得出是它开的
+            tools = self.available_tools()
+            if (tools.get("xcrun") or tools.get("adb")) and now - self.booted_at > 30:
+                self.booted_at = 0.0
+                self.booted_now()
+            return
+        self.adopt_from_sessions()
+        booted = self.booted_now()
+        free = _free_mem_mb()
+        for item in list(self.items.values()):
+            if item["state"] == "ready" and item["key"] not in booted and now - item["started"] > 30:
+                with self.lock:
+                    self.items.pop(item["key"], None)
+                log("模拟器 %s 已经关了（不是 Kiteline 关的）" % item["name"])
+                self.save()
+                continue
+            if item["state"] != "ready":
+                continue
+            sid = item["holder"]
+            watched = bool(self.viewers(item))
+            if sid:
+                for at, target, _ in self.session_uses(sid, self.live.get(sid)):
+                    if item["key"] in self._match(target, booted):
+                        item["used"] = max(item["used"], at)
+                if sid in self.live or sid == "shared":
+                    self.gone_at.pop(sid, None)
+                elif now - self.gone_at.setdefault(sid, now) > DEVICE_GONE_GRACE:
+                    self.release(item, "会话已结束")
+                    continue
+                if not watched and now - item["used"] > DEVICE_IDLE:
+                    self.release(item, "%d 分钟没再用" % (DEVICE_IDLE // 60))
+                    continue
+            elif item["ours"] and not watched:
+                if self.queue:
+                    continue   # 排队的马上就会接手
+                if now - (item.get("released") or item["used"]) > DEVICE_WARM:
+                    self.shutdown(item, "释放后没人用")
+                elif free is not None and free < DEVICE_LOW_MEM_MB:
+                    self.shutdown(item, "可用内存不足（%d MB）" % free)
+                    free = _free_mem_mb()
+            if watched and not item.get("casting"):
+                item["casting"] = True
+                threading.Thread(target=self._cast, args=(item,), name="device-frames", daemon=True).start()
+        state = self.state()
+        if state != self.last_state:
+            self.last_state = state
+            for sid in {i["holder"] for i in self.items.values() if i["holder"]} | set(self.live):
+                BROWSERS.changed(sid)
+
+    def state(self):
+        return sorted((i["key"], i["holder"], i["state"]) for i in self.items.values())
+
+    def status(self):
+        rows = []
+        for item in list(self.items.values()):
+            row = {k: item.get(k) for k in ("kind", "id", "name", "holder", "state", "ours", "started", "used", "error")}
+            row["viewers"] = len(self.viewers(item))
+            if item.get("pid"):
+                row["memMB"] = _tree_rss_mb(item["pid"])
+            rows.append(row)
+        return dict(self.config(), devices=rows, queued=len(self.queue))
+
+    # --- 画面与接管（借会话浏览器的小窗：快照里的 browser、browser_frame 事件、cmd=browser 的 watch / input） ---
+    def for_session(self, sid):
+        rows = [i for i in self.items.values() if i["holder"] == sid and i["state"] in ("ready", "booting")]
+        return max(rows, key=lambda i: i["used"]) if rows else None
+
+    def annotate(self, snapshots):
+        self.live = {s["sessionId"]: s.get("transcriptPath") for s in snapshots if s.get("sessionId")}
+        for snap in snapshots:
+            item = self.for_session(snap.get("sessionId"))
+            if not item:
+                continue
+            browser = BROWSERS.items.get(snap["sessionId"])
+            if browser and browser.get("used", 0) > item["used"]:
+                continue   # 浏览器用得更近：小窗还看浏览器
+            label = ("iOS 模拟器" if item["kind"] == "ios" else "安卓模拟器") + " · " + item["name"]
+            snap["browser"] = {"since": int(item["started"] * 1000), "url": "device://%s/%s" % (item["kind"], item["id"]),
+                               "title": label if item["state"] == "ready" else label + "（正在开机）",
+                               "device": {"kind": item["kind"], "name": item["name"], "id": item["id"],
+                                          "touch": item["kind"] == "android" or bool(self.available_tools().get("axe"))},
+                               "last": label}
+
+    def handles(self, sid):
+        """cmd=browser 的看画面、接管：这个会话的小窗现在显示的是模拟器"""
+        item = self.for_session(sid)
+        if not item:
+            return None
+        browser = BROWSERS.items.get(sid)
+        return None if browser and browser.get("used", 0) > item["used"] else item
+
+    def handle(self, item, request):
+        op = request.get("op")
+        if op == "watch":
+            level = request.get("level") if request.get("level") in DEVICE_LEVELS else "thumb"
+            viewer = str(request.get("viewer") or "anon")[:64]
+            item["viewers"][viewer] = (level, time.time() + BROWSER_LEASE)
+            if request.get("first") and item.get("frame"):
+                self._emit(item)
+            if not item.get("casting"):
+                item["casting"] = True
+                threading.Thread(target=self._cast, args=(item,), name="device-frames", daemon=True).start()
+            return {"tabs": [], "actions": [], "device": {"kind": item["kind"], "name": item["name"]}}
+        if op == "unwatch":
+            item["viewers"].pop(str(request.get("viewer") or "anon")[:64], None)
+            return {}
+        if op == "input":
+            item["used"] = time.time()
+            return self.input(item, request)
+        if op == "close":
+            self.release(item, "用户在 Kiteline 里关掉")
+            return {}
+        if op in ("tab", "actions"):
+            return {"tabs": [], "actions": []}
+        if op == "control":
+            return {}
+        raise RuntimeError("模拟器不支持这个操作：%s" % op)
+
+    def _cast(self, item):
+        """有人看时一张张截屏推过去，没人看了就停（线程退出）"""
+        try:
+            while item["key"] in self.items and self.viewers(item):
+                started = time.time()
+                levels = set(self.viewers(item).values())
+                width, fps = DEVICE_LEVELS["full" if "full" in levels else "thumb"]
+                if item["state"] == "ready":
+                    frame = self.capture(item, width)
+                    if frame:
+                        item["frame"] = frame
+                        item["frame_seq"] = item.get("frame_seq", 0) + 1
+                        self._emit(item)
+                time.sleep(max(0.05, 1.0 / fps - (time.time() - started)))
+        finally:
+            item["casting"] = False
+
+    def capture(self, item, width):
+        """截一张 → {data(base64 jpeg/png), w, h（设备像素）}"""
+        tools = self.available_tools()
+        os.makedirs(DEVICE_DIR, exist_ok=True)
+        shot = os.path.join(DEVICE_DIR, "shot-%s.img" % re.sub(r"[^A-Za-z0-9-]", "", item["id"] or "x"))
+        if item["kind"] == "ios":
+            code, _ = _run_quiet([tools["xcrun"], "simctl", "io", item["id"], "screenshot", "--type=jpeg", shot], timeout=8)
+            if code != 0:
+                return None
+        else:
+            code, out = _run_quiet([tools["adb"], "-s", item["id"], "exec-out", "screencap", "-p"], timeout=8)
+            if code != 0 or not out.startswith(b"\x89PNG"):
+                return None
+            with open(shot, "wb") as handle:
+                handle.write(out)
+        try:
+            raw = open(shot, "rb").read()
+        except OSError:
+            return None
+        size = _png_size(raw)
+        small = shot + ".jpg"
+        if shutil.which("sips"):
+            if not size:
+                code, out = _run_quiet(["sips", "-g", "pixelWidth", "-g", "pixelHeight", shot], timeout=5)
+                nums = re.findall(rb"pixel(?:Width|Height):\s*(\d+)", out)
+                size = (int(nums[0]), int(nums[1])) if len(nums) == 2 else None
+            code, _ = _run_quiet(["sips", "-s", "format", "jpeg", "-s", "formatOptions", "60", "-Z", str(width), shot, "--out", small],
+                                 timeout=8)
+            data = open(small, "rb").read() if code == 0 and os.path.exists(small) else raw
+        elif shutil.which("ffmpeg"):
+            code, out = _run_quiet(["ffmpeg", "-loglevel", "error", "-y", "-i", shot, "-vf", "scale=%d:-2" % width, "-q:v", "6",
+                                    "-f", "image2", "-c:v", "mjpeg", "pipe:1"], timeout=8)
+            data = out if code == 0 and out[:2] == b"\xff\xd8" else raw
+        else:
+            data = raw
+        if not size:
+            return None
+        return {"data": base64.b64encode(data).decode("ascii"), "w": size[0], "h": size[1]}
+
+    def _emit(self, item):
+        frame = item.get("frame")
+        if not frame or not item["holder"]:
+            return
+        levels = set(self.viewers(item).values())
+        # cssW / cssH 给的是设备点数的比例（客户端按它算宽高比、把点击换成 0～1 的位置）
+        emit({"event": "browser_frame", "sessionId": item["holder"], "seq": item.get("frame_seq", 0), "data": frame["data"],
+              "cssW": frame["w"], "cssH": frame["h"], "url": "device://%s/%s" % (item["kind"], item["id"]),
+              "title": ("iOS 模拟器" if item["kind"] == "ios" else "安卓模拟器") + " · " + item["name"],
+              "level": "full" if "full" in levels else "thumb", "device": item["kind"]})
+
+    def input(self, item, request):
+        frame = item.get("frame") or {}
+        width, height = frame.get("w") or 1080, frame.get("h") or 1920
+        x = max(0.0, min(1.0, float(request.get("x") or 0))) * width
+        y = max(0.0, min(1.0, float(request.get("y") or 0))) * height
+        kind = request.get("type")
+        tools = self.available_tools()
+        if item["kind"] == "android":
+            adb = [tools["adb"], "-s", item["id"], "shell", "input"]
+            if kind == "click":
+                _run_quiet(adb + ["tap", str(int(x)), str(int(y))], timeout=5)
+            elif kind == "down":
+                item["drag"] = (x, y, time.time())
+            elif kind == "up" and item.get("drag"):
+                x0, y0, t0 = item.pop("drag")
+                if abs(x - x0) + abs(y - y0) < 12:
+                    _run_quiet(adb + ["tap", str(int(x)), str(int(y))], timeout=5)
+                else:
+                    ms = max(120, min(1500, int((time.time() - t0) * 1000)))
+                    _run_quiet(adb + ["swipe", str(int(x0)), str(int(y0)), str(int(x)), str(int(y)), str(ms)], timeout=5)
+            elif kind == "wheel":
+                dy = float(request.get("dy") or 0)
+                _run_quiet(adb + ["swipe", str(int(x)), str(int(y)), str(int(x)), str(int(max(0, min(height, y - dy * 2)))), "200"],
+                           timeout=5)
+            elif kind == "text":
+                text = str(request.get("text") or "")
+                _run_quiet(adb + ["text", re.sub(r"([\\\"'`$&|;<>()*?! ])", lambda m: "%s" if m.group(1) == " " else "\\" + m.group(1),
+                                                 text)], timeout=5)
+            elif kind == "key":
+                code = {"Enter": 66, "Backspace": 67, "Tab": 61, "Escape": 4, "ArrowUp": 19, "ArrowDown": 20, "ArrowLeft": 21,
+                        "ArrowRight": 22, "Delete": 112}.get(str(request.get("key")))
+                if code:
+                    _run_quiet(adb + ["keyevent", str(code)], timeout=5)
+            elif kind == "nav":
+                code = {"back": 4, "reload": 3}.get(request.get("action"))   # 后退 = 返回键；刷新 = 回主屏幕
+                if code:
+                    _run_quiet(adb + ["keyevent", str(code)], timeout=5)
+            return {}
+        axe = tools.get("axe")
+        if not axe:
+            raise RuntimeError("iOS 模拟器的接管要先装 AXe（brew install cameroncooke/axe/axe），现在只能看画面")
+        scale = 2.0 if "iPad" in (item.get("type") or item["name"]) else 3.0   # 像素 → 点
+        px, py = x / scale, y / scale
+        base = ["--udid", item["id"]]
+        if kind == "click":
+            _run_quiet([axe, "tap", "-x", str(int(px)), "-y", str(int(py))] + base, timeout=8)
+        elif kind == "down":
+            item["drag"] = (px, py, time.time())
+        elif kind == "up" and item.get("drag"):
+            x0, y0, t0 = item.pop("drag")
+            if abs(px - x0) + abs(py - y0) < 5:
+                _run_quiet([axe, "tap", "-x", str(int(px)), "-y", str(int(py))] + base, timeout=8)
+            else:
+                _run_quiet([axe, "swipe", "--start-x", str(int(x0)), "--start-y", str(int(y0)), "--end-x", str(int(px)),
+                            "--end-y", str(int(py))] + base, timeout=8)
+        elif kind == "wheel":
+            dy = float(request.get("dy") or 0) / scale
+            _run_quiet([axe, "swipe", "--start-x", str(int(px)), "--start-y", str(int(py)), "--end-x", str(int(px)),
+                        "--end-y", str(int(max(0, py - dy * 2)))] + base, timeout=8)
+        elif kind == "text":
+            _run_quiet([axe, "type", str(request.get("text") or "")] + base, timeout=8)
+        elif kind == "key":
+            code = {"Enter": 40, "Backspace": 42, "Tab": 43, "Escape": 41}.get(str(request.get("key")))
+            if code:
+                _run_quiet([axe, "key", str(code)] + base, timeout=8)
+        elif kind == "nav" and request.get("action") == "reload":
+            _run_quiet([axe, "button", "home"] + base, timeout=8)
+        return {}
+
+
+DEVICES = DevicePool()
+
+
+def _device_request(op, session_id, extra=None, wait=30.0):
+    """子命令 → 模拟器调度器：写请求文件、等结果（排队、开机时一直等，最多 DEVICE_QUEUE_WAIT 秒）"""
+    folder = os.path.join(DEVICE_DIR, "requests")
+    os.makedirs(folder, exist_ok=True)
+    rid = "%d-%s" % (int(time.time() * 1000), uuid.uuid4().hex[:6])
+    req = os.path.join(folder, rid + ".req")
+    _write_json(req, dict(extra or {}, op=op, sessionId=session_id, at=time.time()))
+    start = time.time()
+    deadline = start + wait
+    said = None
+    try:
+        while time.time() < deadline:
+            for ext in ("ok", "err"):
+                path = os.path.join(folder, "%s.%s" % (rid, ext))
+                data = _json_file(path)
+                if data is not None:
+                    _remove_quiet(path)
+                    return (None, data.get("error") or "失败") if ext == "err" else (data, None)
+            waiting = _json_file(os.path.join(folder, rid + ".wait"))
+            if waiting:
+                deadline = max(deadline, start + DEVICE_QUEUE_WAIT + (DEVICE_BOOT_TIMEOUT if waiting.get("booting") else 0))
+                if waiting.get("why") != said:
+                    said = waiting.get("why")
+                    print("排队中：%s" % said, file=sys.stderr)
+            elif time.time() - start > 10 and not _json_file(os.path.join(folder, rid + ".taken")):
+                return None, "Kiteline 没在这台电脑上运行（或版本太旧），没人接手模拟器请求"
+            time.sleep(0.3)
+        return None, "等太久了"
+    finally:
+        _remove_quiet(req)
+
+
+def command_device(argv):
+    """agent 用的 iOS / 安卓模拟器（Kiteline 调度：排队、按内存放行、闲置自动关；手机和电脑上能看到实时画面、能接管）：
+    device acquire --kind ios|android [--name 设备名或 UDID / AVD 名]
+                         给这个会话一台模拟器（没开就开，满了或内存不够会排队），打印 JSON：{kind, id, name}。
+                         iOS 的 id 是 UDID，用 xcrun simctl <命令> <id>；安卓的 id 是序列号，用 adb -s <id> <命令>
+    device release       用完了：交还（不还也会在 30 分钟没用后自动回收，会话结束也会收回）
+    device status        这台电脑上开着哪几台、谁在用、上限和建议值、排队几个
+    device list          能用的模拟器（iOS 设备、安卓 AVD）
+    device config [--max auto|N] [--idle 分钟]
+                         最多同时开几台（auto = 按内存给的建议值）、多久没用就回收"""
+    if not argv or argv[0] in ("-h", "--help"):
+        print(command_device.__doc__)
+        return 0 if argv else 2
+    op, rest = argv[0], argv[1:]
+    opts = {}
+    index = 0
+    while index < len(rest):
+        if rest[index].startswith("--") and index + 1 < len(rest):
+            opts[rest[index][2:]] = rest[index + 1]
+            index += 2
+        else:
+            index += 1
+    if op in ("acquire", "release", "status"):
+        # 认会话同 browser：--session 指定的，或者按调用它的进程认（agent 的 Bash 里跑的）
+        session = opts.get("session") or os.environ.get("KITELINE_SESSION")
+        if session:
+            session, _ = target_session(session)
+            if not session:
+                return 2
+        else:
+            found = find_calling_session()
+            session = found["sessionId"] if found else (os.environ.get("CLAUDE_CODE_SESSION_ID") or "shared")
+    if op == "list":
+        rows = [dict((k, r.get(k)) for k in ("kind", "id", "name", "state", "runtime", "avd")) for r in DEVICES.list_ios() + DEVICES.list_android()]
+        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        return 0
+    if op == "config":
+        if "max" in opts or "idle" in opts:
+            print(json.dumps(DEVICES.config({"max": opts.get("max", DEVICES.max), "idle": opts.get("idle")}), ensure_ascii=False))
+        else:
+            print(json.dumps(DEVICES.config(), ensure_ascii=False))
+        return 0
+    if op not in ("acquire", "release", "status"):
+        print(command_device.__doc__)
+        return 2
+    extra = {"kind": opts.get("kind"), "name": opts.get("name")} if op == "acquire" else {"name": opts.get("name")}
+    result, error = _device_request(op, session, extra, wait=60 if op == "acquire" else 20)
+    if error:
+        print("失败：%s" % error, file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=1 if op == "status" else None))
+    return 0
+
+
 def browser_fast(line):
     """cmd=browser 的请求不进主循环排队：输入要跟手，其余的另开线程（连浏览器可能要等几秒，别堵住读线程）"""
     try:
@@ -19062,6 +21095,17 @@ def browser_fast(line):
                         item["link"].stop_recording()
         emit({"event": "response", "id": request.get("id"), "ok": True, "max": BROWSER_MAX, "idle": BROWSER_IDLE // 60})
         return True
+    if isinstance(request, dict) and request.get("cmd") == "device_config":
+        # 设置里的「模拟器最多同时开几台」（auto = 按内存的建议值）、「多久没用就回收」；不带参数是只查（显示建议值）
+        try:
+            change = {k: request[k] for k in ("max", "idle") if k in request} or None
+            emit(dict({"event": "response", "id": request.get("id"), "ok": True}, **DEVICES.config(change)))
+        except Exception as exc:
+            emit({"event": "response", "id": request.get("id"), "ok": False, "error": str(exc)})
+        return True
+    if isinstance(request, dict) and request.get("cmd") == "device_status":
+        emit(dict({"event": "response", "id": request.get("id"), "ok": True}, **DEVICES.status()))
+        return True
     if isinstance(request, dict) and request.get("cmd") == "browser_tunnel":
         # 电脑端经 ssh 开好了反向转发：这台上的入口把会话的浏览器连接转到这个端口（接到用户电脑上的浏览器）
         BROWSERS.tunnel = int(request.get("port") or 0) or None
@@ -19074,7 +21118,9 @@ def browser_fast(line):
     def answer():
         response = {"event": "response", "id": request.get("id"), "ok": True}
         try:
-            response.update(BROWSERS.handle(request))
+            device = DEVICES.handles(request.get("sessionId") or "") \
+                if request.get("op") in ("watch", "unwatch", "input", "close", "tab", "actions", "control") else None
+            response.update(DEVICES.handle(device, request) if device else BROWSERS.handle(request))
         except Exception as exc:
             response.update({"ok": False, "error": str(exc) or repr(exc)})
         emit(response)
@@ -19208,6 +21254,7 @@ def command_browser(argv):
                                         打印用户留言；超时（默认 900 秒）退出码 124
     browser close                       用完了：关掉这个会话的浏览器（不关也会在空闲 10 分钟后自动回收）
     browser status                      这台电脑上开着几个、各占多少内存、上限
+    browser logs [--all]                这个会话浏览器的控制台报错、网页异常、失败的网络请求（默认只看当前这一页的，--all 是最近 200 条）
     browser setup                       装 agent-browser 到 ~/.ccpulse/bin 并打印路径（已装就直接打印）
     用法：agent-browser --session "$CLAUDE_CODE_SESSION_ID" --cdp 9339 open https://example.com
           playwright-cli attach --cdp=http://127.0.0.1:9339"""
@@ -19217,6 +21264,8 @@ def command_browser(argv):
     op, rest = argv[0], argv[1:]
     session = note = None
     timeout = 900.0
+    show_all = "--all" in rest
+    rest = [a for a in rest if a != "--all"]
     index = 0
     while index < len(rest):
         arg = rest[index]
@@ -19268,6 +21317,24 @@ def command_browser(argv):
             print(error, file=sys.stderr)
             return 1
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if op == "logs":
+        result, error = _browser_request("devlog", session_id)
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+        rows = result.get("entries") or []
+        if not show_all:
+            navs = [i for i, r in enumerate(rows) if r["kind"] == "nav"]
+            rows = rows[navs[-1]:] if navs else rows
+        for row in rows:
+            stamp = time.strftime("%H:%M:%S", time.localtime(row["t"] / 1000.0))
+            if row["kind"] == "nav":
+                print("%s ── 打开 %s" % (stamp, row["url"]))
+            else:
+                print("%s %s %-9s %s%s" % (stamp, "✗" if row["level"] == "error" else "!", row["kind"], row["text"],
+                                           ("  (%s)" % row["url"]) if row.get("url") else ""))
+        print("这一页：%d 个错误、%d 个警告" % (result.get("errors") or 0, result.get("warns") or 0), file=sys.stderr)
         return 0
     if op == "ask":
         result, error = _browser_request("ask", session_id, {"note": note or ""})
@@ -21237,7 +23304,7 @@ class Watcher:
                 if claude:
                     PEERS.observe(sid, items)
                 STAGES.feed(sid, items)
-                emit({"event": "entries", "sessionId": sid, "items": items})
+                emit({"event": "entries", "sessionId": sid, "items": annotate_risk(items)})
             if shown and not held:
                 del self.asks_shown[sid]
                 emit({"event": "reset", "sessionId": sid})
@@ -21247,7 +23314,7 @@ class Watcher:
         # 没有落盘文件可跟的插件自己推：OpenCode 是桥的事件说哪个会话有变就去取最近几条，DeepSeek Harness 是订阅推过来的
         for sid, items in self.plugins.pump():
             STAGES.feed(sid, items)
-            emit({"event": "entries", "sessionId": sid, "items": items})
+            emit({"event": "entries", "sessionId": sid, "items": annotate_risk(items)})
 
     # --- 请求 ---
 
@@ -21321,6 +23388,29 @@ class Watcher:
             return session_trace(path, self.normalizer(sid), title=snap.get("title"), busy=busy,
                                  expand=expand if isinstance(expand, list) else None, subagents=agent == "claude-code",
                                  rev=request.get("rev") or None)
+        if cmd == "context":
+            # 上下文构成（对话页上下文百分比胶囊点开）：只认 Claude Code 的记录格式
+            if agent != "claude-code":
+                return {"unsupported": True}
+            return session_context(self.path_for(request.get("sessionId")))
+        if cmd in ("rewind_plan", "rewind"):
+            # 撤回某一轮起的文件改动（用 Claude Code 自己的文件快照）。agent 正在干活时不撤：它手上的文件会被换掉
+            if agent != "claude-code":
+                return {"error": "只有 Claude Code 的会话能撤回改动"}
+            sid = request.get("sessionId")
+            if not sid or not re.match(r"^[A-Za-z0-9._-]+$", sid):
+                return {"error": "缺少会话"}
+            snap = self.sessions.get(sid) or {}
+            # 等确认（停在一轮中间、权限卡片还没处理）也不撤：它接着干的时候手上的文件已经被换掉了；撤完告诉它的那句话也送不进去
+            busy = snap.get("activity") in ("busy", "waiting")
+            if cmd == "rewind" and busy:
+                return {"error": "Claude 正在工作或在等你确认：请等它停下来，或先处理确认卡片、中断，再撤回"}
+            path = self.path_for(sid)
+            if cmd == "rewind_plan":
+                return dict(rewind_plan(path, sid, request.get("offset")), busy=busy)
+            return rewind_apply(path, sid, request.get("offset"))
+        if cmd == "rewind_undo":
+            return rewind_undo(request.get("undo"))
         if agent != "claude-code":
             # 子 agent 图、后台任务、测试记录都是从 Claude 的对话记录里认的，别家没有
             if cmd == "agents":
@@ -21371,7 +23461,7 @@ class Watcher:
                     raise RuntimeError("找不到这个子 agent 的记录")
                 limit = max(1, min(int(request.get("limit") or HISTORY_DEFAULT_LIMIT), 400))
                 items, has_more, end = read_history(path, request.get("before"), limit, normalize_subagent_line)
-                return {"items": items, "hasMore": has_more, "end": end}
+                return {"items": annotate_risk(items), "hasMore": has_more, "end": end}
             limit = int(request.get("limit") or HISTORY_DEFAULT_LIMIT)
             limit = max(1, min(limit, 400))
             before = request.get("before")
@@ -21385,7 +23475,7 @@ class Watcher:
                 ts_to = request.get("beforeTs") or (max(ts_values) + 1 if ts_values else 0)
             outbox = read_outbox(session_id, ts_from, ts_to)
             held = _ASK_ITEMS.get(session_id) if before is None else None
-            return {"items": items + outbox + ([held] if held else []), "hasMore": has_more, "end": end}
+            return {"items": annotate_risk(items + outbox + ([held] if held else [])), "hasMore": has_more, "end": end}
         if cmd == "media":
             session_id = request.get("sessionId")
             ref = str(request.get("ref") or "")
@@ -22279,6 +24369,8 @@ SLOW_CMDS = HEAVY_CMDS | frozenset((
     "git_status", "git_diff", "machine_info", "put_file",
     # 执行过程、子 agent 列表、后台任务输出：大会话头一次要一两秒（11-13 实测 570 MB 的记录：trace 1.5 秒、agents 1.4 秒），只读文件
     "trace", "agents", "task_output",
+    # 上下文构成、撤回改动：要把这段对话记录读一遍（找最后一次压缩、各轮快照）
+    "context", "rewind_plan", "rewind", "rewind_undo",
     # 插件的界面步骤（如核对 WorkBuddy 收到没有，最多等十几秒）、经界面新建任务：不能在主循环里等
     "agent_ui", "agent_new"))
 _HEAVY_GATE = threading.BoundedSemaphore(1)
@@ -22541,6 +24633,7 @@ def main():
     watcher = Watcher(plugins)
     TERMS.start_runner()   # agent 的 term run：在 Kiteline 的会话终端里跑命令（见 command_term）
     BROWSERS.start()       # 会话浏览器的调度器（见 BrowserPool）
+    DEVICES.start()        # 模拟器的调度器（见 DevicePool）
     _FAST["watcher"] = watcher
     LIVE.start(watcher)    # 正在生成的文字逐字推（见 LiveTap）
     try:
@@ -22568,6 +24661,7 @@ def main():
             annotate_branches(snapshots)
             TERMS.annotate(snapshots)
             BROWSERS.annotate(snapshots)
+            DEVICES.annotate(snapshots)   # 在浏览器之后：会话的小窗正看模拟器时盖过 browser
             HOSTED.annotate(snapshots)
             snapshots = [snap for snap in snapshots if not unused_session(snap)]
             STAGES.annotate(snapshots)
@@ -23262,6 +25356,8 @@ if __name__ == "__main__":
         sys.exit(command_peers_active(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "term":
         sys.exit(command_term(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "device":
+        sys.exit(command_device(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "browser":
         sys.exit(command_browser(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "group":

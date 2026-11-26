@@ -505,7 +505,8 @@ public sealed class BrowserMini : Border
         Width = collapsed ? 40 : W;
         CornerRadius = new CornerRadius(collapsed ? 20 : 12);
         title.Text = info.Title.Length > 0 ? info.Title : info.ShortUrl;
-        last.Text = info.Last.Length > 0 ? info.Last : info.ShortUrl;
+        last.Text = info.Errors > 0 ? L("网页有 %lld 个错误", info.Errors) : info.Last.Length > 0 ? info.Last : info.ShortUrl;
+        last.Res(TextBlock.ForegroundProperty, info.Errors > 0 ? "Removed" : "Text2");
         ask.Text = info.Ask ?? "";
         ask.IsVisible = info.Ask is not null;
     }
@@ -522,6 +523,9 @@ public sealed class BrowserViewer : Grid
     readonly Border outline = new() { BorderThickness = new Thickness(2), IsHitTestVisible = false, IsVisible = false };
     readonly TextBlock title = Ui.Text("", 12.5, FontWeight.Medium).Trim();
     readonly TextBlock url = Ui.Text("", 11.5, color: "Text2").Trim();
+    readonly Icon addressIcon = Ui.Sym("globe", 11, "Text2");
+    readonly TextBlock errorsText = Ui.Text("", 11, FontWeight.SemiBold, "Removed").Digits();
+    Tap errorsButton = null!;
     readonly Panel bars = new();
     readonly StackPanel actionList = new();
     readonly ScrollViewer actionScroll;
@@ -548,7 +552,7 @@ public sealed class BrowserViewer : Grid
         }
 
         // 顶栏：地址栏是嵌在外壳里的一格（标题在前、网址在后），点开是标签页
-        var address = Ui.Box(Ui.H(6, Ui.Sym("globe", 11, "Text2"), title.Shrink(), url.Shrink().Grow()), new Thickness(10, 0), "BrowserField", 8, "BrowserEdge");
+        var address = Ui.Box(Ui.H(6, addressIcon, title.Shrink(), url.Shrink().Grow()), new Thickness(10, 0), "BrowserField", 8, "BrowserEdge");
         address.Height = 28;
         var tabsButton = new Tap(address, null, 8).Grow();
         tabsButton.Menu(() =>
@@ -568,7 +572,11 @@ public sealed class BrowserViewer : Grid
             SizeButton(L("整个应用"), L("整个应用"), BrowserSize.App),
             SizeButton(L("全屏"), L("全屏"), BrowserSize.FullScreen));
         var sizesBox = Ui.Box(sizesBar, new Thickness(2), "BrowserField", 8, "BrowserEdge");
-        var header = Ui.H(8, navButtons, tabsButton, sizesBox,
+        // 网页报错（控制台、失败的请求）：有才出现，点开看是哪些
+        errorsButton = new Tap(Ui.H(3, Ui.Sym("exclamationmark.circle.fill", 11, "Removed"), errorsText), () => DevLogSheet.Show(key), 10)
+            { Padding = new Thickness(6, 0), Height = 20, IsVisible = false }.Tip(L("网页错误"));
+        errorsButton.Res(Border.BackgroundProperty, "RemovedFill");
+        var header = Ui.H(8, navButtons, tabsButton, errorsButton, sizesBox,
             IconButton("arrow.down.right.and.arrow.up.left", L("缩回小窗"), () => BrowserStore.Shared.SetSize(key, BrowserSize.Mini)),
             // 真正结束浏览器（小窗上的 × 只是收起）：agent 再用浏览器时会重新打开
             IconButton("stop", L("关闭浏览器"), async () =>
@@ -739,6 +747,9 @@ public sealed class BrowserViewer : Grid
         this.info = info;
         title.Text = info.Title.Length > 0 ? info.Title : L("浏览器");
         url.Text = info.ShortUrl;
+        addressIcon.Symbol = info.Device is not null ? "iphone" : "globe";
+        errorsText.Text = info.Errors.ToString();
+        if (errorsButton is not null) errorsButton.IsVisible = info.Errors > 0;
         RebuildBars();
         if (lastChanged) _ = BrowserStore.Shared.RefreshActions(key);
     }

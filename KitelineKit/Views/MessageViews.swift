@@ -423,6 +423,8 @@ struct UserMessage: KLView {
     /// 长按「转发文件」时消息里有好几个文件：先选一个
     @State private var picking: [String]?
     @State private var translator = Translator.shared
+    /// 长按「撤回这一轮起的改动」
+    @State private var rewinding: RewindTarget?
 
     /// 能翻译的：有文字、不是语音（语音下面的转写框不翻）
     static func translatable(_ item: ChatItem) -> (text: String, id: String)? {
@@ -461,6 +463,7 @@ struct UserMessage: KLView {
             }
         }
         .sheetPanel(item: Binding(get: { picking.map(MentionedFiles.init) }, set: { picking = $0?.paths })) { FilePickSheet(key: key, paths: $0.paths) }
+        .sheetPanel(item: $rewinding) { RewindSheet(key: key, offset: $0.offset) }
     }
 
     private func actions(_ text: String, files: [String]) -> [MenuAction] {
@@ -475,10 +478,13 @@ struct UserMessage: KLView {
         }]
         let translate = [translator.menuAction(id: item.id, text: prompt)].compactMap { $0 }
         guard !text.isEmpty, !readOnly else { return translate + forward + link + favorite }
+        // 撤回这一轮起 Claude 改的文件（用 Claude Code 自己的文件快照）：电脑端支持才有；插话（queued）不是一轮的开头
+        let rewind = model.session(key)?.can("rewind") == true && item.queued != true && item.offset > 0
+            ? [MenuAction(title: L("撤回这一轮起的改动"), symbol: "arrow.uturn.backward.circle") { rewinding = RewindTarget(offset: item.offset) }] : []
         return [
             MenuAction(title: L("引用"), symbol: "quote.opening") { model.chat(key).quote = Quote.make(FileLink.splitAttached(text).text) },
             MenuAction(title: L("重新发送"), symbol: "arrow.clockwise") { model.send(key, text: text, images: []) },
-        ] + translate + forward + link + favorite
+        ] + translate + forward + link + rewind + favorite
     }
 }
 

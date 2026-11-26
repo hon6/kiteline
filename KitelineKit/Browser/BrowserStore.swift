@@ -20,8 +20,14 @@ struct BrowserInfo: Decodable, Hashable {
     /// 浏览器已经关了、留着录像（小窗变成「回放」卡片）
     var closed: Bool
     var recs: Int
+    /// 这一页的控制台报错、失败的网络请求个数（watcher 的 BrowserLink.devcount）；点开看 /api/browser op=devlog
+    var errors: Int
+    var warns: Int
+    /// 小窗显示的是模拟器（watcher 的 DevicePool 借这个小窗）：ios / android
+    var device: String?
 
-    enum CodingKeys: String, CodingKey { case url, title, last, actions, ask, since, closed, recs }
+    enum CodingKeys: String, CodingKey { case url, title, last, actions, ask, since, closed, recs, errors, warns, device }
+    private struct Device: Decodable { var kind: String?; var name: String? }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -33,11 +39,20 @@ struct BrowserInfo: Decodable, Hashable {
         since = (try? c.decodeIfPresent(Double.self, forKey: .since)) ?? nil
         closed = ((try? c.decodeIfPresent(Bool.self, forKey: .closed)) ?? nil) ?? false
         recs = ((try? c.decodeIfPresent(Int.self, forKey: .recs)) ?? nil) ?? 0
+        errors = ((try? c.decodeIfPresent(Int.self, forKey: .errors)) ?? nil) ?? 0
+        warns = ((try? c.decodeIfPresent(Int.self, forKey: .warns)) ?? nil) ?? 0
+        let dev = (try? c.decodeIfPresent(Device.self, forKey: .device)) ?? nil
+        device = dev?.kind
+        if let kind = dev?.kind, let name = dev?.name {
+            // 模拟器的标题按界面语言拼（watcher 给的是中文）
+            title = (kind == "ios" ? L("iOS 模拟器") : L("安卓模拟器")) + " · " + name
+        }
     }
 
-    /// 地址栏上显示的：去掉协议
+    /// 地址栏上显示的：去掉协议（模拟器没有网址，只显示标题）
     var shortURL: String {
-        url.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
+        if device != nil { return "" }
+        return url.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
     }
 }
 

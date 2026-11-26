@@ -125,5 +125,18 @@
   ],
   "url": "https://github.com/migueldeicaza/XtermSharp",
   "version": "1bed529"
+ },
+ {
+  "name": "claude-code-command-guard",
+  "version": "main (2026-11)",
+  "license": "MIT",
+  "url": "https://github.com/Yodaisgaming/claude-code-command-guard",
+  "files": [
+   "claude-code-command-guard.txt"
+  ],
+  "products": [
+   "mac",
+   "desktop"
+  ]
  }
 ]

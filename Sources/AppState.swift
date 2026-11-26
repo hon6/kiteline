@@ -34,6 +34,7 @@ final class AppState {
         AgentSkill.compactWindow = config.mobile.compactWindow
         AgentSkill.storage = (config.mobile.storageAuto, config.mobile.storageDays)
         AgentSkill.browser = (config.mobile.browserOn, config.mobile.browserMax, config.mobile.browserIdle, config.mobile.browserRecord)
+        AgentSkill.device = (config.mobile.deviceMax, config.mobile.deviceIdle)
         store.delegate = self
         mobile.onClientsChange = { [weak self] in
             guard let self = self else { return }
@@ -148,6 +149,7 @@ final class AppState {
         AgentSkill.compactWindow = newConfig.mobile.compactWindow
         AgentSkill.storage = (newConfig.mobile.storageAuto, newConfig.mobile.storageDays)
         AgentSkill.browser = (newConfig.mobile.browserOn, newConfig.mobile.browserMax, newConfig.mobile.browserIdle, newConfig.mobile.browserRecord)
+        AgentSkill.device = (newConfig.mobile.deviceMax, newConfig.mobile.deviceIdle)
         mobile.update(config: newConfig.mobile)
         // 端口、令牌可能变了：主窗口的原生对话页跟着重连（没变时什么也不做）
         DispatchQueue.main.async { NativeConversation.setUp() }
@@ -227,6 +229,7 @@ final class AppState {
         AgentSkill.compactWindow = next.mobile.compactWindow
         AgentSkill.storage = (next.mobile.storageAuto, next.mobile.storageDays)
         AgentSkill.browser = (next.mobile.browserOn, next.mobile.browserMax, next.mobile.browserIdle, next.mobile.browserRecord)
+        AgentSkill.device = (next.mobile.deviceMax, next.mobile.deviceIdle)
         mobile.update(config: next.mobile)
         mobile.publishState()   // 快捷短语等设置要同步到已连着的手机
         onConfigChange?(next)
@@ -498,7 +501,7 @@ final class AppState {
             // translate = 能代手机翻译消息（/api/translate）；translateLocal = 能只在电脑本机翻（macOS 26 起的系统翻译）
             // renameSource = 手机能给设备起别名（/api/sources/rename，记在设备所在的电脑上）
             // editorWindows = 能列出、关掉没有会话在运行的 VS Code 窗口（/api/editor/windows，hosted.closeEditor 是自动关的开关）
-            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit"]
+            "features": ["files", "groups", "groupMedia", "hostUpdate", "share", "dirs", "hostedSetup", "translate", "tabGroups", "brag", "renameSource", "restart", "editorWindows", "favoriteEdit", "newSessionOnce"]
                 + (HostTranslate.localAvailable ? ["translateLocal"] : []),
             "hosted": ["tipOff": config.mobile.hostedTipOff, "closeEditor": config.mobile.hostedCloseEditor],
         ]

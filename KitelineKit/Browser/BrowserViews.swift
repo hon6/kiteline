@@ -214,8 +214,12 @@ struct BrowserMini: KLView {
             VStack(alignment: .leading, spacing: 2) {
                 Text(info.title.isEmpty ? info.shortURL : info.title)
                     .font(.ui(.caption2).weight(.semibold)).lineLimit(1)
-                Text(info.last.isEmpty ? info.shortURL : info.last)
-                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                if info.errors > 0 {
+                    Text(L("网页有 %lld 个错误", info.errors)).font(.ui(.caption2).weight(.medium)).foregroundStyle(Theme.removed).lineLimit(1)
+                } else {
+                    Text(info.last.isEmpty ? info.shortURL : info.last)
+                        .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8).padding(.vertical, 6)
@@ -318,6 +322,7 @@ struct BrowserViewer: KLView {
     @State private var handBackNote = ""
     @State private var confirmClose = false
     @State private var replay: BrowserReplay?
+    @State private var showDevlog = false
     @FocusState private var typingFocused: Bool
 
     var klBody: some View {
@@ -443,13 +448,13 @@ struct BrowserViewer: KLView {
                             Label(tab.title.isEmpty ? tab.url : tab.title, systemImage: tab.current ? "checkmark" : "square.on.square")
                         }
                     }
-                    if store.isControlling(key) {
+                    if store.isControlling(key), info.device == nil {
                         Divider()
                         Button { url = info.url; editingURL = true } label: { Label("输入网址", systemImage: "link") }
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: info.url.hasPrefix("https://") ? "lock.fill" : "globe")
+                        Image(systemName: info.device != nil ? "iphone" : (info.url.hasPrefix("https://") ? "lock.fill" : "globe"))
                             .font(.app(size: 10)).foregroundStyle(.secondary)
                         Text(info.title.isEmpty ? (wide || info.shortURL.isEmpty ? L("浏览器") : info.shortURL) : info.title)
                             .font(.ui(.footnote).weight(.medium)).lineLimit(1).layoutPriority(1)
@@ -475,6 +480,23 @@ struct BrowserViewer: KLView {
         .frame(maxWidth: .infinity)
         .background(RoundedRectangle(cornerRadius: 8).fill(BrowserChrome.field))
         .overlay(RoundedRectangle(cornerRadius: 8).hairlineBorder(BrowserChrome.edge.opacity(0.7)))
+        .overlay(alignment: .trailing) {
+            // 网页报错（控制台、失败的请求）：有才出现，点开看是哪些
+            if info.errors > 0 {
+                Button { showDevlog = true } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                        Text("\(info.errors)").monospacedDigit()
+                    }
+                    .font(.app(size: 11, weight: .semibold)).foregroundStyle(Theme.removed)
+                    .padding(.horizontal, 6).frame(height: 20)
+                    .background(Theme.removed.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain).padding(.trailing, 4)
+                .help(L("网页错误")).accessibilityLabel(L("网页有 %lld 个错误", info.errors))
+            }
+        }
+        .sheetPanel(isPresented: $showDevlog) { DevLogSheet(key: key) }
     }
 
     private func navButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
@@ -873,3 +895,61 @@ extension KitelineKit {
     }
 }
 #endif
+
+
+/// 网页报错：控制台报错、网页异常、失败的网络请求（watcher 的 BrowserLink.devlog，最近 200 条，按页面分段）
+struct DevLogSheet: KLView {
+    @EnvModel private var model
+    let key: String
+    @State private var entries: [[String: Any]] = []
+    @State private var loaded = false
+
+    var klBody: some View {
+        FitSheet(title: L("网页错误"), background: Theme.card) {
+            VStack(alignment: .leading, spacing: 10) {
+                if !loaded {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30)
+                } else if entries.isEmpty {
+                    Text("没有记录到错误").foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(entries.reversed().enumerated()), id: \.offset) { _, row in line(row) }
+                }
+            }
+        }
+        .task {
+            if let reply = try? await model.api.post("/api/browser", ["key": key], body: ["op": "devlog"]) {
+                entries = (reply["entries"] as? [[String: Any]]) ?? []
+            }
+            loaded = true
+        }
+    }
+
+    @ViewBuilder private func line(_ row: [String: Any]) -> some View {
+        let kind = row["kind"] as? String ?? ""
+        let url = row["url"] as? String ?? ""
+        if kind == "nav" {
+            Text(L("打开 %@", url)).font(.ui(.caption)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+        } else {
+            let error = (row["level"] as? String) == "error"
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(error ? Theme.removed : Color.orange)
+                    Text(kind == "network" ? L("网络请求") : (kind == "exception" ? L("网页异常") : L("控制台")))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let t = row["t"] as? Double { Text(Format.clock(t)).foregroundStyle(.tertiary) }
+                }
+                .font(.ui(.caption))
+                Text(row["text"] as? String ?? "").font(ChatType.detail).klFontDesign(nil).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !url.isEmpty {
+                    Text(url).font(.ui(.caption2)).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+}

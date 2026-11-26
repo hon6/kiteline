@@ -497,6 +497,22 @@ struct GeneralPane: KLView {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Picker("最多同时开启", selection: binding(\.mobile.deviceMax)) {
+                    Text(L("自动（这台电脑建议 %d 台）", AgentSkill.deviceSuggest())).tag(0)
+                    ForEach([1, 2, 3, 4, 6, 8], id: \.self) { Text(L("%d 台", $0)).tag($0) }
+                }
+                Picker("多久没用就关闭", selection: binding(\.mobile.deviceIdle)) {
+                    Text("10 分钟").tag(10)
+                    Text("30 分钟").tag(30)
+                    Text("1 小时").tag(60)
+                }
+            } header: {
+                Text("模拟器")
+            } footer: {
+                Text("Agent 需要 iOS 模拟器或安卓模拟器时向 Kiteline 申请，会话中会显示模拟器的实时画面。模拟器占用内存较多（iOS 约 1.5 GB，安卓约 3 GB）：达到上限或可用内存不足时，后来的申请排队等候，前面的用完后依次轮到；每开一台前都会检查当时的可用内存，确保开启后仍有余量。会话结束、或持续设定时间没有使用的模拟器会自动关闭。「自动」按每台电脑的内存给出建议数量，远端电脑按它自己的内存计算。只会关闭 Kiteline 或 Agent 开启的模拟器，你自己打开的不受影响。")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("自动清理长期没用的缓存", isOn: binding(\.mobile.storageAuto))
                 Picker("超过多久没使用就清", selection: binding(\.mobile.storageDays)) {
                     Text("7 天").tag(7)

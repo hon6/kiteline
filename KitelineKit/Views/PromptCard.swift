@@ -158,6 +158,8 @@ private struct PermissionCard: KLView {
         VStack(alignment: .leading, spacing: 10) {
             CardTitle(symbol: "exclamationmark.triangle.fill", text: L("%@ 想使用 %@", "\(session.speaker)", "\(Tools.displayName(tool.name))"))
             Text(session.blocking ?? input?["description"]?.string ?? L("需要你的授权")).font(.ui(.subheadline)).foregroundStyle(.secondary)
+            // 这一步要留意的地方（删文件、强推……）：批准前看清楚
+            if let risk = tool.risk, !risk.isEmpty { RiskChips(codes: RiskTag.shown(risk, limit: 4), size: 12) }
             if let command {
                 Text(command).font(.app(size: 13, design: .monospaced)).klFontDesign(nil).lineLimit(5)
                     .padding(10).padding(.trailing, CopyCorner.reserve).frame(maxWidth: .infinity, alignment: .leading)

@@ -129,7 +129,8 @@ struct SessionSnapshot: Codable, Equatable {
     /// close（关闭会话，3.49.7 起）只由电脑端给：手机连老电脑端时的兜底全套里没有它
     /// goal（设定目标，发 /goal）：Claude Code 2.1.139 起有，按会话报来的版本给；别家由插件给（Codex 终端里的会话）
     var capsPayload: [String] {
-        var out = caps ?? (agentID == "claude-code" ? ["mode", "model", "compact", "subagents", "tests", "close"] : [])
+        // context（上下文构成）、rewind（撤回某一轮起的改动）：3.49.57 起，读 Claude Code 自己的记录和文件快照
+        var out = caps ?? (agentID == "claude-code" ? ["mode", "model", "compact", "subagents", "tests", "close", "context", "rewind"] : [])
         if agentID == "claude-code", GoalSnapshot.claudeSupports(version), !out.contains("goal") { out.append("goal") }
         return out
     }

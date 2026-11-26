@@ -228,11 +228,17 @@ public static class UserMessage
                 (L("复制为提示词链接"), () => SessionMenu.Copy(PromptLinks.Make(shown.Trim(),
                     (model.Session(key)?.Cwd ?? (model.PastMeta.TryGetValue(key, out var past) ? past.Cwd : null)) is string cwd
                         ? System.IO.Path.GetFileName(cwd.TrimEnd('/', '\\')) : null))),
+                // 撤回这一轮起 Claude 改的文件（用 Claude Code 自己的文件快照）：电脑端支持才有；插话（queued）不是一轮的开头
+                .. (model.Session(key)?.Can("rewind") == true && item.Queued != true && Offset(item) > 0
+                    ? new[] { (L("撤回这一轮起的改动"), (Action)(() => RewindSheet.Show(key, Offset(item)))) } : []),
             ], () => FavoriteState.Shared.MenuAction(key, item, true), () => TranslateUi.MenuAction(item.Id, shown)));
         }
         if (item.Queued == true) stack.Children.Add(Ui.Text(L("Claude 工作时插入"), 11, color: "Text2").HAlign(HorizontalAlignment.Right));
         return stack;
     }
+
+    /// 这条消息在对话记录里的位置（id 形如「偏移.序号」）
+    static int Offset(ChatItem item) => int.TryParse(item.Id.Split('.')[0], out var n) ? n : 0;
 
     /// 语音转出来的文字：语音条下面的浅色块（同微信「转文字」）
     public static Control Transcript(string text) =>

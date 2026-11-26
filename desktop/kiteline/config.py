@@ -53,6 +53,8 @@ DEFAULT_MOBILE = {
     "browserMax": 4,               # 最多同时开几个浏览器（再按可用内存往下压）
     "browserIdle": 10,             # 空闲多少分钟回收
     "browserRecord": True,         # 录下浏览器操作，可以回放
+    "deviceMax": 0,                # 模拟器最多同时开几台：0 = 自动（各台电脑按自己的内存定，见 watcher 的 device_suggest）
+    "deviceIdle": 30,              # 模拟器持有的会话多少分钟没用就收回
     "storageAuto": True,           # 存储清理：自动清超过 N 天没用的缓存（图片缓存、会话浏览器数据、收件图片，见 storage.py）
     "storageDays": 14,
     "httpsEnabled": True,

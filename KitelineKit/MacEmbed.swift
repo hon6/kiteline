@@ -217,6 +217,9 @@ public enum KitelineKit {
     public static var favoriteCount: Int { model?.favorites.items.count ?? 0 }
 
     /// 自测用：打开第几条收藏（新的在前，从 0 数）的编辑面板——要收藏页正显示着
+    /// 截图步骤 tp:context / tp:rewind:<第几轮>：打开当前对话页的上下文构成、撤回面板（见 TransparencyRequest）
+    public static func openTransparency(_ ask: String) { TransparencyRequest.shared.ask = ask }
+
     public static func editFavorite(_ index: Int) -> String {
         guard let model else { return "-" }
         let items = model.favorites.items.sorted { $0.at > $1.at }

@@ -966,8 +966,22 @@ final class AppModel: KLObservable {
             chat.loaded = true
             chat.add(page.items)
             Offline.saveChat(key, Array(chat.items.values))
+            if !older { Task { await reachPending(key) } }
         } catch {
             show(error)
+        }
+    }
+
+    /// 还挂着等回显的消息，回显可能已经在最新一页之前了：Claude 忙时插的话被交给它以后，它又跑了几百步，
+    /// 手机那会儿没连着、重新打开只拉最新 60 条，认不出这条已经送到，占位就一直垫在对话最下面（11-26 用户遇到）。
+    /// 往前多翻几页直到盖住它发出的时刻，找到回显 settle 会撤掉占位，消息显示在它真正交给 Claude 的位置
+    private func reachPending(_ key: String) async {
+        let chat = chat(key)
+        for _ in 0..<8 {
+            guard chat.hasMore, !chat.loading, let oldest = chat.oldestTs,
+                  let sent = chat.pending.filter({ !$0.isFailed && !$0.inQueueStrip }).map(\.at).min(),
+                  oldest > sent - 120_000 else { return }
+            await loadHistory(key, older: true)
         }
     }
 

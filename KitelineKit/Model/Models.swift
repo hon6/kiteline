@@ -303,6 +303,8 @@ struct ChatItem: Codable, Identifiable, Hashable {
     var goal: String?
     /// 目标达成、做不到那一行带的：用了几轮、多久、多少 token
     var goalStats: GoalStats?
+    /// 工具调用要留意的地方（watcher 的 tool_risk：delete、push……），见 Views/Transparency.swift 的 RiskTag
+    var risk: [String]?
 
     /// 排序：时间 → transcript 里的偏移 → 同一行里的第几块（id 形如「偏移.序号」，Claude 发图的是 o 开头）
     var offset: Int { id.hasPrefix("o") ? 0 : Int(id.split(separator: ".").first ?? "") ?? 0 }

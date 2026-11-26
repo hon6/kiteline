@@ -418,6 +418,8 @@ public sealed class ChatItem : IEquatable<ChatItem>
     public List<ChatImage>? Images;
     /// Claude 的回复里认出来的「需要你来做」的事：消息下面问一句「加入待办？」
     public List<string>? Asks;
+    /// 工具调用要留意的地方（watcher 的 tool_risk：delete、push……），见 Views/Transparency.cs 的 RiskTag
+    public List<string>? Risk;
     /// 会话之间的消息：发出的那步（tool SendMessage）、收到的那条（event）带着，见 Model/Peers.cs
     public PeerInfo? Peer;
     /// SendMessage 的结果里的 msg_id（和收信那边配对）
@@ -461,6 +463,7 @@ public sealed class ChatItem : IEquatable<ChatItem>
             FullLength = n.Int("fullLength"),
             Queued = n.Bool("queued"),
             Asks = n.Get("asks") is JsonArray ? n.Strings("asks") : null,
+            Risk = n.Get("risk") is JsonArray ? n.Strings("risk") : null,
             Peer = PeerInfo.Parse(n.Get("peer")),
             MsgId = n.Str("msgId"),
             ForUser = n.Bool("forUser"),
@@ -527,14 +530,23 @@ public sealed record PastSession(string Key, string Title, string? Cwd, string S
 }
 
 /// 会话浏览器（同 iOS 版 BrowserInfo）：地址、标题、最近一条浏览器指令、指令条数、agent 请你接管时的说明
-public sealed record BrowserInfo(string Url, string Title, string Last, int Actions, string? Ask, double? Since, bool Closed = false, int Recs = 0)
+/// Errors / Warns：这一页的控制台报错、失败的网络请求个数；Device：小窗显示的是模拟器（ios / android，watcher 的 DevicePool 借这个小窗）
+public sealed record BrowserInfo(string Url, string Title, string Last, int Actions, string? Ask, double? Since, bool Closed = false, int Recs = 0,
+                                 int Errors = 0, int Warns = 0, string? Device = null)
 {
-    public static BrowserInfo? Parse(JsonNode? n) =>
-        n is JsonObject
-            ? new BrowserInfo(n.Str("url") ?? "", n.Str("title") ?? "", n.Str("last") ?? "", n.Int("actions") ?? 0,
-                              n.Str("ask") is { Length: > 0 } ask ? ask : null, n.Num("since"), n.Bool("closed") == true, n.Int("recs") ?? 0)
-            : null;
+    public static BrowserInfo? Parse(JsonNode? n)
+    {
+        if (n is not JsonObject) return null;
+        var kind = n.Get("device").Str("kind");
+        // 模拟器的标题按界面语言拼（watcher 给的是中文）
+        var title = kind is not null && n.Get("device").Str("name") is string name
+            ? (kind == "ios" ? Lang.L("iOS 模拟器") : Lang.L("安卓模拟器")) + " · " + name
+            : n.Str("title") ?? "";
+        return new BrowserInfo(n.Str("url") ?? "", title, n.Str("last") ?? "", n.Int("actions") ?? 0,
+                               n.Str("ask") is { Length: > 0 } ask ? ask : null, n.Num("since"), n.Bool("closed") == true, n.Int("recs") ?? 0,
+                               n.Int("errors") ?? 0, n.Int("warns") ?? 0, kind);
+    }
 
-    /// 地址栏上显示的：去掉协议
-    public string ShortUrl => Url.Replace("https://", "").Replace("http://", "");
+    /// 地址栏上显示的：去掉协议（模拟器没有网址，只显示标题）
+    public string ShortUrl => Device is not null ? "" : Url.Replace("https://", "").Replace("http://", "");
 }

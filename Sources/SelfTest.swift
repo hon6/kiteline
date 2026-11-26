@@ -704,6 +704,7 @@ extension SelfTest {
                 KitelineModel.shared.selection = item.id
                 Log.write("[capture] 草稿 \(draft.prefix(14)) → \(item.title)")
             } else { Log.write("[capture] 没有草稿标签或没找到会话「\(arg)」") }
+        case "tp": KitelineKit.openTransparency(arg); delay = 2   // tp:context / tp:rewind:1（过程透明化的两个面板）
         case "favedit": Log.write("[capture] 编辑收藏：\(KitelineKit.editFavorite(Int(arg) ?? 0))"); delay = 2   // 收藏页开着时打开第几条的编辑面板
         case "sidetab": KitelineModel.shared.showSideTab(arg)   // 新版界面左边栏列哪一栏：sidetab:sessions / todos / projects / favorites
         case "project":

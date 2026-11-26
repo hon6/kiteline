@@ -369,7 +369,9 @@ public static class SessionChips
             yield return Pill(Ui.H(5, new AgentGlyph(s.Agent, 12, "Text"), Ui.Text(s.Usage?.Model ?? Agents.Info(s.Agent).Name, 11.5, color: "Text").Opacity(0.75)), null);
         }
         if (s.Usage?.Percent is int percent)
-            yield return Pill(Ui.H(4, new ContextRing(percent), Ui.Text($"{percent}%", 11.5, color: "Text2").Digits()), s.Can("compact") ? onCompact : null);
+            // 电脑端能给上下文构成的：点开看被什么占着（压缩按钮在里面）；老版本电脑端照旧直接问要不要压缩
+            yield return Pill(Ui.H(4, new ContextRing(percent), Ui.Text($"{percent}%", 11.5, color: "Text2").Digits()),
+                s.Can("context") ? () => ContextSheet.Show(key) : s.Can("compact") ? onCompact : null);
         // 目标（/goal）：没设时点开写一个，设了的显示进行中 / 暂停（会话支持才有）
         if (s.Can("goal") && s.CanReply)
         {

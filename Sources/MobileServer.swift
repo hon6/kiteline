@@ -521,7 +521,7 @@ final class MobileServer {
 
     /// 只有内容（对话、文件、图片、差异……）、个头又大的接口：英文设备也原样回，不逐字段查表
     static let contentOnly: Set<String> = ["/api/history", "/api/media", "/api/file", "/api/files", "/api/git/diff", "/api/digest/media",
-                                           "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/trace", "/api/tts", "/api/translate", "/api/peers", "/api/download",
+                                           "/api/task-output", "/api/search", "/api/changelog", "/api/agents", "/api/trace", "/api/context", "/api/tts", "/api/translate", "/api/peers", "/api/download",
                                            "/api/groups/messages", "/api/groups/media"]
 
     /// 每台设备的界面语言（锁屏推送按它发）：存起来，电脑重启后第一条推送也对
@@ -699,6 +699,15 @@ final class MobileServer {
             case ("GET", "/api/trace"):
                 // 执行过程面板：agent → 轮次 → 步骤（expand 是要带上步骤的轮次，「agent:轮次」逗号分隔）
                 self.forwardAny(request, ["cmd": "trace", "expand": request.query["expand"] ?? "", "rev": request.query["rev"] ?? ""], respond: respond)
+            case ("GET", "/api/context"):
+                // 上下文构成（对话页上下文百分比胶囊点开）：被什么占着、这段上下文里谁最费钱（watcher 的 session_context）
+                self.forwardAny(request, ["cmd": "context"], respond: respond)
+            case ("POST", "/api/rewind"):
+                // 撤回某一轮起的文件改动：op = plan（先看会动哪些文件）/ apply（撤回）/ undo（还原撤回）；offset 是那句用户消息在记录里的位置
+                let body = request.jsonBody ?? [:]
+                let op = body["op"] as? String ?? "plan"
+                let cmd = op == "apply" ? "rewind" : (op == "undo" ? "rewind_undo" : "rewind_plan")
+                self.forwardAny(request, ["cmd": cmd, "offset": body["offset"] ?? "", "undo": body["undo"] ?? ""], respond: respond)
             case ("GET", "/api/peers"):
                 // 会话之间的消息往来（默认最近一天）：刚连上、协作图用；之后的走实时事件 peers
                 let since = Double(request.query["since"] ?? "") ?? (Date().timeIntervalSince1970 * 1000 - 86_400_000)
@@ -2194,20 +2203,28 @@ final class MobileServer {
     private func launchReplies(_ respond: @escaping (HTTPResponse) -> Void, cwd: String, branch: String?)
         -> (accepted: (NewSession.Outcome) -> Void, finished: (NewSession.Outcome) -> Void) {
         var replied = false
+        // 只回一次：先回过（accepted、或新任务等久了先回的「正在打开」）的，后面的 accepted 不再回
+        var answered = false
         func reply(_ outcome: NewSession.Outcome) {
+            guard !answered else { return }
+            answered = true
             var payload: [String: Any] = ["ok": outcome.ok, "submitted": outcome.submitted, "openedWindow": outcome.openedWindow,
                                           "message": outcome.message, "error": outcome.ok ? "" : outcome.message, "cwd": cwd]
             if let branch { payload["branch"] = branch }
             respond(.json(payload, status: outcome.ok ? 200 : 409))
         }
         let accepted: (NewSession.Outcome) -> Void = { outcome in
-            replied = true
-            reply(outcome)
+            DispatchQueue.main.async {
+                replied = true
+                reply(outcome)
+            }
         }
         let finished: (NewSession.Outcome) -> Void = { outcome in
-            guard replied else { reply(outcome); return }
-            guard !outcome.submitted else { return }
-            self.notifyRoute(kind: "error", title: "新任务未能自动提交", body: outcome.message, route: "")
+            DispatchQueue.main.async {
+                guard replied else { reply(outcome); return }
+                guard !outcome.submitted else { return }
+                self.notifyRoute(kind: "error", title: "新任务未能自动提交", body: outcome.message, route: "")
+            }
         }
         return (accepted, finished)
     }
@@ -2275,7 +2292,34 @@ final class MobileServer {
     }
 
     /// 新任务：在某个来源的某个目录里开一个新的 Claude Code 会话
+    /// 手机等不到回应会拿同一个请求编号（cid）重发（勾了独立分支要先建分支、再开新窗口，常要十几秒）：
+    /// 还在做就等那一次的结果，做成了的 10 分钟内直接回上次的结果，不再开第二个会话（同 resume）
     private func newSession(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        guard let cid = (request.jsonBody?["cid"] as? String).map({ "new|\($0)" }) else { newSessionOnce(request, respond: respond); return }
+        DispatchQueue.main.async {
+            let now = Date()
+            self.recentResumes = self.recentResumes.filter { now.timeIntervalSince($0.value.at) < 600 }
+            if let previous = self.recentResumes[cid] {
+                Log.write("手机重发的新任务已经开过（\(cid.suffix(12))），不再新建")
+                respond(previous.response); return
+            }
+            if self.pendingSends[cid] != nil {
+                Log.write("手机重发的新任务还在处理（\(cid.suffix(12))），等那一次的结果")
+                self.pendingSends[cid]?.append(respond); return
+            }
+            self.pendingSends[cid] = []
+            self.newSessionOnce(request) { response in
+                DispatchQueue.main.async {
+                    if response.status < 400, MobileServer.succeeded(response) { self.recentResumes[cid] = (Date(), response) }
+                    let waiters = self.pendingSends.removeValue(forKey: cid) ?? []
+                    respond(response)
+                    waiters.forEach { $0(response) }
+                }
+            }
+        }
+    }
+
+    private func newSessionOnce(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
         guard let body = request.jsonBody else { respond(.error("请求格式无效", status: 400)); return }
         let sourceId = body["sourceId"] as? String ?? ""
         guard let sourceConfig = AppState.shared.config.sources.first(where: { $0.id == sourceId }),
@@ -2307,6 +2351,13 @@ final class MobileServer {
                 let agent = (body["agent"] as? String).flatMap { $0.isEmpty || $0 == "claude-code" ? nil : $0 }
                 func launch(_ cwd: String, _ prompt: String, _ branch: String?) {
                     let reply = self.launchReplies(respond, cwd: cwd, branch: branch)
+                    // 开新窗口、等标签加载可能要几十秒（独立分支一定是新窗口），要自动提交的 8 秒还没回过就先回「正在打开」，没提交上另行通知
+                    if submit, !prompt.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                            reply.accepted(NewSession.Outcome(ok: true, submitted: true, openedWindow: true,
+                                                              message: "正在打开项目，加载完成后将自动提交"))
+                        }
+                    }
                     guard let agent else {
                         NewSession.start(source: sourceConfig, cwd: cwd, prompt: prompt, submit: submit,
                                          accepted: reply.accepted, completion: reply.finished)

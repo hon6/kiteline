@@ -1,5 +1,25 @@
 # Kiteline Release Notes
 
+## 3.49.59（2026-11-26）
+
+### New Features
+
+- **See each step more clearly** (Mac, iPhone, iPad, Windows, Linux, Mini Program): when the agent edits code, the changed lines now appear right under that step, and when a command fails its last two lines of error output are shown, so you can tell what changed and what went wrong without opening anything.
+- **Risky actions are flagged** (Mac, iPhone, iPad, Windows, Linux, Mini Program): deleting files, rewriting Git history, running downloaded scripts, changing databases, admin privileges, pushing, installing software and similar actions are marked on the step and on confirmation cards; open the step to see why it deserves attention.
+- **See what's filling your context** (Mac, iPhone, iPad, Windows, Linux, Mini Program): tap the context percentage below the input box to see how much the system prompt, files read, command output, web pages, conversation and more each take up, and which items cost the most. The Compact Context button is there too.
+- **Undo changes from a turn onward** (Mac, iPhone, iPad, Windows, Linux, Mini Program): long-press (right-click on a computer) one of your messages and choose "Undo changes from this turn on". Kiteline lists the files it will restore or delete first, then puts the files Claude changed back the way they were; you can restore them again with one tap. Currently supports Claude Code.
+- **Agents can use the iOS Simulator and Android Emulator** (Mac, Windows, Linux): when an agent needs a simulator it requests one from Kiteline, and the session shows its live screen; you can take over an Android Emulator directly. Kiteline limits how many run at once based on the computer's memory, queues further requests, and shuts idle ones down so memory doesn't fill up. Adjust the limit under Simulators in Settings.
+- **Spot web page errors at a glance** (Mac, iPhone, iPad, Windows, Linux): when the agent's browser hits script errors or failed requests, the browser preview shows the error count; open it to see exactly what went wrong.
+
+### Improvements
+
+- **Attach your latest screenshot when starting a new session** (iPhone, iPad): tapping + in the input bar now shows the screenshot you just took above it; tap it to attach, no need to dig through Photos.
+
+### Fixes
+
+- **Messages sent while Claude is busy no longer stay stuck at the bottom of the conversation** (iPhone, iPad, Mac): if Claude kept working for a long time after receiving the message, reopening the conversation could leave it pinned at the bottom with Claude's later replies above it, as if it had never been sent. It now appears where it was actually delivered.
+- **Starting a new session with "Work in a Separate Branch" no longer reports a network interruption or creates duplicates** (Mac, Windows, Linux, iPhone, iPad): when the computer needs to create the branch and open a new window first, it now replies to the phone right away; if the network drops, the phone retries automatically and a single request only ever creates one session.
+
 ## 3.49.58（2026-11-25）
 
 ### Improvements

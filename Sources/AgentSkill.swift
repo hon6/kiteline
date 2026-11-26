@@ -38,6 +38,23 @@ enum AgentSkill {
             }
         }
     }
+    /// 模拟器（设置 → 模拟器）：最多同时开几台（0 = 自动，各台电脑按自己的内存定）、持有的会话多少分钟没用就收回。
+    /// 启动 watcher 时经环境变量带过去，改了当场告诉在线的 watcher（device_config）
+    static var device: (max: Int, idle: Int) = (0, 30) {
+        didSet {
+            guard device != oldValue else { return }
+            DispatchQueue.main.async {
+                for source in AppState.shared.liveSources {
+                    source.request(["cmd": "device_config", "max": device.max == 0 ? "auto" : String(device.max), "idle": device.idle],
+                                   timeout: 10) { _ in }
+                }
+            }
+        }
+    }
+    /// 按内存建议最多同时开几台模拟器（同 watcher 的 device_suggest）：给系统、编辑器、agent 留 8 GB，其余按每台约 2.5 GB，1～6 台
+    static func deviceSuggest(memoryMB: Double = Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576) -> Int {
+        max(1, min(6, Int((memoryMB - 8192) / 2560)))
+    }
     /// 远端会话的浏览器开在用户这台电脑上（远端 watcher 不起浏览器，经 ssh 反向转发接回来）
     static var browserOnClient: Bool { browser.on != "server" }
 
@@ -56,6 +73,8 @@ enum AgentSkill {
         env["CCPULSE_BROWSER_MAX"] = String(browser.max)
         env["CCPULSE_BROWSER_IDLE"] = String(browser.idle)
         env["CCPULSE_BROWSER_REC"] = browser.record ? "1" : "0"
+        env["CCPULSE_DEVICE_MAX"] = String(device.max)   // 0 = 自动（watcher 按那台电脑的内存定）
+        env["CCPULSE_DEVICE_IDLE"] = String(device.idle)
         env["CCPULSE_STORAGE_AUTO"] = storage.auto ? "1" : "0"   // 存储清理：watcher 每天自动清超过 N 天没用的浏览器数据等
         env["CCPULSE_STORAGE_DAYS"] = String(storage.days)
         // 测试实例的入口不用 9339（见 BrowserRelay.gatePort）

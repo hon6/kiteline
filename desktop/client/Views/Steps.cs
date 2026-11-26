@@ -60,6 +60,8 @@ public sealed class StepRow : StackPanel
             Ui.Text(name, ChatType.Size, FontWeight.Bold),
             briefText,
             new Spacer(4),
+            // 风险标签（删文件、推送、改写 Git 历史……）：一眼看到这一步要留意
+            item.T == "tool" && RiskTag.Shown(item.Risk) is { Count: > 0 } risks ? RiskTag.Chips(risks) : null,
             stat is { } s ? Ui.H(3, Ui.Text($"+{s.Added}", ChatType.DetailSize, color: "Added").Mono(), Ui.Text($"−{s.Removed}", ChatType.DetailSize, color: "Removed").Mono()) : null,
             chevron);
         var tap = new Tap(line.Pad(ChatType.PadH, ChatType.Px(4)), null, 0).Keys("Transparent", "Fill05");
@@ -85,6 +87,12 @@ public sealed class StepRow : StackPanel
             collapse.Click = Toggle;
         }
         else tap.Click = () => ToolDetail.Show(key, step);
+        if (item.T == "tool" && StepPreview.Make(step) is { } preview)
+        {
+            // 改代码的前几行改动、命令出错时最后两行输出：不用点开就知道改了什么、错在哪；左边和标题文字对齐
+            preview.Margin = new Thickness(ChatType.PadH + 22, 0, ChatType.PadH, ChatType.Px(4));
+            Children.Add(preview);
+        }
         if (item.T == "tool" && step.Result?.Images is { Count: > 0 } images)
         {
             // 读图片、截图这类工具：结果里的图直接显示，不用点开这一步才看得到；左边和标题文字对齐
@@ -171,6 +179,13 @@ public static class ToolDetail
         var title = item.T == "result" ? L("工具结果") : item.T == "thinking" ? L("思考")
             : Tools.DisplayName(item.Name) + (Tools.Brief(item) is { Length: > 0 } b ? " · " + b : "");
         var stack = new StackPanel { Spacing = 16 };
+        if (item.T == "tool" && item.Risk is { Count: > 0 } risk)
+        {
+            var notes = new StackPanel { Spacing = 6 };
+            foreach (var code in risk)
+                notes.Children.Add(Ui.H(8, RiskTag.Chips([code], 11.5), Ui.Text(RiskTag.Explain(code), 12, color: "Text2").Wrap().Shrink()));
+            stack.Children.Add(Section(L("需要留意"), notes));
+        }
         if (item.T == "tool") stack.Children.Add(Input(item));
         if (item.T == "thinking") stack.Children.Add(Section(L("思考"), MonoBlock(item.Text ?? "")));
         else stack.Children.Add(Result(key, step.Result));

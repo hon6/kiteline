@@ -47,6 +47,8 @@ struct NewSessionPage: KLView {
     @State private var panelOpen = false
     @State private var showCamera = false
     @State private var clipboardImage = false
+    /// 「你可能要发送的截图」：点开「+」时刚截过图，在「+」上方弹个小气泡（同对话页）
+    @State private var recentShot: RecentScreenshot.Shot?
     @AppStorage("voiceMode") private var voiceMode = false
     @FocusState private var focused: Bool
 
@@ -456,6 +458,24 @@ struct NewSessionPage: KLView {
                     RoundIcon(symbol: "plus", label: panelOpen ? L("收起更多功能") : L("更多功能")) {
                         focused = false
                         withAnimation(.klSnappy(duration: 0.25)) { panelOpen.toggle() }
+                        if panelOpen, attachments.count < 6 {
+                            Task {
+                                let shot = await RecentScreenshot.find()
+                                withAnimation(.klSnappy) { recentShot = shot }
+                            }
+                        }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if let recentShot {
+                            RecentShotBubble(shot: recentShot, current: $recentShot) { prepared in
+                                guard attachments.count < 6 else { return }
+                                attachments.append(ComposeAttachment(name: "screenshot-\(attachments.count + 1).jpg", data: prepared.jpeg, preview: prepared.preview))
+                                withAnimation(.klSnappy(duration: 0.25)) { panelOpen = false }
+                            }
+                            .fixedSize()
+                            .offset(y: -(Bar.rowHeight + 6))
+                            .transition(.scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
+                        }
                     }
                 }
             }
@@ -756,6 +776,9 @@ struct NewSessionPage: KLView {
                 "override": override, "worktree": isolated && canIsolate,
             ]
             if let otherAgent { body["agent"] = otherAgent.id }
+            // 带请求编号：电脑按编号去重，等不到回应时重发一次也只开一个会话（勾了独立分支要先建分支、开新窗口，常要十几秒）。
+            // 老版本电脑端不认编号，重发会开出两个，所以只对声明了 newSessionOnce 的带
+            if model.hostFeatures.contains("newSessionOnce") { body["cid"] = UUID().uuidString }
             let reply = try await model.api.post("/api/new-session", body: body)
             // 新会话一出现就打开它（MainView 看到 pendingOpen 把这一页换成那个会话）
             model.awaitNewSession(sourceId: project.sourceId, cwd: reply["cwd"] as? String ?? project.cwd)

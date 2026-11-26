@@ -63,6 +63,32 @@ def localize_status(payload):
     return out
 
 
+
+def _device_suggest():
+    """设置 → 模拟器「自动」显示的建议台数：按这台电脑的内存，同 watcher 的 device_suggest（给系统、编辑器、agent 留 8 GB，
+    其余按每台约 2.5 GB，1～6 台）。远端电脑由那边的 watcher 按它自己的内存定"""
+    total = None
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong), ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong), ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong), ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong), ("sullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            status = MemoryStatus()
+            status.dwLength = ctypes.sizeof(MemoryStatus)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                total = status.ullTotalPhys / 1048576.0
+        else:
+            total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1048576.0
+    except (OSError, ValueError, AttributeError):
+        total = None
+    if not total:
+        return 2
+    return max(1, min(6, int((total - 8192) // 2560)))
+
 class Console:
     def __init__(self, app):
         self.app = app
@@ -208,6 +234,7 @@ class Console:
         "installTestSkill": bool, "installTodoSkill": bool, "installStageSkill": bool,
         "shrinkAgentImages": bool, "compactWindow": (0, 200000, 300000, 400000),
         "browserOn": ("client", "server"), "browserMax": (1, 2, 3, 4, 5, 6, 8, 10, 12, 16), "browserIdle": (5, 10, 30, 60), "browserRecord": bool,
+        "deviceMax": (0, 1, 2, 3, 4, 6, 8), "deviceIdle": (10, 30, 60),
         "storageAuto": bool, "storageDays": (7, 14, 30, 60),
     }
     TOP_LEVEL = ("notifyOnNeedsAttention", "notifyOnConclusion")
@@ -277,6 +304,21 @@ class Console:
                                     pass
 
                     threading.Thread(target=push, daemon=True).start()
+                if {"deviceMax", "deviceIdle"} & set(changes):
+                    # 模拟器：上限、回收时间当场告诉在线的 watcher（下次启动经环境变量带）
+                    from . import watcher as watcher_module
+                    watcher_module.DEVICE.update(max=int(app.cfg.mobile.get("deviceMax") or 0), idle=int(app.cfg.mobile.get("deviceIdle") or 30))
+
+                    def push_device():
+                        for source in list(app.store.sources.values()):
+                            if getattr(source, "live", False):
+                                try:
+                                    source.request({"cmd": "device_config", "max": watcher_module.DEVICE["max"] or "auto",
+                                                    "idle": watcher_module.DEVICE["idle"]}, timeout=10)
+                                except Exception:  # noqa: BLE001
+                                    pass
+
+                    threading.Thread(target=push_device, daemon=True).start()
                 if "relayURL" in changes and app.cfg.mobile["remoteEnabled"]:
                     app.p2p.stop()
                     app.p2p.start(app.cfg.relay(), app.cfg.https_port())
@@ -343,7 +385,8 @@ class Console:
                 "delivery": {"ready": ready, "reason": why}, "autostart": autostart_enabled(),
                 "fingerprint": tls.ca_fingerprint(), "dataDir": config.config_dir(),
                 "readiness": app.readiness(), "uiLanguage": i18n.ui_choice(), "virtualScreen": vscreen.state(),
-                "savers": agent_skill.savers_summary(app.store.sources.values())}
+                "savers": agent_skill.savers_summary(app.store.sources.values()),
+                "deviceSuggest": _device_suggest()}
 
     def sources(self, action, method, body):
         """来源管理（客户端「来源」页）：GET 列表和建议；POST /add {host, name, port}、/update {id, name, enabled}、/remove {id}、/reconnect {id}"""

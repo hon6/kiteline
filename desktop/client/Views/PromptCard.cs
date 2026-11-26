@@ -43,6 +43,8 @@ public static class PromptCard
         var stack = new StackPanel { Spacing = 10 };
         stack.Children.Add(Title("exclamationmark.triangle.fill", L("%@ 想使用 %@", session.Speaker, Tools.DisplayName(tool.Name))));
         stack.Children.Add(Ui.Text(session.Blocking ?? input.Str("description") ?? L("需要你的授权"), 13, color: "Text2", lines: 3).Wrap());
+        // 这一步要留意的地方（删文件、强推……）：批准前看清楚
+        if (RiskTag.Shown(tool.Risk, 4) is { Count: > 0 } risks) stack.Children.Add(RiskTag.Chips(risks, 11.5));
         if (command is not null)
         {
             var text = new SelectableTextBlock { Text = command, FontFamily = Look.Mono, FontSize = Look.Pt(13), TextWrapping = TextWrapping.Wrap, MaxLines = 5, TextTrimming = TextTrimming.CharacterEllipsis };

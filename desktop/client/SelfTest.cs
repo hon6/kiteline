@@ -161,6 +161,16 @@ static class SelfTest
                     if (Enum.TryParse<SessionAction>(arg, true, out var act) && main.Selection is string current) ChatActions.Perform(current, act);
                     break;
                 case "openfile": if (main.Selection is string fileKey) ChatSheets.File(fileKey, arg); break;
+                // 过程透明化的两个面板：tp:context（上下文构成）、tp:rewind:<第几轮>（撤回面板）
+                case "tp" when main.Selection is string tpKey:
+                    if (arg == "context") Views.ContextSheet.Show(tpKey);
+                    else if (arg.StartsWith("rewind:") && int.TryParse(arg[7..], out var turn) && turn > 0)
+                    {
+                        var turns = Model.AppModel.Shared.Chat(tpKey).Items.Values.Where(x => x.T == "user" && x.Queued != true)
+                            .OrderBy(x => x.Ts ?? 0).ThenBy(x => int.TryParse(x.Id.Split('.')[0], out var o) ? o : 0).ToList();
+                        if (turns.Count >= turn && int.TryParse(turns[turn - 1].Id.Split('.')[0], out var offset)) Views.RewindSheet.Show(tpKey, offset);
+                    }
+                    break;
                 case "share": if (main.Selection is string shareKey) Views.GuestShare.Open(shareKey); break;   // 分享只读链接面板（含发言申请）
                 case "closedialog": Views.Dialog.Last?.Close(); break;
                 // 代码 IDE：code:<explorer|scm|branches>、codefile:<路径>、codetab:history / diff:<路径> / commit:<提交号>
