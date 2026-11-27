@@ -96,7 +96,7 @@ KIT_SOURCES=$(find "$ROOT/KitelineKit" -name '*.swift' ! -path '*/Watch/*' ! -pa
   ! -name TARSApp.swift ! -name PairView.swift ! -name Glass.swift ! -name OnboardingView.swift ! -name ReadinessView.swift \
   ! -name SettingsView.swift ! -name SettingsPages.swift ! -name SessionListView.swift ! -name MainView.swift ! -name Snapshot.swift | sort)
 # 纸鸢的形状、各 agent 的标志（App 图标、iPhone、手表、Mac 共用一份）在 KitelineKit/Shared 里，也编进来
-KIT_SOURCES="$KIT_SOURCES $ROOT/KitelineKit/Shared/PaperKite.swift $ROOT/KitelineKit/Shared/AgentMark.swift $ROOT/KitelineKit/Shared/Lang.swift $ROOT/KitelineKit/Shared/KitelineObservation.swift $ROOT/KitelineKit/Shared/KitelineCompat.swift"
+KIT_SOURCES="$KIT_SOURCES $ROOT/KitelineKit/Shared/PaperKite.swift $ROOT/KitelineKit/Shared/AgentMark.swift $ROOT/KitelineKit/Shared/Lang.swift $ROOT/KitelineKit/Shared/ProjectRoot.swift $ROOT/KitelineKit/Shared/KitelineObservation.swift $ROOT/KitelineKit/Shared/KitelineCompat.swift"
 for arch in $ARCHS; do
   mkdir -p "$KIT/$arch"
   swiftc \

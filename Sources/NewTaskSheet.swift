@@ -450,7 +450,7 @@ struct NewTaskSheet: KLView {
             if model.sources.contains(where: { $0.id == listSource }), projects.contains(where: { $0.sourceId == listSource }) {
                 sourceFilter = listSource
             }
-            if model.sessions.contains(where: { $0.folder == listProject }), projects.contains(where: { $0.name == listProject }) {
+            if model.sessions.contains(where: { $0.project == listProject }), projects.contains(where: { $0.name == listProject }) {
                 projectFilter = listProject
             }
             if let preset = model.newTaskPreset, let project = projects.first(where: { $0.sourceId == preset.sourceId && $0.cwd == preset.cwd }) {

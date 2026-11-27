@@ -409,7 +409,7 @@ struct SidebarView: KLView {
 
     /// 筛着的那个项目（运行中的会话里已经没有它就当没筛）
     private var activeProject: String? {
-        projectFilter.isEmpty || !model.sessions.contains(where: { $0.folder == projectFilter }) ? nil : projectFilter
+        projectFilter.isEmpty || !model.sessions.contains(where: { $0.project == projectFilter }) ? nil : projectFilter
     }
 
     private var isFiltering: Bool { status != "all" || activeSource != nil || activeProject != nil }
@@ -433,13 +433,13 @@ struct SidebarView: KLView {
     /// 在筛着的设备、项目里的
     private func scoped(_ items: [SessionItem]) -> [SessionItem] {
         let source = activeSource?.id, project = activeProject
-        return items.filter { (source == nil || $0.sourceId == source) && (project == nil || $0.folder == project) }
+        return items.filter { (source == nil || $0.sourceId == source) && (project == nil || $0.project == project) }
     }
 
     /// 设备那排：有会话的设备（筛着的那台没会话了也列着），个数跟着项目筛选走
     private var sourceOptions: [ScopeBar.Option] {
         let project = activeProject
-        let inProject = model.filtered.filter { project == nil || $0.folder == project }
+        let inProject = model.filtered.filter { project == nil || $0.project == project }
         let busy = Set(model.sessions.map(\.sourceId))
         return model.sources.filter { busy.contains($0.id) || $0.id == activeSource?.id }.map { source in
             ScopeBar.Option(id: source.id, title: source.name, count: inProject.filter { $0.sourceId == source.id }.count)
@@ -451,9 +451,9 @@ struct SidebarView: KLView {
         var order: [String] = []
         var counts: [String: Int] = [:]
         let source = activeSource?.id
-        for item in model.sortedSessions(sorting) where !item.folder.isEmpty && (source == nil || item.sourceId == source) {
-            if counts[item.folder] == nil { order.append(item.folder) }
-            counts[item.folder, default: 0] += 1
+        for item in model.sortedSessions(sorting) where !item.project.isEmpty && (source == nil || item.sourceId == source) {
+            if counts[item.project] == nil { order.append(item.project) }
+            counts[item.project, default: 0] += 1
         }
         return order.map { ScopeBar.Option(id: $0, title: $0, count: counts[$0] ?? 0) }
     }
@@ -466,7 +466,7 @@ struct SidebarView: KLView {
         let sources = sourceOptions
         let bySource = sources.count > 1 || activeSource != nil
         // 项目那排看全部会话有没有不止一个项目，不看选了哪台设备：那台只有一个项目时也照样显示（11-23 反馈：选了设备项目筛选就没了）
-        let byProject = Set(model.sessions.map(\.folder).filter { !$0.isEmpty }).count > 1 || activeProject != nil
+        let byProject = Set(model.sessions.map(\.project).filter { !$0.isEmpty }).count > 1 || activeProject != nil
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 if model.query.isEmpty {
@@ -542,7 +542,7 @@ struct SidebarView: KLView {
         Button {
             // 选了项目（和设备）：按这个项目里最近的会话取设备、目录、agent
             let latest = activeProject.flatMap { project in
-                model.sessions.filter { $0.folder == project && (activeSource == nil || $0.sourceId == activeSource?.id) }
+                model.sessions.filter { $0.project == project && (activeSource == nil || $0.sourceId == activeSource?.id) }
                     .max { ($0.updatedAt ?? 0) < ($1.updatedAt ?? 0) }
             }
             if let latest {
@@ -661,7 +661,7 @@ struct SidebarView: KLView {
                 if byAgent {
                     map[key] = SessionGroup(key: key, name: Agents.info(item.agent).name, agent: item.agent, items: [])
                 } else {
-                    map[key] = SessionGroup(key: key, name: bySource ? (item.sourceName.isEmpty ? L("未知来源") : item.sourceName) : (item.folder.isEmpty ? L("（未知目录）") : item.folder),
+                    map[key] = SessionGroup(key: key, name: bySource ? (item.sourceName.isEmpty ? L("未知来源") : item.sourceName) : (item.project.isEmpty ? L("（未知目录）") : item.project),
                                             sub: !bySource && multi ? item.sourceName : nil, source: bySource || multi ? item.sourceId : nil, items: [])
                 }
             }
@@ -1251,7 +1251,7 @@ struct SessionRow: KLView {
                 }
                 HStack(spacing: 4) {
                     Image(systemName: item.kind == .ssh ? "server.rack" : (item.kind == .kiteline ? "desktopcomputer" : "laptopcomputer"))
-                    Text(folder ? "\(item.sourceName) · \(item.folder)" : item.sourceName).lineLimit(1)
+                    Text(folder ? "\(item.sourceName) · \(item.projectLabel)" : item.sourceName).lineLimit(1)
                     if let usage = item.usage, usage.percent >= 70 {
                         Spacer(minLength: 4)
                         Text("上下文 \(usage.percent)%")
@@ -1290,7 +1290,7 @@ extension View {
     @MainActor
     func sessionDraggable(_ item: SessionItem) -> some View {
         let status = [Activity.waiting: L("待确认"), .busy: L("正在工作"), .idle: L("空闲")][item.activity] ?? ""
-        let card = SessionCard(title: item.title, status: status, line: item.line, detail: "\(item.sourceName) · \(item.folder)", dot: item.activity.color)
+        let card = SessionCard(title: item.title, status: status, line: item.line, detail: "\(item.sourceName) · \(item.projectLabel)", dot: item.activity.color)
         return onDrag { KitelineKit.dragProvider(key: item.id, card: card) } preview: { card.opacity(0.92) }
     }
 }
@@ -1513,7 +1513,7 @@ struct ConversationDetail: KLView {
         if let item = model.session(key) {
             let status = [Activity.waiting: L("待确认"), .busy: L("正在工作"), .idle: L("空闲")][item.activity] ?? ""
             // 只读（Proma 这类）在状态后标出来
-            return [status, item.readOnly ? L("只读") : "", item.sourceName, item.folder].filter { !$0.isEmpty }.joined(separator: " · ")
+            return [status, item.readOnly ? L("只读") : "", item.sourceName, item.projectLabel].filter { !$0.isEmpty }.joined(separator: " · ")
         }
         if let past = HistoryModel.shared.past(key) { return L("已结束 · %@ · %@", "\(past.sourceName)", "\(past.folder)") }
         return L("已结束")

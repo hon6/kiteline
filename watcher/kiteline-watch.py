@@ -1176,6 +1176,12 @@ class UsageMeter:
                 self.cost = float(entry["totalCostUSD"])
                 self.cost_at = parse_ts(entry.get("timestamp"))
             return
+        if etype == "system" and entry.get("subtype") == "compact_boundary":
+            # 压缩以后：上下文是 Claude Code 记下的压缩后大小，不再是压缩前最后一次请求的（不然胶囊一直停在压缩前的百分比）
+            post = (entry.get("compactMetadata") or {}).get("postTokens")
+            if isinstance(post, (int, float)) and post > 0:
+                self.context = int(post)
+            return
         if etype != "assistant" or entry.get("isSidechain"):
             return
         message = entry.get("message")
@@ -1196,7 +1202,7 @@ class UsageMeter:
         try:
             with open(path, "rb") as handle:
                 for raw in handle:
-                    if b'"usage"' in raw or b'cost-state' in raw[:200]:
+                    if b'"usage"' in raw or b'cost-state' in raw[:200] or b'"compact_boundary"' in raw:
                         entry = parse_line(raw)
                         if entry is not None:
                             self.feed(entry)
@@ -8534,18 +8540,22 @@ def list_projects(limit=60, since=None):
         if newest:
             found.append((newest_at, newest, count, recent))
     found.sort(reverse=True)
-    out, seen = [], set()
+    out, seen = [], {}
     for mtime, path, count, recent in found:
         cwd = transcript_cwd(path)
-        if not cwd or cwd in seen:
+        # worktree 里的会话算进原项目（不在项目列表里各占一行）
+        cwd = project_root(cwd) if cwd else cwd
+        if not cwd:
             continue
-        seen.add(cwd)
+        if cwd in seen:
+            seen[cwd]["sessions"] += count
+            seen[cwd]["today"] += recent
+            continue
         out.append({"cwd": cwd, "lastActive": int(mtime * 1000), "exists": os.path.isdir(cwd),
                     "title": find_title(path), "sessionId": os.path.basename(path)[:-6],
                     "sessions": count, "today": recent})
-        if len(out) >= limit:
-            break
-    return out
+        seen[cwd] = out[-1]
+    return out[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -8792,7 +8802,44 @@ def search_sessions(query, limit=60, per_session=3, budget=12.0, paths=None):
 #         还没写 cost-state 的会话（正在跑）借用同机同模型的平均费率，标为估算
 # ---------------------------------------------------------------------------
 
-_USAGE_SCAN_CACHE = {}   # path -> (signature, scan)
+_USAGE_SCAN_CACHE = {}   # path -> (每个文件读到的字节位置, 去重用的请求号, scan)
+_USAGE_SCAN_LOCK = threading.Lock()
+
+
+def jsonl_lines_from(name, start, marks):
+    """从第 start 个字节起逐行读 jsonl，读到哪记进 marks[name]，下次接着读（会话记录只往后追加）。
+    末尾没写完的半行先不读（解析不了 JSON 的才算没写完），等写完了下次再读"""
+    marks[name] = start
+    try:
+        handle = open(name, "rb")
+    except OSError:
+        return
+    with handle:
+        handle.seek(start)
+        pos = start
+        for raw in handle:
+            if not raw.endswith(b"\n"):
+                try:
+                    json.loads(raw)
+                except ValueError:
+                    break
+            pos += len(raw)
+            marks[name] = pos
+            yield raw
+
+
+def _resume_marks(files, old):
+    """上次读到的位置还能不能接着用：有文件变短了（被改写）就从头读，返回 None"""
+    if old is None:
+        return None
+    for name in files:
+        try:
+            size = os.path.getsize(name)
+        except OSError:
+            return None
+        if size < old.get(name, 0):
+            return None
+    return dict(old)
 
 
 def usage_weight(inp, out, cache_read, cache_write):
@@ -8801,28 +8848,29 @@ def usage_weight(inp, out, cache_read, cache_write):
 
 
 def scan_usage(path):
-    """一个会话（含子代理）：{(小时, 模型): [输入, 输出, 读缓存, 写缓存, 请求数]}、各模型费率、工作目录"""
+    """一个会话（含子代理）：{(小时, 模型): [输入, 输出, 读缓存, 写缓存, 请求数]}、各模型费率、工作目录。
+    只读上次之后新追加的行：正在跑的会话记录有几百 MB，每次整份重读太慢"""
     sub_dir = os.path.join(path[:-6], "subagents")
     files = [path]
     try:
         files += [os.path.join(sub_dir, n) for n in sorted(os.listdir(sub_dir)) if n.endswith(".jsonl")]
     except OSError:
         pass
-    try:
-        signature = tuple((os.path.getsize(f), os.path.getmtime(f)) for f in files)
-    except OSError:
+    if not os.path.exists(path):
         return None
-    hit = _USAGE_SCAN_CACHE.get(path)
-    if hit and hit[0] == signature:
-        return hit[1]
-    buckets, rates, seen, cwd = {}, {}, set(), None
-    for index, name in enumerate(files):
-        try:
-            handle = open(name, "rb")
-        except OSError:
-            continue
-        with handle:
-            for raw in handle:
+    with _USAGE_SCAN_LOCK:
+        hit = _USAGE_SCAN_CACHE.get(path)
+        marks = _resume_marks(files, hit[0] if hit else None)
+        if marks is not None and all(os.path.getsize(f) == marks.get(f) for f in files if os.path.exists(f)):
+            return hit[2]
+        if marks is None:
+            marks, seen, scan = {}, set(), {"buckets": {}, "rates": {}, "cwd": None}
+        else:
+            seen, scan = hit[1], hit[2]
+        buckets, rates = scan["buckets"], scan["rates"]
+        cwd = scan["cwd"]
+        for index, name in enumerate(files):
+            for raw in jsonl_lines_from(name, marks.get(name, 0), marks):
                 if index == 0 and b'"cost-state"' in raw[:60]:
                     entry = parse_line(raw)
                     for model, info in ((entry or {}).get("modelUsage") or {}).items():
@@ -8859,9 +8907,9 @@ def scan_usage(path):
                 bucket[2] += int(usage.get("cache_read_input_tokens") or 0)
                 bucket[3] += int(usage.get("cache_creation_input_tokens") or 0)
                 bucket[4] += 1
-    scan = {"buckets": buckets, "rates": rates, "cwd": cwd or transcript_cwd(path)}
-    _USAGE_SCAN_CACHE[path] = (signature, scan)
-    return scan
+        scan["cwd"] = cwd or scan["cwd"] or transcript_cwd(path)
+        _USAGE_SCAN_CACHE[path] = (marks, seen, scan)
+        return scan
 
 
 def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
@@ -8994,7 +9042,12 @@ def usage_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
 # ---------------------------------------------------------------------------
 
 BRAG_IDLE_MS = 5 * 60000      # 同一个会话两次动静隔得比这短，算一直在干活
-_BRAG_SCAN_CACHE = {}         # path -> (signature, scan)
+_BRAG_SCAN_CACHE = {}         # path -> (每个文件读到的字节位置, scan)
+_BRAG_SCAN_LOCK = threading.Lock()
+BRAG_DAYS_FILE = os.path.join(DATA_DIR, "brag-days.json")   # 过完的日子算好就存下：以后只算今天
+BRAG_DAYS_KEEP = 62           # 存几天（手机最多问 60 天）
+BRAG_DAYS_SETTLE_MS = 10 * 60000   # 一天结束 10 分钟后才算定稿（零点刚过还有记录在写）
+_BRAG_DAYS_LOCK = threading.Lock()
 
 
 def _patch_counts(patch):
@@ -9029,96 +9082,86 @@ def _codex_patch_text(name, args):
     return ""
 
 
-def _brag_claude_file(path, scan):
-    """一份 Claude Code 记录：每条带时间的记录算一次动静；用户发的话、工具调用、编辑结果（按真实补丁数行）"""
-    try:
-        handle = open(path, "rb")
-    except OSError:
-        return
-    with handle:
-        for raw in handle:
-            tail = raw[-8000:]
-            found = list(_TS_BYTES.finditer(tail))
-            if not found:
-                continue
-            ts = parse_ts(found[-1].group(1).decode() + "Z")
-            if ts is None:
-                continue
-            scan["events"].append(ts)
-            head = raw[:1500]   # 用户那一行的 "type":"user" 在 message 前面；助手那一行的 type 在行尾，不能靠它认
-            if b'"type":"user"' not in head and b'"type": "user"' not in head:
-                # 工具调用只数个数，不解析整行（大部分时间花在这里）；正文里的同样字样是转义过的（\"），数不到
-                uses = raw.count(b'"type":"tool_use"') + raw.count(b'"type": "tool_use"')
-                if uses:
-                    scan["tools"].extend([ts] * uses)
-                continue
-            if b'"toolUseResult"' in raw and b'"structuredPatch"' not in raw:
-                continue   # 读文件、跑命令的结果：不是编辑，也不是用户说的话
-            entry = parse_line(raw)
-            if not isinstance(entry, dict) or entry.get("type") != "user":
-                continue
-            scan["cwd"] = scan["cwd"] or entry.get("cwd")
-            result = entry.get("toolUseResult")
-            if isinstance(result, dict):
-                target = result.get("filePath") or result.get("notebook_path") or ""
-                added = removed = 0
-                text = result.get("content")
-                if result.get("type") == "create" and isinstance(text, str) and text:
-                    added = text.count("\n") + (0 if text.endswith("\n") else 1)
-                for hunk in result.get("structuredPatch") or []:
-                    for line in (hunk.get("lines") if isinstance(hunk, dict) else None) or []:
-                        if isinstance(line, str) and line.startswith("+"):
-                            added += 1
-                        elif isinstance(line, str) and line.startswith("-"):
-                            removed += 1
+def _brag_claude_file(path, scan, start=0, marks=None):
+    """一份 Claude Code 记录（从第 start 个字节读起）：每条带时间的记录算一次动静；用户发的话、工具调用、编辑结果（按真实补丁数行）"""
+    for raw in jsonl_lines_from(path, start, {} if marks is None else marks):
+        tail = raw[-8000:]
+        found = list(_TS_BYTES.finditer(tail))
+        if not found:
+            continue
+        ts = parse_ts(found[-1].group(1).decode() + "Z")
+        if ts is None:
+            continue
+        scan["events"].append(ts)
+        head = raw[:1500]   # 用户那一行的 "type":"user" 在 message 前面；助手那一行的 type 在行尾，不能靠它认
+        if b'"type":"user"' not in head and b'"type": "user"' not in head:
+            # 工具调用只数个数，不解析整行（大部分时间花在这里）；正文里的同样字样是转义过的（\"），数不到
+            uses = raw.count(b'"type":"tool_use"') + raw.count(b'"type": "tool_use"')
+            if uses:
+                scan["tools"].extend([ts] * uses)
+            continue
+        if b'"toolUseResult"' in raw and b'"structuredPatch"' not in raw:
+            continue   # 读文件、跑命令的结果：不是编辑，也不是用户说的话
+        entry = parse_line(raw)
+        if not isinstance(entry, dict) or entry.get("type") != "user":
+            continue
+        scan["cwd"] = scan["cwd"] or entry.get("cwd")
+        result = entry.get("toolUseResult")
+        if isinstance(result, dict):
+            target = result.get("filePath") or result.get("notebook_path") or ""
+            added = removed = 0
+            text = result.get("content")
+            if result.get("type") == "create" and isinstance(text, str) and text:
+                added = text.count("\n") + (0 if text.endswith("\n") else 1)
+            for hunk in result.get("structuredPatch") or []:
+                for line in (hunk.get("lines") if isinstance(hunk, dict) else None) or []:
+                    if isinstance(line, str) and line.startswith("+"):
+                        added += 1
+                    elif isinstance(line, str) and line.startswith("-"):
+                        removed += 1
+            if added or removed:
+                scan["edits"].append((ts, added, removed, target))
+            continue
+        if entry.get("isSidechain") or entry.get("isMeta") or result is not None:
+            continue
+        if any(item.get("t") == "user" for item in normalize_line(0, entry)):
+            scan["prompts"].append(ts)
+
+
+def _brag_codex_file(path, scan, start=0, marks=None):
+    """一份 Codex rollout（从第 start 个字节读起）：用户发的话、工具调用、补丁（apply_patch，或 shell 里调的 apply_patch）"""
+    for raw in jsonl_lines_from(path, start, {} if marks is None else marks):
+        entry = parse_line(raw)
+        if not isinstance(entry, dict):
+            continue
+        ts = parse_ts(entry.get("timestamp"))
+        payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+        if ts is None:
+            continue
+        scan["events"].append(ts)
+        kind = payload.get("type")
+        if entry.get("type") in ("session_meta", "turn_context"):
+            scan["cwd"] = payload.get("cwd") or scan["cwd"]
+        elif entry.get("type") == "event_msg" and kind == "user_message":
+            scan["prompts"].append(ts)
+        elif entry.get("type") == "response_item" and kind in ("function_call", "custom_tool_call", "local_shell_call"):
+            scan["tools"].append(ts)
+            name = payload.get("name") or ("shell" if kind == "local_shell_call" else "")
+            args = payload.get("arguments") if kind == "function_call" else payload.get("input")
+            if kind == "local_shell_call":
+                args = payload.get("action") or {}
+            if isinstance(args, str) and kind == "function_call":
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    pass
+            for target, added, removed in _patch_counts(_codex_patch_text(name, args)):
                 if added or removed:
                     scan["edits"].append((ts, added, removed, target))
-                continue
-            if entry.get("isSidechain") or entry.get("isMeta") or result is not None:
-                continue
-            if any(item.get("t") == "user" for item in normalize_line(0, entry)):
-                scan["prompts"].append(ts)
-
-
-def _brag_codex_file(path, scan):
-    """一份 Codex rollout：用户发的话、工具调用、补丁（apply_patch，或 shell 里调的 apply_patch）"""
-    try:
-        handle = open(path, "rb")
-    except OSError:
-        return
-    with handle:
-        for raw in handle:
-            entry = parse_line(raw)
-            if not isinstance(entry, dict):
-                continue
-            ts = parse_ts(entry.get("timestamp"))
-            payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
-            if ts is None:
-                continue
-            scan["events"].append(ts)
-            kind = payload.get("type")
-            if entry.get("type") in ("session_meta", "turn_context"):
-                scan["cwd"] = payload.get("cwd") or scan["cwd"]
-            elif entry.get("type") == "event_msg" and kind == "user_message":
-                scan["prompts"].append(ts)
-            elif entry.get("type") == "response_item" and kind in ("function_call", "custom_tool_call", "local_shell_call"):
-                scan["tools"].append(ts)
-                name = payload.get("name") or ("shell" if kind == "local_shell_call" else "")
-                args = payload.get("arguments") if kind == "function_call" else payload.get("input")
-                if kind == "local_shell_call":
-                    args = payload.get("action") or {}
-                if isinstance(args, str) and kind == "function_call":
-                    try:
-                        args = json.loads(args)
-                    except ValueError:
-                        pass
-                for target, added, removed in _patch_counts(_codex_patch_text(name, args)):
-                    if added or removed:
-                        scan["edits"].append((ts, added, removed, target))
 
 
 def brag_scan(path, agent):
-    """一个会话的动静（含 Claude 子代理）：文件没变就用上次的"""
+    """一个会话的动静（含 Claude 子代理）：只读上次之后新追加的行，文件没变就直接用上次的"""
     files = [path]
     if agent == "claude":
         sub_dir = os.path.join(path[:-6], "subagents")
@@ -9126,19 +9169,22 @@ def brag_scan(path, agent):
             files += [os.path.join(sub_dir, n) for n in sorted(os.listdir(sub_dir)) if n.endswith(".jsonl")]
         except OSError:
             pass
-    try:
-        signature = tuple((os.path.getsize(f), os.path.getmtime(f)) for f in files)
-    except OSError:
+    if not os.path.exists(path):
         return None
-    hit = _BRAG_SCAN_CACHE.get(path)
-    if hit and hit[0] == signature:
-        return hit[1]
-    scan = {"agent": agent, "events": [], "prompts": [], "tools": [], "edits": [], "cwd": None}
-    for name in files:
-        (_brag_claude_file if agent == "claude" else _brag_codex_file)(name, scan)
-    scan["events"].sort()
-    _BRAG_SCAN_CACHE[path] = (signature, scan)
-    return scan
+    with _BRAG_SCAN_LOCK:
+        hit = _BRAG_SCAN_CACHE.get(path)
+        marks = _resume_marks(files, hit[0] if hit else None)
+        if marks is not None and all(os.path.getsize(f) == marks.get(f) for f in files if os.path.exists(f)):
+            return hit[1]
+        if marks is None:
+            marks, scan = {}, {"agent": agent, "events": [], "prompts": [], "tools": [], "edits": [], "cwd": None}
+        else:
+            scan = hit[1]
+        for name in files:
+            (_brag_claude_file if agent == "claude" else _brag_codex_file)(name, scan, marks.get(name, 0), marks)
+        scan["events"].sort()
+        _BRAG_SCAN_CACHE[path] = (marks, scan)
+        return scan
 
 
 def _brag_spans(events, since_ms, until_ms):
@@ -9299,6 +9345,108 @@ def brag_report(since_ms, until_ms=None, tz_minutes=0, plugins=None):
             "agents": [a.get("agent") for a in usage.get("agents") or []], "idleMinutes": BRAG_IDLE_MS // 60000}
 
 
+def _brag_day_keys(since_ms, until_ms, tz_minutes):
+    """since 到 until 之间每天的 (日期, 当天开始的毫秒)；since 是某天零点（按 tz）"""
+    out, start = [], since_ms
+    while start < until_ms:
+        out.append((time.strftime("%Y-%m-%d", time.gmtime(start / 1000.0 + tz_minutes * 60)), start))
+        start += 86400000
+    return out
+
+
+def _brag_days_load(tz_minutes):
+    try:
+        with open(BRAG_DAYS_FILE, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict) or data.get("v") != 1 or data.get("tz") != tz_minutes:
+        return {}
+    return data.get("days") if isinstance(data.get("days"), dict) else {}
+
+
+def _brag_days_save(tz_minutes, days):
+    keep = dict(sorted(days.items())[-BRAG_DAYS_KEEP:])
+    tmp = BRAG_DAYS_FILE + ".tmp"
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"v": 1, "tz": tz_minutes, "days": keep}, handle, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp, BRAG_DAYS_FILE)
+    except OSError as exc:
+        log("战绩缓存写不进：%r" % exc)
+
+
+def brag_report_cached(since_ms, until_ms=None, tz_minutes=0, plugins=None):
+    """同 brag_report，但过完的日子只算一次、存进 brag-days.json，以后只现算今天（打开分享页不用等）。
+    指定了 until（只问过去某一段）的照旧现算"""
+    if until_ms:
+        return brag_report(since_ms, until_ms, tz_minutes, plugins)
+    now = int(time.time() * 1000)
+    local = now + tz_minutes * 60000
+    today = local - local % 86400000 - tz_minutes * 60000
+    since_ms = min(max(since_ms, today - BRAG_DAYS_KEEP * 86400000), today)
+    with _BRAG_DAYS_LOCK:
+        stored = _brag_days_load(tz_minutes)
+        past = _brag_day_keys(since_ms, today, tz_minutes)
+        missing = [start for key, start in past if key not in stored]
+        if missing:
+            fresh = {row["day"]: row for row in brag_report(missing[0], today, tz_minutes, plugins)["days"]}
+            settled = now - today >= BRAG_DAYS_SETTLE_MS
+            changed = False
+            for key, start in past:
+                if start < missing[0]:
+                    continue
+                row = fresh.get(key) or dict(_brag_blank(key), curve=[0] * 96)
+                if settled or start + 86400000 < today:
+                    stored[key] = row
+                    changed = True
+                else:
+                    fresh[key] = row
+            if changed:
+                _brag_days_save(tz_minutes, stored)
+        else:
+            fresh = {}
+        rows = [stored.get(key) or fresh.get(key) for key, _ in past]
+    rows = [row for row in rows if row]
+    rows += brag_report(today, None, tz_minutes, plugins)["days"]
+    rows = [row for row in rows if row.get("sessions") or row.get("input") or row.get("output")
+            or row.get("cacheRead") or row.get("cacheWrite") or row.get("requests")]
+    agents = []
+    for row in rows:
+        agents += [a for a in row.get("agents") or [] if a not in agents]
+    return {"days": rows, "agents": agents, "idleMinutes": BRAG_IDLE_MS // 60000}
+
+
+def brag_prewarm(plugins):
+    """后台先算好：watcher 一启动先把近 30 天算一遍（扫描缓存也热了），之后每过一个零点把昨天定稿。
+    只在这台电脑上分享过战绩（有 brag-days.json）才做，没用过这功能的不白占资源"""
+    while True:
+        try:
+            with open(BRAG_DAYS_FILE, encoding="utf-8") as handle:
+                tz_minutes = int(json.load(handle).get("tz") or 0)
+        except (OSError, ValueError, TypeError, AttributeError):
+            tz_minutes = None
+        now = int(time.time() * 1000)
+        if tz_minutes is not None:
+            local = now + tz_minutes * 60000
+            today = local - local % 86400000 - tz_minutes * 60000
+            try:
+                started = time.time()
+                brag_report_cached(today - 29 * 86400000, None, tz_minutes, plugins)
+                log("战绩预算完成，用时 %.1f 秒" % (time.time() - started))
+            except Exception as exc:
+                log("战绩预算出错：%r" % exc)
+            # 下一次：零点过 10 分钟（昨天定稿）
+            target = today + BRAG_DAYS_SETTLE_MS
+            if target <= int(time.time() * 1000):
+                target += 86400000
+            wait = (target - int(time.time() * 1000)) / 1000.0
+        else:
+            wait = 3600
+        time.sleep(max(60, min(wait, 6 * 3600)))
+
+
 def _brag_session_split(path, agent):
     """一个会话按模型分的 token（阵容卡片用）"""
     models = {}
@@ -9417,6 +9565,7 @@ def project_overview(limit=40, since=None, extra=None):
     projects = list_projects(limit, since)
     known = {p["cwd"] for p in projects}
     for cwd in (extra or [])[:20]:
+        cwd = project_root(cwd)
         if is_abs_path(cwd) and cwd not in known:
             known.add(cwd)
             projects.append({"cwd": cwd, "lastActive": 0, "exists": os.path.isdir(cwd), "sessions": 0, "today": 0})
@@ -9453,6 +9602,102 @@ def repo_info(cwd):
     except Exception:
         pass
     return {"repo": True, "root": root, "branch": branch, "worktrees": trees}
+
+
+_WT_SIBLING = re.compile(r"^(.*[\\/])([^\\/]+)-worktrees[\\/][^\\/]+(?=$|[\\/])")
+_WT_CLAUDE = re.compile(r"^(.*?)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?=$|[\\/])")
+
+
+def project_root(cwd):
+    """会话目录在 worktree 里时，归到原项目：<父>/<仓库>-worktrees/<名>[/子] → <父>/<仓库>[/子]；
+    Claude Code 自己的 <仓库>/.claude/worktrees/<名>[/子] → <仓库>[/子]。不是 worktree 的原样返回（纯字符串，不碰磁盘）。
+    各端同款：Sources/ProjectRoot.swift、KitelineKit/Shared/ProjectRoot.swift、desktop/kiteline/aggregate.py、desktop/client/Model/ProjectRoot.cs、miniprogram/lib/projroot.js"""
+    if not isinstance(cwd, str) or not cwd:
+        return cwd
+    m = _WT_SIBLING.match(cwd)
+    if m:
+        return m.group(1) + m.group(2) + cwd[m.end():]
+    m = _WT_CLAUDE.match(cwd)
+    if m and m.group(1):
+        return m.group(1) + cwd[m.end():]
+    return cwd
+
+
+WORKTREE_SWEEP_SECONDS = 600     # 多久查一次可以收掉的 worktree
+WORKTREE_IDLE_SECONDS = 1800     # 没有会话在里面、且这么久没动过，才算「会话关掉了」
+
+
+def worktree_sweep(live_cwds, roots=None):
+    """收掉 Kiteline 开的、已经用完的 worktree（只认 tars/ 分支）：没有会话在里面、半小时没动、
+    工作区干净（含未跟踪文件）、分支已经合进主仓库当前分支——四条都满足才 git worktree remove + git branch -d。
+    还有没合并的提交或没提交的改动一律不动（Git 页的工作树列表里能看到、手动处理）。返回删掉的路径"""
+    if not shutil.which("git"):
+        return []
+    live = [os.path.realpath(c) for c in live_cwds if isinstance(c, str) and c]
+    if roots is None:
+        roots = set()
+        for p in list_projects(200):
+            root = project_root(p["cwd"])
+            if os.path.isdir(os.path.join(os.path.dirname(root.rstrip("/\\")), os.path.basename(root.rstrip("/\\")) + "-worktrees")):
+                roots.add(root)
+    removed = []
+    for cwd in roots:
+        try:
+            top = run_git(cwd, ["rev-parse", "--show-toplevel"]).strip()
+            base_branch = run_git(top, ["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+        except Exception:
+            continue
+        if not base_branch or base_branch == "HEAD":
+            continue
+        for tree in _worktrees(top):
+            path, branch = tree.get("path") or "", tree.get("branch") or ""
+            if tree.get("main") or not branch.startswith("tars/") or not os.path.isdir(path):
+                continue
+            real = os.path.realpath(path)
+            if any(c == real or c.startswith(real + os.sep) for c in live):
+                continue
+            try:
+                if time.time() - _tree_mtime(path) < WORKTREE_IDLE_SECONDS:
+                    continue
+                if run_git(path, ["status", "--porcelain", "--untracked-files=normal"]).strip():
+                    continue
+                if subprocess.run(["git", "-C", top, "merge-base", "--is-ancestor", "refs/heads/" + branch, "HEAD"],
+                                  capture_output=True, timeout=20, **_no_window()).returncode != 0:
+                    continue
+                run_git(top, ["worktree", "remove", path])
+                run_git(top, ["branch", "-d", branch])
+                removed.append(path)
+                log("收掉已合并的工作树：%s（%s）" % (path, branch))
+            except Exception as exc:
+                log("收工作树出错 %s：%r" % (path, exc))
+        base = os.path.join(os.path.dirname(top), os.path.basename(top) + "-worktrees")
+        try:
+            if os.path.isdir(base) and not os.listdir(base):
+                os.rmdir(base)
+        except OSError:
+            pass
+    return removed
+
+
+def _sweep_quiet(live_cwds):
+    try:
+        worktree_sweep(live_cwds)
+    except Exception as exc:
+        log("收工作树出错：%r" % exc)
+
+
+def _tree_mtime(path):
+    """worktree 最近一次被动过的时间：目录本身、git 索引和 HEAD 里最新的那个"""
+    times = [os.path.getmtime(path)]
+    try:
+        gitdir = run_git(path, ["rev-parse", "--absolute-git-dir"]).strip()
+        for name in ("index", "HEAD", "logs/HEAD"):
+            p = os.path.join(gitdir, name)
+            if os.path.exists(p):
+                times.append(os.path.getmtime(p))
+    except Exception:
+        pass
+    return max(times)
 
 
 def worktree_add(cwd, stamp=None):
@@ -11648,13 +11893,18 @@ def session_context(path):
     if hit and hit[0] == signature:
         return hit[1]
     # 先找最后一次压缩在哪（只看原文，不解析），从那里开始解析
-    start, rate = 0, None
+    start, rate, model_line = 0, None, None
     try:
         with open(path, "rb") as handle:
             offset = 0
             for raw in handle:
+                if b'"usage"' in raw and b'"assistant"' in raw[:400]:
+                    model_line = (offset, raw)
                 if b'"compact_boundary"' in raw:
-                    start = offset
+                    # 工具结果、读到的源码里也可能出现这个词：解析确认是压缩边界那一行才算
+                    entry = parse_line(raw)
+                    if isinstance(entry, dict) and entry.get("type") == "system" and entry.get("subtype") == "compact_boundary":
+                        start = offset
                 elif b'"cost-state"' in raw[:60]:
                     entry = parse_line(raw)
                     rows = [(info.get("costUSD"), usage_weight(info.get("inputTokens") or 0, info.get("outputTokens") or 0,
@@ -11672,7 +11922,13 @@ def session_context(path):
     calls = []           # 每次请求（按 message.id 去重）：(输入总量, 输出, 时刻)
     seen_calls = {}
     tools = {}           # tool_use id → (name, brief)
-    model, compacted_at = None, None
+    model, compacted_at, post_tokens = None, None, None
+    if model_line and model_line[0] < start:
+        # 压缩前最后一次请求用的模型（压缩后还没请求时窗口大小靠它，不然 Opus / Sonnet 5 会退回 20 万）
+        entry = parse_line(model_line[1])
+        message = entry.get("message") if isinstance(entry, dict) else None
+        if isinstance(message, dict) and message.get("model") not in (None, "<synthetic>"):
+            model = message.get("model")
     try:
         with open(path, "rb") as handle:
             handle.seek(start)
@@ -11683,6 +11939,8 @@ def session_context(path):
                 etype = entry.get("type")
                 if etype == "system" and entry.get("subtype") == "compact_boundary":
                     blocks, calls, seen_calls, compacted_at = [], [], {}, parse_ts(entry.get("timestamp"))
+                    post = (entry.get("compactMetadata") or {}).get("postTokens")
+                    post_tokens = int(post) if isinstance(post, (int, float)) and post > 0 else None
                     continue
                 message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
                 if etype == "assistant":
@@ -11742,13 +12000,18 @@ def session_context(path):
                             blocks.append(["image", 1600, None, len(calls), False, None])
     except OSError:
         return {"unsupported": True}
+    pending = not calls and post_tokens
+    if pending:
+        # 刚压缩完、还没发过请求：总量用 Claude Code 记的压缩后大小，各部分照常按字数估、余下算固定开销；
+        # 花费按「下一次请求会把它们都读一遍」摊（占比 ≈ 大小占比），没有新花费所以不给美元
+        calls = [[post_tokens, 0, compacted_at]]
     if not calls:
         reply = {"context": 0, "window": context_window(model, 0), "parts": [], "top": [], "calls": 0, "compactedAt": compacted_at}
         _CONTEXT_CACHE[path] = (signature, reply)
         return reply
     now_total = calls[-1][0] + calls[-1][1]
     # 固定开销：第一次请求的输入减去它之前进来的内容
-    before_first = sum(b[1] for b in blocks if b[3] <= 0 and not b[4])
+    before_first = sum(b[1] for b in blocks if (b[3] <= 0 or pending) and not b[4])
     baseline = max(0, calls[0][0] - before_first)
     if baseline > now_total:
         baseline = calls[0][0]
@@ -11793,8 +12056,10 @@ def session_context(path):
                       for r in merged.values()), key=lambda r: -r["tokens"])[:12]
     reply = {"context": now_total, "window": context_window(model, now_total), "baseline": baseline, "calls": n_calls,
              "compactedAt": compacted_at, "since": calls[0][2], "model": model, "parts": out_parts, "top": out_top,
-             "costUSD": round(total_w * rate, 4) if rate else None, "estimated": True,
-             "weight": int(total_w), "spentWeight": int(spent)}
+             "costUSD": round(total_w * rate, 4) if rate and not pending else None, "estimated": True,
+             "weight": int(total_w), "spentWeight": 0 if pending else int(spent)}
+    if pending:
+        reply["calls"] = 0
     _CONTEXT_CACHE[path] = (signature, reply)
     if len(_CONTEXT_CACHE) > 16:
         _CONTEXT_CACHE.pop(next(iter(_CONTEXT_CACHE)))
@@ -23565,7 +23830,7 @@ class Watcher:
             # 分享战绩：按天的数字（sessionId 给了就只算这一个会话）
             if request.get("sessionId"):
                 return {"session": call_with_timeout(60, brag_session, self.path_for(request.get("sessionId")))}
-            return call_with_timeout(90, brag_report, int(request.get("since") or 0), int(request.get("until") or 0) or None,
+            return call_with_timeout(90, brag_report_cached, int(request.get("since") or 0), int(request.get("until") or 0) or None,
                                      int(request.get("tz") or 0), self.plugins)
         if cmd == "usage_report":
             return usage_report(int(request.get("since") or 0), int(request.get("until") or 0) or None,
@@ -24636,6 +24901,10 @@ def main():
     DEVICES.start()        # 模拟器的调度器（见 DevicePool）
     _FAST["watcher"] = watcher
     LIVE.start(watcher)    # 正在生成的文字逐字推（见 LiveTap）
+    # 分享战绩：启动 2 分钟后先在后台算好近 30 天、之后每天零点过后把昨天定稿（打开分享页不用等）
+    prewarm = threading.Timer(120, brag_prewarm, args=(plugins,))
+    prewarm.daemon = True
+    prewarm.start()
     try:
         sync_skills()
         sync_limits_mod()
@@ -24644,6 +24913,7 @@ def main():
     except Exception as exc:
         log("装技能出错：%r" % exc)
     last_skills = time.time()
+    last_sweep = time.time() - WORKTREE_SWEEP_SECONDS + 300   # 启动 5 分钟后第一次收用完的 worktree
     sampler = SysSampler()
     last_signatures = {}
     debug_state = {"scans": 0}
@@ -24668,6 +24938,10 @@ def main():
             watcher.track(snapshots)
             GOALS.annotate(snapshots)
             write_live_sessions(snapshots)
+            if time.time() - last_sweep > WORKTREE_SWEEP_SECONDS:
+                last_sweep = time.time()
+                threading.Thread(target=_sweep_quiet, args=([snap.get("cwd") for snap in snapshots],),
+                                 name="worktree-sweep", daemon=True).start()
             if time.time() - last_skills > SKILLS_RESYNC_SECONDS:
                 last_skills = time.time()
                 try:

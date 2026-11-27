@@ -1350,6 +1350,10 @@
  "再操作": "delivery_bridge.py",
  "写": "PluginStore.swift",
  "写临时文件失败": "PluginStore.swift",
+ "写入": [
+  "KitelineKit/Model/Tools.swift",
+  "desktop/client/Model/Tools.cs"
+ ],
  "写入 watcher 失败：%@": "Source.swift",
  "写入失败：%@": "vscode_a11y.py",
  "写入整个文件": "ProjectPages.swift",
@@ -1499,6 +1503,10 @@
  "加密密钥（可选）": "SettingsWindow.cs",
  "加密（可选）": "SettingsPages.swift",
  "加载失败": "Theme.swift",
+ "加载工具": [
+  "KitelineKit/Model/Tools.swift",
+  "desktop/client/Model/Tools.cs"
+ ],
  "加载更多": "CodeGit.cs",
  "动物": "Profile.swift",
  "区块 %@：%@": "CodeScreens.swift",
@@ -2738,6 +2746,10 @@
  "打开系统设置": "SettingsWindow.swift",
  "打开终端": "TerminalPanel.swift",
  "打开网络诊断，定位连接失败的环节": "Diagnostics.swift",
+ "打开网页": [
+  "KitelineKit/Model/Tools.swift",
+  "desktop/client/Model/Tools.cs"
+ ],
  "打开群聊": "MacEmbed.swift",
  "打开该会话并定位到原消息": "TodosPage.cs",
  "打开这个会话": "GroupViews.swift",
@@ -3590,6 +3602,10 @@
  "查找和替换": "CodeScreens.swift",
  "查找和替换（Ctrl+F）": "CodeWindow.cs",
  "查找和替换（⌘F）": "CodeIDEView.swift",
+ "查找文件": [
+  "KitelineKit/Model/Tools.swift",
+  "desktop/client/Model/Tools.cs"
+ ],
  "查看": "AgentDetails.swift",
  "查看 diff": "ProjectPages.swift",
  "查看事项": "TodosView.swift",
@@ -4503,6 +4519,10 @@
  "编辑器": "ClaudeInput.swift",
  "编辑快捷短语": "MacComposer.swift",
  "编辑收藏": "FavoritesView.swift",
+ "编辑笔记本": [
+  "KitelineKit/Model/Tools.swift",
+  "desktop/client/Model/Tools.cs"
+ ],
  "缩回小窗": "BrowserViews.swift",
  "缩小": "Images.swift",
  "缩小字号": "TerminalPanel.cs",
@@ -4523,6 +4543,10 @@
  "缺少手机": "PeerComputers.swift",
  "缺少提示": "MobileServer.swift",
  "缺少文件": "ccpulse-watch.py",
+ "网上搜索": [
+  "KitelineKit/Model/Tools.swift",
+  "desktop/client/Model/Tools.cs"
+ ],
  "网址、步骤；拿到后把 AppID 发给我": "ccpulse-watch.py",
  "网络": "AgentDetails.swift",
  "网络不通": "PeerComputers.swift",
@@ -4941,6 +4965,10 @@
  "运行中…": "ccpulse-watch.py",
  "运行中的会话": "NewLayout.swift",
  "运行于": "AgentDetails.swift",
+ "运行命令": [
+  "KitelineKit/Model/Tools.swift",
+  "desktop/client/Model/Tools.cs"
+ ],
  "运行测试": "WatchSupport.swift",
  "运行测试并发送结果": "Config.swift",
  "近 30 天": "BragCard.swift",

@@ -373,3 +373,17 @@ extension NotifyEvent {
         itemId = c.text("itemId")
     }
 }
+
+
+/// 带工作目录的会话（正在跑的、历史的、日报里的）：归到的项目目录、项目名、会话行上显示的项目名
+protocol HasProjectCwd { var cwd: String? { get } }
+extension HasProjectCwd {
+    /// worktree 里的会话算原项目（见 KitelineKit/Shared/ProjectRoot.swift），项目筛选、分组、项目页都按它
+    var projectCwd: String? { ProjectRoot.of(cwd) }
+    var projectName: String { projectCwd.map { ($0 as NSString).lastPathComponent } ?? "" }
+    /// 在 worktree 里时带上 worktree 名（「ccpulse · 20261126-011603」）
+    var projectLabel: String { ProjectRoot.worktree(cwd).map { "\(projectName) · \($0)" } ?? projectName }
+}
+extension SessionInfo: HasProjectCwd {}
+extension PastSession: HasProjectCwd {}
+extension DigestSession: HasProjectCwd {}

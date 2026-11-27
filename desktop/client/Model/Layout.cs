@@ -102,7 +102,7 @@ public static class ProjectList
 
     /// 这个项目里正在跑的会话
     public static List<SessionInfo> Live(ProjectItem project) =>
-        AppModel.Shared.Sessions.Where(s => s.SourceId == project.SourceId && s.Cwd == project.Cwd).ToList();
+        AppModel.Shared.Sessions.Where(s => s.SourceId == project.SourceId && s.ProjectCwd == project.Cwd).ToList();
 
     public static string IdOf(SessionInfo s) => $"{s.SourceId}\n{s.Cwd ?? ""}";
 

@@ -1,5 +1,17 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.63（2026-11-27）
+
+### Improvements
+
+- **Cleaner steps in conversations** (Windows, Linux): each step an agent takes is one line with an icon, a plain action name (Read, Edit, Run command, Run tests…) and the file or command in a gray tag, followed right away by a check mark when it succeeds or a cross when it fails.
+- **Share Stats opens faster** (Windows, Linux): past days are counted once and kept, and shortly after midnight the computer prepares yesterday's numbers, so opening Share Stats only needs to count today. Usage reports load faster too.
+- **Separate branches no longer clutter the project list** (Windows, Linux): sessions running in a separate branch are listed under their original project. Once a branch is merged, has no uncommitted changes and its sessions have ended, the computer removes its folder automatically; branches with unmerged work are kept.
+
+### Bug Fixes
+
+- **Context usage after compacting** (Windows, Linux): after you compact the context, the percentage below the input box drops right away to the compacted size instead of keeping the old number, and Context Breakdown shows the total and each part before your next message instead of 0, with the context window size matching the current model.
+
 ## 1.0.62（2026-11-26）
 
 ### New Features

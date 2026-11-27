@@ -29,6 +29,9 @@ struct PaywallView: KLView {
                         }
                     }
                     ForEach(plans) { option in planCard(option, on: option.id == plan?.id) }
+                    if let note = Plan.currencyNote(store.products) {
+                        Text(note).font(.ui(.caption)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .center)
+                    }
                 }
                 if let plan { buyButton(plan) }
                 if let message = store.message {
@@ -181,6 +184,53 @@ struct PaywallView: KLView {
 }
 
 /// 付费页上的一档（月度 / 年度）。截图版拿不到 App Store 的商品，用假的
+extension Plan {
+    /// 价格带上明确的币种：很多人用外区 Apple ID，App Store 按账户地区给价格，日元和人民币都写「¥」会被当成人民币。
+    /// 人民币在中文界面保持「¥14」；其余一律按中文写法带前缀（JP¥300、US$1.99、HK$18、NT$60），英文界面的人民币写 CN¥
+    static func money(_ value: Decimal, _ product: Product, display: String? = nil) -> String {
+        money(value, product.priceFormatStyle, display: display)
+    }
+
+    static func money(_ value: Decimal, _ style: Decimal.FormatStyle.Currency, display: String? = nil) -> String {
+        let english = Lang.shared.isEnglish
+        if style.currencyCode == "CNY", !english { return display ?? value.formatted(style) }
+        var text = value.formatted(style.locale(Locale(identifier: english && style.currencyCode != "CNY" ? "en_US" : "zh_CN")))
+        // en_US 下日元只写「¥」、zh_CN 下人民币只写「¥」：补上前缀
+        if style.currencyCode == "JPY", !text.contains("JP") { text = text.replacingOccurrences(of: "¥", with: "JP¥").replacingOccurrences(of: "￥", with: "JP¥") }
+        if style.currencyCode == "CNY", !text.contains("CN") { text = text.replacingOccurrences(of: "¥", with: "CN¥").replacingOccurrences(of: "￥", with: "CN¥") }
+        return text
+    }
+
+    /// 不是人民币时说明一句按哪种货币计价（外区 Apple ID）；人民币返回 nil
+    static func currencyNote(_ products: [Product]) -> String? {
+        #if SNAPSHOT
+        if products.isEmpty, let demo = demoCurrency { return currencyNote(code: demo.code) }
+        #endif
+        return products.first.flatMap { currencyNote(code: $0.priceFormatStyle.currencyCode) }
+    }
+
+    static func currencyNote(code: String) -> String? {
+        guard code != "CNY" else { return nil }
+        let name = Locale(identifier: Lang.shared.isEnglish ? "en_US" : "zh_CN").localizedString(forCurrencyCode: code) ?? code
+        return L("价格按你的 Apple 账户所在地区以%@计价", name)
+    }
+}
+
+#if SNAPSHOT
+extension Plan {
+    /// 截图版模拟外区 Apple ID 的币种（TARS_DEMO_CURRENCY），金额同 App Store Connect 里的定价
+    static var demoCurrency: (code: String, locale: String, month: Decimal, year: Decimal)? {
+        switch ProcessInfo.processInfo.environment["TARS_DEMO_CURRENCY"] {
+        case "JPY": return ("JPY", "ja_JP", 300, 2500)
+        case "USD": return ("USD", "en_US", Decimal(string: "1.99")!, Decimal(string: "14.99")!)
+        case "HKD": return ("HKD", "zh_HK", 18, 118)
+        case "TWD": return ("TWD", "zh_TW", 60, 490)
+        default: return nil
+        }
+    }
+}
+#endif
+
 struct Plan: Identifiable {
     var id: String
     var title: String
@@ -194,6 +244,14 @@ struct Plan: Identifiable {
 
     static func list(_ products: [Product]) -> [Plan] {
         #if SNAPSHOT
+        if products.isEmpty, let demo = demoCurrency {
+            // 截图版测外区价格：TARS_DEMO_CURRENCY=JPY / USD / HKD …，金额取 App Store Connect 里该地区的价格，走和真商品一样的格式化
+            let style = Decimal.FormatStyle.Currency(code: demo.code, locale: Locale(identifier: demo.locale))
+            let save = Int(((1 - NSDecimalNumber(decimal: demo.year / 12 / demo.month).doubleValue) * 100).rounded())
+            return [Plan(id: "m", title: L("月度"), price: money(demo.month, style), unit: L("/月"), note: nil, badge: nil, yearly: false, trialDays: nil),
+                    Plan(id: "y", title: L("年度"), price: money(demo.year, style), unit: L("/年"), note: L("约 ") + money(demo.year / 12, style) + L("/月"),
+                         badge: L("省 %@%%", "\(save)"), yearly: true, trialDays: nil)]
+        }
         if products.isEmpty {
             // 截图用：和 App Store Connect 里定的价格一致（10-29 降价：月付 ¥14、年付 ¥98，不设免费试用）
             return [Plan(id: "m", title: L("月度"), price: "¥14", unit: L("/月"), note: nil, badge: nil, yearly: false, trialDays: nil),
@@ -207,7 +265,7 @@ struct Plan: Identifiable {
             var note: String?
             var badge: String?
             if yearly {
-                note = L("约 ") + (product.price / 12).formatted(product.priceFormatStyle) + L("/月")
+                note = L("约 ") + money(product.price / 12, product) + L("/月")
                 if let monthly, monthly.price > 0 {
                     let save = 1 - NSDecimalNumber(decimal: product.price / 12 / monthly.price).doubleValue
                     if save >= 0.05 { badge = L("省 %@%%", "\(Int((save * 100).rounded()))") }
@@ -218,22 +276,31 @@ struct Plan: Identifiable {
                 let p = offer.period
                 trial = p.unit == .day ? p.value : (p.unit == .week ? p.value * 7 : (p.unit == .month ? p.value * 30 : nil))
             }
-            return Plan(id: product.id, title: yearly ? L("年度") : L("月度"), price: product.displayPrice, unit: yearly ? L("/年") : L("/月"),
+            return Plan(id: product.id, title: yearly ? L("年度") : L("月度"), price: money(product.price, product, display: product.displayPrice), unit: yearly ? L("/年") : L("/月"),
                         note: note, badge: badge, yearly: yearly, trialDays: trial, product: product)
         }
     }
 }
 
-/// 在这里弹付费页：主界面挂一个；本身就是弹窗的页面（设置、新建任务）各挂一个——弹窗开着时主界面弹不出别的弹窗
+/// 在这里弹付费页：主界面挂一个；本身就是弹窗的页面（设置、新建任务）各挂一个——弹窗开着时主界面弹不出别的弹窗。
+/// 嵌在主界面里的页面（底部 Tab 栏「我」页里的设置）不能再挂：同一个状态两处都要弹，一个也弹不出来
+/// （11-17 加 Tab 栏起，「我」页点「免费版 · 订阅」一直没反应，11-27 查付费时发现）
 struct PaywallHost: KLViewModifier {
-    func klBody(content: Content) -> some View {
-        content.sheetPanel(isPresented: Binding(get: { Store.shared.paywall != nil }, set: { if !$0 { Store.shared.paywall = nil } })) {
-            PaywallView(reason: Store.shared.paywall ?? .settings)
+    var enabled = true
+
+    @ViewBuilder func klBody(content: Content) -> some View {
+        if enabled {
+            content.sheetPanel(isPresented: Binding(get: { Store.shared.paywall != nil }, set: { if !$0 { Store.shared.paywall = nil } })) {
+                PaywallView(reason: Store.shared.paywall ?? .settings)
+            }
+        } else {
+            content
         }
     }
 }
 
 extension View {
-    func paywallHost() -> some View { modifier(PaywallHost()) }
+    /// enabled 为 false：这一页嵌在已经挂了付费页的界面里，交给外面那个弹
+    func paywallHost(_ enabled: Bool = true) -> some View { modifier(PaywallHost(enabled: enabled)) }
 }
 

@@ -27,6 +27,11 @@ struct SessionItem: Identifiable, Equatable {
     var kind: SourceKind
     var cwd: String
     var folder: String
+    /// 归到的项目（worktree 里的会话算原项目，见 ProjectRoot）：项目筛选、按项目分组用它
+    var projectCwd: String
+    var project: String
+    /// 会话行上显示的项目名：在 worktree 里时带上 worktree 名（「ccpulse · 20261126-011603」）
+    var projectLabel: String
     var updatedAt: Double?
     var startedAt: Double?
     var pendingTool: String?
@@ -104,6 +109,10 @@ struct SessionItem: Identifiable, Equatable {
         kind = record.kind
         cwd = s.cwd
         folder = (s.cwd as NSString).lastPathComponent
+        let root = ProjectRoot.of(s.cwd), name = (root as NSString).lastPathComponent
+        projectCwd = root
+        project = name
+        projectLabel = ProjectRoot.worktree(s.cwd).map { "\(name) · \($0)" } ?? name
         updatedAt = s.transcriptUpdatedAt ?? s.statusUpdatedAt ?? s.updatedAt
         startedAt = s.startedAt
         pendingTool = s.pendingTool

@@ -115,7 +115,7 @@ struct DigestCard: KLView {
                 Avatar(text: Format.initials(s.title), size: 42)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(s.title).font(.ui(.headline)).lineLimit(1)
-                    Text([s.sourceName, s.cwd.map { ($0 as NSString).lastPathComponent }, span].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    Text([s.sourceName, Optional(s.projectLabel), span].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -674,10 +674,10 @@ struct HistoryView: KLView {
         var map: [String: [PastSession]] = [:]
         var names: [String: String] = [:]
         for s in sessions {
-            let key = bySource ? s.sourceName : "\(s.sourceName)\n\(s.cwd ?? "")"
+            let key = bySource ? s.sourceName : "\(s.sourceName)\n\(s.projectCwd ?? "")"
             if map[key] == nil {
                 order.append(key)
-                let project = s.cwd.map { ($0 as NSString).lastPathComponent } ?? L("（未知目录）")
+                let project = s.projectCwd == nil ? L("（未知目录）") : s.projectName
                 names[key] = bySource ? (s.sourceName.isEmpty ? L("未知来源") : s.sourceName) : (multi && !s.sourceName.isEmpty ? "\(project) · \(s.sourceName)" : project)
             }
             map[key, default: []].append(s)
@@ -752,7 +752,7 @@ struct PastRow: KLView {
                     Spacer(minLength: 4)
                     Text(Format.listTime(session.lastActive)).font(.ui(.caption)).foregroundStyle(.tertiary)
                 }
-                Text([session.sourceName, session.cwd.map { ($0 as NSString).lastPathComponent }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                Text([session.sourceName, Optional(session.projectLabel)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.ui(.caption)).foregroundStyle(.secondary).lineLimit(1)
                 if searching {
                     ForEach(Array(session.hits.prefix(2).enumerated()), id: \.offset) { _, hit in
@@ -853,7 +853,7 @@ struct ProjectsView: KLView {
         .refreshable { await load() }
     }
 
-    private func lives(_ p: ProjectInfo) -> [SessionInfo] { model.sessions.filter { $0.sourceId == p.sourceId && $0.cwd == p.cwd } }
+    private func lives(_ p: ProjectInfo) -> [SessionInfo] { model.sessions.filter { $0.sourceId == p.sourceId && $0.projectCwd == p.cwd } }
 
     /// 有等你确认的排最前，然后是在干活的、开着会话的
     private func rank(_ p: ProjectInfo) -> Int {

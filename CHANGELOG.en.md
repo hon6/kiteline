@@ -1,5 +1,20 @@
 # Kiteline Release Notes
 
+## 3.49.60（2026-11-27）
+
+### Improvements
+
+- **Cleaner steps in conversations** (Mac, iPhone, iPad, Windows, Linux, Mini Program): each step an agent takes is one line with an icon, a plain action name (Read, Edit, Run command, Run tests…) and the file or command in a gray tag, followed right away by a check mark when it succeeds or a cross when it fails.
+- **Share Stats opens faster** (iPhone, iPad, Mac, Windows, Linux): past days are counted once and kept, and shortly after midnight the computer prepares yesterday's numbers on its own, so opening Share Stats only needs to count today. The page shows your last numbers right away and updates them when counting finishes. Usage reports are faster too.
+- **No more waiting when sending files from other apps** (iPhone, iPad): the Send to Session panel shows your last session and project lists right away so you can pick one and send, then refreshes them in the background. When the computer is slow to respond, the loading area no longer covers the options and notes above it.
+- **Separate branches no longer clutter the project list** (Mac, iPhone, iPad, Windows, Linux, Mini Program): sessions running in a separate branch are listed under their original project with the branch folder shown beside them. Once a branch is merged, has no uncommitted changes and its sessions have ended, the computer removes its folder automatically; branches with unmerged work are kept.
+
+### Bug Fixes
+
+- **Tapping Subscribe on the Me tab did nothing** (iPhone): tapping "Kiteline Pro · Free · Subscribe" on the Me tab now opens the subscription page.
+- **Context usage after compacting** (Mac, iPhone, iPad, Windows, Linux, Mini Program): after you compact the context, the percentage below the input box drops right away to the compacted size instead of keeping the old number, and Context Breakdown shows the total and each part before your next message instead of 0, with the context window size matching the current model.
+- **Subscription prices show their currency** (iPhone, iPad): with an Apple Account from another country or region, prices now include the currency (such as JP¥300 or US$1.99) and the paywall notes which currency is used.
+
 ## 3.49.59（2026-11-26）
 
 ### New Features

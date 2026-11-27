@@ -179,7 +179,7 @@ final class ProjectsModel: ObservableObject {
     func codeKey(_ id: String) -> String? {
         if let key = codeKeys[id] { return key }
         guard let place = Self.place(id) else { return nil }
-        let key = KitelineModel.shared.sessions.first { $0.sourceId == place.sourceId && $0.cwd == place.cwd }?.id
+        let key = KitelineModel.shared.sessions.first { $0.sourceId == place.sourceId && $0.projectCwd == place.cwd }?.id
             ?? project(id)?.sessionId.map { "\(place.sourceId)#\($0)" }
         if let key { codeKeys[id] = key }
         return key
@@ -278,7 +278,7 @@ final class ProjectsModel: ObservableObject {
 
     /// 这个项目里正在跑的会话（实时的，跟着侧栏变）
     func live(_ project: ProjectItem) -> [SessionItem] {
-        KitelineModel.shared.sessions.filter { $0.sourceId == project.sourceId && $0.cwd == project.cwd }
+        KitelineModel.shared.sessions.filter { $0.sourceId == project.sourceId && $0.projectCwd == project.cwd }
     }
 
     func rank(_ project: ProjectItem) -> Int {

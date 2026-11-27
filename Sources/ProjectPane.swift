@@ -276,7 +276,7 @@ struct ProjectPaneView: KLView {
         let members = projects.members(id)
         // 会话：几台设备上的都列（会话上写着是哪台设备的）
         let live = model.recentFirst(members.count > 1 ? projects.live(group: members)
-            : model.sessions.filter { $0.sourceId == place.sourceId && $0.cwd == place.cwd })
+            : model.sessions.filter { $0.sourceId == place.sourceId && $0.projectCwd == place.cwd })
         let key = projects.codeKey(ProjectsModel.id(sourceId: place.sourceId, cwd: place.cwd))
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -590,7 +590,7 @@ struct ProjectBlock: KLView {
             let members = projects.members(id)
             // 按最近活动排（行上显示的就是这个时间；11-21 反馈：昨天的排在中间不对），标记、置顶的在前
             let live = model.recentFirst(members.count > 1 ? projects.live(group: members)
-                : model.sessions.filter { $0.sourceId == place.0 && $0.cwd == place.1 })
+                : model.sessions.filter { $0.sourceId == place.0 && $0.projectCwd == place.1 })
             let key = projects.codeKey(ProjectsModel.id(sourceId: place.0, cwd: place.1))
             Group {
                 if block == "sessions" {

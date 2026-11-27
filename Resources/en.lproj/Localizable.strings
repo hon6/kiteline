@@ -1075,6 +1075,7 @@
 "以管理员身份打开 PowerShell 运行：%s" = "run this in PowerShell as administrator: %s";
 "以管理员身份打开 PowerShell 运行：New-NetFirewallRule -DisplayName Kiteline -Direction Inbound -Action Allow " = "Open PowerShell as administrator and run: New-NetFirewallRule -DisplayName Kiteline -Direction Inbound -Action Allow ";
 "以管理员身份运行" = "Runs with administrator privileges";
+"价格按你的 Apple 账户所在地区以%@计价" = "Prices are in %@, based on your Apple Account region.";
 "任务" = "Task";
 "任务 %@/%@" = "Task %@/%@";
 "任务不存在" = "Task not found.";
@@ -1391,6 +1392,7 @@
 "再操作" = " and then try again";
 "写" = "Write";
 "写临时文件失败" = "Couldn't write a temporary file";
+"写入" = "Write";
 "写入 watcher 失败：%@" = "Failed to write to watcher: %@";
 "写入失败：%@" = "Write failed: %@";
 "写入整个文件" = "Write Entire File";
@@ -1550,6 +1552,7 @@
 "加行" = "Lines added";
 "加载上下文" = "Loading context";
 "加载失败" = "Failed to Load";
+"加载工具" = "Load tools";
 "加载更多" = "Load More";
 "动作" = "Actions";
 "动物" = "Animals";
@@ -2836,6 +2839,7 @@
 "打开系统设置" = "Open System Settings";
 "打开终端" = "Open Terminal";
 "打开网络诊断，定位连接失败的环节" = "Open network diagnostics to find where the connection fails.";
+"打开网页" = "Open page";
 "打开群聊" = "Open Group Chat";
 "打开设置" = "Open Settings";
 "打开该会话并定位到原消息" = "Open the session and go to the original message.";
@@ -3720,6 +3724,7 @@
 "查找和替换" = "Find and Replace";
 "查找和替换（Ctrl+F）" = "Find and Replace (Ctrl+F)";
 "查找和替换（⌘F）" = "Find and Replace (⌘F)";
+"查找文件" = "Find files";
 "查看" = "View";
 "查看 diff" = "View Diff";
 "查看事项" = "View Items";
@@ -4670,6 +4675,7 @@
 "编辑器" = "the editor";
 "编辑快捷短语" = "Edit Quick Replies";
 "编辑收藏" = "Edit Favorite";
+"编辑笔记本" = "Edit notebook";
 "缩回小窗" = "Shrink to Mini View";
 "缩小" = "Zoom Out";
 "缩小字号" = "Decrease Font Size";
@@ -4692,6 +4698,7 @@
 "缺少手机" = "Missing phone";
 "缺少提示" = "Missing alert";
 "缺少文件" = "No files specified";
+"网上搜索" = "Web search";
 "网址、步骤；拿到后把 AppID 发给我" = "URL and steps; send me the AppID once you have it";
 "网络" = "Network";
 "网络不通" = "Network unreachable";
@@ -5131,6 +5138,7 @@
 "运行中…" = "Running…";
 "运行中的会话" = "Running sessions";
 "运行于" = "Runs In";
+"运行命令" = "Run command";
 "运行测试" = "Run tests";
 "运行测试并发送结果" = "Run the tests and send the results.";
 "近 30 天" = "Last 30 days";

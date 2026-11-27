@@ -632,7 +632,7 @@ struct NewSessionPage: KLView {
         }
         // 带入会话列表正筛着的设备、项目（列表当没筛的这里也不筛）
         if model.sources.contains(where: { $0.id == listSource }), all.contains(where: { $0.sourceId == listSource }) { sourceFilter = listSource }
-        if model.sessions.contains(where: { $0.cwd.map { ($0 as NSString).lastPathComponent } == listProject }),
+        if model.sessions.contains(where: { $0.projectName == listProject }),
            all.contains(where: { $0.name == listProject }) { projectFilter = listProject }
         // 筛着某个项目、只对上一个：环境已经说明了在哪儿开，直接选上（可以换）
         if !projectFilter.isEmpty {

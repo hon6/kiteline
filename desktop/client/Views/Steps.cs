@@ -11,7 +11,7 @@ using static Kiteline.Lang;
 
 namespace Kiteline.Views;
 
-/// 一串连续的步骤（思考、工具调用），装在一张卡片里；很多步时前面的折成一行（同 Mac 版 StepsCard）
+/// 一串连续的步骤（思考、工具调用）：装在一张和消息气泡同底色的卡片里，一行一步；很多步时前面的折成一行（同 Mac 版 StepsCard）
 public static class StepsCard
 {
     public static Control Make(string key, StepsRow row)
@@ -37,7 +37,7 @@ public static class StepsCard
     }
 }
 
-/// 一步：照 VS Code，工具名粗体、和正文一样大；后面的参数 0.85em 等宽；思考是灰色斜体，点一下展开原文
+/// 一步：工具图标 + 动作名（读取、编辑、运行命令……）+ 灰底等宽小标签 + 行尾状态（同 Mac 版 StepRow）；思考是灰色斜体，点一下展开原文
 public sealed class StepRow : StackPanel
 {
     readonly Step step;
@@ -48,23 +48,36 @@ public sealed class StepRow : StackPanel
     {
         this.step = step;
         var item = step.Item;
-        var name = item.T switch { "thinking" => L("思考"), "result" => L("结果"), _ => Tools.DisplayName(item.Name) };
+        var name = item.T switch { "thinking" => L("思考"), "result" => L("结果"), _ => Tools.Verb(item) };
         var brief = item.T == "tool" ? Tools.Brief(item) : (item.Text ?? "").Trim().Split('\n')[0];
         var briefText = Ui.Text(brief, item.T == "tool" ? ChatType.DetailSize : ChatType.Size, color: "Text2").Shrink();
-        if (item.T == "tool") briefText.FontFamily = Look.Mono; else briefText.FontStyle = FontStyle.Italic;
+        Control? briefView = briefText;
+        if (item.T == "tool")
+        {
+            // 文件名、命令放进灰底小标签
+            briefText.FontFamily = Look.Mono;
+            var chip = Ui.Box(briefText, new Thickness(7, 2.5), "Fill06", 6);
+            chip.VerticalAlignment = VerticalAlignment.Center;
+            chip.MinWidth = 0;
+            briefView = brief.Length > 0 ? chip.Shrink() : null;
+        }
+        else briefText.FontStyle = FontStyle.Italic;
         var stat = item.T == "tool" ? Tools.DiffStat(item) : null;
-        var chevron = Ui.Sym(item.T == "thinking" ? "chevron.right" : "chevron.right", ChatType.Size * 0.75, "Text3");
+        var chevron = Ui.Sym("chevron.right", ChatType.Size * 0.7, "Text3");
         chevron.FontWeight = FontWeight.SemiBold;
-        var line = Ui.H(6,
-            new StateIcon(step).Width(16),
-            Ui.Text(name, ChatType.Size, FontWeight.Bold),
-            briefText,
+        // 一行里的东西都竖直居中（Ui.H 默认）；图标一律 18 宽的一列、靠左，和上面气泡里的字对齐
+        var line = Ui.H(7,
+            new StateIcon(step).Width(18),
+            Ui.Text(name, ChatType.Size, FontWeight.SemiBold),
+            briefView,
+            item.T == "thinking" ? chevron : null,
+            // 改了几行、状态勾紧跟在标签后面（宽窗口里不跑到最右边）；放不下时先截短标签
+            stat is { } s ? Ui.H(3, Ui.Text($"+{s.Added}", ChatType.DetailSize, color: "Added").Mono(), Ui.Text($"−{s.Removed}", ChatType.DetailSize, color: "Removed").Mono()) : null,
+            item.T == "tool" ? StepMark.Make(step.State) : null,
             new Spacer(4),
             // 风险标签（删文件、推送、改写 Git 历史……）：一眼看到这一步要留意
-            item.T == "tool" && RiskTag.Shown(item.Risk) is { Count: > 0 } risks ? RiskTag.Chips(risks) : null,
-            stat is { } s ? Ui.H(3, Ui.Text($"+{s.Added}", ChatType.DetailSize, color: "Added").Mono(), Ui.Text($"−{s.Removed}", ChatType.DetailSize, color: "Removed").Mono()) : null,
-            chevron);
-        var tap = new Tap(line.Pad(ChatType.PadH, ChatType.Px(4)), null, 0).Keys("Transparent", "Fill05");
+            item.T == "tool" && RiskTag.Shown(item.Risk) is { Count: > 0 } risks ? RiskTag.Chips(risks) : null);
+        var tap = new Tap(line.Pad(ChatType.PadH, ChatType.Px(5)), null, 0).Keys("Transparent", "Fill05");
         Children.Add(tap);
         if (item.T == "thinking" && item.Text is string text)
         {
@@ -74,7 +87,7 @@ public sealed class StepRow : StackPanel
             var collapse = new Tap(Ui.H(4, Ui.Sym("chevron.up", ChatType.Size * 0.7, "Text2"), Ui.Text(L("收起思考"), ChatType.Size * 0.85, color: "Text2")).Pad(4, ChatType.Px(3)), null, 4)
                 { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-4, ChatType.Px(4), 0, 0) };
             var panel = new StackPanel { Children = { CopyCorner.Wrap(body, text, ChatType.Px(2)), collapse },
-                                         Margin = new Thickness(ChatType.PadH + 22, ChatType.Px(2), ChatType.PadH, ChatType.Px(6)), IsVisible = false };
+                                         Margin = new Thickness(ChatType.PadH + 25, ChatType.Px(2), ChatType.PadH, ChatType.Px(6)), IsVisible = false };
             detail = panel;
             Children.Add(detail);
             void Toggle()
@@ -90,7 +103,7 @@ public sealed class StepRow : StackPanel
         if (item.T == "tool" && StepPreview.Make(step) is { } preview)
         {
             // 改代码的前几行改动、命令出错时最后两行输出：不用点开就知道改了什么、错在哪；左边和标题文字对齐
-            preview.Margin = new Thickness(ChatType.PadH + 22, 0, ChatType.PadH, ChatType.Px(4));
+            preview.Margin = new Thickness(ChatType.PadH + 25, 0, ChatType.PadH, ChatType.Px(4));
             Children.Add(preview);
         }
         if (item.T == "tool" && step.Result?.Images is { Count: > 0 } images)
@@ -98,30 +111,42 @@ public sealed class StepRow : StackPanel
             // 读图片、截图这类工具：结果里的图直接显示，不用点开这一步才看得到；左边和标题文字对齐
             Children.Add(new MessageImages(key, images, gallery)
             {
-                Margin = new Thickness(ChatType.PadH + 22, ChatType.Px(2), ChatType.PadH, ChatType.Px(6)), HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(ChatType.PadH + 25, ChatType.Px(2), ChatType.PadH, ChatType.Px(6)), HorizontalAlignment = HorizontalAlignment.Left,
             });
         }
     }
 }
 
-/// 步骤左边的图标（同 Mac 版 StateIcon）：没状态时是工具图标（思考是小纸鸢）；在跑一闪一闪的点、等你确认橙点、成功绿点、出错红点
+/// 步骤左边的图标（同 Mac 版 StateIcon）：工具是各自的图标，思考是小纸鸢；状态在行尾（StepMark）
 public sealed class StateIcon : Panel
 {
     public StateIcon(Step step)
     {
         Height = ChatType.Size * 1.5;
-        Control icon = step.State switch
+        Control icon = step.Item.T == "thinking"
+            ? new KiteGlyph(ChatType.Size * 1.1)
+            : Ui.Sym(Tools.Symbol(step.Item.Name), ChatType.Size * 0.9, "Text2");
+        icon.HorizontalAlignment = HorizontalAlignment.Left;
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        Children.Add(icon);
+    }
+}
+
+/// 步骤行尾的状态（同 Mac 版 StepMark）：在跑一闪一闪的点、等你确认橙点、成功绿勾、出错红叉；没状态不占位
+public static class StepMark
+{
+    public static Control? Make(StepState state)
+    {
+        Control? mark = state switch
         {
             StepState.Running => new PulseDot("Accent", 7),
             StepState.Waiting => Ui.Dot(7, "Orange"),
-            StepState.Ok => Ui.Dot(7, "Added"),
-            StepState.Failed => Ui.Dot(7, "Removed"),
-            _ when step.Item.T == "thinking" => new KiteGlyph(ChatType.Size * 1.15),
-            _ => Ui.Sym(Tools.Symbol(step.Item.Name), ChatType.Size * 0.85, "Text2"),
+            StepState.Ok => Ui.Sym("checkmark", ChatType.Size * 0.75, "Added"),
+            StepState.Failed => Ui.Sym("xmark", ChatType.Size * 0.72, "Removed"),
+            _ => null,
         };
-        icon.HorizontalAlignment = HorizontalAlignment.Center;
-        icon.VerticalAlignment = VerticalAlignment.Center;
-        Children.Add(icon);
+        if (mark != null) mark.VerticalAlignment = VerticalAlignment.Center;
+        return mark;
     }
 }
 

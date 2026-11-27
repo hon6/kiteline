@@ -12,14 +12,41 @@ enum Tools {
         }
     }
 
+    /// 步骤那一行开头的动作名（读取、编辑、运行命令……），不认识的工具照原名
+    static func verb(_ item: ChatItem) -> String {
+        switch item.name ?? "" {
+        case "Bash": return isTest(item.input?["command"]?.string ?? "") ? L("运行测试") : L("运行命令")
+        case "Read": return L("读取")
+        case "Edit", "MultiEdit": return L("编辑")
+        case "Write": return L("写入")
+        case "NotebookEdit": return L("编辑笔记本")
+        case "Grep": return L("搜索")
+        case "Glob": return L("查找文件")
+        case "WebFetch": return L("打开网页")
+        case "WebSearch": return L("网上搜索")
+        case "Skill": return L("技能")
+        case "SendMessage": return L("发送消息")
+        case "ToolSearch": return L("加载工具")
+        default: return displayName(item.name)
+        }
+    }
+
+    /// 命令是不是在跑测试（swift test、pytest、npm test……）
+    static func isTest(_ command: String) -> Bool {
+        command.range(of: testPattern, options: .regularExpression) != nil
+    }
+
+    static let testPattern = #"(^|[\s;&|(])(pytest|jest|vitest|rspec|phpunit|ctest|(swift|go|cargo|dotnet|mvn|deno|bun|make|flutter|mix) test|(npm|pnpm|yarn)( run)? test|python3? -m (pytest|unittest)|xcodebuild\b.*\btest|\S*gradlew? \S*test)\b"#
+
     /// SF Symbols 图标
     static func symbol(_ name: String?) -> String {
         switch name ?? "" {
+        case "SendMessage": return "paperplane"
+        case "TodoWrite": return "checklist"
         case "Bash": return "terminal"
         case "Read": return "doc.text"
-        case "Edit", "MultiEdit": return "pencil"
+        case "Edit", "MultiEdit", "NotebookEdit": return "square.and.pencil"
         case "Write": return "doc.badge.plus"
-        case "NotebookEdit": return "book.closed"
         case "Grep", "Glob": return "magnifyingglass"
         case "WebFetch", "WebSearch": return "globe"
         case "Task", "Agent": return "person.2"

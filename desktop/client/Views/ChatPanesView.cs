@@ -728,7 +728,7 @@ public sealed class PaneTab : Control
         if (key is null) return L("选择要在此打开的会话，或从左侧拖入");
         if (s is null) return string.Join(" · ", new[] { title, L("已结束") });
         var status = s.Error is not null ? L("出错已停止") : s.Activity switch { "waiting" => L("待确认"), "busy" => L("正在工作"), "idle" => L("空闲"), _ => "" };
-        return string.Join(" · ", new[] { title, status, s.ReadOnly ? L("只读") : "", s.SourceName, s.Folder }.Where(x => x.Length > 0));
+        return string.Join(" · ", new[] { title, status, s.ReadOnly ? L("只读") : "", s.SourceName, s.FolderLabel }.Where(x => x.Length > 0));
     }
 
     IEnumerable<Control> Menu()
@@ -997,7 +997,7 @@ public sealed class PanePicker : ScrollViewer
         {
             var key = s.Key;
             var status = s.Error is not null ? L("出错已停止") : s.Activity switch { "waiting" => L("待确认"), "busy" => L("正在工作"), "idle" => L("空闲"), _ => "" };
-            var detail = status + (s.ReadOnly ? " · " + L("只读") : "") + string.Concat(new[] { s.SourceName, s.Folder }.Where(x => x.Length > 0).Select(x => " · " + x));
+            var detail = status + (s.ReadOnly ? " · " + L("只读") : "") + string.Concat(new[] { s.SourceName, s.FolderLabel }.Where(x => x.Length > 0).Select(x => " · " + x));
             var initial = new Border
             {
                 Width = 32, Height = 32, CornerRadius = new CornerRadius(8),

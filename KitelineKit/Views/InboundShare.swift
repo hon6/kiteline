@@ -281,13 +281,13 @@ struct InboundShareView: KLView {
                 }
                 .buttonStyle(RowButtonStyle())
             }
-            if sessions != nil, shown.isEmpty {
-                Text(query.isEmpty ? "暂无会话" : "无匹配的会话").foregroundStyle(.secondary)
+            if sessions == nil { loadingRows }
+            else if shown.isEmpty {
+                Text(loadError ?? (query.isEmpty ? L("暂无会话") : L("无匹配的会话"))).foregroundStyle(.secondary)
             }
         } footer: {
             Text("已结束的会话会先在电脑上的 VS Code 中恢复，再发送。")
         }
-        .overlay { if sessions == nil { loadingView } }
     }
 
     private var filteredSessions: [PastSession] {
@@ -314,32 +314,44 @@ struct InboundShareView: KLView {
                 }
                 .buttonStyle(RowButtonStyle())
             }
-            if projects != nil, shown.isEmpty {
-                Text(projects?.isEmpty == true ? "暂无使用过 Claude Code 的项目" : "无匹配的项目").foregroundStyle(.secondary)
+            if projects == nil { loadingRows }
+            else if shown.isEmpty {
+                Text(loadError ?? (projects?.isEmpty == true ? L("暂无使用过 Claude Code 的项目") : L("无匹配的项目"))).foregroundStyle(.secondary)
             }
         } footer: {
             Text("在所选项目中新建 Claude Code 会话，并把文件和说明作为第一条消息发送。")
         }
-        .overlay { if projects == nil { loadingView } }
     }
 
-    @ViewBuilder private var loadingView: some View {
-        if let loadError { Text(loadError).foregroundStyle(.secondary).padding() } else { SkeletonPage(style: .list(5, trail: .none)) }
+    /// 第一次用、还没有缓存时：几行骨架占位，作为列表里的普通行（不盖在别的行上）
+    @ViewBuilder private var loadingRows: some View {
+        ForEach(0..<4, id: \.self) { i in
+            SkeletonRow(index: i, lead: .avatar, lines: 2, trail: .none).skeletonShimmer()
+        }
     }
 
     // MARK: 取数据、发送
 
     private func load() async {
-        // 先选上正在看的那个会话（多半就是要发给它），和它所在的项目
-        let current = model.current
-        async let pastReply = try? model.api.get(PastSessionsReply.self, "/api/sessions")
-        async let projectReply = try? model.api.get(ProjectsReply.self, "/api/projects")
+        // 先显示上次的列表（和历史会话页、项目页共用一份缓存，读本机文件、不联网），后台再静默换成最新的
+        if sessions == nil, let cached = model.api.cached(PastSessionsReply.self, "/api/sessions") { sessions = cached.sessions }
+        if projects == nil, let cached = model.api.cached(ProjectsReply.self, "/api/projects") { projects = cached.projects.filter(\.exists) }
+        pickDefaults()
+        async let pastReply = try? model.api.getCaching(PastSessionsReply.self, "/api/sessions")
+        async let projectReply = try? model.api.getCaching(ProjectsReply.self, "/api/projects")
         let past = await pastReply
         let found = await projectReply
-        sessions = past?.sessions ?? []
-        projects = found?.projects.filter(\.exists) ?? []
-        if past == nil || found == nil { loadError = model.connected ? L("读取失败，请稍后重试") : L("未连接到电脑") }
-        if pickedSession == nil {
+        if let past { sessions = past.sessions } else if sessions == nil { sessions = [] }
+        if let found { projects = found.projects.filter(\.exists) } else if projects == nil { projects = [] }
+        // 有缓存撑着就不提示；一条都没有才说明原因
+        if past == nil || found == nil { loadError = model.connected ? L("读取失败，请稍后重试") : L("未连接到电脑") } else { loadError = nil }
+        pickDefaults()
+    }
+
+    /// 先选上正在看的那个会话（多半就是要发给它），和它所在的项目；用户已经选了的不动
+    private func pickDefaults() {
+        let current = model.current
+        if pickedSession == nil, sessions != nil {
             pickedSession = current.flatMap { key in sessions?.contains { $0.key == key } == true ? key : nil } ?? filteredSessions.first?.key
         }
         if pickedProject == nil, let cwd = current.flatMap({ model.session($0)?.cwd }) {

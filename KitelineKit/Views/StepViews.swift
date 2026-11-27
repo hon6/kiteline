@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 一串连续的步骤（思考、工具调用），装在一张卡片里；很多步时前面的折成一行
+/// 一串连续的步骤（思考、工具调用）：装在一张和消息气泡同底色的卡片里，一行一步；很多步时前面的折成一行
 struct StepsCard: KLView {
     @EnvModel private var model
     let key: String
@@ -29,7 +29,8 @@ struct StepsCard: KLView {
                 }
                 .buttonStyle(.steady(.plain))
             }
-            // 工具调用列表：一行一个，不画分隔线；行上下各 4、卡片上下再 4，第一行字离卡片顶 8（同气泡）
+            // 工具调用列表：一行一个，不画分隔线；行上下各 5、卡片上下再 4；左右留 padH，图标和气泡里的字对齐
+            // （11-27 试过去掉卡片底色，夹在白色消息气泡中间显得突兀，用户要求加回来）
             // 结果带图的（读图片、截图）图直接显示在那一步下面；点开看大图时，这张卡片里所有步骤的图左右滑着连着看
             let gallery = steps.flatMap { $0.result?.images ?? [] }
             ForEach(steps.dropFirst(hidden), id: \.id) { step in
@@ -63,30 +64,42 @@ struct StepRow: KLView {
             Button {
                 if item.t == "thinking" { withAnimation(.klSnappy) { expanded.toggle() } } else { open() }
             } label: {
-                // 照 VS Code：工具名粗体、和正文一样大；后面的参数 0.85em 等宽；思考是灰色斜体
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    StateIcon(step: step).frame(width: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + ChatType.size * 0.35 }
-                    Text(name).fontWeight(.bold).lineLimit(1).layoutPriority(1)
-                    Group {
-                        if item.t == "tool" { Text(brief).font(ChatType.detail).klFontDesign(nil) } else { Text(brief).italic() }
+                // 一行一步：工具图标 + 动作名（读取、编辑、运行命令……）+ 灰底等宽小标签（文件名、命令）+ 右边的状态（在跑闪点、等你确认橙点、成功打勾、出错打叉）
+                // 思考：纸鸢 + 「思考」+ 灰色斜体的第一句，后面跟展开箭头
+                // 一行里的东西都按竖直居中排（图标、动作名、灰底标签、勾叉、圆点各自高矮不同，按基线排圆点会掉下去）；图标一律 18 宽的一列
+                HStack(alignment: .center, spacing: 7) {
+                    StateIcon(step: step).frame(width: 18, alignment: .leading)   // 靠左：图标宽窄不一时左边缘仍和上面气泡里的字对齐
+                    Text(name).fontWeight(.semibold).lineLimit(1).layoutPriority(1)
+                    if item.t == "tool" {
+                        if !brief.isEmpty {
+                            Text(brief).font(ChatType.detail).klFontDesign(nil)
+                                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                    } else {
+                        Text(brief).italic().foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     }
-                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    // 风险标签（删文件、推送、改写 Git 历史……）：一眼看到这一步要留意
-                    let risks = item.t == "tool" ? RiskTag.shown(item.risk) : []
-                    if !risks.isEmpty { RiskChips(codes: risks) }
+                    if item.t == "thinking" {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: ChatType.size * 0.7, weight: .semibold)).foregroundStyle(.tertiary)
+                    }
+                    // 改了几行、状态勾紧跟在标签后面（宽窗口里不跑到最右边）；放不下时先截短标签
                     if let stat = item.t == "tool" ? Tools.diffStat(item) : nil {
                         HStack(spacing: 3) {
                             Text("+\(stat.added)").foregroundStyle(Theme.added)
                             Text("−\(stat.removed)").foregroundStyle(Theme.removed)
                         }
-                        .font(ChatType.detail).klFontDesign(nil)
+                        .font(ChatType.detail).klFontDesign(nil).fixedSize().layoutPriority(1)
                     }
-                    Image(systemName: item.t == "thinking" && expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: ChatType.size * 0.75, weight: .semibold)).foregroundStyle(.tertiary)
+                    if item.t == "tool" { StepMark(state: step.state).layoutPriority(1) }
+                    Spacer(minLength: 4)
+                    // 风险标签（删文件、推送、改写 Git 历史……）：一眼看到这一步要留意
+                    let risks = item.t == "tool" ? RiskTag.shown(item.risk) : []
+                    if !risks.isEmpty { RiskChips(codes: risks) }
                 }
                 .padding(.horizontal, ChatType.padH)
-                .padding(.vertical, ChatType.px(4))
+                .padding(.vertical, ChatType.px(5))
                 .contentShape(Rectangle())
                 .hoverHighlight()
             }
@@ -97,7 +110,7 @@ struct StepRow: KLView {
                 RichText(text: RichBuilder.plain(text, tone: .secondary))
                     .environment(\.richMenu, [MenuAction(title: L("复制全部思考"), symbol: "doc.on.doc") { Clipboard.copy(text) }])
                     .padding(.horizontal, ChatType.padH)
-                    .padding(.leading, 22)
+                    .padding(.leading, 25)
                     .padding(.trailing, CopyCorner.reserve)
                     .padding(.top, ChatType.px(2))
                     .padding(.bottom, ChatType.px(4))
@@ -112,7 +125,7 @@ struct StepRow: KLView {
                     .font(.appFixed(size: ChatType.size * 0.85))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, ChatType.padH)
-                    .padding(.leading, 22)
+                    .padding(.leading, 25)
                     .padding(.vertical, ChatType.px(4))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -124,14 +137,14 @@ struct StepRow: KLView {
                 // 改代码的前几行改动、命令出错时最后两行输出：不用点开就知道改了什么、错在哪；左边和标题文字对齐
                 StepPreview(step: step)
                     .padding(.horizontal, ChatType.padH)
-                    .padding(.leading, 22)
+                    .padding(.leading, 25)
                     .padding(.bottom, ChatType.px(4))
             }
             if item.t == "tool", let images = step.result?.images, !images.isEmpty {
                 // 读图片、截图这类工具：结果里的图直接显示，不用点开这一步才看得到；左边和标题文字对齐
                 MessageImages(key: key, images: images, gallery: gallery)
                     .padding(.horizontal, ChatType.padH)
-                    .padding(.leading, 22)
+                    .padding(.leading, 25)
                     .padding(.top, ChatType.px(2))
                     .padding(.bottom, ChatType.px(6))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -143,7 +156,7 @@ struct StepRow: KLView {
         switch step.item.t {
         case "thinking": return L("思考")
         case "result": return L("结果")
-        default: return Tools.displayName(step.item.name)
+        default: return Tools.verb(step.item)
         }
     }
 
@@ -154,26 +167,36 @@ struct StepRow: KLView {
     }
 }
 
-/// 步骤左边的图标：没状态时是工具图标；在跑转圈、等你确认是橙点、成功绿点、出错红点
+/// 步骤左边的图标：思考是小纸鸢，工具是各自的图标（状态改到行尾的 StepMark）
 struct StateIcon: KLView {
     let step: Step
 
     var klBody: some View {
-        switch step.state {
-        case .none:
-            if step.item.t == "thinking" {
-                KiteMark(color: Theme.claude).frame(width: ChatType.size * 1.15, height: ChatType.size * 1.15)
-            } else {
-                Image(systemName: Tools.symbol(step.item.name)).font(.system(size: ChatType.size * 0.85)).foregroundStyle(.secondary)
-            }
+        if step.item.t == "thinking" {
+            KiteMark(color: Theme.claude).frame(width: ChatType.size * 1.1, height: ChatType.size * 1.1)
+        } else {
+            // 图标都选带框、大小相近的线条图标（文件、方框笔、终端框……），一列排下来才整齐
+            Image(systemName: Tools.symbol(step.item.name)).font(.system(size: ChatType.size * 0.9)).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// 步骤行尾的状态：在跑一闪一闪的点、等你确认橙点、成功绿勾、出错红叉；没状态不占位
+struct StepMark: KLView {
+    let state: StepState
+
+    var klBody: some View {
+        switch state {
         case .running:
             PulseDot(color: Theme.claude, size: 7, low: 0.25, period: 0.7)
         case .waiting:
             Circle().fill(Color.orange).frame(width: 7, height: 7)
         case .ok:
-            Circle().fill(Theme.added).frame(width: 7, height: 7)
+            Image(systemName: "checkmark").font(.system(size: ChatType.size * 0.75, weight: .semibold)).foregroundStyle(Theme.added)
         case .failed:
-            Circle().fill(Theme.removed).frame(width: 7, height: 7)
+            Image(systemName: "xmark").font(.system(size: ChatType.size * 0.72, weight: .semibold)).foregroundStyle(Theme.removed)
+        case .none:
+            EmptyView()
         }
     }
 }

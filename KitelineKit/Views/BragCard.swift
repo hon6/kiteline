@@ -178,7 +178,8 @@ enum MorningBrag {
         formatter.dateFormat = "yyyy-MM-dd"
         let today = formatter.string(from: now)
         guard defaults.string(forKey: shownKey) != today else { return false }
-        guard let data = try? await model.api.data("/api/brag", ["days": "2"]),
+        // 问 30 天并存下：接着弹出的分享页直接用这份，不用再等电脑算一遍
+        guard let data = try? await model.api.dataCaching("/api/brag", ["days": "30"]),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
         defaults.set(today, forKey: shownKey)   // 今天问过了：昨天没干活也不再问
         let yesterday = formatter.string(from: now.addingTimeInterval(-86400))
@@ -209,6 +210,9 @@ struct BragShareSheet: KLView {
     @AppStorage("brag.showCost") private var showCost = false
     @AppStorage("brag.theme") private var themeID = BragTheme.token.rawValue
     @AppStorage(MorningBrag.enabledKey) private var morning = true
+    #if DEBUG
+    @State private var openedAt = Date()   // 调试遥控 brag：记打开到出图、到新数据各用了几秒
+    #endif
 
     private var themes: [BragTheme] { sessionKey == nil ? BragTheme.allCases : BragTheme.forSession }
     private var theme: BragTheme {
@@ -340,14 +344,22 @@ struct BragShareSheet: KLView {
         error = nil
         do {
             let query = sessionKey.map { ["key": $0] } ?? ["days": "30"]
-            let data = try await model.api.data("/api/brag", query)
+            // 先拿上次的数字画出来（不用干等），电脑算好了再换成新的
+            if payload == nil, sessionKey == nil, let cached = model.api.cachedData("/api/brag", query) {
+                payload = String(data: cached, encoding: .utf8)
+            }
+            let data = try await (sessionKey == nil ? model.api.dataCaching("/api/brag", query) : model.api.data("/api/brag", query))
             var ref = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["ref"] as? String
             if ref == nil, sessionKey != nil {   // 一个任务的接口不带推荐码：问一次按天的（有缓存，很快）
                 ref = (try? await model.api.get("/api/brag", ["days": "1"]))?["ref"] as? String
             }
             if let ref { code = await Self.personalCode(ref) }
             payload = String(data: data, encoding: .utf8)
+            #if DEBUG
+            DebugRemote.note(String(format: "brag 电脑数据到了：%.2f 秒", Date().timeIntervalSince(openedAt)))
+            #endif
         } catch {
+            if payload != nil, sessionKey == nil { return }   // 已经在显示上次的数字：刷新失败就先这样，别换成出错页
             let text = "\(error)"
             self.error = text.contains("404") ? L("电脑上的 Kiteline 版本较旧，更新到最新版本后即可分享战绩") : (error as? LocalizedError)?.errorDescription ?? text
         }
@@ -374,6 +386,9 @@ struct BragShareSheet: KLView {
         do {
             let result = try await BragRenderer.shared.render(payload: payload, options: options)
             guard !Task.isCancelled else { return }
+            #if DEBUG
+            if rendered == nil { DebugRemote.note(String(format: "brag 第一张图出来：%.2f 秒", Date().timeIntervalSince(openedAt))) }
+            #endif
             rendered = result
             // 第一次由脚本挑范围（今天还没怎么用就是昨天）
             if sessionKey == nil, range == nil { range = BragRange(rawValue: result.range) ?? .today }

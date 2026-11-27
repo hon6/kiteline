@@ -1286,7 +1286,7 @@ public struct SessionCard: KLView {
     init(_ session: SessionInfo) {
         let status = session.error != nil ? L("出错已停止") : (["waiting": L("待确认"), "busy": L("正在工作"), "idle": L("空闲")][session.activity] ?? "")
         self.init(title: session.title, status: status, line: session.activityText ?? session.preview ?? "",
-                  detail: [session.sourceName, session.cwd.map { ($0 as NSString).lastPathComponent } ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
+                  detail: [session.sourceName, session.projectLabel].filter { !$0.isEmpty }.joined(separator: " · "),
                   dot: StatusColor.of(session))
     }
 
@@ -2307,7 +2307,7 @@ private struct PaneTab: KLView {
                 .filter { !$0.isEmpty }.joined(separator: " · ")
         }
         if let session {
-            return [title, SessionCard(session).status, session.sourceName, session.cwd.map { ($0 as NSString).lastPathComponent } ?? ""]
+            return [title, SessionCard(session).status, session.sourceName, session.projectLabel]
                 .filter { !$0.isEmpty }.joined(separator: " · ")
         }
         return [model.pastMeta[key]?.title ?? "", L("已结束")].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -2934,7 +2934,7 @@ private struct PickerRow: KLView {
                 Text(session.title).font(.ui(.subheadline).weight(.medium)).foregroundStyle(.primary).lineLimit(1)
                 HStack(spacing: 5) {
                     Circle().fill(StatusColor.of(session)).frame(width: 6, height: 6)
-                    Text(SessionCard(session).status + ([session.sourceName, session.cwd.map { ($0 as NSString).lastPathComponent } ?? ""]
+                    Text(SessionCard(session).status + ([session.sourceName, session.projectLabel]
                         .filter { !$0.isEmpty }.map { " · " + $0 }.joined()))
                         .lineLimit(1)
                 }

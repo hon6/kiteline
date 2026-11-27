@@ -317,6 +317,7 @@ enum Projects {
         var order: [String] = []
         var errors: [String] = []
         func upsert(_ source: SourceConfig, _ cwd: String, _ fill: (inout [String: Any]) -> Void) {
+            let cwd = ProjectRoot.of(cwd)   // worktree 归到原项目
             let key = "\(source.id)\n\(cwd)"
             var item = items[key] ?? ["sourceId": source.id, "sourceName": source.displayName, "kind": source.kind.rawValue,
                                       "cwd": cwd, "name": (cwd as NSString).lastPathComponent, "exists": true,

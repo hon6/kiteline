@@ -15,7 +15,7 @@ struct ProjectDetailView: KLView {
 
     /// 这个项目正在跑的会话，最近有动静的在上（行上显示的就是这个时间；同 Mac 项目栏 recentFirst）
     private var lives: [SessionInfo] {
-        model.sessions.filter { $0.sourceId == project.sourceId && $0.cwd == project.cwd }
+        model.sessions.filter { $0.sourceId == project.sourceId && $0.projectCwd == project.cwd }
             .sorted { ($0.updatedAt ?? 0) != ($1.updatedAt ?? 0) ? ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) : $0.key < $1.key }
     }
     private var key: String? { lives.first?.key ?? project.sessionKey }
@@ -846,7 +846,7 @@ struct NewTaskView: KLView {
         if model.sources.contains(where: { $0.id == listSource }), all.contains(where: { $0.sourceId == listSource }) {
             sourceFilter = listSource
         }
-        if model.sessions.contains(where: { $0.cwd.map { ($0 as NSString).lastPathComponent } == listProject }),
+        if model.sessions.contains(where: { $0.projectName == listProject }),
            all.contains(where: { $0.name == listProject }) {
             projectFilter = listProject
         }

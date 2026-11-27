@@ -17,14 +17,38 @@ public static class Tools
         _ => name,
     };
 
+    /// 步骤那一行开头的动作名（读取、编辑、运行命令……，同 iOS 版 Tools.verb），不认识的工具照原名
+    public static string Verb(ChatItem item) => item.Name switch
+    {
+        "Bash" => IsTest(item.Input.Str("command") ?? "") ? L("运行测试") : L("运行命令"),
+        "Read" => L("读取"),
+        "Edit" or "MultiEdit" => L("编辑"),
+        "Write" => L("写入"),
+        "NotebookEdit" => L("编辑笔记本"),
+        "Grep" => L("搜索"),
+        "Glob" => L("查找文件"),
+        "WebFetch" => L("打开网页"),
+        "WebSearch" => L("网上搜索"),
+        "Skill" => L("技能"),
+        "SendMessage" => L("发送消息"),
+        "ToolSearch" => L("加载工具"),
+        _ => DisplayName(item.Name),
+    };
+
+    /// 命令是不是在跑测试（swift test、pytest、npm test……；同 iOS 版 Tools.testPattern）
+    public static bool IsTest(string command) => TestPattern.IsMatch(command);
+
+    static readonly Regex TestPattern = new(@"(^|[\s;&|(])(pytest|jest|vitest|rspec|phpunit|ctest|(swift|go|cargo|dotnet|mvn|deno|bun|make|flutter|mix) test|(npm|pnpm|yarn)( run)? test|python3? -m (pytest|unittest)|xcodebuild\b.*\btest|\S*gradlew? \S*test)\b");
+
     /// 图标（SF Symbols 的名字，Icons 里换成对应的 Fluent 图标）
     public static string Symbol(string? name) => name switch
     {
+        "SendMessage" => "paperplane",
+        "TodoWrite" => "checklist",
         "Bash" => "terminal",
         "Read" => "doc.text",
-        "Edit" or "MultiEdit" => "pencil",
+        "Edit" or "MultiEdit" or "NotebookEdit" => "square.and.pencil",
         "Write" => "doc.badge.plus",
-        "NotebookEdit" => "book.closed",
         "Grep" or "Glob" => "magnifyingglass",
         "WebFetch" or "WebSearch" => "globe",
         "Task" or "Agent" => "person.2",

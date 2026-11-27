@@ -126,7 +126,7 @@ public sealed class ProjectsPage : Panel
 
     /// 这个项目里正在跑的会话（实时的，跟着侧栏变）
     static List<SessionInfo> Live(ProjectItem project) =>
-        AppModel.Shared.Sessions.Where(s => s.SourceId == project.SourceId && s.Cwd == project.Cwd).ToList();
+        AppModel.Shared.Sessions.Where(s => s.SourceId == project.SourceId && s.ProjectCwd == project.Cwd).ToList();
 
     static int Rank(ProjectItem project)
     {

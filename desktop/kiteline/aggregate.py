@@ -3,6 +3,7 @@
 """
 
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -123,11 +124,30 @@ def cached_request(cache_key, source, payload, field, timeout, fresh=False):
     return value
 
 
+_WT_SIBLING = re.compile(r"^(.*[\\/])([^\\/]+)-worktrees[\\/][^\\/]+(?=$|[\\/])")
+_WT_CLAUDE = re.compile(r"^(.+?)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?=$|[\\/])")
+
+
+def project_root(cwd):
+    """会话目录在 worktree 里时归到原项目（同 watcher 的 project_root）：<父>/<仓库>-worktrees/<名>[/子] → <父>/<仓库>[/子]；
+    <仓库>/.claude/worktrees/<名>[/子] → <仓库>[/子]"""
+    if not isinstance(cwd, str) or not cwd:
+        return cwd
+    m = _WT_SIBLING.match(cwd)
+    if m:
+        return m.group(1) + m.group(2) + cwd[m.end():]
+    m = _WT_CLAUDE.match(cwd)
+    if m:
+        return m.group(1) + cwd[m.end():]
+    return cwd
+
+
 def projects(store, detail=False, fresh=False):
     """fresh：不用缓存，每台机器都当场问（日报要最新的 git 状态）"""
     items, order, errors = {}, [], []
 
     def upsert(source, cwd):
+        cwd = project_root(cwd)   # worktree 归到原项目
         key = "%s\n%s" % (source.id, cwd)
         if key not in items:
             items[key] = {"sourceId": source.id, "sourceName": source.name, "kind": source.kind, "cwd": cwd,

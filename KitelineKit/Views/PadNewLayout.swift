@@ -224,7 +224,7 @@ private struct PadProjectList: KLView {
         }
     }
 
-    private func lives(_ p: ProjectInfo) -> [SessionInfo] { model.sessions.filter { $0.sourceId == p.sourceId && $0.cwd == p.cwd } }
+    private func lives(_ p: ProjectInfo) -> [SessionInfo] { model.sessions.filter { $0.sourceId == p.sourceId && $0.projectCwd == p.cwd } }
 
     private func row(_ p: ProjectInfo) -> some View {
         Button { pick(p) } label: {
@@ -270,7 +270,7 @@ private struct PadProjectPane: KLView {
     let back: () -> Void
 
     var klBody: some View {
-        let lives = model.sessions.filter { $0.sourceId == project.sourceId && $0.cwd == project.cwd }
+        let lives = model.sessions.filter { $0.sourceId == project.sourceId && $0.projectCwd == project.cwd }
             .sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
         let codeKey = lives.first?.key ?? project.sessionKey
         GeometryReader { geo in
@@ -418,10 +418,10 @@ final class PadRecent: KLObservable {
             defer { loading.remove(id) }
             var list: [PastSession] = []
             if let reply = try? await api.getCaching(PastSessionsReply.self, "/api/sessions", ["source": project.sourceId, "cwd": project.cwd]) {
-                list = reply.sessions.filter { $0.cwd == nil || $0.cwd == project.cwd }
+                list = reply.sessions.filter { $0.cwd == nil || ProjectRoot.of($0.cwd) == project.cwd }
             }
             if list.isEmpty, let reply = try? await api.get(PastSessionsReply.self, "/api/sessions", ["project": project.name]) {
-                list = reply.sessions.filter { $0.cwd == project.cwd }
+                list = reply.sessions.filter { ProjectRoot.of($0.cwd) == project.cwd }
             }
             if !list.isEmpty || past[id] == nil { past[id] = list.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) } }
             if !list.isEmpty { loadedAt[id] = Date() }

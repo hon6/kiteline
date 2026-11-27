@@ -94,7 +94,11 @@ public sealed record SessionInfo
     public const string ClaudeCaps = "mode,model,compact,subagents,tests";
     public string Speaker => Agents.Info(Agent).Speaker;
     /// 项目文件夹名
-    public string Folder => Path.GetFileName((Cwd ?? "").TrimEnd('/', '\\'));
+    /// 项目名（项目筛选、分组用）：worktree 里的会话算原项目（见 ProjectRoot）
+    public string Folder => Path.GetFileName((ProjectCwd ?? "").TrimEnd('/', '\\'));
+    public string? ProjectCwd => ProjectRoot.Of(Cwd);
+    /// 会话行上显示的项目名：在 worktree 里时带上 worktree 名
+    public string FolderLabel => ProjectRoot.Worktree(Cwd) is { } wt ? Folder + " · " + wt : Folder;
 
     public static SessionInfo? Parse(JsonNode? n)
     {
