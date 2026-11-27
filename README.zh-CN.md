@@ -67,6 +67,7 @@ irm https://tars.betac.cn/install.ps1 | iex
 - **不碰你的 AI 账号**：不登录 Claude 或任何 AI 服务，不读 API Key 和登录凭证，不调用任何模型接口；只读 Agent 自己写下的会话记录，只通过 Agent 自己提供的接口操作。
 - **Agent 自己汇报**：自带技能让 Agent 发截图、用 Playwright 在真实浏览器里把网页功能走一遍并把报告发给你、把只有你能做的事记成待办、报告做到第几步。
 - **抬腕就能批**：命令、计划、提问推到锁屏和 Apple Watch；锁屏和灵动岛上实时显示谁在等你、做到第几步；高风险命令一律二次确认。
+- **过程看得清，改坏了能撤回**：改了哪几行、哪里报错直接显示在步骤下；删除文件、改写 Git 历史、推送、提权这类步骤标出风险（只标不拦）；上下文被什么占着、哪些最费钱一目了然；Claude Code 某一轮改坏了，一键撤回那之后的文件改动，还能还原。
 - **整个团队一屏看全**：世界模式和数据流大屏把每台电脑上的每个会话放在一块屏上。
 
 ## 演示
@@ -94,6 +95,9 @@ irm https://tars.betac.cn/install.ps1 | iex
 | **看到工作本身** | 实时步骤、命令、代码改动、测试输出与图片；内置带 Git 的代码编辑器，以及跑在会话里的终端。Agent 需要终端时，命令也开在这个会话的终端里，标签上写明所在设备。 |
 | **后台运行** | Mac、Linux 电脑上的项目，新建任务和恢复会话默认由 Kiteline 在后台运行 Claude Code，不打开 VS Code；发消息、确认都不切换前台，电脑锁屏时也能操作，需要看代码时一键转到 VS Code。经 SSH 连接的远端电脑按设备开启。 |
 | **会话组与执行过程** | 电脑上把相关会话收进一组，组标签挂在窗口顶部，切到某组时组里的会话各占一列。Mac 与 iPad 上可打开「执行过程」，按时间线查看 Agent、轮次与每一步，出错处一键定位，还能回放。 |
+| **过程透明** | 改代码的步骤下直接显示改了哪几行，命令出错显示最后两行报错；删除文件、改写 Git 历史、执行下载的脚本、改动数据库、管理员权限、推送、安装软件等步骤在步骤和确认卡片上标出提示，只标注不拦截。点上下文百分比查看系统提示、文件、命令输出、网页、对话各占多少和花费占比。 |
+| **撤回改动** | 长按（电脑上右键）自己发的一句话，把 Claude Code 从这一轮起改过的文件恢复原样；先列出要恢复和删除的文件，撤回前另存当前版本，可一键还原。 |
+| **模拟器** | Agent 向 Kiteline 申请 iOS 模拟器（Mac）或安卓模拟器，会话里看实时画面，安卓可直接接管。按电脑内存决定同时开几台（设置里可调），满了排队，闲置自动关闭，只关自己开的。 |
 | **Agent 浏览器** | Agent 操作网页时统一使用 Kiteline 提供的浏览器：会话里出现实时画面小窗，可放大查看每一步；遇到登录、验证码由你接管，完成后交还。操作全程录像，可以回放。 |
 | **消息排队与重启** | Agent 正忙时发出的消息排在输入框上方，可调整顺序、编辑、删除或强插；会话可单个或批量重启，对话内容保留。 |
 | **多台电脑** | 手机可同时连接多台装有 Kiteline 的电脑，会话合并在一个列表；电脑之间也可以互相添加，每台设备可设别名。 |
@@ -209,6 +213,7 @@ flowchart LR
 - **本机语音识别**：按住说话由 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 与 Fun-ASR-Nano 模型在本机完成，音频不离开你自己的设备。
 - **实时活动**：iPhone 把 ActivityKit 的推送启动令牌和每个实时活动的更新令牌报给电脑，电脑按「一轮工作」开始、合并更新（新的待确认立即发，其余最多每 8 秒一次）、空闲 90 秒后结束，经推送网关发给 APNs 的 `liveactivity` 通道。按 Apple 的规定这部分内容是明文，只放会话标题和状态。
 - **只读分享**：有分享时电脑另开一个只认 `/g/` 的局域网 HTTP 端口（没有分享就关），页面每 8 秒带 ETag 轮询一次快照；快照现取会话记录生成，不含思考过程、图片和关键信息，内容不经过任何服务器。
+- **过程透明**：风险判定移植自开源项目 [claude-code-command-guard](https://github.com/seelig-ai/claude-code-command-guard)（MIT）的规则，并用它的测试矩阵验证，再补上推送、装软件、结束进程、提权、读密钥等提示；在会话监听里给每个工具调用打标签，各端只负责显示。上下文构成以 Claude Code 报告的实际用量为总量，按最近一次压缩之后的内容估算各部分，花费按「之后每次请求都要重读」加权。撤回直接用 Claude Code 自己记录的文件快照（`file-history`），撤回前把当前文件备份成可还原的清单。模拟器由会话监听里的调度器统一分配：请求先来先到排队，开机前看可用内存（至少留 2 GB），闲置、会话结束即释放；要关的进程号写盘，监听重启后接着收；画面借用 Agent 浏览器的小窗通道。
 - **世界模式**：[three.js](https://threejs.org) 场景各端共用一份，由同一条状态流驱动。
 - **数据流大屏**：同样是 three.js，和世界模式共用宿主协议。卡片是贴 Canvas 纹理的薄板；每种线是一个环形写入的 `LineSegments`，线的数量有上限。底层的线用普通叠加，几百根叠起来也只是一层淡灰；只有亮起的线（最多 320 根）和光点（一个着色器驱动的 `Points`，最多 1500 颗）用加法混合。自动运镜正对平面，平移、放大到最忙的卡片，列出刚经过它的几次调用。
 
@@ -308,6 +313,14 @@ flowchart LR
 <td align="center" valign="top"><img src="assets/images/gallery/zh/ip-share.webp" width="220" alt="生成只读链接，让同事看会话"><br><sub>生成只读链接，让同事看会话</sub></td>
 </tr></table>
 
+### 过程透明
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-steps.webp" width="220" alt="改了哪几行、哪里报错直接看到，有风险的步骤标出提示"><br><sub>改了哪几行、哪里报错直接看到，有风险的步骤标出提示</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-context.webp" width="220" alt="上下文构成：各部分占多少、哪些最费钱"><br><sub>上下文构成：各部分占多少、哪些最费钱</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/ip-rewind.webp" width="220" alt="撤回某一轮起的改动，可一键还原"><br><sub>撤回某一轮起的改动，可一键还原</sub></td>
+</tr></table>
+
 ### 多种 Agent
 
 <table><tr>
@@ -367,6 +380,11 @@ flowchart LR
 </tr></table>
 
 ### iPad
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-land-term.webp" width="440" alt="横屏多列：会话、网页悬浮小窗和终端同屏"><br><sub>横屏多列：会话、网页悬浮小窗和终端同屏</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/zh/pad-land-cols.webp" width="440" alt="横屏：左边列表，右边两列会话并排"><br><sub>横屏：左边列表，右边两列会话并排</sub></td>
+</tr></table>
 
 <table><tr>
 <td align="center" valign="top"><img src="assets/images/gallery/zh/pad-columns.webp" width="440" alt="两个会话并排分屏"><br><sub>两个会话并排分屏</sub></td>

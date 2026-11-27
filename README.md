@@ -67,6 +67,7 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 - **Never touches your AI login.** Kiteline doesn't sign in to Claude or any other AI service, never reads API keys or tokens and never calls a model API. It reads the transcripts your agents already write and acts only through interfaces they offer.
 - **Agents report back.** Built-in skills let agents send screenshots, walk through web features in a real browser with Playwright and send you the report, track what only you can do as to-dos, and show which stage they are at.
 - **Approve from your wrist.** Commands, plans and questions reach the lock screen and Apple Watch; a Live Activity shows who is waiting and what step each session is on; risky commands always ask twice.
+- **See every step, undo a bad turn.** Changed lines and errors show right under each step; deleting files, rewriting Git history, pushing and admin rights are flagged (never blocked); see what fills the context and what costs the most; if a Claude Code turn went wrong, roll its file changes back — and restore them if you change your mind.
 - **See the whole team at once.** World mode and the Flow Board show every session on every computer on one screen.
 
 ## See it in action
@@ -94,6 +95,9 @@ Your existing agent sessions show up on the phone right away. More in the [insta
 | **See the work, not just the chat** | Live steps, commands, diffs, test output and images, plus a code editor with Git and a terminal that runs inside each session. When an agent needs a terminal, its command runs in that session's terminal too, labelled with the device. |
 | **Background sessions** | On a Mac or Linux computer, new tasks and resumed sessions run Claude Code in the background by default, with no VS Code window. Messages and approvals never take the foreground and still work with the computer locked; move a session into VS Code with one click. Remote hosts over SSH can be turned on device by device. |
 | **Session groups and execution trace** | On the computer, put related sessions into a group: group tabs sit along the top of the window and switching to a group lays its sessions out in columns. On Mac and iPad, the execution trace shows agents, turns and every step on a timeline, jumps to the first error and replays the run. |
+| **Every step in the open** | Edits show their changed lines and failed commands their last two lines of error under the step. Deleting files, rewriting Git history, running downloaded scripts, changing databases, admin rights, pushing and installing software are flagged on the step and the approval card — flagged, never blocked. Tap the context percentage to see the tokens and cost share of the system prompt, files, command output, web pages and conversation. |
+| **Undo changes** | Hold one of your messages (right-click on the computer) to put back every file Claude Code changed from that turn on. Kiteline lists the files to restore and delete first, and saves the current versions so you can restore them. |
+| **Simulators** | Agents request an iOS Simulator (Mac) or Android emulator from Kiteline; watch it live in the session and take over Android directly. How many run at once follows the computer’s memory (adjustable in Settings); requests queue when full, idle devices close, and only devices Kiteline opened are ever closed. |
 | **Agent browser** | Agents use the browser Kiteline provides. A live preview appears in the session; enlarge it to follow every step, take over for sign-ins and CAPTCHAs, then hand back. Every run is recorded for replay. |
 | **Message queue and restart** | Messages sent while the agent is busy line up above the input box: reorder, edit, delete or jump the queue. Restart one session or many; the conversation is kept. |
 | **Several computers** | Connect your phone to several computers running Kiteline and see their sessions in one list; computers can add each other too, and every device can have an alias. |
@@ -209,6 +213,7 @@ flowchart LR
 - **On-device speech.** Hold-to-talk transcription runs locally with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and the Fun-ASR-Nano model, so audio never leaves your own devices.
 - **Live Activities.** The iPhone reports its ActivityKit push-to-start token and each activity’s update token to the computer. The computer starts one per round of work, coalesces updates (a new waiting session goes out at once, everything else at most every 8 seconds) and ends it after 90 idle seconds, sending through the push gateway to APNs’ `liveactivity` channel. Apple requires this content to be plaintext, so it carries only session titles and status.
 - **Read-only sharing.** While something is shared, the computer opens a separate local-network HTTP port that serves only `/g/` (closed when nothing is shared). The page polls a snapshot every 8 seconds with an ETag; snapshots are built from the session record on demand, leave out reasoning, images and key info, and never pass through a server.
+- **Process transparency.** Risk flags port the rules of the open-source [claude-code-command-guard](https://github.com/seelig-ai/claude-code-command-guard) (MIT) and are verified against its test matrix, with extra notices for pushing, installing software, killing processes, privilege escalation and reading secrets; the watcher tags every tool call and the apps only render the tags. The context breakdown takes the usage Claude Code reports as the total, estimates each part from the content since the last compaction, and weights cost by how many later requests re-read it. Undo uses Claude Code’s own file snapshots (`file-history`) and backs the current files up into a restorable manifest first. Simulators are handed out by a scheduler in the watcher: first come, first served, admitted only when enough memory is free (at least 2 GB left), released when idle or when the session ends; PIDs to clean up are written to disk so a restarted watcher still reaps them, and frames reuse the agent-browser preview channel.
 - **World mode.** A [three.js](https://threejs.org) scene shared by every platform and rendered from the same state stream.
 - **Flow Board.** Also three.js, on the same host protocol. Cards are thin slabs with canvas textures; each line kind is one `LineSegments` buffer written as a ring, so the line count stays bounded. Base lines use normal blending so hundreds of them stay a faint grey, while only the lit lines (up to 320) and the particles (one shader-driven `Points`, up to 1,500) are additive. An automatic camera pans and zooms to the busiest card — straight on, in 2D — and lists the calls that just passed through it.
 
@@ -310,6 +315,14 @@ Screens are framed by device: iPhone, iPad, Apple Watch and the desktop window. 
 <td align="center" valign="top"><img src="assets/images/gallery/en/ip-share.webp" width="220" alt="A read-only link so a teammate can watch a session"><br><sub>A read-only link so a teammate can watch a session</sub></td>
 </tr></table>
 
+### Every step in the open
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-steps.webp" width="220" alt="Changed lines and errors at a glance, risky steps flagged"><br><sub>Changed lines and errors at a glance, risky steps flagged</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-context.webp" width="220" alt="Context breakdown: what fills it and what costs the most"><br><sub>Context breakdown: what fills it and what costs the most</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/ip-rewind.webp" width="220" alt="Undo the changes from a turn on, with a restore"><br><sub>Undo the changes from a turn on, with a restore</sub></td>
+</tr></table>
+
 ### More than one agent
 
 <table><tr>
@@ -369,6 +382,11 @@ Screens are framed by device: iPhone, iPad, Apple Watch and the desktop window. 
 </tr></table>
 
 ### iPad
+
+<table><tr>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-land-term.webp" width="440" alt="Landscape: sessions, a floating browser and a terminal on one screen"><br><sub>Landscape: sessions, a floating browser and a terminal on one screen</sub></td>
+<td align="center" valign="top"><img src="assets/images/gallery/en/pad-land-cols.webp" width="440" alt="Landscape: list on the left, two sessions side by side"><br><sub>Landscape: list on the left, two sessions side by side</sub></td>
+</tr></table>
 
 <table><tr>
 <td align="center" valign="top"><img src="assets/images/gallery/en/pad-columns.webp" width="440" alt="Two sessions side by side"><br><sub>Two sessions side by side</sub></td>
