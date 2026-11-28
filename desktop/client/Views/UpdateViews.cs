@@ -42,7 +42,7 @@ public sealed class UpdateButton : Tap
         ring.Value = state.Phase == "downloading" ? state.Progress : -1;
         ToolTip.SetTip(this, state.Phase switch
         {
-            "ready" => L("新版本已安装，轻点重启以完成更新"),
+            "ready" => state.AutoUpdate ? L("新版本已安装，电脑空闲时自动重启完成更新；轻点可立即重启") : L("新版本已安装，轻点重启以完成更新"),
             "downloading" => L("正在下载 Kiteline %@（%@）", state.Version, $"{(int)(state.Progress * 100)}%"),
             "installing" => L("正在安装 Kiteline %@…", state.Version),
             _ => L("有新版本：Kiteline %@", state.Version),
@@ -191,7 +191,9 @@ public sealed class UpdateDialog : Window
                 break;
             case "ready":
                 title.Text = L("新版本已安装");
-                detail.Text = L("重启 Kiteline 后生效，正在进行的会话不受影响。");
+                detail.Text = !s.AutoUpdate ? L("重启 Kiteline 后生效，正在进行的会话不受影响。")
+                    : L("电脑空闲时会自动重启完成更新，也可以现在重启。正在进行的会话不受影响。")
+                      + (s.WaitingFor.Length > 0 ? "\n" + L("正在等待：%@", L(s.WaitingFor)) : "");
                 if (key != drawn) buttons.Content = Buttons(L("稍后"), Close, L("立即重启"), () => _ = s.Restart());
                 break;
             case "restarting":

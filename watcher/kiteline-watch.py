@@ -7443,7 +7443,7 @@ class StageTracker:
         """agent 用 stage 报的：{steps, parts: [{name, step, done}], part, plan, doneAt, marks: [{step, ts, label, note, part}]}"""
         return self._load(os.path.join(STAGE_DIR, "%s.json" % sid), {})
 
-    def view(self, sid, cwd):
+    def view(self, sid, cwd, infer=True):
         """快照里的 stage：{step, total, label, steps, kinds, since, turnAt, note, auto, marks: [[第几步, 时间]], part, parts}；
         不知道返回 None。part / parts 只在 agent 把任务分了几部分（几个端）时有：step 这些说的是正在做的那部分"""
         turn = self.turns.get(sid)
@@ -7496,6 +7496,9 @@ class StageTracker:
             for kind, ts, flavor in self.trail.get(sid) or []:
                 if kind and ts >= auto_floor:
                     events.append((ts, 2, kind, flavor, None, None))
+        if not infer and not declared:
+            # 不推断的（别家 agent：收不到提醒、也不会自己补报）：agent 没规划、没报过就不显示，不拿动作硬套「2/4 开发中」
+            return None
         if not events:
             return None
         events.sort(key=lambda e: (e[0], e[1]))
@@ -7633,7 +7636,7 @@ class StageTracker:
                 self.idle_since.pop(sid, None)
             if activity in ("busy", "waiting"):
                 try:
-                    stage = self.view(sid, snap.get("cwd") or "")
+                    stage = self.view(sid, snap.get("cwd") or "", infer=snap.get("agent") in (None, "", "claude-code"))
                 except Exception as exc:  # noqa  阶段只是锦上添花，算错了也不能拖垮快照
                     log("stage %s: %r" % (sid[:8], exc))
                     stage = None
@@ -15769,6 +15772,55 @@ def _dsh_text(content):
     return "\n".join(part.get("text") or "" for part in (content or []) if isinstance(part, dict) and part.get("type") == "text")
 
 
+# DSH 目标的阶段 → 快照 goal.state（guide/plugin-development.md 4.7）
+DSH_GOAL_STATES = {"active": "active", "paused": "paused", "blocked": "blocked", "complete": "met"}
+
+
+def dsh_goal_view(value):
+    """DSH 的目标（投影 goal 或 goals/get 的结果）→ 快照的 goal；没有目标、已清除的返回 None。
+    投影是 {goal: {id, revision, objective, phase, maxGoalRounds, blockedReason?}, roundsStarted, createdAt, updatedAt}，goals/get 是摊平的一层"""
+    if not isinstance(value, dict):
+        return None
+    body = value.get("goal") if isinstance(value.get("goal"), dict) else value
+    objective, phase = body.get("objective"), body.get("phase")
+    if not objective or phase not in DSH_GOAL_STATES:
+        return None
+    out = {"text": str(objective), "state": DSH_GOAL_STATES[phase], "since": value.get("createdAt"), "at": value.get("updatedAt")}
+    if isinstance(value.get("roundsStarted"), int):
+        out["turns"] = value["roundsStarted"]
+    if phase == "complete" and isinstance(value.get("createdAt"), (int, float)) and isinstance(value.get("updatedAt"), (int, float)):
+        out["durationMs"] = int(value["updatedAt"] - value["createdAt"])
+    reason = body.get("blockedReason") if isinstance(body.get("blockedReason"), dict) else None
+    if phase == "blocked" and reason and reason.get("message"):
+        out["note"] = str(reason["message"])[:300]
+    return out
+
+
+def dsh_goal_event(data):
+    """goal/change 事件 → 对话里一行提示（同 Codex：goal 是 set / check / met / paused / cleared）"""
+    body = data.get("goal") if isinstance(data.get("goal"), dict) else {}
+    operation, objective = data.get("operation"), body.get("objective") or ""
+    if operation == "create":
+        return {"text": "已设定目标", "detail": objective, "goal": "set"}
+    if operation == "edit":
+        return {"text": "已修改目标", "detail": objective, "goal": "set"}
+    if operation == "pause":
+        return {"text": "已暂停目标", "goal": "paused"}
+    if operation == "resume":
+        return {"text": "已继续目标", "goal": "set"}
+    if operation == "block":
+        reason = body.get("blockedReason") if isinstance(body.get("blockedReason"), dict) else {}
+        return {"text": "目标受阻，已停下", "detail": reason.get("message") or "", "goal": "paused"}
+    if operation == "complete":
+        line = {"text": "目标已达成", "detail": objective, "goal": "met"}
+        if isinstance(data.get("createdAt"), (int, float)) and isinstance(data.get("updatedAt"), (int, float)):
+            line["goalStats"] = {"turns": data.get("roundsStarted"), "durationMs": int(data["updatedAt"] - data["createdAt"])}
+        return line
+    if operation == "clear":
+        return {"text": "已清除目标", "goal": "cleared"}
+    return None
+
+
 def dsh_items(events):
     """DSH 的会话事件 → 对话项。id =「事件序号.块序号」：和 Claude 的「行偏移.序号」一样能排序、往前翻页"""
     items = []
@@ -15781,7 +15833,19 @@ def dsh_items(events):
         def item_id(index):
             return "%d.%d" % (seq, index)
 
+        if kind == "goal/change":
+            line = dsh_goal_event(data)
+            if line:
+                items.append(dict(line, id=item_id(0), ts=ts, t="event"))
+            continue
         if kind == "user/message":
+            # 目标每轮续做时 DSH 塞给模型的「<goal_round> … Round: 3/30」：显示成一行「继续推进目标」，不当成你说的话
+            first = next((p.get("text") for p in data.get("content") or [] if isinstance(p, dict) and p.get("type") == "text"), "") or ""
+            if first.startswith("<goal_round>"):
+                found = re.search(r"Round:\s*(\d+)", first)
+                items.append({"id": item_id(0), "ts": ts, "t": "event", "goal": "check",
+                              "text": "继续推进目标 · 第 %s 轮" % found.group(1) if found else "继续推进目标"})
+                continue
             # 只要用户自己说的话：运行环境、时间这些是 DSH 塞给模型的；回答提问的回复在工具结果里已经有了
             if (data.get("source") or {}).get("kind") != "user":
                 continue
@@ -15872,6 +15936,7 @@ class DshHost:
         self.projections = {}    # 会话 id → {投影名: 值}（title、tokenUsage、contextPressure……）
         self.running = {}        # 会话 id → 正在跑
         self.touched = {}        # 会话 id → 最近有动静的时间（Kiteline 连上之后）
+        self.moved = {}          # 会话 id → 对话里最近一个事件的时间（跟着的会话）
         self.requests = {}       # 事件 id → 等人答的审批 / 提问（$events 的 waterfall）
         self.follows = {}        # 会话 id → session/follow 的流 id
         self.streams = {}        # 流 id → 处理函数
@@ -16058,7 +16123,7 @@ class DshHost:
                     self.rows[head["sessionId"]] = head
                     self.running[head["sessionId"]] = bool(head.get("running"))
                 elif event == "api-session/removed" and isinstance(head, str):
-                    for table in (self.rows, self.projections, self.running, self.touched, self.latest, self.calls, self.sent):
+                    for table in (self.rows, self.projections, self.running, self.touched, self.moved, self.latest, self.calls, self.sent):
                         table.pop(head, None)
                 elif event == "api-session/status" and isinstance(head, str):
                     self.running[head] = bool(args[1]) if len(args) > 1 else False
@@ -16086,7 +16151,14 @@ class DshHost:
                     if isinstance(entry, dict) and isinstance(entry.get("values"), dict):
                         self.projections.setdefault(sid, {}).update(entry["values"])
             elif value.get("type") == "projection" and value.get("sessionId"):
-                self.projections.setdefault(value["sessionId"], {})[value.get("key")] = value.get("value")
+                target = self.projections.setdefault(value["sessionId"], {})
+                if isinstance(value.get("changes"), list):
+                    # 0.2.2 起一帧带一个事件改动的几项：changes: [{key, val}]（之前是单项 key / value，认不出时新建会话一直没标题）
+                    for change in value["changes"]:
+                        if isinstance(change, dict) and change.get("key"):
+                            target[change["key"]] = change.get("val", change.get("value"))
+                elif value.get("key"):
+                    target[value["key"]] = value.get("value")
 
     def on_workspace(self, value):
         # 基线、整份替换里带着全部归档的会话，之后归档有变化单独来一帧 archived（都是整份）。
@@ -16131,6 +16203,10 @@ class DshHost:
             seqs = [e["seq"] for e in events if isinstance(e, dict) and isinstance(e.get("seq"), int)]
             if seqs:
                 self.cursors[sid] = max([self.cursors.get(sid, 0)] + seqs)
+            # 对话里最近一个事件的时间：列表行的 updatedAt 只在用户发话时变，agent 自己干一整夜也不动，拿它当「最近动静」会误报可能停滞
+            stamps = [e.get("time") or e.get("ts") for e in events if isinstance(e, dict) and isinstance(e.get("time") or e.get("ts"), (int, float))]
+            if stamps:
+                self.moved[sid] = max([self.moved.get(sid, 0)] + stamps)
             calls = {} if snapshot else self.calls.setdefault(sid, {})
             latest = self.latest.setdefault(sid, {})
             for item in items:
@@ -16250,7 +16326,9 @@ class DshHost:
                          "cacheRead": int(tokens.get("cacheReadTokens") or 0), "cacheWrite": int(tokens.get("cacheWriteTokens") or 0),
                          "requests": 0, "model": model, "cost": None, "costAt": None}
             error = note.get("error")
-            updated = row.get("updatedAt")
+            with self.lock:
+                stamps = [t for t in (row.get("updatedAt"), self.moved.get(sid), self.touched.get(sid)) if isinstance(t, (int, float))]
+            updated = int(max(stamps)) if stamps else None
             out.append({
                 "pid": self.pid,
                 "sessionId": sid,
@@ -16284,6 +16362,9 @@ class DshHost:
                 "transcriptUpdatedAt": updated,
                 "agent": "deepseek-harness",
             })
+            goal = dsh_goal_view(proj.get("goal"))
+            if goal:
+                out[-1]["goal"] = goal
         return out
 
     # --- 手机上的操作 ---
@@ -16315,6 +16396,39 @@ class DshHost:
         with self.lock:
             self.touched[sid] = _now_ms()
         return "已发送"
+
+    def goal(self, sid, action, objective):
+        """/goal：设定、清除、暂停、继续、查看目标（DSH 的 goals/*，同它输入框里的 /goal）。设定后 DSH 自己一轮接一轮续做"""
+        current = self.call("goals/get", {"agentId": sid})
+        view = dsh_goal_view(current)
+        if action == "show":
+            return "当前目标：%s" % view["text"] if view else "这个会话没有设定目标"
+        if action == "set":
+            if view and view["state"] != "met":
+                # 已经有一个没做完的：改目标（DSH 一个会话同时只有一个目标），停着的顺带继续
+                self.call("goals/edit", {"agentId": sid, "ref": {"id": current["id"], "revision": current["revision"]},
+                                         "request": {"objective": objective}})
+                if view["state"] != "active":
+                    fresh = self.call("goals/get", {"agentId": sid}) or {}
+                    self.call("goals/resume", {"agentId": sid, "ref": {"id": fresh["id"], "revision": fresh["revision"]}})
+                return "已修改目标"
+            self.call("goals/create", {"agentId": sid, "request": {"objective": objective}})
+            return "已设定目标"
+        if not view:
+            raise RuntimeError("这个会话没有设定目标")
+        ref = {"id": current["id"], "revision": current["revision"]}
+        if action == "clear":
+            self.call("goals/clear", {"agentId": sid, "ref": ref})
+            return "已清除目标"
+        if action == "pause":
+            if view["state"] != "active":
+                return "目标已经停下了"
+            self.call("goals/pause", {"agentId": sid, "ref": ref})
+            return "已暂停目标"
+        if view["state"] == "met":
+            raise RuntimeError("目标已经达成，可以设定一个新目标")
+        self.call("goals/resume", {"agentId": sid, "ref": ref})
+        return "已继续目标"
 
     def key(self, sid, key):
         request = self.request_for(sid)
@@ -16390,7 +16504,11 @@ class DshHost:
                     part = (data.get("content") or [])[int(index_text)]
                 attachment = part.get("attachment") if isinstance(part.get("attachment"), dict) else {}
                 attachment_id = attachment.get("attachmentId") or attachment.get("id")   # DSH 落盘的事件里叫 attachmentId；两种写法都认
-                found = self.call("session/attachment", {"request": {"sessionId": sid, "attachmentId": attachment_id}}) or {}
+                try:
+                    # 0.2.2 起要整份附件引用 {sessionId, attachment: {attachmentId, mediaType, bytes, …}}
+                    found = self.call("session/attachment", {"request": {"sessionId": sid, "attachment": attachment}}) or {}
+                except RuntimeError:
+                    found = self.call("session/attachment", {"request": {"sessionId": sid, "attachmentId": attachment_id}}) or {}
                 return {"mime": (found.get("attachment") or {}).get("mediaType") or attachment.get("mediaType") or "image/png",
                         "data": found.get("data") or ""}
         raise RuntimeError("图片不存在：%s" % ref)
@@ -17347,6 +17465,7 @@ class DshPlugin(AgentPlugin):
     id, name = "deepseek-harness", "DeepSeek Harness"
     needs = ("proc", "secret.read", "net.http", "net.ws")
     limits_note = "DeepSeek 按量付费，没有周期额度：「今日用量」中显示 DeepSeek 账号余额（需在 DeepSeek Harness 中登录 DeepSeek 账号，使用 API Key 的不显示）"
+    caps = ("goal", "goal-pause")   # 目标：DSH 的 goals/* 接口（设定、暂停、继续、清除）
     # 桌面版和命令行（dsh --profile web）是同一套网页服务；审批只有「允许这一次」。实测见 ccpulse-c1 10-24 的记录
     support = {
         "mac": {"desktop": support_form(verified=True), "cli": support_form()},
@@ -17379,6 +17498,10 @@ class DshPlugin(AgentPlugin):
         return self.link.owner(sid).media(sid, ref) if ref.startswith("d") else None
 
     def send(self, sid, text, images):
+        command = None if images else goal_command(text)
+        if command:
+            # /goal 交给 DSH 的目标接口（同它输入框里的 /goal），别当成一句话发给模型
+            return self.link.owner(sid).goal(sid, *command)
         return self.link.owner(sid).send(sid, text, images)
 
     def key(self, sid, key):

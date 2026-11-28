@@ -1106,9 +1106,10 @@ extension SelfTest {
             case "skip": if let version = Updater.shared.release?.version { Updater.shared.setSkipped(Updater.ownKey(version), true) }
             case "begin": Updater.shared.begin()
             case "restart": Updater.shared.restart()
+            case "idle": Log.write("[capture] 自动重启等待：\(Updater.shared.idleBlocker() ?? "无，可以重启")")
             default: UpdateWindowController.shared.show()
             }
-            Log.write("[capture] 更新：\(Updater.shared.phase.rawValue) \(Updater.shared.release?.version ?? "-") 已收 \(Updater.shared.received)，箭头\(Updater.shared.visible ? "显示" : "不显示")，" +
+            Log.write("[capture] 更新：\(Updater.shared.phase.rawValue) \(Updater.shared.release?.version ?? "-") 已收 \(Updater.shared.received)/\(Updater.shared.total)，自动 \(Updater.shared.auto)、静默 \(Updater.shared.silent)，箭头\(Updater.shared.visible ? "显示" : "不显示")，" +
                       "更新窗口\(UpdateWindowController.shared.window?.isVisible == true ? "开着" : "没开")，手机窗口\(UpdateWindowController.phones.window?.isVisible == true ? "开着" : "没开")，" +
                       "落后 \(Updater.shared.release?.behind ?? 0) 版、说明 \(Updater.shared.release?.history.count ?? 0) 版，手机 \(Updater.shared.phones.map { "\($0.version) \($0.devices.map(\.name))" } ?? "-")")
         case "updateshot":

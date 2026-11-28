@@ -253,6 +253,10 @@ public sealed class SettingsWindow : Window
             Form.Toggle(OperatingSystem.IsWindows() ? L("开机时自动启动 Kiteline") : L("登录时自动启动 Kiteline"), status.Truthy("autostart"),
                 on => Post("/api/desktop/settings", new JsonObject { ["autostart"] = on })),
         ], L("自动启动时只在后台运行（托盘图标），不打开主窗口。")));
+        if (config["autoUpdate"] is not null)   // 旧版后台没有这项
+            form.Children.Add(Form.Section(L("更新"), [
+                Form.Toggle(L("自动更新"), config.Truthy("autoUpdate"), on => Set("autoUpdate", on)),
+            ], L("发现新版本后在后台下载并安装，只下载有变化的部分；等电脑无人操作 10 分钟、没有会话在运行或等待确认、手机也没在查看时，自动重启完成更新，不会切到前台。关闭后，发现新版本时会询问是否更新。")));
         form.Children.Add(Form.Section(L("帮助改进 Kiteline"), [
             Form.Toggle(L("发送使用统计"), config.Truthy("usageStats"), on => Set("usageStats", on)),
         ], L("定期发送设备数量与型号、会话的 Agent、模型、token 用量、上下文长度与时长，以及你在 Kiteline 中的名字，用于改进产品。不包含对话、代码、文件和项目路径。")));

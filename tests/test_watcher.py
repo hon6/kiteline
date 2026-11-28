@@ -1153,6 +1153,7 @@ try:
     tracker.annotate(snaps)
     check("别家 agent（装不上提醒 mod）不留提醒；快照里也不带提醒", not os.path.exists(os.path.join(tracker.nudge_dir, "st-2.json"))
           and "_nudge" not in (snaps[0].get("stage") or {}), str(snaps[0].get("stage")))
+    check("别家 agent 没规划、没报过：不按动作推断阶段（不硬挂「2/4 开发中」）", snaps[0].get("stage") is None, str(snaps[0].get("stage")))
     tracker.nudge_dir = None
     said = [W.stage_text_kind(t)[0] for t in ("后端改完，接下来在宿主机开发库上实际跑一遍这个函数。", "现在改前端。", "先看一下现在的代码是怎么取数据的。", "类型检查通过。提交并发版。")]
     check("说明文字小模型：接下来实际跑一遍 → 测试、改前端 → 开发、先看代码 → 调研、提交发版 → 发布", said == ["test", "dev", "research", "report"], str(said))

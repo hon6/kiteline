@@ -162,7 +162,8 @@ class IdleClose:
             return False   # 别的 Kiteline 电脑上的会话由那台自己判断（本机看过的经 /api/viewed 转告它）
         can_reply = not snap.get("readOnly") and (is_vscode(snap) or bool(snap.get("tmuxPane") or snap.get("hosted")) or record.kind == "local"
                                                   or delivery.via_agent(snap))
-        if "close" not in caps_payload(snap) or not can_reply or record.activity == "busy":
+        # status == "shell"：Claude 空闲但后台还有命令在跑；这时发 /exit 会弹「还有后台任务，确定退出吗」，手机上成了没人点的「需要确认」
+        if "close" not in caps_payload(snap) or not can_reply or record.activity == "busy" or snap.get("status") == "shell":
             return False
         idle = self.idle(record.key, now)
         if idle is None or idle < THRESHOLD:
@@ -188,15 +189,14 @@ class IdleClose:
                 hours = int((self.idle(record.key, now) or 0) / 3600)
                 log.write("自动关闭会话「%s」：%d 小时未打开" % (title, hours))
                 outcome = delivery.close(record, self.app.store.source(record.source_id), self.app.server.siblings(record))
+                # 发出去了也记一下：/exit 送到了、会话却没退（Claude 弹了别的确认框）时，别每一轮都再发
+                with self._lock:
+                    self._failed_at[record.key] = now
                 if outcome.ok:
                     self.app.set_marked(record.key, False)   # 同手动关闭：关掉了就取消标记
                     self.app.audit.note("自动关闭会话", "%s（%d 小时未打开）" % (title, hours))
-                    with self._lock:
-                        self._failed_at.pop(record.key, None)
                 else:
                     log.write("自动关闭会话未成功「%s」：%s" % (title, outcome["message"]))
-                    with self._lock:
-                        self._failed_at[record.key] = now
                 time.sleep(0 if delivery.DRY_RUN else 3)
         except Exception as exc:  # noqa: BLE001
             log.write("自动关闭会话出错：%s" % exc)

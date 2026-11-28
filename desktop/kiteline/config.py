@@ -68,6 +68,8 @@ DEFAULT_MOBILE = {
     "morningTime": "08:30",
     "remindWaiting": True,
     "autoCloseIdle": True,   # 24 小时没在 Kiteline 里打开过详情的会话自动关闭、进历史会话（见 idleclose.py）
+    # 自动更新：发现新版本就在后台下载装好（差量，只下变了的文件），等电脑空闲时自动重启换上（见 updater.py）；关掉 = 弹窗询问
+    "autoUpdate": True,
     # 「支持后台运行 Claude Code」的提示（会话页、来源页）选了不再提示。开关本身按设备：来源的 hostedOn
     # （远端项目的新任务、恢复会话不开 VS Code，在那台电脑上后台运行，见 app.launch_hosted；默认关，检测过出口、用户确认才开。
     # 先前那版是这里一个默认开的 hostedRemote，那时的值不算数）

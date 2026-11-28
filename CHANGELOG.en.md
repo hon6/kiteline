@@ -1,5 +1,15 @@
 # Kiteline Release Notes
 
+## 3.49.61（2026-11-28）
+
+### New Features
+
+- **Automatic background updates** (Mac): When a new version is available, Kiteline downloads and installs it in the background, fetching only what has changed—usually just a few MB. Once the computer has been idle for a while, no session is running or waiting for confirmation, and no phone is viewing, Kiteline restarts to finish updating without coming to the front or interrupting ongoing sessions. You can turn this off in Settings → General → Updates; when off, you will be asked before updating.
+
+### Bug Fixes
+
+- **"Confirmation needed" appearing out of nowhere** (Mac, iPhone, iPad): When a session that had not been viewed for a long time was closed automatically while commands were still running in its background, the agent asked to confirm exiting, which showed up on your phone as a "Confirmation needed" card that kept reappearing every few minutes. Sessions with commands still running in the background are no longer closed automatically, and automatic closing no longer retries repeatedly.
+
 ## 3.49.60（2026-11-27）
 
 ### Improvements

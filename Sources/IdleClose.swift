@@ -130,8 +130,10 @@ final class IdleClose {
     private func isDue(_ record: SessionRecord, now: Date) -> Bool {
         let snap = record.snapshot
         // 互联的别的 Kiteline 电脑上的会话由那台自己判断（本机看过的经 /api/viewed 转告它，见 PeerComputers.noteViewed）
+        // status == "shell"：Claude 空闲但后台还有命令在跑（开发服务器、监视进程……）。这时发 /exit 会弹「还有后台任务，确定退出吗」，
+        // 手机上显示成「需要确认」，没人点就一直留着（11-28 反馈「没有操作突然弹出」）；后台有活就不算闲置，不关
         guard record.kind != .kiteline, snap.capsPayload.contains("close"), snap.canReply(local: record.kind == .local), snap.act != .busy,
-              let idle = idle(record.key, now: now), idle >= Self.threshold else { return false }
+              snap.status != "shell", let idle = idle(record.key, now: now), idle >= Self.threshold else { return false }
         if let failed = failedAt[record.key], now.timeIntervalSince(failed) < 7200 { return false }
         return true
     }
@@ -151,11 +153,11 @@ final class IdleClose {
         Delivery.close(record: record, source: AppState.shared.source(withId: record.sourceId)) { [weak self] outcome in
             DispatchQueue.main.async {
                 guard let self else { return }
+                // 发出去了也记一下：/exit 送到了、会话却没退（Claude 弹了别的确认框）时，别每 10 分钟再发一遍
+                self.failedAt[key] = now
                 if outcome.ok {
-                    self.failedAt[key] = nil
                     Audit.note("自动关闭会话", detail: "\(title)（\(hours) 小时未打开）")
                 } else {
-                    self.failedAt[key] = now
                     Log.write("自动关闭会话未成功「\(title)」：\(outcome.message)")
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + (Delivery.dryRun ? 0 : 3)) { self.closeNext(Array(keys.dropFirst()), now: now, force: force) }

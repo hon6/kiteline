@@ -553,6 +553,19 @@ struct GeneralPane: KLView {
                     }
             }
             Section {
+                Toggle("自动更新", isOn: Binding(get: { config.mobile.autoUpdate }, set: { on in
+                    config.mobile.autoUpdate = on
+                    AppState.shared.updatePreferences { $0.mobile.autoUpdate = on }
+                    // 打开时已经发现了新版本：现在就在后台下载
+                    if on, Updater.shared.auto, Updater.shared.phase == .available { Updater.shared.begin(auto: true) }
+                }))
+            } header: {
+                Text("更新")
+            } footer: {
+                Text("发现新版本后在后台下载并安装，只下载有变化的部分；等电脑无人操作 10 分钟、没有会话在运行或等待确认、手机也没在查看时，自动重启完成更新，不会切到前台。关闭后，发现新版本时会询问是否更新。")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("发送使用统计", isOn: Binding(get: { config.mobile.usageStats }, set: { on in
                     config.mobile.usageStats = on
                     AppState.shared.updatePreferences { $0.mobile.usageStats = on }

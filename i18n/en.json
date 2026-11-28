@@ -6083,5 +6083,16 @@
  "；%@ 上也有": "; also on %@",
  "；先轻点「一键安装」装上 tmux，或在电脑终端运行 %@": "; first tap “One-Click Install” to install tmux, or run %@ in Terminal on the computer",
  "；安卓的 id 是序列号，用 adb -s": "",
- "；已重新建立远程连接": "; the remote connection was re-established"
+ "；已重新建立远程连接": "; the remote connection was re-established",
+ "新版本已安装，电脑空闲时自动重启完成更新；轻点可立即重启": "New version installed. Kiteline will restart to finish updating when the computer is idle; click to restart now",
+ "正在等待：%@": "Waiting: %@",
+ "电脑空闲时会自动重启完成更新，也可以现在重启。正在进行的会话不受影响。": "Kiteline will restart automatically to finish updating when the computer is idle, or you can restart now. Ongoing sessions are not affected.",
+ "自动更新已关闭": "Automatic updates are off",
+ "电脑有人在用": "The computer is in use",
+ "有会话在等待确认": "A session is waiting for confirmation",
+ "有会话正在运行": "A session is running",
+ "手机正在查看": "A phone is viewing",
+ "自动更新": "Automatic updates",
+ "更新": "Updates",
+ "发现新版本后在后台下载并安装，只下载有变化的部分；等电脑无人操作 10 分钟、没有会话在运行或等待确认、手机也没在查看时，自动重启完成更新，不会切到前台。关闭后，发现新版本时会询问是否更新。": "When a new version is available, it is downloaded and installed in the background, fetching only what has changed. Kiteline then restarts to finish updating once the computer has been idle for 10 minutes, no session is running or waiting for confirmation, and no phone is viewing; it will not come to the front. When off, you will be asked before updating."
 }

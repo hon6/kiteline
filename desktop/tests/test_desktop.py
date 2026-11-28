@@ -687,13 +687,15 @@ def _ic_tick(ic, now, force=False):
 _ica = _IcApp()
 _ic = idleclose.IdleClose(_ica)
 _t0 = 1_800_000_000.0
-_ica.store.records = [_ic_rec("a"), _ic_rec("b"), _ic_rec("busy", "busy"), _ic_rec("ro", readOnly=True), _ic_rec("codex", agent="codex", caps=[])]
+_ica.store.records = [_ic_rec("a"), _ic_rec("b"), _ic_rec("busy", "busy"), _ic_rec("ro", readOnly=True), _ic_rec("codex", agent="codex", caps=[]),
+                     _ic_rec("bg", status="shell")]
 _ic.store_updated(_t0)
 check("新出现的会话从第一次见到起算", _ic.idle("local#a", _t0 + 60) == 60)
 _ic.touch(["local#b"], _t0 + 3600)
 check("23 小时：都不关", _ic_tick(_ic, _t0 + 23 * 3600) == [])
-check("24 小时没打开的关；打开过的、正在跑的、只读的、不能关的（caps 没 close）不关", _ic_tick(_ic, _t0 + 24 * 3600 + 10) == ["a"])
+check("24 小时没打开的关；打开过的、正在跑的、只读的、不能关的（caps 没 close）、后台还有命令在跑的（status shell）不关", _ic_tick(_ic, _t0 + 24 * 3600 + 10) == ["a"])
 check("关掉了取消标记", "local#a" in _ica.unmarked)
+check("关闭指令发出去了、会话却还在（Claude 弹了确认框）：2 小时内不再发", _ic_tick(_ic, _t0 + 24 * 3600 + 15) == [])
 _ic_away[0] = 30
 check("人在用电脑（10 分钟内动过键鼠）：要切 VS Code 的先不关", _ic_tick(_ic, _t0 + 25 * 3600 + 20) == [])
 _ic_away[0] = 10_000.0
@@ -835,6 +837,136 @@ _uh_u._evaluate_phones()
 check("手机升级了：手机端提醒收起", "phones" not in _uh_u.state())
 _uh_server.shutdown()
 del os.environ["KITELINE_UPDATE_URL"], os.environ["KITELINE_STORE_LOOKUP"]
+
+print("== 自动更新：bsdiff 补丁、差量拼新版本（本机已有 / 补丁 / 整个文件、出错就报）、空闲判断")
+import bz2 as _du_bz2  # noqa: E402
+import gzip as _du_gzip  # noqa: E402
+import hashlib as _du_hashlib  # noqa: E402
+import random as _du_random  # noqa: E402
+import shutil as _du_shutil  # noqa: E402
+import tempfile as _du_tempfile  # noqa: E402
+
+
+def _du_raises(fn):
+    try:
+        fn()
+    except Exception:  # noqa: BLE001
+        return True
+    return False
+
+
+def _du_off(n):
+    return (n if n >= 0 else (-n) | (1 << 63)).to_bytes(8, "little")
+
+
+def _du_patch(ctrl, diff, extra, new_size):
+    """手拼一个 BSDIFF40 补丁（同 bsdiff4 生成的格式）"""
+    c = _du_bz2.compress(b"".join(_du_off(x) + _du_off(y) + _du_off(z) for x, y, z in ctrl))
+    d = _du_bz2.compress(diff)
+    return b"BSDIFF40" + _du_off(len(c)) + _du_off(len(d)) + _du_off(new_size) + c + d + _du_bz2.compress(extra)
+
+
+_du_old = b"hello world, kiteline 1.0.90"
+_du_new = b"hello WORLD, kiteline 1.0.91!"
+_du_diff = bytes((n - o) & 0xFF for n, o in zip(_du_new[:28], _du_old[:28]))
+_du_good = _du_patch([(28, 1, 0)], _du_diff, b"!", 29)
+check("bspatch：逐字节加 diff + 追加 extra", _uh.bspatch(_du_old, _du_good) == _du_new)
+_du_a = bytes(_du_random.getrandbits(8) for _ in range(5000))
+_du_b = bytes(_du_random.getrandbits(8) for _ in range(5000))
+check("逐字节相加（整段当大整数算）和逐个算一样", _uh._add_bytes(_du_a, _du_b) == bytes((x + y) & 0xFF for x, y in zip(_du_a, _du_b)))
+check("bspatch：坏补丁报错", _du_raises(lambda: _uh.bspatch(_du_old, b"BSDIFF40" + b"\0" * 40)))
+check("清单里的 ../ 和绝对路径不认", _du_raises(lambda: _uh._check_rel("../x")) and _du_raises(lambda: _uh._check_rel("/etc/x"))
+      and _uh._check_rel("a/b.py") == "a/b.py")
+
+# 差量拼新版本：本机目录里有 same.py（原样拷）、old.bin（打补丁成 new.bin），blob.txt 整个下载
+_du_tmp = _du_tempfile.mkdtemp(prefix="kl-delta-test-")
+_du_local = os.path.join(_du_tmp, "installed")
+os.makedirs(os.path.join(_du_local, "pkg"))
+open(os.path.join(_du_local, "pkg", "same.py"), "wb").write(b"print('same')\n")
+open(os.path.join(_du_local, "old.bin"), "wb").write(_du_old)
+
+
+def _du_h(data):
+    return _du_hashlib.sha256(data).hexdigest()
+
+
+_du_blob = b"brand new file\n" * 20
+_du_raw = {}   # 地址 → 原样字节（清单、块、补丁不是 JSON）
+_du_manifest = {"format": 1, "root": "Kiteline", "dirs": ["empty"], "links": [], "files": [
+    {"p": "pkg/same.py", "h": _du_h(b"print('same')\n"), "n": 14, "z": 0, "x": 0},
+    {"p": "bin/new.bin", "h": _du_h(_du_new), "n": len(_du_new), "z": 999, "x": 1,
+     "d": [{"f": _du_h(_du_old), "n": len(_du_old), "z": len(_du_good)}]},
+    {"p": "blob.txt", "h": _du_h(_du_blob), "n": len(_du_blob), "z": len(_du_gzip.compress(_du_blob)), "x": 0}]}
+_du_mbytes = _uh_json.dumps(_du_manifest).encode()
+_du_raw["/download/delta/files/test-1.0.91.json"] = _du_mbytes
+_du_raw["/download/delta/patches/%s-%s.bsdiff" % (_du_h(_du_old), _du_h(_du_new))] = _du_good
+_du_raw["/download/delta/blobs/%s.gz" % _du_h(_du_blob)] = _du_gzip.compress(_du_blob)
+
+
+class _DuHandler(_uh_http.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        body = _du_raw.get(self.path)
+        self.send_response(200 if body is not None else 404)
+        self.end_headers()
+        if body is not None:
+            self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+_du_server = _uh_http.ThreadingHTTPServer(("127.0.0.1", 0), _DuHandler)
+_uh_threading.Thread(target=_du_server.serve_forever, daemon=True).start()
+_du_url = "http://127.0.0.1:%d/download/delta/files/test-1.0.91.json" % _du_server.server_port
+_du_u = _uh.Updater(_uh_app)
+_du_u.directory = os.path.join(_du_tmp, "updates")
+_du_u._local_roots = lambda: ([_du_local], set())
+_du_tree = _du_u._build_delta({"url": _du_url, "sha256": _du_h(_du_mbytes)}, "1.0.91")
+
+
+def _du_read(rel):
+    return open(os.path.join(_du_tree, *rel.split("/")), "rb").read()
+
+
+check("差量：本机已有的原样拷、补丁打出新文件、没有的整个下载、空目录也建",
+      _du_read("pkg/same.py") == b"print('same')\n" and _du_read("bin/new.bin") == _du_new and _du_read("blob.txt") == _du_blob
+      and os.path.isdir(os.path.join(_du_tree, "empty")) and os.path.basename(_du_tree) == "Kiteline")
+check("差量：要下载的只算补丁和块（本机已有的不算）", _du_u.total == len(_du_good) + _du_manifest["files"][2]["z"] and _du_u.received == _du_u.total,
+      "%s / %s" % (_du_u.received, _du_u.total))
+if not _uh_config.IS_WINDOWS:
+    check("差量：可执行位照清单设", os.access(os.path.join(_du_tree, "bin", "new.bin"), os.X_OK)
+          and not os.access(os.path.join(_du_tree, "blob.txt"), os.X_OK))
+check("差量：清单的 SHA-256 对不上就不用", _du_raises(lambda: _du_u._build_delta({"url": _du_url, "sha256": "0" * 64}, "1.0.91")))
+_du_raw["/download/delta/blobs/%s.gz" % _du_h(_du_blob)] = _du_gzip.compress(b"tampered")
+check("差量：下到的文件内容不对就报错（调用方退回整包）",
+      _du_raises(lambda: _du_u._build_delta({"url": _du_url, "sha256": _du_h(_du_mbytes)}, "1.0.91")))
+_du_server.shutdown()
+_du_shutil.rmtree(_du_tmp, ignore_errors=True)
+
+# 空闲判断：自动更新开着、装好了，按顺序挡：有人在用 → 等确认 → 运行中（等满 24 小时就不等了）→ 手机 5 分钟内来过
+_du_u.phase, _du_u.staged, _du_u.supported, _du_u.ready_since = "ready", "/tmp/x", True, _uh_time.time()
+_du_u.app = type("A", (), {"cfg": _uh_config.Config(), "version": "1.0.90",
+                            "store": type("S", (), {"records": []})(), "devices": type("D", (), {"all": []})()})()
+_du_u.app.cfg.update(lambda d: d["mobile"].update({"autoUpdate": True}))
+from kiteline import idleclose as _du_ic  # noqa: E402
+_du_saved_idle = _du_ic.user_idle
+_du_ic.user_idle = lambda: 30
+check("空闲判断：刚有人动过键盘鼠标", _du_u.idle_blocker() == "电脑有人在用", str(_du_u.idle_blocker()))
+_du_ic.user_idle = lambda: 900
+_du_u.app.store.records = [type("R", (), {"activity": "waiting"})()]
+check("空闲判断：有会话等确认", _du_u.idle_blocker() == "有会话在等待确认")
+_du_u.app.store.records = [type("R", (), {"activity": "busy"})()]
+check("空闲判断：有会话在运行", _du_u.idle_blocker() == "有会话正在运行")
+_du_u.ready_since = _uh_time.time() - 25 * 3600
+check("空闲判断：等了一天还在运行就不再等它", _du_u.idle_blocker() is None, str(_du_u.idle_blocker()))
+_du_u.app.devices.all = [{"client": "ios/1.9 (iPhone13,2; iOS 18.7.8)", "lastSeen": _uh_time.time() * 1000 - 60_000},
+                         {"client": "mac/3.49 (Mac15,1)", "lastSeen": _uh_time.time() * 1000}]
+check("空闲判断：手机 5 分钟内来过（别的电脑不算）", _du_u.idle_blocker() == "手机正在查看")
+_du_u.app.devices.all[0]["lastSeen"] = _uh_time.time() * 1000 - 400_000
+check("空闲判断：都满足就可以重启", _du_u.idle_blocker() is None)
+_du_u.app.cfg.update(lambda d: d["mobile"].update({"autoUpdate": False}))
+check("空闲判断：关了自动更新就不自动重启", _du_u.idle_blocker() == "自动更新已关闭")
+_du_ic.user_idle = _du_saved_idle
 
 print("== 别的会话来信引起的那一轮答完不提醒（store）")
 from kiteline.store import Store as _Store  # noqa: E402

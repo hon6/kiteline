@@ -14,8 +14,15 @@ version、url、size、sha256，notes / notesEn 是这一版的更新说明。
 勾了「此版本不再提示」（/skip）这个版本就不再弹，出了更新的版本再弹（同 Mac 版）。顺带看配对过的手机：App Store 上
 有比手机上新的 Kiteline 时，state 的 phones 里列出来，客户端同样弹一次「手机端有新版本」。
 手机也能反过来看这台电脑的更新、让它下载安装和重启（/api/host-update → host_payload() / remote()）。
+
+自动更新（设置里默认开，mobile.autoUpdate；同 Mac 版）：发现新版本不弹窗，直接在后台下载装好，等电脑空闲时（没人用电脑、
+没有会话在运行或等确认、手机这几分钟没在看）自动重启换上。下载走差量（_build_delta）：latest.json 的 files 指向这个版本的
+文件清单（tools/release/delta.py 生成），本机已有的文件直接拷，变了的文件下二进制补丁（bsdiff 格式，本文件里的 bspatch 打）
+或整个文件，拼出和安装包解开后一样的目录，再走原来的安装流程；拼不出来就退回下载整个安装包。
 """
 
+import bz2
+import gzip
 import hashlib
 import json
 import locale
@@ -37,6 +44,10 @@ FIRST_CHECK = 30
 SNOOZE = 24 * 3600          # 弹过（点了「以后再说」）之后多久再自动弹
 STORE_EVERY = 6 * 3600      # App Store 上的 iPhone 版六小时问一次
 IOS_BUNDLE = "com.mrhong.tars.ios"
+IDLE_TICK = 60              # 装好后每分钟看一次电脑空不空闲
+IDLE_NEEDED = 600           # 人离开电脑这么久才自动重启
+BUSY_PATIENCE = 24 * 3600   # 一直有会话在运行：等这么久后不再等它（正在运行的会话不受 Kiteline 重启影响，只是保守起见先等）
+PHONE_RECENT = 300          # 手机这么久内来过请求 = 正在看
 
 
 def parse_version(text):
@@ -71,6 +82,11 @@ class Updater:
         self.store_checked = 0
         self.phones = None           # 还是旧版本的手机 {version, notes, devices: [{name, version}]}
         self.client = {}             # 正在运行的客户端（启动时自己报上来）：从托盘、控制台重启时也把它关掉再打开
+        self.total = 0               # 这次要下载的总字节数：差量是算出来的那些，整包是安装包大小
+        self.silent = False          # 这次是自动更新开始的：装好了不弹窗，等空闲自动重启
+        self.waiting_for = ""        # 自动重启还在等什么（「电脑有人在用」……）；空 = 没在等
+        self.ready_since = 0
+        self.delta_failed = set()    # 差量拼过失败的版本：下次直接下整包
         self.supported, self.reason = self._supported()
         self.directory = config.path("updates")
 
@@ -122,7 +138,9 @@ class Updater:
             key = self.key(version) if version else ""
             payload = {"ok": True, "supported": self.supported, "reason": self.reason, "current": self.app.version,
                        "phase": self.phase, "version": version, "notes": notes,
-                       "size": int(release.get("size") or 0), "received": self.received, "error": self.error,
+                       "size": self.total if self.phase == "downloading" else self.expected_size(),
+                       "received": self.received, "error": self.error,
+                       "autoUpdate": self.auto(), "silent": self.silent, "waitingFor": self.waiting_for,
                        "checkedAt": int(self.checked_at * 1000), "page": self.app.cfg.relay().rstrip("/") + "/download",
                        "restartNeeded": self.phase == "ready", "behind": self.behind,
                        # 各版本说明（客户端按界面语言挑 notes / notesEn）；没取到就只有新版本这一版
@@ -130,7 +148,7 @@ class Updater:
                                                        "notesEn": release.get("notesEn") or ""}] if version else []),
                        # 自动弹窗：key 记「不再提示」「弹过了」，prompt = 现在该弹
                        "key": key, "skipped": bool(key) and self.is_skipped(key),
-                       "prompt": self.phase == "available" and bool(key) and self.due(key)}
+                       "prompt": self.phase == "available" and bool(key) and self.due(key) and not self.auto()}
             phones = self.phones
         if phones:
             phone_key = "ios:" + phones["version"]
@@ -173,6 +191,16 @@ class Updater:
             self.app.cfg.update(change)
         return {"ok": True}
 
+    def auto(self):
+        """自动更新开着（设置里）且这台能自动装"""
+        return self.supported and bool(self.app.cfg.mobile.get("autoUpdate", True))
+
+    def expected_size(self):
+        """从这台的版本更新过去大概要下载多少：差量算得出来就用差量的，不然是整个安装包"""
+        release = self.release or {}
+        files = release.get("files") or {}
+        return int((files.get("from") or {}).get(self.app.version) or release.get("size") or 0)
+
     def _set(self, phase, **fields):
         with self._lock:
             if phase is not None:
@@ -191,6 +219,7 @@ class Updater:
         if os.environ.get("KITELINE_CONFIG_DIR") and not os.environ.get("KITELINE_UPDATE_URL"):
             return   # 隔离测试实例不去查官网
         threading.Thread(target=self._loop, daemon=True, name="updater").start()
+        threading.Thread(target=self._idle_loop, daemon=True, name="updater-idle").start()
 
     def _loop(self):
         time.sleep(FIRST_CHECK)
@@ -198,6 +227,51 @@ class Updater:
             if self.phase in ("idle", "none", "available", "error"):
                 self.check()
             time.sleep(CHECK_EVERY)
+
+    def _idle_loop(self):
+        """每分钟：自动更新开着、发现了新版本还没下的 → 后台下载（设置里刚打开自动更新也走这里）；装好了 → 看空不空闲，空闲就重启"""
+        tick = float(os.environ.get("KITELINE_UPDATE_IDLE_TICK") or IDLE_TICK)
+        while True:
+            time.sleep(tick)
+            try:
+                if self.phase == "available" and self.auto():
+                    log.write("自动更新：开始在后台下载 %s" % (self.release or {}).get("version"))
+                    self.begin(auto=True)
+                elif self.phase == "ready":
+                    self._try_idle_restart()
+            except Exception as exc:  # noqa: BLE001
+                log.write("自动更新：%s" % exc)
+
+    def idle_blocker(self):
+        """现在不能自动重启的原因；None = 可以"""
+        if self.phase != "ready" or not self.staged:
+            return "新版本还没有装好"
+        if not self.auto():
+            return "自动更新已关闭"
+        from .idleclose import user_idle
+        if user_idle() < float(os.environ.get("KITELINE_UPDATE_IDLE") or IDLE_NEEDED):
+            return "电脑有人在用"
+        records = list(getattr(self.app.store, "records", []) or [])
+        if any(r.activity == "waiting" for r in records):
+            return "有会话在等待确认"
+        if any(r.activity == "busy" for r in records) and time.time() - (self.ready_since or time.time()) < BUSY_PATIENCE:
+            return "有会话正在运行"
+        recent = (time.time() - PHONE_RECENT) * 1000
+        for device in self.app.devices.all:
+            client = device.get("client") or ""
+            if (client.startswith("ios/") or client == "miniprogram") and float(device.get("lastSeen") or 0) > recent:
+                return "手机正在查看"
+        return None
+
+    def _try_idle_restart(self):
+        blocker = self.idle_blocker()
+        if blocker:
+            if blocker != self.waiting_for:
+                log.write("自动更新：新版本 %s 已装好，等待空闲（%s）" % ((self.release or {}).get("version"), blocker))
+                self._set(None, waiting_for=blocker)
+            return
+        log.write("自动更新：电脑空闲，重启换上新版本 %s" % (self.release or {}).get("version"))
+        self.restart(auto=True)
 
     def check(self):
         """查一次；正在下载、装好待重启时不打断"""
@@ -222,6 +296,10 @@ class Updater:
                 self._set("available", release=release, error="", behind=behind, **({"history": []} if fresh else {}))
                 if fresh:
                     threading.Thread(target=self._fetch_history, args=(version,), daemon=True, name="updater-notes").start()
+                if self.auto():
+                    # 自动更新：不弹窗，直接在后台下载装好
+                    log.write("自动更新：开始在后台下载 %s" % version)
+                    self.begin(auto=True)
             else:
                 self._set("none", release=None, error="", history=[], behind=0)
             threading.Thread(target=self._check_phones, daemon=True, name="updater-phones").start()
@@ -331,8 +409,8 @@ class Updater:
 
     # MARK: 下载、安装
 
-    def begin(self):
-        """用户确认更新：后台下载 + 静默安装，进度看 state()"""
+    def begin(self, auto=False):
+        """后台下载 + 静默安装，进度看 state()。auto：自动更新开始的（装好了不弹窗、等空闲自动重启）"""
         with self._lock:
             if not self.supported:
                 return {"ok": False, "error": self.reason}
@@ -340,7 +418,9 @@ class Updater:
                 return {"ok": self.phase in ("downloading", "installing", "ready"), "error": "" if self.phase in ("downloading", "installing", "ready") else "没有可用的更新"}
             self.phase = "downloading"
             self.received = 0
+            self.total = 0
             self.error = ""
+            self.silent = auto
             self._cancel.clear()
         self._worker = threading.Thread(target=self._download_and_install, daemon=True, name="updater-install")
         self._worker.start()
@@ -353,9 +433,29 @@ class Updater:
 
     def _download_and_install(self):
         release = self.release
+        files = release.get("files") or {}
+        if files.get("url") and files.get("sha256") and release.get("version") not in self.delta_failed:
+            try:
+                os.makedirs(self.directory, exist_ok=True)
+                self._cleanup()
+                tree = self._build_delta(files, release.get("version"))
+                self._set("installing")
+                self.staged = self._finish_windows(tree) if config.IS_WINDOWS else self._finish_linux(tree)
+                log.write("新版本 %s 已装好（差量，下载 %d 字节），重启后生效" % (release.get("version"), self.received))
+                self._set("ready", ready_since=time.time(), waiting_for="")
+                return
+            except Cancelled:
+                self._cleanup()
+                self._set("available", received=0, error="")
+                return
+            except Exception as exc:  # noqa: BLE001
+                log.write("差量更新没成功（%s），改为下载整个安装包" % exc)
+                self.delta_failed.add(release.get("version"))
+                self._set(None, received=0)
         try:
             os.makedirs(self.directory, exist_ok=True)
             self._cleanup()
+            self._set(None, total=int(release.get("size") or 0), received=0)
             name = os.path.basename(release.get("file") or release["url"].rsplit("/", 1)[-1])
             archive = os.path.join(self.directory, name)
             self._download(release["url"], archive, int(release.get("size") or 0), release.get("sha256", ""))
@@ -363,7 +463,7 @@ class Updater:
             self.staged = self._stage_windows(archive) if config.IS_WINDOWS else self._stage_linux(archive)
             os.remove(archive)
             log.write("新版本 %s 已装好，重启后生效" % release.get("version"))
-            self._set("ready")
+            self._set("ready", ready_since=time.time(), waiting_for="")
         except Cancelled:
             self._cleanup()
             self._set("available", received=0, error="")
@@ -371,6 +471,125 @@ class Updater:
             log.write("更新失败：%s" % exc)
             self._cleanup()
             self._set("error", error=str(exc) or "更新失败")
+
+    # MARK: 差量更新
+
+    def _local_roots(self):
+        """本机这份 Kiteline 的文件在哪：Windows 是 Kiteline.exe 所在的文件夹；Linux 是安装目录（虚拟环境、更新目录除外）"""
+        if config.IS_WINDOWS:
+            return [self.app_dir()], set()
+        home = self.install_home()
+        return [home], {os.path.join(home, "venv")}
+
+    def _build_delta(self, files, version):
+        """拼出新版本（和安装包解开后的目录一样），返回那个目录。清单格式见 tools/release/delta.py：
+        本机有同样内容的文件（按 SHA-256 认，不管在哪个路径）直接拷，变了的文件有从本机某个文件出发的补丁就下补丁打上，
+        没有就下整个文件（gzip）；每个文件都核对 SHA-256。出错抛异常（调用方退回下载整包）"""
+        data = self._get(files["url"], limit=32 << 20)
+        if hashlib.sha256(data).hexdigest() != str(files["sha256"]).lower():
+            raise RuntimeError("文件清单校验失败")
+        manifest = json.loads(data.decode("utf-8"))
+        if manifest.get("format") != 1 or not isinstance(manifest.get("files"), list):
+            raise RuntimeError("文件清单格式不对")
+        entries = manifest["files"]
+        for item in entries + (manifest.get("links") or []):
+            _check_rel(item.get("p") or "")
+        # 本机的文件：只算大小对得上的（新版本的文件、补丁的出发文件），按 SHA-256 建索引
+        sizes = {int(e.get("n") or 0) for e in entries} | {int(d.get("n") or 0) for e in entries for d in e.get("d") or []}
+        roots, skip = self._local_roots()
+        local = {}
+        for root in roots:
+            for folder, dirs, names in os.walk(root):
+                dirs[:] = [d for d in dirs if os.path.join(folder, d) not in skip and d != "__pycache__"]
+                for name in names:
+                    if self._cancel.is_set():
+                        raise Cancelled()
+                    path = os.path.join(folder, name)
+                    try:
+                        if os.path.islink(path) or os.path.getsize(path) not in sizes:
+                            continue
+                        local.setdefault(_sha256_file(path), path)
+                    except OSError:
+                        continue
+        plan, total = [], 0
+        for e in entries:
+            h = str(e["h"]).lower()
+            if h in local:
+                plan.append((e, "local", local[h], 0))
+                continue
+            patch = next((d for d in e.get("d") or [] if str(d.get("f")).lower() in local), None)
+            if patch:
+                plan.append((e, "patch", patch, int(patch.get("z") or 0)))
+                total += int(patch.get("z") or 0)
+            else:
+                plan.append((e, "blob", None, int(e.get("z") or 0)))
+                total += int(e.get("z") or 0)
+        self._set(None, total=total, received=0)
+        downloads = sum(1 for p in plan if p[1] != "local")
+        log.write("差量更新 %s：%d 个文件，本机已有 %d 个，要下载 %d 个、共 %d 字节" % (version, len(entries), len(entries) - downloads, downloads, total))
+        base = files["url"].rsplit("/", 2)[0]   # …/download/delta
+        tree = os.path.join(self.directory, "stage", os.path.basename(manifest.get("root") or "Kiteline"))
+        os.makedirs(tree, exist_ok=True)
+        for rel in manifest.get("dirs") or []:
+            os.makedirs(os.path.join(tree, *_check_rel(rel).split("/")), exist_ok=True)
+        received = 0
+        for e, kind, source, size in plan:
+            if self._cancel.is_set():
+                raise Cancelled()
+            h = str(e["h"]).lower()
+            out = os.path.join(tree, *e["p"].split("/"))
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            if kind == "local":
+                shutil.copyfile(source, out)
+            else:
+                url = "%s/patches/%s-%s.bsdiff" % (base, str(source["f"]).lower(), h) if kind == "patch" else "%s/blobs/%s.gz" % (base, h)
+                body = self._get(url, limit=size + 1 if size else 512 << 20, progress=received)
+                if size and len(body) != size:
+                    raise RuntimeError("下载不完整：%s" % e["p"])
+                received += len(body)
+                if kind == "patch":
+                    with open(local[str(source["f"]).lower()], "rb") as old:
+                        content = bspatch(old.read(), body)
+                else:
+                    content = gzip.decompress(body)
+                if hashlib.sha256(content).hexdigest() != h:
+                    raise RuntimeError("文件校验失败：%s" % e["p"])
+                with open(out, "wb") as handle:
+                    handle.write(content)
+            if _sha256_file(out) != h:
+                raise RuntimeError("文件校验失败：%s" % e["p"])
+            if not config.IS_WINDOWS:
+                os.chmod(out, 0o755 if e.get("x") else 0o644)
+        for link in manifest.get("links") or []:
+            target = str(link.get("t") or "")
+            if target.startswith("/") or config.IS_WINDOWS:
+                raise RuntimeError("文件清单里有异常链接")
+            os.symlink(target, os.path.join(tree, *link["p"].split("/")))
+        return tree
+
+    def _get(self, url, limit, progress=None):
+        """下载一个小文件读进内存（清单、补丁、文件块）；progress 给了就边下边更新进度"""
+        request = urllib.request.Request(url, headers={"User-Agent": "Kiteline/%s (%s; delta)" % (self.app.version, self.platform)})
+        chunks, got, last = [], 0, 0
+        with urllib.request.urlopen(request, timeout=60) as response:
+            while True:
+                if self._cancel.is_set():
+                    raise Cancelled()
+                chunk = response.read(256 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                got += len(chunk)
+                if got > limit:
+                    raise RuntimeError("下载的内容过大：%s" % url.rsplit("/", 1)[-1])
+                if progress is not None and time.time() - last > 0.2:
+                    last = time.time()
+                    with self._lock:
+                        self.received = progress + got
+        if progress is not None:
+            with self._lock:
+                self.received = progress + got
+        return b"".join(chunks)
 
     def _download(self, url, target, size, sha256):
         partial = target + ".part"
@@ -417,6 +636,9 @@ class Updater:
                 if member.startswith("/") or ".." in member.replace("\\", "/").split("/"):
                     raise RuntimeError("安装包内容异常")
             bundle.extractall(stage)
+        return self._finish_windows(stage)
+
+    def _finish_windows(self, stage):
         found = _find(stage, "Kiteline.exe")
         if not found:
             raise RuntimeError("安装包里没有 Kiteline.exe")
@@ -434,6 +656,9 @@ class Updater:
                 if member.name.startswith("/") or ".." in member.name.split("/") or member.issym() or member.islnk() or member.isdev():
                     raise RuntimeError("安装包内容异常")
             bundle.extractall(stage, members=members)
+        return self._finish_linux(stage)
+
+    def _finish_linux(self, stage):
         installer = _find(stage, "install-linux.sh")
         if not installer:
             raise RuntimeError("安装包里没有 install-linux.sh")
@@ -461,8 +686,9 @@ class Updater:
 
     # MARK: 重启
 
-    def restart(self, client=None):
-        """装好后重启：起一个独立的小脚本，等这份 Kiteline（和客户端）退出、换上新文件、再启动；然后这份退出。
+    def restart(self, client=None, auto=False):
+        """auto：空闲时自动重启的（只记日志，流程一样：后台带 --background 起，原来开着的客户端照样重新打开）。
+        装好后重启：起一个独立的小脚本，等这份 Kiteline（和客户端）退出、换上新文件、再启动；然后这份退出。
         client = {"pid": 客户端进程号, "exe": 客户端程序路径, "args": [...]}：客户端自己随后退出，由脚本重新打开"""
         if self.phase != "ready" or not self.staged:
             return {"ok": False, "error": "没有待安装的更新"}
@@ -595,6 +821,78 @@ class Updater:
 
 class Cancelled(Exception):
     pass
+
+
+def _check_rel(rel):
+    """清单里的路径只能在新版本目录里面：不能是绝对路径、不能有 .."""
+    rel = str(rel)
+    if not rel or rel.startswith(("/", "\\")) or ".." in rel.replace("\\", "/").split("/") or ":" in rel:
+        raise RuntimeError("文件清单里有异常路径")
+    return rel
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _offtin(buf, pos):
+    """bsdiff 的 64 位整数：小端、最高位是符号位"""
+    value = int.from_bytes(buf[pos:pos + 8], "little")
+    return -(value & 0x7FFFFFFFFFFFFFFF) if value & (1 << 63) else value
+
+
+def _add_bytes(a, b):
+    """逐字节相加（各自 mod 256，不进位）：整段当大整数一次算完，比逐字节循环快几十倍"""
+    n = len(a)
+    if not n:
+        return b""
+    low = int.from_bytes(b"\x7f" * n, "little")
+    high = int.from_bytes(b"\x80" * n, "little")
+    x, y = int.from_bytes(a, "little"), int.from_bytes(b, "little")
+    return (((x & low) + (y & low)) ^ ((x ^ y) & high)).to_bytes(n, "little")
+
+
+def bspatch(old, patch):
+    """打 bsdiff（BSDIFF40 格式，tools/release/delta.py 用 bsdiff4 生成，同 macOS 自带的 bspatch）补丁，返回新文件内容"""
+    if patch[:8] != b"BSDIFF40" or len(patch) < 32:
+        raise RuntimeError("补丁格式不对")
+    ctrl_len, diff_len, new_size = _offtin(patch, 8), _offtin(patch, 16), _offtin(patch, 24)
+    if ctrl_len < 0 or diff_len < 0 or new_size < 0 or new_size > 1 << 31:
+        raise RuntimeError("补丁格式不对")
+    ctrl = bz2.decompress(patch[32:32 + ctrl_len])
+    diff = bz2.decompress(patch[32 + ctrl_len:32 + ctrl_len + diff_len])
+    extra = bz2.decompress(patch[32 + ctrl_len + diff_len:])
+    out = bytearray()
+    old_pos = diff_pos = extra_pos = 0
+    old_size = len(old)
+    for i in range(0, len(ctrl) - 23, 24):
+        x, y, z = _offtin(ctrl, i), _offtin(ctrl, i + 8), _offtin(ctrl, i + 16)
+        if x < 0 or y < 0 or len(out) + x + y > new_size:
+            raise RuntimeError("补丁内容异常")
+        chunk = diff[diff_pos:diff_pos + x]
+        if len(chunk) != x:
+            raise RuntimeError("补丁内容异常")
+        # 旧文件里超出范围的字节当 0（同 bspatch.c）
+        start, end = max(old_pos, 0), min(old_pos + x, old_size)
+        base = bytearray(x)
+        if end > start:
+            base[start - old_pos:end - old_pos] = old[start:end]
+        out += _add_bytes(bytes(base), chunk)
+        diff_pos += x
+        old_pos += x
+        piece = extra[extra_pos:extra_pos + y]
+        if len(piece) != y:
+            raise RuntimeError("补丁内容异常")
+        out += piece
+        extra_pos += y
+        old_pos += z
+    if len(out) != new_size:
+        raise RuntimeError("补丁内容异常")
+    return bytes(out)
 
 
 def _alive(pid):

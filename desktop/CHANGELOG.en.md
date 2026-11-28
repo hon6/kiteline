@@ -1,5 +1,15 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.64（2026-11-28）
+
+### New Features
+
+- **Automatic background updates** (Windows, Linux): When a new version is available, Kiteline downloads and installs it in the background, fetching only what has changed—usually just a few MB. Once the computer has been idle for a while, no session is running or waiting for confirmation, and no phone is viewing, Kiteline restarts to finish updating without interrupting ongoing sessions. You can turn this off in Settings → General → Updates; when off, you will be asked before updating.
+
+### Bug Fixes
+
+- **"Confirmation needed" appearing out of nowhere** (Windows, Linux): When a session that had not been viewed for a long time was closed automatically while commands were still running in its background, the agent asked to confirm exiting, which showed up on your phone as a "Confirmation needed" card that kept reappearing every few minutes. Sessions with commands still running in the background are no longer closed automatically, and automatic closing no longer retries repeatedly.
+
 ## 1.0.63（2026-11-27）
 
 ### Improvements

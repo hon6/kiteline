@@ -37,7 +37,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.63"
+VERSION = "1.0.64"
 
 
 class App:
@@ -827,7 +827,7 @@ class App:
                 "speech": "authorized" if voice.state()[0] in ("ready", "missing", "downloading") else "denied",
                 "submitOnSend": m["submitOnSend"], "digestTime": m["digestTime"], "morningTime": m["morningTime"],
                 "quietStart": m["quietStart"], "quietEnd": m["quietEnd"], "quietActive": self.cfg.in_quiet_hours(),
-                "remindWaiting": m["remindWaiting"], "autoCloseIdle": m["autoCloseIdle"], "dailyBudget": m["dailyBudget"],
+                "remindWaiting": m["remindWaiting"], "autoCloseIdle": m["autoCloseIdle"], "autoUpdate": m.get("autoUpdate", True), "dailyBudget": m["dailyBudget"],
                 "remote": {"enabled": m["remoteEnabled"], "state": self.p2p.status.get("state", "stopped"),
                            "relay": self.p2p.status.get("relay") or ""}}
 

@@ -32,6 +32,12 @@ public sealed partial class UpdateState : ObservableObject
     /// 「此版本不再提示」「弹过了」按它记（windows:1.0.22）
     [ObservableProperty] string key = "";
     [ObservableProperty] bool skipped;
+    /// 自动更新开着（后台设置里）：装好后等电脑空闲自动重启
+    [ObservableProperty] bool autoUpdate;
+    /// 这次是自动更新开始的：装好了不弹窗
+    [ObservableProperty] bool silent;
+    /// 自动重启还在等什么（「电脑有人在用」……，后台给的中文原文）；空 = 没在等
+    [ObservableProperty] string waitingFor = "";
 
     /// 落后的这几版各自的更新内容（新的在前）；取不到就只有新版本这一版
     public IReadOnlyList<ReleaseNote> Releases { get; private set; } = [];
@@ -114,6 +120,9 @@ public sealed partial class UpdateState : ObservableObject
         Behind = (int)(n.Num("behind") ?? 0);
         Key = n.Str("key") ?? "";
         Skipped = n.Truthy("skipped");
+        AutoUpdate = n.Truthy("autoUpdate");
+        Silent = n.Truthy("silent");
+        WaitingFor = n.Str("waitingFor") ?? "";
         Releases = (n.Arr("releases") ?? []).Select(r => new ReleaseNote(r.Str("version") ?? "", r.Str("date") ?? "",
             ((Lang.IsEnglish ? r.Str("notesEn") : null) is { Length: > 0 } en ? en : r.Str("notes") ?? "").Trim()))
             .Where(r => r.Version.Length > 0 && r.Notes.Length > 0).ToList();
@@ -126,7 +135,8 @@ public sealed partial class UpdateState : ObservableObject
         OnPropertyChanged(nameof(Phones));
         OnPropertyChanged(nameof(Progress));
         OnPropertyChanged(nameof(Visible));
-        if (next == "ready" && before != "ready") Ready?.Invoke();
+        // 装好了弹「重启以完成更新」；自动更新开始的不弹，等空闲自动重启
+        if (next == "ready" && before != "ready" && !Silent) Ready?.Invoke();
         // 后台说该弹了：弹一次、报「弹过了」（24 小时内不再弹）。自己的和手机的同时到时先弹自己的，手机的等下一轮
         if (next == "available" && n.Truthy("prompt") && Key.Length > 0 && prompted.Add(Key))
         {

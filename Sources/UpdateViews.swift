@@ -38,7 +38,7 @@ struct UpdateButton: KLView {
     private var tip: String {
         let version = updater.release?.version ?? ""
         switch updater.phase {
-        case .ready: return L("新版本已安装，轻点重启以完成更新")
+        case .ready: return updater.auto ? L("新版本已安装，电脑空闲时自动重启完成更新；轻点可立即重启") : L("新版本已安装，轻点重启以完成更新")
         case .downloading: return L("正在下载 Kiteline %@（%@）", version, "\(Int(updater.progress * 100))%")
         case .installing: return L("正在安装 Kiteline %@…", version)
         default: return L("有新版本：Kiteline %@", version)
@@ -73,9 +73,9 @@ final class UpdateWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: panel)
         panel.delegate = self
         guard !phones else { return }
-        // 装好了：弹出来问要不要现在重启
+        // 装好了：弹出来问要不要现在重启（自动更新开始的不弹：等空闲自动重启）
         Updater.shared.$phase.removeDuplicates().sink { [weak self] phase in
-            if phase == .ready { DispatchQueue.main.async { self?.show() } }
+            if phase == .ready, !Updater.shared.silent { DispatchQueue.main.async { self?.show() } }
         }.store(in: &watch)
         // 发现新版本（电脑端自己的 / 手机端的）：自动弹一次
         Updater.shared.prompts.receive(on: DispatchQueue.main).sink { [weak self] prompt in
@@ -228,15 +228,18 @@ private struct UpdateView: KLView {
         if !updater.supported && updater.phase == .available { return L("%@，请到官网下载新版本。", updater.reason) }
         switch updater.phase {
         case .available:
-            let size = (updater.release?.size ?? 0) > 0 ? " · " + ByteCountFormatter.string(fromByteCount: updater.release!.size, countStyle: .file) : ""
+            let size = updater.expectedSize > 0 ? " · " + ByteCountFormatter.string(fromByteCount: updater.expectedSize, countStyle: .file) : ""
             let behind = (updater.release?.behind ?? 0) > 1 ? " · " + L("已落后 %lld 个版本", count: updater.release!.behind) : ""
             return L("当前版本 %@", updater.current) + behind + size + "\n" + L("下载后在后台自动安装，装好后重启即可。")
         case .downloading:
-            let total = updater.release?.size ?? 0
+            let total = updater.total
             let got = ByteCountFormatter.string(fromByteCount: updater.received, countStyle: .file)
             return total > 0 ? "\(got) / \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))" : got
         case .installing: return L("安装在后台进行，不影响使用。")
-        case .ready: return L("重启 Kiteline 后生效，正在进行的会话不受影响。")
+        case .ready:
+            guard updater.auto else { return L("重启 Kiteline 后生效，正在进行的会话不受影响。") }
+            let waiting = updater.waitingFor.isEmpty ? "" : "\n" + L("正在等待：%@", updater.waitingFor)
+            return L("电脑空闲时会自动重启完成更新，也可以现在重启。正在进行的会话不受影响。") + waiting
         case .restarting: return L("新版本启动后会自动打开。")
         case .error: return updater.error.isEmpty ? L("更新失败") : updater.error
         case .checking: return ""

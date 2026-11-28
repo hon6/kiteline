@@ -100,7 +100,7 @@ enum ConfigKey: String, CodingKey {
     case deviceMax, deviceIdle
     case storageAuto, storageDays
     case httpsEnabled, httpsPort, pushContact, voiceLocale, digestTime, quickReplies, dailyBudget
-    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, hostedTipOff, hostedLocal, hostedCloseEditor
+    case barkURL, barkMode, barkKey, barkIV, dailyCap, morningTime, remindWaiting, autoCloseIdle, autoUpdate, hostedTipOff, hostedLocal, hostedCloseEditor
     case quietStart, quietEnd, mutedSessions, pinnedSessions, markedSessions, myName, avatar, remoteEnabled, relayURL, watch, usageStats
     // 旧版扁平字段
     case watchedPathPrefixes
@@ -164,6 +164,9 @@ struct MobileConfig: Codable, Equatable {
     var remindWaiting: Bool = true
     /// 24 小时没在 Kiteline 里打开过详情的会话自动关闭、进历史会话（标记、置顶的也关；见 IdleClose.swift）
     var autoCloseIdle: Bool = true
+    /// 自动更新：发现新版本就在后台下载装好（差量，只下变了的文件），等电脑空闲时自动重启换上（见 Updater.swift）。
+    /// 关掉 = 回到发现新版本弹窗询问
+    var autoUpdate: Bool = true
     /// 「支持后台运行 Claude Code」的提示（会话页、来源页）：勾了「不再提示」就不再显示（各端共用）。
     /// 开关本身按设备，见 SourceConfig.hostedOn（先前那版是这里一个默认开的 hostedRemote，那时的值不算数）
     var hostedTipOff: Bool = false
@@ -292,6 +295,7 @@ struct MobileConfig: Codable, Equatable {
         morningTime = text(.morningTime, "08:30")
         remindWaiting = flag(.remindWaiting, true)
         autoCloseIdle = flag(.autoCloseIdle, true)
+        autoUpdate = flag(.autoUpdate, true)
         hostedTipOff = flag(.hostedTipOff, false)
         hostedLocal = flag(.hostedLocal, true)
         hostedCloseEditor = flag(.hostedCloseEditor, true)

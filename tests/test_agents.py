@@ -936,6 +936,26 @@ class FakeDshHandler(http.server.BaseHTTPRequestHandler):
             value = {"records": records[-request.get("maxMessages", 50):], "hasMore": False}
         elif method in ("session/prompt", "session/cancel", "$events/result"):
             value = {"accepted": True} if method != "$events/result" else None
+        elif method.startswith("goals/"):
+            # 一个会话一个目标：{id, revision, objective, phase, roundsStarted, createdAt, updatedAt}，改一次 revision +1；ref 对不上报错
+            goal = getattr(self.server, "goal", None)
+            if method not in ("goals/get", "goals/create") and (not goal or args.get("ref") != {"id": goal["id"], "revision": goal["revision"]}):
+                ok = False
+            elif method == "goals/get":
+                value = goal
+            elif method == "goals/create":
+                self.server.goal = {"id": "goal-1", "revision": 1, "objective": args["request"]["objective"], "phase": "active",
+                                    "roundsStarted": 0, "createdAt": 1000, "updatedAt": 1000}
+                value = {"ref": {"id": "goal-1", "revision": 1}}
+            elif method == "goals/clear":
+                self.server.goal, value = None, {"id": goal["id"], "revision": goal["revision"] + 1}
+            else:
+                goal["revision"] += 1
+                if method == "goals/edit":
+                    goal["objective"] = args["request"]["objective"]
+                else:
+                    goal["phase"] = {"goals/pause": "paused", "goals/resume": "active"}[method]
+                value = dict(goal)
         elif method == "account/getBalance" and self.server.balance != "error":
             value = self.server.balance
         else:
@@ -1070,6 +1090,33 @@ plugins.handle("deepseek-harness", {"cmd": "agent_send", "sessionId": SID, "text
 prompt = dsh.calls[-1]
 check("空闲时发消息 → session/prompt（queue，开新一轮）", prompt[0] == "session/prompt" and prompt[1]["request"]["mode"] == "queue"
       and prompt[1]["request"]["content"] == [{"type": "text", "text": "再加个测试"}] and prompt[1]["request"]["requestId"], str(prompt)[:300])
+# 目标（/goal）：交给 DSH 的 goals/*，不当成一句话发给模型
+check("快照的 caps 带目标（设定、暂停）", {"goal", "goal-pause"} <= set(plugins.sessions()[0].get("caps") or []) if plugins.sessions() else False,
+      str([s.get("caps") for s in plugins.sessions()]))
+said = plugins.handle("deepseek-harness", {"cmd": "agent_send", "sessionId": SID, "text": "/goal 把测试补齐"})
+check("/goal <目标> → goals/create（不发 session/prompt）", dsh.calls[-1] == ("goals/create", {"agentId": SID, "request": {"objective": "把测试补齐"}}), str(dsh.calls[-2:]))
+said = plugins.handle("deepseek-harness", {"cmd": "agent_send", "sessionId": SID, "text": "/goal pause"})
+check("/goal pause → goals/pause 带当前 ref", dsh.calls[-1] == ("goals/pause", {"agentId": SID, "ref": {"id": "goal-1", "revision": 1}}) and dsh.goal["phase"] == "paused", str(dsh.calls[-1:]))
+plugins.handle("deepseek-harness", {"cmd": "agent_send", "sessionId": SID, "text": "/goal resume"})
+check("/goal resume → goals/resume", dsh.calls[-1][0] == "goals/resume" and dsh.goal["phase"] == "active", str(dsh.calls[-1:]))
+plugins.handle("deepseek-harness", {"cmd": "agent_send", "sessionId": SID, "text": "/goal 换成只补单元测试"})
+check("已有没做完的目标再设定 → goals/edit 改目标", dsh.calls[-1][0] == "goals/edit" and dsh.goal["objective"] == "换成只补单元测试", str(dsh.calls[-1:]))
+dsh.push("session/control", {"type": "projection", "sessionId": SID, "seq": 40, "changes": [{"key": "goal", "val": {
+    "goal": {"id": "goal-1", "revision": 4, "objective": "换成只补单元测试", "phase": "blocked", "maxGoalRounds": 30,
+             "blockedReason": {"code": "model-reported", "message": "缺测试账号"}}, "roundsStarted": 3, "createdAt": 1000, "updatedAt": 5000}}]})
+snap = wait(lambda: next((s for s in plugins.sessions() if (s.get("goal") or {}).get("state") == "blocked"), None))
+check("投影里的目标 → 快照 goal（受阻带原因、轮数）", snap and snap["goal"]["text"] == "换成只补单元测试" and snap["goal"]["note"] == "缺测试账号"
+      and snap["goal"]["turns"] == 3, str(snap and snap.get("goal")))
+plugins.handle("deepseek-harness", {"cmd": "agent_send", "sessionId": SID, "text": "/goal clear"})
+check("/goal clear → goals/clear", dsh.calls[-1][0] == "goals/clear" and dsh.goal is None, str(dsh.calls[-1:]))
+items = W.dsh_items([
+    {"seq": 50, "type": "goal/change", "time": 1, "data": {"kind": "goal/change", "operation": "create", "goal": {"objective": "补测试", "phase": "active"}}},
+    {"seq": 51, "type": "user/message", "time": 2, "data": {"content": [{"type": "text", "text": "<goal_round>\nObjective: \"补测试\"\nRound: 2/30\n…"}], "source": {"kind": "goal"}}},
+    {"seq": 52, "type": "goal/change", "time": 3, "data": {"kind": "goal/change", "operation": "complete", "goal": {"objective": "补测试", "phase": "complete"},
+                                                          "roundsStarted": 2, "createdAt": 1000, "updatedAt": 61000}}])
+check("对话里：设定 / 每轮续做 / 达成写成目标提示（续做那句不当成你说的话）",
+      [(i["t"], i.get("goal"), i["text"]) for i in items] == [("event", "set", "已设定目标"), ("event", "check", "继续推进目标 · 第 2 轮"), ("event", "met", "目标已达成")]
+      and items[2]["goalStats"] == {"turns": 2, "durationMs": 60000}, str(items))
 dsh.push("$events", {"type": "emit", "event": "api-session/status", "args": [SID, True]})
 snap = wait(lambda: next((s for s in dlink.snapshots() if s["activity"] == "busy"), None))
 check("忙闲广播 → 正在工作", snap is not None)
@@ -1103,6 +1150,14 @@ check("新建的空白会话不列", wait(lambda: host.rows.get("session-new")) 
 dsh.push("session/control", {"type": "projection", "sessionId": "session-new", "key": "sessionListMetadata", "value": {"blank": False, "lastPromptAt": 1}, "seq": 4})
 check("说过话以后（DSH 只更新投影里的 blank，不再推列表行）→ 列出来",
       wait(lambda: "session-new" in [s["sessionId"] for s in dlink.snapshots()]), str(host.projections.get("session-new")))
+# 0.2.2 起投影帧是 {seq, changes: [{key, val}]}：连上以后新建的会话标题从这里来
+dsh.push("session/control", {"type": "projection", "sessionId": "session-new", "seq": 5,
+                             "changes": [{"key": "title", "val": "新格式标题"}, {"key": "sessionListMetadata", "val": {"blank": False, "lastPromptAt": 2}}]})
+check("新格式投影（changes 列表）→ 标题跟上",
+      wait(lambda: [s["name"] for s in dlink.snapshots() if s["sessionId"] == "session-new"] == ["新格式标题"]), str(host.projections.get("session-new")))
+host.moved["session-new"] = 9_000_000_000_000
+check("最近动静取对话事件时间（列表行 updatedAt 只在发话时变）",
+      [s["transcriptUpdatedAt"] for s in dlink.snapshots() if s["sessionId"] == "session-new"] == [9_000_000_000_000])
 dsh.push("$events", {"type": "emit", "event": "api-session/removed", "args": ["session-new"]})
 check("会话删了 → 不再列", wait(lambda: dlink.snapshots() == []))
 

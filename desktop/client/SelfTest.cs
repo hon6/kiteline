@@ -118,9 +118,13 @@ static class SelfTest
                 case "pref": var pref = arg.Split('=', 2); Prefs.Set(pref[0], pref.Length > 1 && pref[1].Length > 0 ? pref[1] : null); break;
                 // 检查更新的几种状态：update:available / downloading / ready …（假数据）。available 带 prompt：后台说该弹了，会自动弹出更新弹窗；
                 // 同时带一台旧版本的手机（phones），关掉更新弹窗后下一轮会弹「手机端有新版本」
+                // update:ready+auto：自动更新装好了、在等空闲（不该自己弹出更新弹窗）
                 case "update":
+                    var updateAuto = arg.EndsWith("+auto");
+                    arg = arg.Split('+')[0];
                     UpdateState.Shared.Inject(new System.Text.Json.Nodes.JsonObject
                     {
+                        ["autoUpdate"] = updateAuto, ["silent"] = updateAuto, ["waitingFor"] = updateAuto ? "电脑有人在用" : "",
                         ["phase"] = arg, ["version"] = "1.0.22", ["current"] = "1.0.19", ["size"] = 38500000, ["received"] = 14200000, ["supported"] = true,
                         ["notes"] = "新功能\n· 新版本提醒", ["behind"] = 3, ["key"] = "linux:1.0.22", ["prompt"] = arg == "available",
                         ["releases"] = new System.Text.Json.Nodes.JsonArray(
