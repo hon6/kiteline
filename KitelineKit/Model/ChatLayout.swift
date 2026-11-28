@@ -30,6 +30,9 @@ struct PendingSend: Identifiable, Hashable {
     /// 排队（later）时电脑给的编号，对上会话的 queue；seen = 已经在 queue 里出现过（之后不在了 = 已交给 Claude 或在别处删了）
     var qid: String?
     var seen = false
+    /// 「未出现」后用户点了重新发送的次数：请求编号（cid）要换新的，不然电脑按编号去重、当成已经送过不再投递
+    var attempt = 0
+    var cid: String { attempt == 0 ? id : "\(id)-r\(attempt)" }
     /// 发的时候 Claude 正忙：多半要排队。还在发送中就先放进排队列表，不在对话里画——
     /// 以前先在对话里出现、电脑回了「排队」又跳回队列，像是消息退回来了（11-20）
     var busyAtSend = false

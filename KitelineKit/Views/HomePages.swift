@@ -549,7 +549,7 @@ struct HistoryView: KLView {
     // MARK: 筛选、显示方式（同会话列表：状态筛选条在左，「显示方式」菜单在右；下面是设备、项目两排胶囊）
 
     private static var statusOptions: [(String, String, Color?)] { [
-        ("all", L("全部"), nil), ("live", L("进行中"), Theme.claude), ("ended", L("已结束"), Color.secondary),
+        ("all", L("全部"), nil), ("live", L("未关闭"), Theme.claude), ("ended", L("已结束"), Color.secondary),
     ] }
     private static var groupOptions: [(String, String)] { [("none", L("按日期")), ("source", L("按来源")), ("project", L("按项目"))] }
 
@@ -744,11 +744,7 @@ struct PastRow: KLView {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(session.title).font(.ui(.body)).lineLimit(1)
-                    if session.live {
-                        Text("进行中").font(.ui(.caption2).weight(.medium)).foregroundStyle(Theme.claude)
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(Theme.tile, in: Capsule())
-                    }
+                    if session.live { SessionStateTag(activity: session.activity) }
                     Spacer(minLength: 4)
                     Text(Format.listTime(session.lastActive)).font(.ui(.caption)).foregroundStyle(.tertiary)
                 }
@@ -864,11 +860,11 @@ struct ProjectsView: KLView {
     }
 
     private var stats: String {
-        let live = projects.filter { !lives($0).isEmpty }.count
+        let live = projects.filter { lives($0).contains(where: \.isBusy) }.count   // 只数在干活的（开着没干活的不算）
         let waiting = projects.filter { lives($0).contains(where: \.isWaiting) }.count
         let dirty = projects.filter { $0.changed + $0.untracked > 0 }.count
         let unpushed = projects.filter { $0.ahead > 0 }.count
-        return [L("%lld 个项目", count: projects.count), L("%lld 个运行中", count: live), waiting > 0 ? L("%lld 个待确认", count: waiting) : nil,
+        return [L("%lld 个项目", count: projects.count), L("%lld 个进行中", count: live), waiting > 0 ? L("%lld 个待确认", count: waiting) : nil,
                 dirty > 0 ? L("%lld 个有未提交改动", count: dirty) : nil, unpushed > 0 ? L("%lld 个未推送", count: unpushed) : nil].compactMap { $0 }.joined(separator: " · ")
     }
 
@@ -923,7 +919,7 @@ struct ProjectCard: KLView {
                 VStack(alignment: .trailing, spacing: 3) {
                     if waiting > 0 { Chip(text: waiting > 1 ? L("%lld 个待确认", count: waiting) : L("待确认"), color: .orange) }   // 整句给翻译，别拼
                     else if busy > 0 { Chip(text: busy > 1 ? L("%lld 个进行中", count: busy) : L("进行中"), color: Theme.claude) }
-                    else if !lives.isEmpty { Chip(text: L("%lld 个会话运行中", count: lives.count), color: Theme.added) }
+                    // 只开着、没在干活的不标（11-29 反馈：做完好几天的还显示「运行中」，像是还在跑）
                     Text(Bytes.relative(p.lastActive)).font(.ui(.caption2)).foregroundStyle(.tertiary)
                 }
             }
@@ -990,6 +986,20 @@ struct StatGrid: KLView {
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         }
+    }
+}
+
+/// 会话列表里的状态小标签：在干活「进行中」、等你「待确认」、开着没干活「空闲」（灰）；关掉的不标。
+/// 只开着不等于在跑：11-29 用户看到周五做完的会话还挂着「运行中」
+struct SessionStateTag: KLView {
+    let activity: String?
+
+    var klBody: some View {
+        let (text, color): (String, Color?) = activity == "waiting" ? (L("待确认"), .orange)
+            : activity == "busy" ? (L("进行中"), Theme.claude) : (L("空闲"), nil)
+        Text(text).font(.ui(.caption2).weight(.medium)).foregroundStyle(color ?? .secondary)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(color == nil ? Color.primary.opacity(0.06) : Theme.tile, in: Capsule())
     }
 }
 

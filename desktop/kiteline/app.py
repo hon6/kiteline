@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import uuid
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -37,7 +38,7 @@ from .store import HOSTED_ISSUES, Store, display_title, hosted_issue
 from . import watcher as watcher_module
 from .watcher import LocalSource, SSHSource
 
-VERSION = "1.0.64"
+VERSION = "1.0.65"
 
 
 class App:
@@ -1202,7 +1203,8 @@ class App:
                 return any(r.source_id == source.id and os.path.normcase(os.path.normpath(r.snap.get("cwd") or "")) == want
                            and ((r.key not in busy_before and r.activity in ("busy", "waiting")) or (r.key not in keys_before and r.snap.get("usage")))
                            for r in self.store.records)
-        result = launch_session(cwd, prompt, submit, None, source.kind, source.name, started, source=source, notify=self._launch_failed)
+        result = launch_session(cwd, prompt, submit, None, source.kind, source.name, started, source=source, notify=self._launch_failed,
+                                launch=launch_options(body.get("launch")) or None)
         if branch:
             result["branch"] = branch
         return Response.json(result)
@@ -1679,13 +1681,31 @@ def move_to_background(record, source, siblings):
     return False, "未能转到后台运行：%s" % error
 
 
-def launch_hosted(cwd, prompt, submit, session_id, source, agent=None):
+def launch_options(raw):
+    """新会话的启动设置（手机新会话页底下那排选的 {mode, model, effort}）：只认四种权限模式、像模型 id 的字、五档思考等级（同 Mac 版 MobileServer.launchOptions）"""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    if raw.get("mode") in ("default", "acceptEdits", "plan", "auto"):
+        out["mode"] = raw["mode"]
+    if isinstance(raw.get("model"), str) and re.match(r"^[A-Za-z0-9._\-\[\]]{1,80}$", raw["model"]):
+        out["model"] = raw["model"]
+    if raw.get("effort") in ("low", "medium", "high", "xhigh", "max"):
+        out["effort"] = raw["effort"]
+    return out
+
+
+def launch_hosted(cwd, prompt, submit, session_id, source, agent=None, launch=None, new_session_id=None):
     """不开 VS Code：请项目所在电脑（本机或远端）上的 watcher 在后台起 claude（watcher/kiteline-watch.py 的 hosted_start，同 Mac 版 Hosted.start）。
     agent：别家命令行 agent（插件 id，见 r_launchable），在同一套后台伪终端里跑。返回 (结果, None) 或 (None, 起不来的原因)"""
     payload = {"cmd": "hosted_start", "cwd": cwd, "prompt": prompt, "submit": bool(submit and prompt),
                "netEnv": remotessh.claude_environment()}
     if session_id:
         payload["sessionId"] = session_id
+    elif launch and new_session_id and not agent:
+        # 权限模式、模型、思考等级当 claude 的启动参数带上，会话编号预先定好（watcher 的 hosted_opts）
+        payload["launch"] = launch
+        payload["newSessionId"] = new_session_id
     if agent:
         # 老版本 watcher 不认 agent：会照常起 Claude Code 还回成功，用户选的却是别家，先拦下
         if "hosted_agents" not in (getattr(source, "features", None) or ()):
@@ -1719,8 +1739,11 @@ def launch_hosted(cwd, prompt, submit, session_id, source, agent=None):
         HOSTED_ISSUES.pop(source.id, None)   # 起来了：会话页的「后台运行未成功」提示不用了
     # 这个项目有会话在后台了：它那个最小化着、里面没有会话的 VS Code 窗口用不着了（见 editor_windows.py）
     editor_windows.settle(None, "started", cwd, source.id)
-    return {"ok": True, "submitted": submitted, "openedWindow": False, "message": message, "error": "", "cwd": cwd,
-            "sessionId": reply.get("sessionId")}, None
+    result = {"ok": True, "submitted": submitted, "openedWindow": False, "message": message, "error": "", "cwd": cwd,
+              "sessionId": reply.get("sessionId")}
+    if payload.get("launch"):
+        result["launched"] = True   # 手机看新会话编号对得上就不再切设置
+    return result, None
 
 
 def agent_failure(reason):
@@ -1790,7 +1813,7 @@ def hosted_note(reason):
 
 
 def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="本机", started=None, source=None, notify=None, done=None,
-                   in_editor=False):
+                   in_editor=False, launch=None):
     """在项目的 VS Code 窗口里新开（或恢复）一个 Claude Code 会话，内容预填进输入框；submit 时再按回车。
     先回一个结果（新标签加载要十几秒，手机的请求等不了），提交在后台做；done(提交上了没有) 在后台做完时调（同 Mac 版 NewSession 的 completion）。
     远端（Remote-SSH）项目用 vscode-remote 地址开窗口（VS Code 没开着也行），开之前先把 Remote-SSH 准备好（见 remotessh）。
@@ -1800,7 +1823,11 @@ def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="�
             and "hosted" in (getattr(source, "features", None) or ()) and HOSTED_SETTING[0](source.id)
             and HOSTED_BLOCKED.get(source.id, 0) < time.time()):
         box = {}
-        worker = threading.Thread(target=lambda: box.update(zip(("result", "reason"), launch_hosted(cwd, prompt, submit, session_id, source))),
+        # launch：手机新会话页选的启动设置；watcher 认（hosted_opts）才带，并预先定好会话编号回给手机
+        fresh = str(uuid.uuid4()) if launch and not session_id and "hosted_opts" in (getattr(source, "features", None) or ()) else None
+        worker = threading.Thread(target=lambda: box.update(zip(("result", "reason"),
+                                                                launch_hosted(cwd, prompt, submit, session_id, source,
+                                                                              launch=launch if fresh else None, new_session_id=fresh))),
                                   name="hosted-start", daemon=True)
         worker.start()
         worker.join(8)   # 一般两三秒就起来；手机那边的请求只等 12 秒
@@ -1829,8 +1856,11 @@ def launch_session(cwd, prompt, submit, session_id, source_kind, source_name="�
             if not result.get("ok") and notify and submit and prompt:
                 notify(result.get("message") or "")
         threading.Thread(target=finish, name="hosted-wait", daemon=True).start()
-        return {"ok": True, "submitted": bool(submit and prompt), "openedWindow": False, "error": "", "cwd": cwd,
-                "message": "正在后台启动 Claude Code，启动后将自动提交" if submit and prompt else "正在后台启动 Claude Code"}
+        early = {"ok": True, "submitted": bool(submit and prompt), "openedWindow": False, "error": "", "cwd": cwd,
+                 "message": "正在后台启动 Claude Code，启动后将自动提交" if submit and prompt else "正在后台启动 Claude Code"}
+        if fresh:
+            early.update(sessionId=fresh, launched=True)   # 起不来改开 VS Code 时会话编号对不上，手机照样会切
+        return early
     if delivery.DRY_RUN:
         what = "恢复会话 %s" % session_id if session_id else "新会话"
         log.write("[dry-run] %s %s:%s（submit=%s）：%s" % (what, source_name, cwd, "true" if submit else "false", prompt[:120]))

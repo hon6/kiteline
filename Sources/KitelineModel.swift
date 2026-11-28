@@ -404,6 +404,7 @@ applyLayoutToPanes()
         MainActor.assumeIsolated {
             KitelineKit.panes.show(key)   // 选中的没变（再点的就是当前这个）时上面不会切，这里补上
             KitelineKit.panes.flashTab(key)
+            KitelineKit.engaged(key)   // 点了就算打开过：恢复出来、还没算打开的标签从这时起算
         }
     }
 

@@ -73,12 +73,12 @@ struct ProjectDetailView: KLView {
                         // 各在哪个分支上干活（同一项目里几个会话并行时一眼看清）
                         Button { open(.chat(s.key)) } label: {
                             SessionMini(title: s.title, sub: (s.branch.map { "⎇ \($0) · " } ?? "") + (s.liveStage.map { "\($0.short) · " } ?? "")
-                                        + (s.activityText ?? s.preview ?? ""), time: s.updatedAt, live: true)
+                                        + (s.activityText ?? s.preview ?? ""), time: s.updatedAt, activity: s.activity)
                         }
                             .buttonStyle(RowButtonStyle())
                     }
                 } header: {
-                    Text("正在运行").font(.sectionHeader)
+                    Text("未关闭的会话").font(.sectionHeader)
                 }
             }
             Section {
@@ -86,7 +86,7 @@ struct ProjectDetailView: KLView {
                     let ended = past.filter { !$0.live }
                     if ended.isEmpty { Text(lives.isEmpty ? "暂无会话记录" : "暂无已结束的会话").foregroundStyle(.secondary) }
                     ForEach(ended) { s in
-                        Button { open(.chat(s.key)) } label: { SessionMini(title: s.title, sub: s.firstPrompt ?? "", time: s.lastActive, live: false) }
+                        Button { open(.chat(s.key)) } label: { SessionMini(title: s.title, sub: s.firstPrompt ?? "", time: s.lastActive, activity: nil) }
                             .buttonStyle(RowButtonStyle())
                     }
                 } else {
@@ -127,7 +127,8 @@ struct SessionMini: KLView {
     let title: String
     let sub: String
     let time: Double?
-    let live: Bool
+    /// 开着的会话的状态（进行中 / 待确认 / 空闲）；nil = 已关闭，不标
+    let activity: String?
 
     var klBody: some View {
         HStack(spacing: 10) {
@@ -135,10 +136,7 @@ struct SessionMini: KLView {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(title).foregroundStyle(.primary).lineLimit(1)
-                    if live {
-                        Text("进行中").font(.ui(.caption2)).foregroundStyle(Theme.claude)
-                            .padding(.horizontal, 5).padding(.vertical, 1).background(Theme.tile, in: Capsule())
-                    }
+                    if let activity { SessionStateTag(activity: activity) }
                     Spacer()
                     Text(Format.listTime(time)).font(.ui(.caption)).foregroundStyle(.tertiary)
                 }

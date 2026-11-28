@@ -14,6 +14,8 @@ struct PastItem: Identifiable, Hashable {
     var firstPrompt: String?
     var lastActive: Double
     var live: Bool
+    /// 开着的会话这时的状态（busy / waiting / idle）：标签按它写「进行中」「待确认」「空闲」
+    var activity: String?
     var hits: [Hit] = []
     /// 搜到它是因为项目名（project）或标题（title）里有搜索词（可能没有正文片段）
     var match: [String] = []
@@ -36,6 +38,7 @@ struct PastItem: Identifiable, Hashable {
         firstPrompt = item["firstPrompt"] as? String
         lastActive = Digest.number(item["lastActive"])
         live = item["live"] as? Bool ?? false
+        activity = item["activity"] as? String
         hits = ((item["hits"] as? [[String: Any]]) ?? []).map {
             Hit(id: $0["id"] as? String ?? "", ts: Digest.number($0["ts"]),
                 who: ($0["t"] as? String) == "user" ? Profile.displayName(AppState.shared.config.mobile) : "Claude", snippet: $0["snippet"] as? String ?? "")
@@ -224,7 +227,7 @@ struct HistoryView: KLView {
     // MARK: 筛选、显示方式（和手机上、会话列表一样：状态筛选条在左，「显示方式」菜单在右；下面是设备、项目两排胶囊）
 
     private static var statusOptions: [(String, String, Color?)] { [
-        ("all", L("全部"), nil), ("live", L("进行中"), Color.tarsBrand), ("ended", L("已结束"), Color.secondary),
+        ("all", L("全部"), nil), ("live", L("未关闭"), Color.tarsBrand), ("ended", L("已结束"), Color.secondary),
     ] }
     private static var groupOptions: [(String, String)] { [("none", L("按日期")), ("source", L("按来源")), ("project", L("按项目"))] }
 
@@ -477,8 +480,11 @@ struct PastRow: KLView {
             Spacer(minLength: 6)
             TarsOpenedTabMark(key: item.key)
             if item.live {
-                Text("进行中").font(.app(size: 10.5, weight: .medium)).foregroundStyle(Color.tarsBrand)
-                    .padding(.horizontal, 6).padding(.vertical, 2).background(Color.tarsTile, in: Capsule())
+                // 开着不等于在跑（11-29 反馈：周五做完的还挂着「运行中」）：按这时的状态写，没在干活的灰色「空闲」
+                let act = AppState.shared.store.record(withKey: item.key)?.snapshot.act.rawValue ?? item.activity
+                let (text, color): (String, Color?) = act == "waiting" ? (L("待确认"), .tarsOrange) : act == "busy" ? (L("进行中"), .tarsBrand) : (L("空闲"), nil)
+                Text(text).font(.app(size: 10.5, weight: .medium)).foregroundStyle(color ?? .secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2).background(color == nil ? Color.primary.opacity(0.06) : Color.tarsTile, in: Capsule())
             }
             Text(Format.short(item.lastActive)).font(.app(size: avatar ? 10.5 : SideMetric.Text.meta)).foregroundStyle(.tertiary)
         }

@@ -1,5 +1,23 @@
 # Kiteline Release Notes
 
+## 3.49.62（2026-11-28）
+
+### New Features
+
+- **Choose the permission mode, model, and goal when starting a session** (iPhone, iPad, Mini Program): just like in a conversation, the new-session page now has permission mode (Manual, Accept Edits, Plan, Auto), model and thinking level (including Ultracode), and goal buttons below the input box, so you can set them before writing the first message. The session starts with the selected mode and model; with a goal set, it keeps working toward the goal and stops only when it is confirmed as met.
+
+### Improvements
+
+- **Resend a message that didn't show up** (iPhone, iPad, Mini Program): when a message you sent still hasn't appeared in the conversation after a while, a Resend button now appears next to the notice, so you can send it again without retyping it on the computer.
+- **Get notified when Codex is waiting for approval** (Mac, iPhone, iPad, Mini Program): with the new Codex desktop app, Codex in VS Code, or terminal Codex running without the background server, your phone now shows "Needs confirmation" and sends a notification when Codex stops for approval, instead of showing "Working" the whole time. Approve in Codex on the computer.
+- **Reply to the new Codex in VS Code from your phone** (Mac, iPhone, iPad, Mini Program): sessions in the new Codex for VS Code are no longer view-only. You can reply from your phone; if Codex is busy, your message is sent after the current turn.
+
+### Bug Fixes
+
+- **Closed background Codex sessions no longer linger** (Mac, iPhone, iPad, Mini Program): Codex sessions started from your phone and run in the background on the computer are now marked "Background" and their terminal can be viewed. Closing the session also stops the background Codex, so it no longer stays in the session list or uses the computer's resources.
+- **Finished sessions no longer show "Running"** (Mac, iPhone, iPad, Mini Program): in the project list, project details, and session history, each session now shows its actual state: "In progress" while working, "Needs confirmation" when waiting for you, and a gray "Idle" when it is done but still open. Project cards are only labeled when a session is working or waiting, and the "running" count now includes only projects with a session at work. The "In progress" history filter is renamed "Open".
+- **Sessions you haven't opened now close on schedule** (Mac, iPhone, iPad): a conversation that was already on screen when the app returned to the foreground, and tabs restored automatically at launch or when switching projects and tab groups, no longer count as "opened", so sessions not opened for 24 hours close on time. They count once you send a message there, click the tab, or open them again.
+
 ## 3.49.61（2026-11-28）
 
 ### New Features

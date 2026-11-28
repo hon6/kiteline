@@ -303,11 +303,11 @@ final class ProjectsModel: ObservableObject {
     }
 
     var summary: String {
-        let running = projects.filter { !live($0).isEmpty }.count
+        let running = projects.filter { live($0).contains { $0.activity == .busy } }.count   // 只数在干活的
         let waiting = projects.filter { live($0).contains { $0.activity == .waiting } }.count
         let dirty = projects.filter { $0.git?.dirty ?? false }.count
         let unpushed = projects.filter { ($0.git?.ahead ?? 0) > 0 }.count
-        return [L("%lld 个项目", count: projects.count), L("%lld 个运行中", count: running), waiting > 0 ? L("%lld 个待确认", count: waiting) : nil,
+        return [L("%lld 个项目", count: projects.count), L("%lld 个进行中", count: running), waiting > 0 ? L("%lld 个待确认", count: waiting) : nil,
                 dirty > 0 ? L("%lld 个有未提交改动", count: dirty) : nil, unpushed > 0 ? L("%lld 个未推送", count: unpushed) : nil]
             .compactMap { $0 }.joined(separator: " · ")
     }
@@ -420,7 +420,7 @@ struct ProjectCard: KLView {
         let busy = live.filter { $0.activity == .busy }.count
         if waiting > 0 { return (waiting > 1 ? L("%lld 个待确认", count: waiting) : L("待确认"), .orange) }
         if busy > 0 { return (busy > 1 ? L("%lld 个进行中", count: busy) : L("进行中"), .tarsBrand) }
-        if !live.isEmpty { return (L("%lld 个会话运行中", count: live.count), .green) }
+        // 只开着、没在干活的不标（11-29 反馈：做完好几天的还显示「运行中」）
         return nil
     }
 
@@ -455,7 +455,7 @@ struct ProjectCard: KLView {
             }
             .controlSize(.small)
             if !live.isEmpty {
-                Text("正在运行").font(.app(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.top, 2)
+                Text("未关闭的会话").font(.app(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.top, 2)
                 ForEach(live) { session in
                     HStack(spacing: 8) {
                         Circle().fill(session.activity.color).frame(width: 6, height: 6)

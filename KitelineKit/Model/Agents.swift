@@ -272,6 +272,53 @@ extension AppModel {
         if let ultracode { chat.ultracodeOverride = (ultracode, session.ultracode == true, id) }
     }
 
+    // MARK: 新会话页选的设置（同 Mac KitelineKit.afterDraftStart、小程序 conn.planLaunch）
+
+    /// 新会话页发出去后登记。新会话出现、能回复了：启动时没带上的权限模式、模型、思考等级在会话里切（电脑端改在 VS Code 里开、老版本电脑端）；
+    /// Ultracode 发 /effort ultracode on；设了目标时第一句是 /goal，输入框里写的字、图这时发。放在数据层：发完离开新会话页也照样做完
+    func planLaunch(_ plan: LaunchPlan) {
+        launchPlans.append(plan)
+        runLaunchPlans()
+    }
+
+    func runLaunchPlans() {
+        guard !launchPlans.isEmpty else { return }
+        var keep: [LaunchPlan] = []
+        for var plan in launchPlans {
+            guard Date() < plan.until else { continue }
+            let hit = plan.key.flatMap { key in sessions.first { $0.key == key } }
+                ?? sessions.first { !plan.known.contains($0.key) && $0.sourceId == plan.sourceId
+                    && ((!plan.expectId.isEmpty && $0.key == plan.sourceId + "#" + plan.expectId)
+                        || $0.cwd == plan.cwd || ($0.cwd ?? "").hasPrefix(plan.cwd + "/")) }
+            guard let session = hit else { keep.append(plan); continue }
+            plan.key = session.key
+            guard session.canReply else { keep.append(plan); continue }
+            applyLaunch(session, plan)
+        }
+        launchPlans = keep
+    }
+
+    private func applyLaunch(_ session: SessionInfo, _ plan: LaunchPlan) {
+        let key = session.key
+        let chat = chat(key)
+        // 电脑端预先定好的编号对上了 = 后台启动时已当启动参数带上：不再切，只让输入框下面那排先按选的显示（Claude 回话前记录里还没有模型）
+        let carried = plan.launched && !plan.expectId.isEmpty && key.hasSuffix("#" + plan.expectId)
+        if carried {
+            if let id = plan.model { chat.modelOverride = (id, session.usage?.model, "launch") }
+            if let level = plan.effort { chat.effortOverride = (level, session.effort, "launch") }
+        } else {
+            if let id = plan.model { setModel(key, id, modelName(id)) }
+            if let level = plan.effort { setEffort(key, level: level, EffortLevel.name(level)) }
+        }
+        if plan.ultracode { setEffort(key, ultracode: true, "Ultracode") }
+        Task {
+            if !carried, let mode = plan.mode { await setPermissionMode(key, mode) }
+            if let text = plan.followUp, !text.isEmpty || !plan.images.isEmpty {
+                _ = send(key, text: text, images: plan.images.map { ($0.name, $0.data, $0.preview) })
+            }
+        }
+    }
+
     /// 切权限模式：替你在 Claude Code 里按 ⇧Tab，按到目标那一档
     func setPermissionMode(_ key: String, _ target: PermissionMode) async {
         guard let session = session(key), session.canReply else { flash(L("此会话不支持远程操作")); return }
@@ -291,4 +338,23 @@ extension AppModel {
             show(error)
         }
     }
+}
+
+/// 新会话页发出去后、等会话出来再做的（见 AppModel.planLaunch）
+struct LaunchPlan {
+    let sourceId: String
+    let cwd: String
+    let known: Set<String>
+    let until: Date
+    /// 电脑端预先定好的会话编号、启动设置是否已带上（new-session 回的 sessionId / launched）
+    let expectId: String
+    let launched: Bool
+    let mode: PermissionMode?
+    let model: String?
+    let effort: String?
+    let ultracode: Bool
+    /// 设了目标时：第一句发的是 /goal，输入框里写的字、图等会话出来再发（nil = 不用补发）
+    let followUp: String?
+    let images: [ComposeAttachment]
+    var key: String?
 }

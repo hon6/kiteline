@@ -1,5 +1,24 @@
 # Kiteline for Windows and Linux — Release Notes
 
+## 1.0.65（2026-11-28）
+
+### New Features
+
+- **Permission mode and model chosen on the phone take effect right away** (Windows, Linux): when you start a session from iPhone, iPad, or the Mini Program, the permission mode, model, and thinking level you chose are applied from the very start.
+
+### Improvements
+
+- **Resend a message that didn't show up** (Windows, Linux): when a message you sent still hasn't appeared in the conversation after a while, a Resend button now appears next to the notice, so you can send it again without retyping it on the computer.
+- **Get notified when Codex is waiting for approval** (Windows, Linux): with the new Codex desktop app, Codex in VS Code, or terminal Codex running without the background server, your phone now shows "Needs confirmation" and sends a notification when Codex stops for approval, instead of showing "Working" the whole time. Approve in Codex on the computer.
+- **Reply to the new Codex in VS Code from your phone** (Windows, Linux): sessions in the new Codex for VS Code are no longer view-only. You can reply from your phone; if Codex is busy, your message is sent after the current turn.
+
+### Bug Fixes
+
+- **Closed background Codex sessions no longer linger** (Linux): Codex sessions started from your phone and run in the background on the computer are now marked "Background" and their terminal can be viewed. Closing the session also stops the background Codex, so it no longer stays in the session list or uses the computer's resources.
+- **Finished sessions no longer show "Running"** (Windows, Linux): on the Projects page, the project sidebar, and session history, each session now shows its actual state: "In progress" while working, "Needs confirmation" when waiting for you, and a gray "Idle" when it is done but still open. Project cards are only labeled when a session is working or waiting. The "In progress" history filter is renamed "Open".
+- **Sessions you haven't opened now close on schedule** (Windows, Linux): tabs restored automatically at launch or when switching projects and tab groups no longer count as "opened", so sessions not opened for 24 hours close on time. They count once you send a message there or open them again. The same applies to a conversation that was already on screen when the phone app returned to the foreground.
+- **Codex sessions show the right project folder** (Windows): Codex sessions on Windows used to show a folder path starting with "\\?\" and appeared as a separate project in the project list. They now show the normal folder and are grouped under the right project.
+
 ## 1.0.64（2026-11-28）
 
 ### New Features

@@ -1132,8 +1132,9 @@ final class MobileServer {
                 self.forward(request, ["cmd": "tests", "limit": 50], respond: respond)
             case ("GET", "/api/voices"):
                 let key = request.query["key"] ?? ""
-                // 各端只在打开对话页时取这个：旧版手机不报 /api/viewed，靠它算「打开过」
-                IdleClose.shared.touch([key])
+                // 各端只在打开对话页时取这个：旧版手机不报 /api/viewed，靠它算「打开过」；
+                // passive=1 = 自己出现的对话页（恢复出来的标签页），新版各端不算打开过（11-29）
+                if request.query["passive"] != "1" { IdleClose.shared.touch([key]) }
                 respond(.json(["ok": true, "voices": self.voices.list(key: key).map {
                     ["id": $0.id, "text": $0.text, "duration": $0.duration, "ts": $0.ts * 1000]
                 }]))
@@ -2200,7 +2201,17 @@ final class MobileServer {
 
     /// 新任务 / 恢复会话怎么回手机：要自动提交的，标签开出来就先回（新标签加载要十几秒，手机的请求等不了），
     /// 之后没提交成功再推一条提醒；不用等的照旧在最后回
-    private func launchReplies(_ respond: @escaping (HTTPResponse) -> Void, cwd: String, branch: String?)
+    /// 新会话的启动设置（手机新会话页底下那排选的）：只认 Claude Code 的四种权限模式、像模型 id 的字、五档思考等级，别的丢掉
+    static func launchOptions(_ raw: Any?) -> [String: String] {
+        guard let raw = raw as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        if let mode = raw["mode"] as? String, ["default", "acceptEdits", "plan", "auto"].contains(mode) { out["mode"] = mode }
+        if let model = raw["model"] as? String, model.range(of: #"^[A-Za-z0-9._\-\[\]]{1,80}$"#, options: .regularExpression) != nil { out["model"] = model }
+        if let effort = raw["effort"] as? String, ["low", "medium", "high", "xhigh", "max"].contains(effort) { out["effort"] = effort }
+        return out
+    }
+
+    private func launchReplies(_ respond: @escaping (HTTPResponse) -> Void, cwd: String, branch: String?, sessionId: String? = nil)
         -> (accepted: (NewSession.Outcome) -> Void, finished: (NewSession.Outcome) -> Void) {
         var replied = false
         // 只回一次：先回过（accepted、或新任务等久了先回的「正在打开」）的，后面的 accepted 不再回
@@ -2211,6 +2222,8 @@ final class MobileServer {
             var payload: [String: Any] = ["ok": outcome.ok, "submitted": outcome.submitted, "openedWindow": outcome.openedWindow,
                                           "message": outcome.message, "error": outcome.ok ? "" : outcome.message, "cwd": cwd]
             if let branch { payload["branch"] = branch }
+            // 预先定好的会话编号：手机看新出现的会话是不是它，是 = 启动设置已经带上（launched）
+            if let sessionId, outcome.ok { payload["sessionId"] = sessionId; payload["launched"] = true }
             respond(.json(payload, status: outcome.ok ? 200 : 409))
         }
         let accepted: (NewSession.Outcome) -> Void = { outcome in
@@ -2349,8 +2362,13 @@ final class MobileServer {
                 Log.write("手机新任务 \(sourceConfig.displayName):\(cwd)：\(text.prefix(60))（图 \(attachments.count) 张）")
                 // agent：选了别家命令行 agent（插件 id）就在那台电脑上后台运行它（见 Hosted.launchable）
                 let agent = (body["agent"] as? String).flatMap { $0.isEmpty || $0 == "claude-code" ? nil : $0 }
+                // launch：手机新会话页选好的权限模式、模型、思考等级（{mode, model, effort}）。后台运行时当 claude 的启动参数带上，
+                // 并预先定好会话编号回给手机（sessionId）：新会话是这个编号 = 已经带上了；不是（改在 VS Code 里开了）手机等会话出来再切
+                let options = MobileServer.launchOptions(body["launch"])
+                let preId: String? = agent == nil && !options.isEmpty && Hosted.wanted(sourceConfig)
+                    && connection.hostFeatures.contains("hosted_opts") ? UUID().uuidString.lowercased() : nil
                 func launch(_ cwd: String, _ prompt: String, _ branch: String?) {
-                    let reply = self.launchReplies(respond, cwd: cwd, branch: branch)
+                    let reply = self.launchReplies(respond, cwd: cwd, branch: branch, sessionId: preId)
                     // 开新窗口、等标签加载可能要几十秒（独立分支一定是新窗口），要自动提交的 8 秒还没回过就先回「正在打开」，没提交上另行通知
                     if submit, !prompt.isEmpty {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
@@ -2360,6 +2378,7 @@ final class MobileServer {
                     }
                     guard let agent else {
                         NewSession.start(source: sourceConfig, cwd: cwd, prompt: prompt, submit: submit,
+                                         launch: options.isEmpty ? nil : options, newSessionId: preId,
                                          accepted: reply.accepted, completion: reply.finished)
                         return
                     }

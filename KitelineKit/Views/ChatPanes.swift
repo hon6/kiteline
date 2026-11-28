@@ -312,6 +312,7 @@ public final class ChatPanes: KLObservable {
             if pane.tabs.contains(key) { pane.key = key; pane.previous = nil }
         }
         focusID = id
+        RestoredPanes.picked?(key)   // 点了就算打开过（恢复出来的标签也是，见 AppModel.engaged）
     }
 
     /// 把一个标签换成另一个 key，位置不动（新会话草稿发出第一句、会话起来以后换成那个会话，同 VS Code 新开的对话标签）。
@@ -772,6 +773,7 @@ public final class ChatPanes: KLObservable {
             root = node
             let ids = panes.map(\.id)
             focusID = ids.contains(saved.focus) ? saved.focus : ids[0]
+            RestoredPanes.note(panes.compactMap(\.key))   // 启动时读回的不算点开过
         }
         store = (defaults, key)
     }
@@ -862,6 +864,7 @@ public final class ChatPanes: KLObservable {
             root = node
             let ids = panes.map(\.id)
             focusID = ids.contains(saved.focus) ? saved.focus : ids[0]
+            RestoredPanes.note(panes.compactMap(\.key))   // 切项目 / 标签组换回的那套：不算点开过
         } else {
             let pane = Pane(id: UUID(), key: nil)
             root = .pane(pane)

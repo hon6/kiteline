@@ -897,6 +897,30 @@ struct PendingMessage: KLView {
         }
     }
 
+    private var unconfirmedNote: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle.fill")
+            Text("对话中未出现这条消息，请在电脑上查看").multilineTextAlignment(.trailing)
+        }
+        .font(.ui(.caption2))
+        .foregroundStyle(.orange)
+    }
+
+    private var unconfirmedActions: some View {
+        HStack(spacing: 14) {
+            Button { model.resend(key, pending.id) } label: {
+                Text("重新发送").font(.ui(.caption2).weight(.medium)).foregroundStyle(.primary)
+            }
+            .buttonStyle(.steady(.plain))
+            .accessibilityLabel("重新发送这条消息")
+            Button { withAnimation(.klSnappy(duration: 0.2)) { model.discard(key, pending.id) } } label: {
+                Text("移除").font(.ui(.caption2).weight(.medium)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.steady(.plain))
+            .accessibilityLabel("移除这条消息")
+        }
+    }
+
     @ViewBuilder private var status: some View {
         switch pending.state {
         case .sending: ProgressView().controlSize(.small)
@@ -911,20 +935,17 @@ struct PendingMessage: KLView {
             .font(.ui(.caption2))
             .foregroundStyle(.secondary)
         case .unconfirmed:
-            // 电脑报了已提交，对话里却一直没出现。不给「重新发送」：老版本电脑端不核对输入框，文字可能还留在里面，再发一次会和它拼在一起
-            // （新版粘贴落空、回车没提交上会直接报出来，走 failed / filled）
-            HStack(alignment: .lastTextBaseline, spacing: 10) {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text("对话中未出现这条消息，请在电脑上查看").multilineTextAlignment(.trailing)
+            // 电脑报了已提交，对话里却一直没出现。给「重新发送」（11-28 顾客要求）：换新请求编号再投递一次（同一编号电脑会去重、不再投递）
+            // 放得下排一行；窄屏（iPhone 竖着）提示一行、按钮另起一行，别把提示挤成断开的两截
+            KLViewThatFits(in: .horizontal) {
+                HStack(alignment: .lastTextBaseline, spacing: 10) {
+                    unconfirmedNote.fixedSize()
+                    unconfirmedActions
                 }
-                .font(.ui(.caption2))
-                .foregroundStyle(.orange)
-                Button { withAnimation(.klSnappy(duration: 0.2)) { model.discard(key, pending.id) } } label: {
-                    Text("移除").font(.ui(.caption2).weight(.medium)).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 6) {
+                    unconfirmedNote
+                    unconfirmedActions
                 }
-                .buttonStyle(.steady(.plain))
-                .accessibilityLabel("移除这条消息")
             }
         case .failed(let message):
             HStack(alignment: .lastTextBaseline, spacing: 10) {

@@ -108,7 +108,9 @@ final class AppModel: KLObservable {
     @Tracked private(set) var pastMeta: [String: PastSession] = [:]
     /// 打开某个会话时要跳到的那条（历史搜索的命中）
     @Tracked var jumpRequests: [String: String] = [:]
-    @Tracked private var awaitNew: (sourceId: String, cwd: String, known: Set<String>, until: Date)?
+    @Tracked private var awaitNew: (sourceId: String, cwd: String, known: Set<String>, until: Date, expect: String?)?
+    /// 新会话页发出去后、等会话出来再切的设置和补发的话（见 planLaunch）
+    var launchPlans: [LaunchPlan] = []
     /// 输入框里没发出去的话：像微信一样留着，列表里显示「[草稿]」
     @Tracked private(set) var drafts: [String: String]
     @Tracked private var seen: [String: Double]
@@ -116,6 +118,9 @@ final class AppModel: KLObservable {
     @Tracked private var presenceTask: Task<Void, Never>?
     /// 开着的对话页定时报「打开过」（见 reportViewed）
     @Tracked private var viewedTask: Task<Void, Never>?
+    /// 不是你点开、自己出现在屏幕上的对话页：App 回到前台时本来就停在这页的、启动或切项目 / 标签组时恢复出来的（RestoredPanes）。
+    /// 这些不算「打开过」（电脑按它自动关闭 24 小时没打开的会话），你在这页发消息、点进这一块、离开再点进来才算（11-29）
+    private var passiveKeys: Set<String> = []
     /// 定时看两条路（局域网、远程访问）通不通，走着局域网时它断了就换到远程访问
     @Tracked private var lanTask: Task<Void, Never>?
     /// 什么时候切到后台的：回来时离开得久，远程访问的旧连接多半已被系统掐断，直接重连不等它超时
@@ -317,15 +322,16 @@ final class AppModel: KLObservable {
     }
 
     /// 新建任务开始了：等这个项目里冒出一个新会话，3 分钟内出现就自动打开
-    func awaitNewSession(sourceId: String, cwd: String) {
-        awaitNew = (sourceId, cwd, Set(sessions.map(\.key)), Date().addingTimeInterval(180))
+    /// expectId：电脑端预先定好的会话编号（new-session 回的 sessionId），有就按编号认（目录写法可能不同，如 /tmp 和 /private/tmp）
+    func awaitNewSession(sourceId: String, cwd: String, expectId: String? = nil) {
+        awaitNew = (sourceId, cwd, Set(sessions.map(\.key)), Date().addingTimeInterval(180), expectId.map { sourceId + "#" + $0 })
     }
 
     private func checkAwaitNew() {
         guard let wait = awaitNew else { return }
         if Date() > wait.until { awaitNew = nil; return }
         guard let hit = sessions.first(where: { !wait.known.contains($0.key) && $0.sourceId == wait.sourceId
-            && ($0.cwd == wait.cwd || ($0.cwd ?? "").hasPrefix(wait.cwd + "/")) }) else { return }
+            && ($0.key == wait.expect || $0.cwd == wait.cwd || ($0.cwd ?? "").hasPrefix(wait.cwd + "/")) }) else { return }
         awaitNew = nil
         flash(L("新会话已开始"))
         pendingOpen = hit.key
@@ -356,6 +362,9 @@ final class AppModel: KLObservable {
             }
         }
         connect()
+        // 回到前台时屏幕上本来就停着的对话页：不是这次点开的，不算打开过（见 passiveKeys）
+        passiveKeys.formUnion(openCounts.keys)
+        RestoredPanes.picked = { [weak self] key in MainActor.assumeIsolated { self?.engaged(key) } }
         startViewedReports()
         if embedded { return }
         startLinked()
@@ -664,15 +673,11 @@ final class AppModel: KLObservable {
     /// 告诉电脑这几个会话的详情打开过：电脑会把 24 小时没在 Kiteline 里打开过详情的会话自动关掉、移进历史（Mac 端 IdleClose）。
     /// 对话页打开时报一次；开着、App 在前台（Mac：窗口在屏幕上看得见）时每 10 分钟再报一次，一直摆在屏幕上看的不算没打开。
     /// 只报人打开着的对话页：别的会话发来消息、它在后台回复，都不经过这里。
-    /// history：再带上本机记的最后看过（未读红点那份 seen，打开、看完、标为已读时记），补上电脑升级前的历史
-    func reportViewed(_ keys: [String]? = nil, history: Bool = false) {
-        let keys = keys ?? Array(openCounts.keys)
-        guard !keys.isEmpty || history else { return }
+    /// 不再带本机记的最后看过（seen）：那份连回到前台时停着的页面也记，会把没点开的会话算成看过（11-29 起，电脑端的合并留给旧版）
+    func reportViewed(_ keys: [String]? = nil) {
+        let keys = keys ?? openCounts.keys.filter { !passiveKeys.contains($0) }
+        guard !keys.isEmpty else { return }
         var body: [String: Any] = ["keys": keys]
-        if history {
-            let oldest = Date().timeIntervalSince1970 * 1000 - 30 * 86400 * 1000
-            body["seen"] = seen.filter { $0.value > oldest }
-        }
         let api = api
         // 直连的其他电脑上的会话报给那台（它的「闲置自动关闭」按它算）；其余报给主电脑
         var byHost: [String: [String]] = [:]
@@ -681,22 +686,17 @@ final class AppModel: KLObservable {
             let mine = keys.filter { hub.computer(of: $0) == nil }
             body["keys"] = mine
             for (_, list) in byHost { Task { _ = try? await api.post("/api/viewed", body: ["keys": list]) } }
-            if mine.isEmpty && !history { return }
+            if mine.isEmpty { return }
         }
         Task { _ = try? await api.post("/api/viewed", body: body) }
     }
 
-    /// 回到前台（start）先报一次开着的（连同本机历史），之后每 10 分钟；切到后台（stop）停
+    /// 回到前台（start）先报一次开着的（回到前台时本来就停着的不报，见 passiveKeys），之后每 10 分钟；切到后台（stop）停
     private func startViewedReports() {
         viewedTask?.cancel()
         viewedTask = Task { [weak self] in
-            var history = true
             while !Task.isCancelled {
-                if let self {
-                    let visible = self.windowVisible
-                    if visible || history { self.reportViewed(visible ? nil : [], history: history) }
-                }
-                history = false
+                if let self, self.windowVisible { self.reportViewed() }
                 try? await Task.sleep(seconds: 600)
             }
         }
@@ -895,6 +895,7 @@ final class AppModel: KLObservable {
         if changed { UserDefaults.standard.set(seen, forKey: "seen") }
         for key in openCounts.keys where session(key) != nil { markSeen(key) }
         checkAwaitNew()
+        runLaunchPlans()
         #if os(iOS) && !targetEnvironment(macCatalyst) && !KITELINE_MAC
         // 等你确认 / 在工作的数变了：推给 Apple Watch 的表盘复杂功能
         if !embedded { WatchBridge.shared.phoneStateChanged(sessions) }
@@ -990,6 +991,8 @@ final class AppModel: KLObservable {
         sleepTasks[key]?.cancel()
         sleepTasks[key] = nil
         openCounts[key, default: 0] += 1
+        // 刚恢复出来的（启动、切项目 / 标签组）不算你点开的；其余都是点进来的
+        if RestoredPanes.take(key) { passiveKeys.insert(key) } else { passiveKeys.remove(key) }
         if focus || current == nil { current = key }
         let chat = chat(key)
         if let last = seen[key], Date().timeIntervalSince1970 * 1000 - last > 10 * 60 * 1000 {
@@ -1004,7 +1007,7 @@ final class AppModel: KLObservable {
         }
         #endif
         markSeen(key)
-        reportViewed([key])
+        if !passiveKeys.contains(key) { reportViewed([key]) }
         // 先放上次存在手机上的，连上后再换成最新的
         if !chat.loaded, chat.items.isEmpty, let cached = Offline.loadChat(key) { chat.add(cached) }
         Task { await loadHistory(key, older: false) }
@@ -1014,13 +1017,20 @@ final class AppModel: KLObservable {
     /// 这个会话里用语音发过的消息：对话里画成语音条，点了能放。
     /// 只在打开对话页时取：电脑把这个请求也当「打开过详情」（不报 /api/viewed 的旧版靠它），别处别调
     private func loadVoices(_ key: String) async {
-        guard let reply = try? await api.get("/api/voices", ["key": key]),
+        // 恢复出来的页面带 passive=1：电脑别把这次取当成「打开过」（见 passiveKeys）
+        guard let reply = try? await api.get("/api/voices", passiveKeys.contains(key) ? ["key": key, "passive": "1"] : ["key": key]),
               let list = reply["voices"] as? [[String: Any]] else { return }
         let chat = chat(key)
         for entry in list {
             guard let id = entry["id"] as? String, let text = entry["text"] as? String else { continue }
             chat.voices[text.trimmingCharacters(in: .whitespacesAndNewlines)] = VoiceClip(id: id, duration: entry["duration"] as? Double ?? 0)
         }
+    }
+
+    /// 在这页上动手了（发消息、点进这一块）：回到前台停着的、恢复出来的页面从这时起算打开过
+    func engaged(_ key: String) {
+        guard passiveKeys.remove(key) != nil, isOpen(key) else { return }
+        reportViewed([key])
     }
 
     func close(_ key: String) {
@@ -1030,7 +1040,8 @@ final class AppModel: KLObservable {
         markSeen(key)
         if left <= 0 {
             scheduleSleep(key)
-            reportViewed([key])   // 看完离开：电脑记下最后看过的时间，别的设备上这个会话就不再标新消息
+            // 没点开过（回到前台时停着的、恢复出来的）就离开：不算看过
+            if passiveKeys.remove(key) == nil { reportViewed([key]) }   // 看完离开：电脑记下最后看过的时间，别的设备上这个会话就不再标新消息
         }
     }
 
@@ -1064,6 +1075,7 @@ final class AppModel: KLObservable {
     @discardableResult
     func send(_ key: String, text: String, images: [(name: String, data: Data, preview: Data)], files: [(name: String, data: Data)] = []) -> String? {
         let id = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36) + String(Int.random(in: 0..<1_000_000), radix: 36)
+        engaged(key)
         let pending = PendingSend(id: id, text: text, previews: images.map(\.preview),
                                   payload: images.map { ["name": $0.name, "data": $0.data.base64EncodedString()] },
                                   files: files.map { PendingFile(name: $0.name, size: $0.data.count) },
@@ -1114,6 +1126,15 @@ final class AppModel: KLObservable {
         Task { await deliver(key, id) }
     }
 
+    /// 「对话中未出现这条消息」时重新发送：换个请求编号（电脑那头按编号去重），发的时刻也重记（回显按这个时刻往后认）
+    func resend(_ key: String, _ id: String) {
+        chat(key).update(id) {
+            $0.attempt += 1
+            $0.at = Date().timeIntervalSince1970 * 1000
+        }
+        retry(key, id)
+    }
+
     private func deliver(_ key: String, _ id: String) async {
         let chat = chat(key)
         guard let p = chat.pending.first(where: { $0.id == id }) else { return }
@@ -1134,7 +1155,7 @@ final class AppModel: KLObservable {
                 }
             } else {
                 reply = try await api.post(live ? "/api/send" : "/api/resume", ["key": key],
-                                           body: ["text": p.text, "images": p.payload, "files": p.filePayload, "override": p.override, "cid": p.id])
+                                           body: ["text": p.text, "images": p.payload, "files": p.filePayload, "override": p.override, "cid": p.cid])
             }
             queuedAttempts[id] = nil
             let submitted = reply["submitted"] as? Bool ?? false
@@ -1550,4 +1571,26 @@ extension AppModel {
         }
         return false
     }
+}
+
+/// 自己恢复出来的分屏（启动时读回上次的、切项目 / 标签组换回那一套）：各块正显示的会话记在这里，
+/// 它们的对话页第一次出现时不算你点开的（AppModel.passiveKeys），不让电脑当成「打开过」而一直不自动关闭（11-29）。
+/// 启动时要等连上电脑、拿到会话列表对话页才出来（实测要好几秒），所以留 60 秒；出现一次就用掉
+/// 只在主线程上读写（分屏和对话页都在主线程）
+enum RestoredPanes {
+    nonisolated(unsafe) private static var keys: Set<String> = []
+    nonisolated(unsafe) private static var generation = 0
+
+    static func note(_ shown: [String]) {
+        keys = Set(shown.filter { !$0.isEmpty })
+        generation += 1
+        let mine = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { if generation == mine { keys = [] } }
+    }
+
+    /// 这个对话页是不是刚恢复出来的（问一次就用掉）
+    static func take(_ key: String) -> Bool { keys.remove(key) != nil }
+
+    /// 点了分屏里的某个标签（AppModel.start 时接上 engaged）
+    nonisolated(unsafe) static var picked: ((String) -> Void)?
 }

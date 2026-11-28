@@ -1945,5 +1945,39 @@ finally:
     _ew.DISABLED[0], _ew.BACKEND[0], _ew.CLOSE_WAIT[0] = _ew_saved
     _ew._opened.clear()
 
+print("\n== 新会话的启动设置（手机新会话页选的权限模式、模型、思考等级） ==")
+from kiteline import app as _nl_app, delivery as _nl_delivery, editor_windows as _nl_ew, remotessh as _nl_rs
+_nl_saved = (_nl_delivery.DRY_RUN, _nl_rs.claude_environment, _nl_ew.settle, _nl_app.HOSTED_SETTING[0])
+_nl_delivery.DRY_RUN, _nl_rs.claude_environment, _nl_ew.settle = False, (lambda: {}), (lambda *a, **k: None)
+_nl_app.HOSTED_SETTING[0] = lambda sid: True
+
+
+class _NlSource:
+    def __init__(self, feats):
+        self.id, self.name, self.features, self.sent = "local", "本机", feats, []
+
+    def request(self, payload, timeout=0):
+        self.sent.append(payload)
+        return {"submitted": True, "hosted": "h1", "sessionId": payload.get("newSessionId") or "own-id"}
+
+
+try:
+    check("启动设置只留认得的", _nl_app.launch_options({"mode": "plan", "model": "claude-opus-5-5", "effort": "high", "x": 1})
+          == {"mode": "plan", "model": "claude-opus-5-5", "effort": "high"})
+    check("启动设置丢掉不认的值", _nl_app.launch_options({"mode": "bypassPermissions", "model": "a b;rm", "effort": "huge"}) == {}
+          and _nl_app.launch_options("plan") == {})
+    _nl_s = _NlSource(("hosted", "hosted_opts"))
+    _nl_r = _nl_app.launch_session("/p", "你好", True, None, "local", source=_nl_s, launch={"mode": "plan", "model": "claude-haiku-5-5"})
+    check("后台运行带上启动设置和预定编号，回 launched", _nl_s.sent[-1].get("launch") == {"mode": "plan", "model": "claude-haiku-5-5"}
+          and _nl_r.get("launched") is True and _nl_r.get("sessionId") == _nl_s.sent[-1].get("newSessionId"), (_nl_s.sent[-1], _nl_r))
+    _nl_s = _NlSource(("hosted",))
+    _nl_r = _nl_app.launch_session("/p", "你好", True, None, "local", source=_nl_s, launch={"mode": "plan"})
+    check("老 watcher（没有 hosted_opts）不带启动设置", "launch" not in _nl_s.sent[-1] and not _nl_r.get("launched"), _nl_s.sent[-1])
+    _nl_s = _NlSource(("hosted", "hosted_opts"))
+    _nl_app.launch_session("/p", "", False, "old-id", "local", source=_nl_s, launch={"mode": "plan"})
+    check("恢复会话不带启动设置", "launch" not in _nl_s.sent[-1], _nl_s.sent[-1])
+finally:
+    _nl_delivery.DRY_RUN, _nl_rs.claude_environment, _nl_ew.settle, _nl_app.HOSTED_SETTING[0] = _nl_saved
+
 print("\n电脑端单元测试：%s" % ("全部通过" if not FAILED else "%d 项失败" % FAILED))
 sys.exit(1 if FAILED else 0)

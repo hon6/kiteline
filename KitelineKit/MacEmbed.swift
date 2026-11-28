@@ -8,6 +8,9 @@ import SwiftUI
 public enum KitelineKit {
     static var model: AppModel?
 
+    /// 在左栏点了这个会话（它已经开成标签）：恢复出来、还没算打开过的标签从这时起算（见 AppModel.engaged）
+    @MainActor public static func engaged(_ key: String) { model?.engaged(key) }
+
     /// 对话里点了别的会话：交给 Mac App 在左边栏选中它
     public static var openSession: (String) -> Void = { _ in }
     /// 对话里点了今日动态 / 用量 / 历史 / 项目：交给 Mac App 切到左边栏对应那一项（today / usage / history / projects）

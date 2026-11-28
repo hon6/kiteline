@@ -516,6 +516,10 @@ struct ChatView: KLView {
             model.jumpRequests[key] = nil
             jumpTarget = target
         }
+        // 点进分屏里的这一块：恢复出来的、回到前台时停着的页面从这时起算打开过（见 AppModel.engaged）
+        .klOnChange(of: pane?.isFocused ?? false) { _, focused in
+            if focused { model.engaged(key) }
+        }
         .task { await model.loadPastMeta(key) }
         #if SNAPSHOT
         .task {

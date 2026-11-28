@@ -480,6 +480,7 @@ public sealed class ChatPanes
         Root = node;
         var ids = Panes.Select(p => p.Id).ToList();
         FocusId = Guid.TryParse(snapshot.Str("focus"), out var focus) && ids.Contains(focus) ? focus : ids[0];
+        AppModel.RestoredPanes.Note(Panes.Select(p => p.Key));   // 切项目 / 会话组换回的那套：不算点开过
         Sizes.Clear();
         Commit();
     }
@@ -513,6 +514,7 @@ public sealed class ChatPanes
             Root = node;
             var ids = Panes.Select(p => p.Id).ToList();
             FocusId = Guid.TryParse(saved.Str("focus"), out var focus) && ids.Contains(focus) ? focus : ids[0];
+            AppModel.RestoredPanes.Note(Panes.Select(p => p.Key));   // 启动时读回的不算点开过
         }
         remembering = true;
     }

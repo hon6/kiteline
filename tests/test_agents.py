@@ -211,6 +211,73 @@ check("两种都记的只留一份，只有 item_completed 的照常显示",
       [(i["t"], i.get("text") or i.get("name")) for i in items]
       == [("user", "建文件"), ("tool", "Bash"), ("result", "ok"), ("text", "好了"), ("tool", "Bash"), ("result", "/w")], str(items))
 
+# 只读兜底的会话在等批准（11-28，0.172 --no-daemon / 桌面版 26.1120 实测）：rollout 这一轮最后一个调用要提升权限、还没输出，
+# 日志库里这之后没有审批结果 → 待确认；批准过（日志里有 <- response: …Approval）、普通命令、策略 never 的都不算
+def ap_rollout(name, call, output=False, policy="on-request", ago=20):
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - ago))
+    path = os.path.join(ROOT, name)
+    rows = [rollout_line("event_msg", {"type": "task_started"}, stamp), rollout_line("turn_context", {"approval_policy": policy}, stamp),
+            rollout_line("response_item", dict(call, call_id="c1"), stamp)]
+    if output:
+        rows.append(rollout_line("response_item", {"type": "function_call_output", "call_id": "c1", "output": "ok"}, stamp))
+    with open(path, "w") as handle:
+        handle.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    return path, time.time() - ago
+esc = {"type": "function_call", "name": "exec_command",
+       "arguments": json.dumps({"cmd": "rm -rf build", "sandbox_permissions": "require_escalated", "justification": "要删构建目录"})}
+p1, at1 = ap_rollout("ap1.jsonl", esc)
+got = W.codex_rollout_pending_approval(p1)
+check("要提升权限、还没输出 → 等批准（带命令和理由）", got and got["command"] == "rm -rf build" and got["justification"] == "要删构建目录"
+      and got["kind"] == "command", got)
+check("有输出了 → 不算", W.codex_rollout_pending_approval(ap_rollout("ap2.jsonl", esc, output=True)[0]) is None)
+check("审批策略 never → 不算", W.codex_rollout_pending_approval(ap_rollout("ap3.jsonl", esc, policy="never")[0]) is None)
+plain = {"type": "function_call", "name": "exec_command", "arguments": json.dumps({"cmd": "npm test"})}
+check("普通命令跑得久 → 不算（照旧是正在工作）", W.codex_rollout_pending_approval(ap_rollout("ap4.jsonl", plain)[0]) is None)
+patch = {"type": "custom_tool_call", "name": "apply_patch", "input": "*** Begin Patch"}
+check("改文件挂着不动 → 等批准", (W.codex_rollout_pending_approval(ap_rollout("ap5.jsonl", patch)[0]) or {}).get("kind") == "patch")
+check("改文件刚发出（3 秒内）→ 还不算", W.codex_rollout_pending_approval(ap_rollout("ap6.jsonl", patch, ago=1)[0]) is None)
+logs = os.path.join(ROOT, "logs_2.sqlite")
+conn = sqlite3.connect(logs)
+conn.execute("create table logs (id integer primary key, ts int, ts_nanos int, level text, target text, feedback_log_body text)")
+conn.execute("insert into logs (ts, ts_nanos, level, target, feedback_log_body) values (?, 0, 'INFO', 'x', 'app-server event: item/started')", (int(at1) + 1,))
+conn.commit()
+real_home = W.CODEX_HOME
+W.CODEX_HOME = ROOT
+try:
+    check("日志库里调用之后没有审批结果 → 没答", W.codex_approval_answered_since(at1) is False)
+    conn.execute("insert into logs (ts, ts_nanos, level, target, feedback_log_body) values (?, 0, 'INFO', 'x', ?)",
+                 (int(at1) - 30, "<- response: CommandExecutionRequestApproval { decision: Accept }"))
+    conn.commit()
+    check("更早的审批结果不算（那是上一条命令的）", W.codex_approval_answered_since(at1) is False)
+    conn.execute("insert into logs (ts, ts_nanos, level, target, feedback_log_body) values (?, 0, 'INFO', 'x', ?)",
+                 (int(at1) + 2, "<- response: CommandExecutionRequestApproval { request_id: Integer(0), response: … Accept }"))
+    conn.commit()
+    check("调用之后有审批结果 → 已答（命令在跑，算忙）", W.codex_approval_answered_since(at1) is True)
+    W.CODEX_HOME = os.path.join(ROOT, "no-such-codex-home")
+    check("读不到日志库 → 不知道（不猜）", W.codex_approval_answered_since(at1) is None)
+finally:
+    W.CODEX_HOME = real_home
+    conn.close()
+
+# Windows 上 Codex 报的目录带扩展长度前缀（11-28 实测 0.172）：去掉，不然项目按目录归类时拆成两个
+check("目录去掉 \\\\?\\ 前缀（普通盘符 / UNC），别的路径不动",
+      [W.codex_plain_path(x) for x in ("\\\\?\\C:\\w\\p", "\\\\?\\UNC\\srv\\share", "/tmp/a", "C:\\a", "")]
+      == ["C:\\w\\p", "\\\\srv\\share", "/tmp/a", "C:\\a", ""])
+
+# 后台运行的 Codex 会话（快照没有进程号）：按会话编号 / 工作目录 + 时间认出是哪个托管会话起的
+hs = W.HostedSessions()
+now_ms = int(time.time() * 1000)
+e_new = {"id": "h1", "agent": "codex", "cwd": ROOT, "sessionId": "", "startedAt": now_ms - 60000}
+e_old = {"id": "h0", "agent": "codex", "cwd": ROOT, "sessionId": "", "startedAt": now_ms - 600000}
+e_res = {"id": "h2", "agent": "codex", "cwd": "/elsewhere", "sessionId": "thr-res", "startedAt": now_ms - 5000}
+check("新开的：同目录、它启动后才建的会话 → 认给启动得最晚的那个",
+      (hs.loose_owner({"sessionId": "thr-new", "cwd": ROOT, "startedAt": now_ms - 50000}, [e_old, e_new, e_res]) or {}).get("id") == "h1")
+check("认过的会话下次直接对上", (hs.loose_owner({"sessionId": "thr-new", "cwd": "/moved", "startedAt": 0}, [e_new]) or {}).get("id") == "h1")
+check("恢复的：登记里有会话编号 → 按编号对上", (hs.loose_owner({"sessionId": "thr-res", "cwd": "/x", "startedAt": 1}, [e_res]) or {}).get("id") == "h2")
+check("会话比托管会话启动得还早（用户自己开的）→ 不认",
+      hs.loose_owner({"sessionId": "thr-mine", "cwd": ROOT, "startedAt": now_ms - 900000}, [e_old]) is None)
+check("目录不同 → 不认", W.HostedSessions().loose_owner({"sessionId": "t", "cwd": "/other", "startedAt": now_ms}, [e_new]) is None)
+
 # ---------------------------------------------------------------------------
 print("== OpenCode 消息解析")
 

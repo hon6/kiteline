@@ -44,6 +44,27 @@ public sealed partial class AppModel : ObservableObject
     /// 正在看的会话（分屏时是当前块）
     public string? Current { get; set; }
     readonly Dictionary<string, int> openCounts = new();
+    /// 不是你点开、自己出现的对话页（启动、切项目 / 会话组时恢复出来的分屏，见 RestoredPanes）：不算「打开过」，
+    /// 不让后台当成看过而一直不自动关闭；在这页发消息、离开再点进来才算（11-29 起，同 Mac / iPhone）
+    readonly HashSet<string> passiveKeys = new();
+
+    /// 刚恢复出来的分屏里各块正显示的会话：它们的对话页第一次出现时算「自己出现的」。
+    /// 启动时要等连上后台、拿到会话列表对话页才出来（Mac 上实测好几秒），留 60 秒；出现一次就用掉
+    public static class RestoredPanes
+    {
+        static HashSet<string> keys = new();
+        static int generation;
+
+        public static void Note(IEnumerable<string?> shown)
+        {
+            keys = shown.OfType<string>().Where(k => k.Length > 0).ToHashSet();
+            var mine = ++generation;
+            DispatcherTimer.RunOnce(() => { if (generation == mine) keys = new(); }, TimeSpan.FromSeconds(60));
+        }
+
+        /// 这个对话页是不是刚恢复出来的（问一次就用掉）
+        public static bool Take(string key) => keys.Remove(key);
+    }
     /// 窗口在前台时收到的提醒，弹成横幅
     [ObservableProperty] NotifyEvent? banner;
     /// 一闪而过的提示
@@ -221,7 +242,7 @@ public sealed partial class AppModel : ObservableObject
         _ = Connect(streamCancel.Token);
         viewedTimer ??= new DispatcherTimer(TimeSpan.FromMinutes(10), DispatcherPriority.Background, (_, _) => { if (WindowShown()) ReportViewed(); });
         viewedTimer.Start();
-        ReportViewed(WindowShown() ? null : [], history: true);
+        if (WindowShown()) ReportViewed();
     }
 
     public void Stop()
@@ -470,7 +491,8 @@ public sealed partial class AppModel : ObservableObject
         var chat = Chat(key);
         chat.NewSince = seen.TryGetValue(key, out var last) && Format.NowMs - last > 10 * 60 * 1000 ? last : null;
         MarkSeen(key);
-        ReportViewed([key]);
+        if (RestoredPanes.Take(key)) passiveKeys.Add(key);
+        else { passiveKeys.Remove(key); ReportViewed([key]); }
         _ = LoadHistory(key, false);
         _ = LoadVoices(key);
     }
@@ -478,19 +500,12 @@ public sealed partial class AppModel : ObservableObject
     /// 告诉后台这几个会话的详情打开过：后台会把 24 小时没在 Kiteline 里打开过详情的会话自动关掉、移进历史（idleclose.py / Mac 的 IdleClose）。
     /// 对话页打开时报一次；开着、窗口在屏幕上（没最小化、没收进托盘）时每 10 分钟再报一次。
     /// 只报人打开着的对话页：别的会话发来消息、它在后台回复，都不经过这里。
-    /// history：再带上本机记的最后看过（未读红点那份 seen），补上后台升级前的历史（连上时报一次）
-    public void ReportViewed(IEnumerable<string>? keys = null, bool history = false)
+    /// 不再带本机记的最后看过（seen）：那份连自己恢复出来的页面也记，会把没点开的会话算成看过（11-29 起，后台的合并留给旧版）
+    public void ReportViewed(IEnumerable<string>? keys = null)
     {
-        var list = (keys ?? openCounts.Keys).ToList();
-        if (list.Count == 0 && !history) return;
+        var list = (keys ?? openCounts.Keys.Where(k => !passiveKeys.Contains(k))).ToList();
+        if (list.Count == 0) return;
         var body = new JsonObject { ["keys"] = new JsonArray(list.Select(k => (JsonNode?)JsonValue.Create(k)).ToArray()) };
-        if (history)
-        {
-            var oldest = Format.NowMs - 30.0 * 86400 * 1000;
-            var map = new JsonObject();
-            foreach (var (key, value) in seen) if (value > oldest) map[key] = value;
-            body["seen"] = map;
-        }
         _ = PostViewed(body);
     }
 
@@ -509,7 +524,10 @@ public sealed partial class AppModel : ObservableObject
     {
         try
         {
-            var reply = await Api.Get("/api/voices", new Dictionary<string, string> { ["key"] = key });
+            // 恢复出来的页面带 passive=1：后台别把这次取当成「打开过」（见 passiveKeys）
+            var query = new Dictionary<string, string> { ["key"] = key };
+            if (passiveKeys.Contains(key)) query["passive"] = "1";
+            var reply = await Api.Get("/api/voices", query);
             var chat = Chat(key);
             foreach (var entry in reply.Arr("voices").Items())
                 if (entry.Str("id") is string id && entry.Str("text") is string text)
@@ -524,7 +542,14 @@ public sealed partial class AppModel : ObservableObject
         var left = (openCounts.TryGetValue(key, out var n) ? n : 1) - 1;
         if (left > 0) openCounts[key] = left; else openCounts.Remove(key);
         if (Current == key && left <= 0) Current = openCounts.Keys.FirstOrDefault();
+        if (left <= 0) passiveKeys.Remove(key);
         MarkSeen(key);
+    }
+
+    /// 在这页上动手了（发消息）：恢复出来的页面从这时起算打开过
+    public void Engaged(string key)
+    {
+        if (passiveKeys.Remove(key) && IsOpen(key)) ReportViewed([key]);
     }
 
     // MARK: 操作
@@ -534,6 +559,7 @@ public sealed partial class AppModel : ObservableObject
     /// 发消息（可带图）。会话已经结束的，后台会先在 VS Code 里恢复这段对话再发。返回这条的 id
     public string Send(string key, string text, IReadOnlyList<ComposeAttachment> images)
     {
+        Engaged(key);
         var id = NewId();
         Chat(key).AddPending(new PendingSend
         {
@@ -612,6 +638,13 @@ public sealed partial class AppModel : ObservableObject
     {
         Chat(key).Update(id, p => p with { State = SendState.Sending, Error = null, Override = overrideCap || p.Override });
         _ = Deliver(key, id);
+    }
+
+    /// 「对话中未出现这条消息」时重新发送：换个请求编号（电脑那头按编号去重），发的时刻也重记（同 iOS）
+    public void Resend(string key, string id)
+    {
+        Chat(key).Update(id, p => p with { Attempt = p.Attempt + 1, At = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+        Retry(key, id);
     }
 
 
@@ -746,7 +779,7 @@ public sealed partial class AppModel : ObservableObject
             {
                 reply = await Api.Post(live ? "/api/send" : "/api/resume", new Dictionary<string, object>
                 {
-                    ["text"] = p.Text, ["images"] = p.Payload, ["override"] = p.Override, ["cid"] = p.Id,
+                    ["text"] = p.Text, ["images"] = p.Payload, ["override"] = p.Override, ["cid"] = p.Cid,
                 }, new Dictionary<string, string> { ["key"] = key });
             }
             queuedAttempts.Remove(id);

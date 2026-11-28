@@ -494,7 +494,7 @@ struct ProjectSessions: KLView {
                             Text("正在打开会话，文件和 Git 稍后显示…").font(.app(size: 11.5)).foregroundStyle(.secondary)
                         }
                     } else {
-                        Text("没有运行中的会话").font(.app(size: 11.5)).foregroundStyle(.secondary).padding(.leading, SideMetric.inset - 8)
+                        Text("没有未关闭的会话").font(.app(size: 11.5)).foregroundStyle(.secondary).padding(.leading, SideMetric.inset - 8)
                     }
                 }
                 ForEach(live) { item in
@@ -512,7 +512,7 @@ struct ProjectSessions: KLView {
                 }
             } header: {
                 HStack(spacing: SideMetric.gap) {
-                    PanelSectionTitle(title: L("正在运行"), count: live.count)
+                    PanelSectionTitle(title: L("未关闭的会话"), count: live.count)
                     Spacer(minLength: 4)
                     // 新会话（11-20 反馈：创建会话按钮大一点；同 VS Code 新开对话标签）：在中间开一个新会话标签，项目、设备、agent 带好
                     Button {

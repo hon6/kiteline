@@ -5899,10 +5899,10 @@ def codex_usage_scan(path):
             if not isinstance(payload, dict):
                 continue
             if entry.get("type") == "session_meta":
-                cwd, session = payload.get("cwd") or cwd, payload.get("id") or session
+                cwd, session = codex_plain_path(payload.get("cwd")) or cwd, payload.get("id") or session
                 continue
             if entry.get("type") == "turn_context":
-                model, cwd = payload.get("model") or model, payload.get("cwd") or cwd
+                model, cwd = payload.get("model") or model, codex_plain_path(payload.get("cwd")) or cwd
                 continue
             info = payload.get("info") if payload.get("type") == "token_count" else None
             total = info.get("total_token_usage") if isinstance(info, dict) else None
@@ -9144,7 +9144,7 @@ def _brag_codex_file(path, scan, start=0, marks=None):
         scan["events"].append(ts)
         kind = payload.get("type")
         if entry.get("type") in ("session_meta", "turn_context"):
-            scan["cwd"] = payload.get("cwd") or scan["cwd"]
+            scan["cwd"] = codex_plain_path(payload.get("cwd")) or scan["cwd"]
         elif entry.get("type") == "event_msg" and kind == "user_message":
             scan["prompts"].append(ts)
         elif entry.get("type") == "response_item" and kind in ("function_call", "custom_tool_call", "local_shell_call"):
@@ -13921,7 +13921,7 @@ class CodexLink:
         if state == "notLoaded":
             return None
         thread_id = thread["id"]
-        cwd = thread.get("cwd") or ""
+        cwd = codex_plain_path(thread.get("cwd") or "")
         path = thread.get("path")
         scan = scan_codex_rollout(path)
         flags = status.get("activeFlags") or []
@@ -13975,6 +13975,15 @@ class CodexLink:
             "transcriptUpdatedAt": int(scan["mtime"] * 1000) if scan["mtime"] else None,
             "agent": "codex",
         }
+
+
+def codex_plain_path(path):
+    """Windows 上 Codex（0.172 实测）报的目录带扩展长度前缀 \\\\?\\C:\\…（UNC 的是 \\\\?\\UNC\\服务器\\…）：去掉，
+    不然手机上显示怪路径、同一个项目按目录归类时被拆成两个"""
+    if isinstance(path, str) and path.startswith("\\\\?\\"):
+        rest = path[4:]
+        return "\\\\" + rest[4:] if rest[:4].upper() == "UNC\\" else rest
+    return path
 
 
 def codex_request_text(request):
@@ -14335,6 +14344,106 @@ def codex_rollout_activity(path):
     return "busy" if started > ended and time.time() - mtime < 600 else "idle"
 
 
+# 只读兜底的会话没有审批请求可看（请求只在 Codex 进程的内存里），但「在等你批准」很要紧：不标出来手机只显示「正在工作」、
+# 也不推提醒，用户以为它在跑（11-28 实测 0.172 --no-daemon）。rollout 里看得出：这一轮最后一个工具调用还没有输出，而且是
+# 一定要审批才会执行的——命令带 sandbox_permissions: require_escalated（老版本 with_escalated_permissions: true），
+# 或改文件（apply_patch，平常一下就写完，挂着不动就是在等批准）。批准 / 拒绝之后 Codex 的日志库 logs_N.sqlite 会记一行
+# 「<- response: …RequestApproval…」（不带会话编号，只按时间比：调用之后有过任何审批结果，就当已经答了、命令在跑，照旧算忙）。
+# 读不到日志库时不猜，照旧算忙。审批策略是 never 的会话不会问。
+CODEX_APPROVAL_RESPONSE = re.compile(r"<- response: \w*(?:Approval)\b")
+
+
+def codex_logs_db():
+    found = []
+    for path in globlib.glob(os.path.join(CODEX_HOME, "logs_*.sqlite")):
+        match = re.search(r"logs_(\d+)\.sqlite$", path)
+        if match:
+            found.append((int(match.group(1)), path))
+    return max(found)[1] if found else None
+
+
+def _codex_line_time(stamp):
+    try:
+        base, _, frac = (stamp or "").rstrip("Z").partition(".")
+        return calendar.timegm(time.strptime(base, "%Y-%m-%dT%H:%M:%S")) + float("0." + (frac or "0"))
+    except (ValueError, TypeError):
+        return None
+
+
+def codex_rollout_pending_approval(path):
+    """rollout 这一轮里还挂着、要审批才会执行的工具调用 → {callId, command, justification, kind, at}；没有 → None"""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            handle.seek(max(0, size - 256 * 1024))
+            data = handle.read()
+    except OSError:
+        return None
+    start = max(data.rfind(b'"type":"task_started"'), data.rfind(b'"type": "task_started"'))
+    if start < 0:
+        return None
+    start = data.rfind(b"\n", 0, start) + 1
+    calls, done, policy = {}, set(), None
+    for raw in data[start:].splitlines():
+        try:
+            line = json.loads(raw)
+        except ValueError:
+            continue
+        payload = line.get("payload") if isinstance(line.get("payload"), dict) else {}
+        kind = payload.get("type")
+        if line.get("type") == "turn_context":
+            policy = payload.get("approval_policy") or policy
+        elif kind in ("function_call", "custom_tool_call", "local_shell_call") and payload.get("call_id"):
+            calls[payload["call_id"]] = (payload, _codex_line_time(line.get("timestamp")))
+        elif kind in ("function_call_output", "custom_tool_call_output") and payload.get("call_id"):
+            done.add(payload["call_id"])
+        elif kind == "item_completed":
+            item = payload.get("item") or {}
+            if item.get("id"):
+                done.add(item["id"])
+    if isinstance(policy, str) and policy.lower() == "never":
+        return None
+    open_calls = [(cid, call) for cid, call in calls.items() if cid not in done]
+    if not open_calls:
+        return None
+    cid, (payload, at) = open_calls[-1]
+    name = payload.get("name") or ""
+    if name == "apply_patch" or (payload.get("type") == "custom_tool_call" and "apply_patch" in name):
+        if at is None or time.time() - at < 3:
+            return None
+        return {"callId": cid, "command": "", "justification": "", "kind": "patch", "at": at}
+    try:
+        args = json.loads(payload.get("arguments") or "{}")
+    except ValueError:
+        return None
+    if not isinstance(args, dict):
+        return None
+    escalated = args.get("sandbox_permissions") == "require_escalated" or args.get("with_escalated_permissions") is True
+    if not escalated:
+        return None
+    command = args.get("cmd") or args.get("command") or ""
+    return {"callId": cid, "command": _shell_text(command) if not isinstance(command, str) else command,
+            "justification": args.get("justification") if isinstance(args.get("justification"), str) else "",
+            "kind": "command", "at": at}
+
+
+def codex_approval_answered_since(at):
+    """日志库里 at（秒）之后有没有审批结果；读不到日志库 → None（不知道）"""
+    path = codex_logs_db()
+    if not path or at is None:
+        return None
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % pathname2url(path), uri=True, timeout=2)
+        try:
+            rows = db.execute("select feedback_log_body from logs where ts >= ? and ts + ts_nanos / 1e9 >= ? "
+                              "and feedback_log_body like '<- response:%Approval%' order by id desc limit 20", (int(at) - 1, at)).fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    return any(CODEX_APPROVAL_RESPONSE.search(row[0] or "") for row in rows)
+
+
 def codex_fallback_snapshots(listed):
     """状态库里该列却没被列出的 Codex 会话（见上面的说明）→ 只读快照"""
     path = codex_state_db()
@@ -14379,13 +14488,27 @@ def codex_fallback_snapshots(listed):
         elif not procs[kind]:
             continue
         activity = codex_rollout_activity(rollout)
+        pending = codex_rollout_pending_approval(rollout) if activity == "busy" else None
+        if pending and codex_approval_answered_since(pending["at"]) is not False:
+            pending = None
         thread = {"id": tid, "cwd": row.get("cwd") or "", "path": rollout, "name": (row.get("title") or "").strip() or None,
                   "preview": row.get("first_user_message"), "status": {"type": "active" if activity == "busy" else "idle"},
                   "model": row.get("model"), "reasoningEffort": row.get("reasoning_effort"), "source": row.get("source"),
                   "createdAt": row.get("created_at"), "updatedAt": row.get("updated_at"), "cliVersion": row.get("cli_version")}
-        snap = CodexLink._snapshot(thread, [], None, None, 0)
+        requests = []
+        if pending:
+            # 在等批准：手机上显示待确认（会推提醒），但只能在 Codex 里点——卡片不给按钮（pendingOptions 空），说明写清楚
+            where = {"desktop": "Codex", "vscode": "VS Code", "cli": "终端里的 Codex"}.get(kind, "Codex")
+            ask = pending["justification"] or ("修改文件" if pending["kind"] == "patch" else "运行：%s" % pending["command"][:80])
+            requests = [{"id": pending["callId"], "params": {"command": pending["command"], "reason": "请在电脑上的 %s 中批准：%s" % (where, ask)},
+                         "method": "applyPatchApproval" if pending["kind"] == "patch" else "execCommandApproval"}]
+            thread["status"] = {"type": "active", "activeFlags": ["waitingOnApproval"]}
+        snap = CodexLink._snapshot(thread, requests, None, None, 0)
         if not snap:
             continue
+        if pending:
+            # 只有一个按钮写明去电脑上批准（各端把空列表当「没给」，会画默认的允许 / 拒绝）；点了照常回「请在 Codex 中操作」
+            snap["pendingOptions"] = [{"key": "1", "label": "请在电脑上批准", "style": "normal"}]
         snap["entrypoint"] = {"desktop": "codex-desktop", "vscode": "codex-vscode"}.get(kind, "codex")
         if kind in CODEX_QUEUE_KINDS and queueable:
             # 能经排队消息发过去（见 codex_queue_send）：可以回复，确认、中断仍要在 Codex 里
@@ -14403,7 +14526,9 @@ def codex_fallback_snapshots(listed):
 # 真实桌面版 26.1117 + 假模型实测：空闲时几秒内发出、忙时排队、图片也行、后台服务开不开都一样）。
 # 库里一行的 payload_json 是 Codex 内部的格式（和它自己 thread/queue/add 写进去的逐字段一致）：
 #   {"UserInput": {"content": [{"type": "text", "text", "text_elements": []}, {"type": "image", "image_url": "data:…"}], "client_id"}}
-CODEX_QUEUE_KINDS = ("desktop", "cli")
+# VS Code 扩展 26.51120（11-24 发布，内置 codex 0.171）也删掉了跟随协议（extension.js 里 thread-owner-discovery / thread-follower-* 都没了），
+# 新版扩展的会话只能走这条：扩展自己起的 stdio app-server 同样认排队消息库（11-28 用扩展自带的 codex、同样的启动参数实测）
+CODEX_QUEUE_KINDS = ("desktop", "cli", "vscode")
 # 只有载入了这个会话的进程才取它的排队消息（桌面版切到别的页面也照取；这次启动后没打开过的会话没人取）。空闲时等 CODEX_QUEUE_WAIT 秒
 # 没取走就撤回这条、如实报「在 Codex 中打开这个会话一次」。没用深链接 codex://threads/<会话> 自动载入：11-23 实测它把 Codex 切到前台
 # （open -g 也拦不住），装着多份 Codex 时还会交给系统默认的那份打开。Windows 实测 26.1111 载入后 9 秒内取走
@@ -17138,13 +17263,28 @@ class CodexPlugin(AgentPlugin):
     needs = ("locate", "net.connect", "net.ws", "proc.pipe", "fs.tail", "db.read")
     limits_note = "「今日用量」中显示 5 小时与本周额度（免费版为 30 天额度），取自 Codex 自己的记录，回复一次后更新"
     normalize = staticmethod(normalize_codex_line)
-    # 10-23 真机矩阵 + 10-24 真实 Codex + 假模型的端到端（tools/codex-probe/e2e_watcher.py）
+    # 10-23 真机矩阵 + 10-24 真实 Codex + 假模型的端到端（tools/codex-probe/e2e_watcher.py）；11-28 终端 0.172、桌面版 26.1120、
+    # VS Code 扩展 26.51120 重新实测：新版桌面版和扩展不再开放会话操作，只能看、经排队消息发话，确认 / 回答 / 中断要在电脑上点
+    _NEW_APPS = ("view", "reply")
+    _NEW_NOTE = "新版只能查看和发消息（等批准时会提醒），批准、回答、中断请在电脑上的 Codex 中操作"
     support = {
-        "mac": {"cli": support_form(verified=True), "vscode": support_form(verified=True), "desktop": support_form(verified=True)},
-        "windows": {"cli": support_form(verified=True), "vscode": support_form(verified=True), "desktop": support_form(verified=True)},
-        "linux": {"cli": support_form(verified=True), "vscode": support_form(verified=True),
+        "mac": {"cli": support_form(verified=True), "vscode": support_form(_NEW_APPS, note=_NEW_NOTE),
+                "desktop": support_form(_NEW_APPS, verified=True, note=_NEW_NOTE)},
+        "windows": {"cli": support_form(verified=True), "vscode": support_form(_NEW_APPS, note=_NEW_NOTE),
+                    "desktop": support_form(_NEW_APPS, verified=True, note=_NEW_NOTE)},
+        "linux": {"cli": support_form(verified=True), "vscode": support_form(_NEW_APPS, note=_NEW_NOTE),
                   "desktop": support_form((), note="Codex 桌面版没有 Linux 版")},
     }
+    gaps = ({"kind": "unsupported",
+             "text": "新版 Codex 桌面版（26.11 起）和 VS Code 扩展（26.51120 起）去掉了给其他应用用的会话操作接口：手机上可以查看、发消息，"
+                     "等批准时会提醒，但批准、回答提问、中断需要在电脑上的 Codex 里操作；终端里的 Codex 不受影响",
+             "textEn": "The new Codex desktop app (26.11+) and VS Code extension (26.51120+) removed the interface other apps used to "
+                       "operate sessions: from your phone you can view, send messages and get notified when approval is needed, but "
+                       "approving, answering and interrupting must be done in Codex on the computer. Codex in the terminal is unaffected."},
+            {"kind": "untested",
+             "text": "VS Code 扩展 26.51120 起从手机发消息：用扩展自带的 Codex 内核实测过，还没在 VS Code 界面里核对手机发的话是否同步显示",
+             "textEn": "Sending messages from your phone to the VS Code extension (26.51120+) was tested against the extension's bundled "
+                       "Codex engine, but not yet checked inside the VS Code UI."})
 
     def __init__(self):
         self.daemon = CodexLink()
@@ -23043,6 +23183,8 @@ class HostedSessions:
         self.starting, self.starting_lock = {}, threading.Lock()
         # 别家 agent 的进程是哪个托管会话起的（(进程号, 当时有哪些托管会话) → (托管编号或 None, 什么时候查的)）：见 agent_owner
         self.owners, self.owners_lock = {}, threading.Lock()
+        # 没有进程号的别家会话认过的（托管编号 → 会话编号）：见 loose_owner
+        self.bound = {}
 
     def agent_owner(self, pid, entries):
         """别家 agent 的这个进程是不是我们在后台起的（entries：带 agent 的托管登记）。先比进程号（配方里的命令就是它本身），
@@ -23131,6 +23273,46 @@ class HostedSessions:
                     caps = snap.setdefault("caps", [])
                     if "close" not in caps:
                         caps.append("close")
+        if others:
+            # 快照里没有进程号的别家会话（Codex 终端的会话在共享后台服务里，后台服务不说是哪个终端界面开的）：按会话编号 / 工作目录 + 时间认。
+            # 不认的话后台起的 Codex 不标「后台运行」、看不到它的终端，关闭也只归档、后台那份 codex 一直留着（11-28 实测 0.172）
+            claimed = {snap.get("hosted") for snap in snapshots if snap.get("hosted")}
+            for snap in sorted(snapshots, key=lambda item: item.get("startedAt") or 0):
+                if snap.get("hosted") or snap.get("pid") is not None or snap.get("agent") in (None, "claude-code"):
+                    continue
+                hit = self.loose_owner(snap, [e for e in others if e["agent"] == snap["agent"] and e["id"] not in claimed])
+                if hit:
+                    claimed.add(hit["id"])
+                    snap["hosted"] = hit["id"]
+                    caps = snap.setdefault("caps", [])
+                    if "close" not in caps:
+                        caps.append("close")
+        live = {e.get("id") for e in ready}
+        self.bound = {hid: sid for hid, sid in self.bound.items() if hid in live}
+
+    def loose_owner(self, snap, entries):
+        """没有进程号的别家会话是哪个托管会话起的：认过的、恢复时登记了会话编号的直接对上；新开的按工作目录相同、
+        会话是在它启动之后才建的（取启动得最晚的那个，一个托管会话只认一个会话）"""
+        sid = snap.get("sessionId")
+        hit = next((e for e in entries if self.bound.get(e["id"]) == sid or (e.get("sessionId") and e.get("sessionId") == sid)), None)
+        if hit:
+            self.bound[hit["id"]] = sid
+            return hit
+        started, cwd = snap.get("startedAt"), snap.get("cwd")
+        if not isinstance(started, (int, float)) or not cwd:
+            return None
+        def same(path):
+            try:
+                return os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.realpath(cwd))
+            except (OSError, ValueError):
+                return False
+        fits = [e for e in entries if e["id"] not in self.bound and not e.get("sessionId") and e.get("cwd") and same(e["cwd"])
+                and isinstance(e.get("startedAt"), (int, float)) and e["startedAt"] - 2000 <= started]
+        if not fits:
+            return None
+        hit = max(fits, key=lambda e: e["startedAt"])
+        self.bound[hit["id"]] = sid
+        return hit
 
     def attach_terms(self, session_id):
         """列终端前把这个会话的「claude」终端接上（watcher 重启过、关掉过的也重新接）"""
@@ -23740,6 +23922,12 @@ class Watcher:
                 def stop_held():
                     if not HOSTED.stop({"hosted": held}).get("stopped"):
                         raise RuntimeError("后台运行的会话没有结束")
+                    if agent == "codex":
+                        # Codex 的会话在共享后台服务里，终端界面退了它还载入着、一直留在列表里：照它自己的关闭再归档（恢复时会先取消归档）
+                        try:
+                            self.plugins.handle(agent, request)
+                        except Exception as exc:
+                            log("后台运行的 Codex 会话归档没成：%r" % exc)
                     return {"message": "已结束后台运行的会话"}
                 return respond_later(request, stop_held)
         if cmd in ("agent_send", "agent_key", "agent_answer", "agent_close", "agent_ui"):

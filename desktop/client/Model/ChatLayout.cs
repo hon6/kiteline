@@ -29,6 +29,9 @@ public sealed record PendingSend
     /// 排队（Later）时电脑给的编号，对上会话的 Queue；Seen = 已经在队列里出现过（之后不在了 = 已交给 Claude 或在别处删了）
     public string? Qid { get; init; }
     public bool Seen { get; init; }
+    /// 「未出现」后用户点了重新发送的次数：请求编号（cid）要换新的，不然电脑按编号去重、当成已经送过不再投递（同 iOS）
+    public int Attempt { get; init; }
+    public string Cid => Attempt == 0 ? Id : $"{Id}-r{Attempt}";
     /// 发的时候 Claude 正忙：多半要排队。还在发送中就先放进排队列表，不在对话里画（先出现在对话里、回了「排队」又跳回队列，像消息退回来了，同 iOS）
     public bool BusyAtSend { get; init; }
     /// 发的时刻（毫秒）：对话里比它早的用户消息不是它的回显（见 ChatStore.Settle）

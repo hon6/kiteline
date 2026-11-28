@@ -147,11 +147,11 @@ public sealed class ProjectsPage : Panel
     {
         get
         {
-            var running = projects.Count(p => Live(p).Count > 0);
+            var running = projects.Count(p => Live(p).Any(s => s.IsBusy));   // 只数在干活的
             var waiting = projects.Count(p => Live(p).Any(s => s.IsWaiting));
             var dirty = projects.Count(p => p.Git?.Dirty ?? false);
             var unpushed = projects.Count(p => (p.Git?.Ahead ?? 0) > 0);
-            return string.Join(" · ", new[] { L("%lld 个项目", projects.Count), L("%lld 个运行中", running), waiting > 0 ? L("%lld 个待确认", waiting) : null,
+            return string.Join(" · ", new[] { L("%lld 个项目", projects.Count), L("%lld 个进行中", running), waiting > 0 ? L("%lld 个待确认", waiting) : null,
                 dirty > 0 ? L("%lld 个有未提交改动", dirty) : null, unpushed > 0 ? L("%lld 个未推送", unpushed) : null }.OfType<string>());
         }
     }
@@ -214,7 +214,7 @@ public sealed class ProjectsPage : Panel
         (string Text, string Color, string Fill)? tag =
             waiting > 0 ? (waiting > 1 ? L("%lld 个待确认", waiting) : L("待确认"), "Orange", "OrangeFill13")
             : busy > 0 ? (busy > 1 ? L("%lld 个进行中", busy) : L("进行中"), "Accent", "IconTile")
-            : live.Count > 0 ? (L("%lld 个会话运行中", live.Count), "Green", "GreenFill13") : null;
+            : null;   // 只开着、没在干活的不标（11-29 反馈：做完好几天的还显示「运行中」）
         if (tag is not { } t) return null;
         return new Border { Padding = new Thickness(6, 2), CornerRadius = new CornerRadius(9), Child = Ui.Text(t.Text, 10.5, FontWeight.Medium, t.Color) }
             .Res(Border.BackgroundProperty, t.Fill);
@@ -260,7 +260,7 @@ public sealed class ProjectsPage : Panel
         if (actions.Children.Count > 0) stack.Children.Add(actions);
         if (live.Count > 0)
         {
-            stack.Children.Add(Ui.Text(L("正在运行"), 11, FontWeight.SemiBold, "Text2").Margin(0, 2, 0, 0));
+            stack.Children.Add(Ui.Text(L("未关闭的会话"), 11, FontWeight.SemiBold, "Text2").Margin(0, 2, 0, 0));
             foreach (var session in live)
             {
                 var color = session.IsWaiting ? "Orange" : session.IsBusy ? "Accent" : session.Activity == "idle" ? "Green" : "Text2";

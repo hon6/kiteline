@@ -160,6 +160,8 @@ static class SelfTest
                 case "link": Model.PromptLinks.Handle(arg); break;   // 当作点了这条提示词链接（kiteline://new#p=…）
                 case "newtask": Views.NewTaskSheet.Open(arg.Length > 0 && Model.AppModel.Shared.Sessions.FirstOrDefault(x => x.Title == arg) is { } picked ? (picked.SourceId, picked.Cwd ?? "") : null); break;
                 case "todoedit": Views.TodoEditor.Open(Views.TodoEditor.Target.New()); break;
+                // send:<文字>：往选中的会话发一句（同在输入框里回车），测发送状态（排队、未出现、重新发送）
+                case "send": if (main.Selection is string sendKey) model.Send(sendKey, arg, []); break;
                 // 对话里的面板：action:files / changes / tests / agents / search / info / mode / model；openfile:<路径>；closedialog
                 case "action":
                     if (Enum.TryParse<SessionAction>(arg, true, out var act) && main.Selection is string current) ChatActions.Perform(current, act);

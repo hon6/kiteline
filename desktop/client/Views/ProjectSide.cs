@@ -216,8 +216,8 @@ public sealed class SideProjects : Grid
         var model = AppModel.Shared;
         var live = model.SortedSessions("recent", ProjectList.Live(p)).ToList();
         sessions.Count = live.Count;
-        sessionBody.Children.Add(Section(L("正在运行"), live.Count, true, null));
-        if (live.Count == 0) sessionBody.Children.Add(Ui.Text(L("没有运行中的会话"), 11, color: "Text3").Margin(SideMetric.Pad, 2, 0, 4));
+        sessionBody.Children.Add(Section(L("未关闭的会话"), live.Count, true, null));
+        if (live.Count == 0) sessionBody.Children.Add(Ui.Text(L("没有未关闭的会话"), 11, color: "Text3").Margin(SideMetric.Pad, 2, 0, 4));
         var used = new HashSet<string>();
         foreach (var s in live)
         {

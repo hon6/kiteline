@@ -619,9 +619,10 @@ public static class PendingMessage
             SendState.Filled => Ui.Text(L("已填入 VS Code 输入框，未提交"), 11, color: "Orange").HAlign(HorizontalAlignment.Right),
             SendState.Queued => Ui.Text(L("离线，连接后自动发送"), 11, color: "Orange").HAlign(HorizontalAlignment.Right),
             SendState.Later => Ui.HTop(4, Ui.Sym("clock", 11, "Text2").Margin(0, 2, 0, 0), Ui.Text(L("排队中，Claude 完成当前这一步后会读到"), 11, color: "Text2", lines: 2).Wrap().Shrink()).HAlign(HorizontalAlignment.Right).MaxW(560),
-            // 电脑报了已提交，对话里却一直没出现（同 iOS）。不给「重新发送」：老版本电脑端不核对输入框，文字可能还留在里面，再发一次会和它拼在一起
+            // 电脑报了已提交，对话里却一直没出现（同 iOS）。给「重新发送」：换新请求编号再投递一次
             SendState.Unconfirmed => Ui.H(10,
                 Ui.HTop(4, Ui.Sym("exclamationmark.triangle.fill", 11, "Orange").Margin(0, 2, 0, 0), Ui.Text(L("对话中未出现这条消息，请在电脑上查看"), 11, color: "Orange", lines: 2).Wrap().Shrink()).Shrink(),
+                new Tap(Ui.Text(L("重新发送"), 11, FontWeight.Medium, "Text"), () => model.Resend(key, p.Id), 4).Tip(L("重新发送这条消息")),
                 new Tap(Ui.Text(L("移除"), 11, FontWeight.Medium, "Text2"), () => model.Discard(key, p.Id), 4).Tip(L("移除这条消息"))).HAlign(HorizontalAlignment.Right).MaxW(560),
             // 原因长的折成两行（同 Mac 的 lineLimit(2)），不要一行撑出窗口
             SendState.Failed => Ui.H(10,

@@ -40,6 +40,16 @@ struct NewSessionPage: KLView {
     @State private var worktrees = 0
     @State private var agents: [ComposeTask.LaunchableAgent] = []
     @State private var agent = "claude-code"
+    // 输入框下面那排（同对话页、Mac 新会话标签）：权限模式、模型、思考等级、Ultracode、目标；空 = 照 Claude Code 的默认。
+    // 发的时候 launch 带给电脑端（后台运行时当 claude 的启动参数），没带上的等会话出来再切（AppModel.planLaunch）
+    @State private var launchMode: PermissionMode?
+    @State private var launchModel: String?
+    @State private var launchEffort: String?
+    @State private var launchUltracode = false
+    @State private var launchGoal: String?
+    @State private var goalEditing = false
+    @State private var modeEditing = false
+    @State private var modelEditing = false
 
     // 输入栏（同对话页的 Composer）
     @State private var attachments: [ComposeAttachment] = []
@@ -77,7 +87,9 @@ struct NewSessionPage: KLView {
     private var draftKey: String { picked.map(ComposeTask.draftKey) ?? Self.looseDraft }
     private var draft: String { model.drafts[draftKey] ?? "" }
     private var text: Binding<String> { Binding(get: { model.drafts[draftKey] ?? "" }, set: { model.setDraft(draftKey, $0) }) }
-    private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty }
+    private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && !(claudeTune && launchGoal != nil) }
+    /// 底下那排只对 Claude Code 的新会话（定时任务、别家 agent 没有）
+    private var claudeTune: Bool { picked != nil && !scheduled && otherAgent == nil }
     /// 发出去了、正等新会话：输入栏先停用（再发会又开一个会话），会话开出来后在它的对话页里接着说
     private var locked: Bool { sent != nil && sent?.phase != .done }
     private var talking: Bool { voiceMode && RemoteConfig.shared.isOn(.voice) }
@@ -482,11 +494,56 @@ struct NewSessionPage: KLView {
             .padding(.horizontal, Bar.edge - Bar.iconInset)
             .padding(.vertical, Bar.spacing)
             .animation(.klSnappy(duration: 0.2), value: empty)
+            if claudeTune, !locked { tuneRow }
             if panelOpen { panel.transition(.move(edge: .bottom).combined(with: .opacity)) }
         }
         .background(Theme.inputBar)
         .overlay(alignment: .top) { Divider() }
         .disabled(locked)
+    }
+
+    // MARK: 权限模式、模型和思考等级、目标（同对话页输入框下面那排）
+
+    private var tuneRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Bar.spacing) {
+                ToolChip(symbol: launchMode?.symbol ?? "shield", text: launchMode?.title ?? L("默认模式")) { modeEditing = true }
+                Button { modelEditing = true } label: {
+                    HStack(spacing: 4) {
+                        Text(launchModel.map { modelName($0) } ?? L("默认模型")).foregroundStyle(.primary.opacity(0.75))
+                        let effort = [launchEffort.map { EffortLevel.name($0) }, launchUltracode ? "Ultracode" : nil].compactMap { $0 }
+                        if !effort.isEmpty { Text(effort.joined(separator: " · ")).foregroundStyle(.secondary) }
+                    }
+                    .font(.chip).lineLimit(1)
+                    .chipFace(height: 28)
+                }
+                .buttonStyle(PressableStyle())
+                Button { goalEditing = true } label: {
+                    chip(symbol: "target", text: launchGoal == nil ? L("目标") : L("已设目标"), on: launchGoal != nil)
+                }
+                .buttonStyle(PressableStyle())
+            }
+            .padding(.horizontal, Bar.edge)
+        }
+        .padding(.bottom, Bar.spacing)
+        .transition(.opacity)
+        .sheetPanel(isPresented: $modeEditing) { DraftModeSheet(mode: $launchMode) }
+        .sheetPanel(isPresented: $modelEditing) {
+            DraftModelSheet(model: $launchModel, effort: $launchEffort, ultracode: $launchUltracode,
+                            choices: ModelChoice.choices(seen: model.sessions.map { $0.usage?.model }, current: launchModel))
+        }
+        .sheetPanel(isPresented: $goalEditing) {
+            DraftGoalSheet(goal: $launchGoal, draft: draft) { model.setDraft(draftKey, "") }
+        }
+    }
+
+    private func chip(symbol: String, text: String, on: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).font(.app(size: 11, weight: .semibold))
+            Text(text).font(.chip).lineLimit(1)
+        }
+        .foregroundStyle(on ? AnyShapeStyle(Theme.claude) : AnyShapeStyle(.primary.opacity(0.75)))
+        .chipFace(height: 28)
     }
 
     private var field: some View {
@@ -723,14 +780,14 @@ struct NewSessionPage: KLView {
             return
         }
         let prompt = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty || (!scheduled && !attachments.isEmpty) else { model.flash(L("请先填写任务内容")); focused = true; return }
+        guard !prompt.isEmpty || (!scheduled && !attachments.isEmpty) || (claudeTune && launchGoal != nil) else { model.flash(L("请先填写任务内容")); focused = true; return }
         let images = scheduled ? [] : attachments
         let key = draftKey
         Haptics.tap()
         focused = false
         panelOpen = false
         withAnimation(.klSnappy) {
-            sent = Sent(text: prompt, previews: images.map(\.preview),
+            sent = Sent(text: prompt.isEmpty ? (claudeTune ? launchGoal.map { "/goal " + $0 } : nil) ?? "" : prompt, previews: images.map(\.preview),
                         status: scheduled ? L("正在创建…") : (project.open || project.live > 0 || otherAgent != nil ? L("正在新建会话…") : L("正在打开 VS Code…")))
         }
         model.setDraft(key, "")
@@ -770,18 +827,36 @@ struct NewSessionPage: KLView {
             return
         }
         do {
+            // 设了目标：第一句是 /goal，写的字和图等会话出来再发（同 Mac 新会话标签）
+            let goal = otherAgent == nil ? launchGoal : nil
             var body: [String: Any] = [
-                "sourceId": project.sourceId, "cwd": project.cwd, "text": prompt,
-                "images": images.map { ["name": $0.name, "data": $0.data.base64EncodedString()] },
+                "sourceId": project.sourceId, "cwd": project.cwd, "text": goal.map { "/goal " + $0 } ?? prompt,
+                "images": goal != nil ? [] : images.map { ["name": $0.name, "data": $0.data.base64EncodedString()] },
                 "override": override, "worktree": isolated && canIsolate,
             ]
             if let otherAgent { body["agent"] = otherAgent.id }
+            let tuned = otherAgent == nil && (launchMode != nil || launchModel != nil || launchEffort != nil || launchUltracode || goal != nil)
+            if otherAgent == nil {
+                var launch: [String: String] = [:]
+                if let launchMode { launch["mode"] = launchMode.rawValue }
+                if let launchModel { launch["model"] = launchModel }
+                if let launchEffort { launch["effort"] = launchEffort }
+                if !launch.isEmpty { body["launch"] = launch }
+            }
+            let known = Set(model.sessions.map(\.key))
             // 带请求编号：电脑按编号去重，等不到回应时重发一次也只开一个会话（勾了独立分支要先建分支、开新窗口，常要十几秒）。
             // 老版本电脑端不认编号，重发会开出两个，所以只对声明了 newSessionOnce 的带
             if model.hostFeatures.contains("newSessionOnce") { body["cid"] = UUID().uuidString }
             let reply = try await model.api.post("/api/new-session", body: body)
             // 新会话一出现就打开它（MainView 看到 pendingOpen 把这一页换成那个会话）
-            model.awaitNewSession(sourceId: project.sourceId, cwd: reply["cwd"] as? String ?? project.cwd)
+            model.awaitNewSession(sourceId: project.sourceId, cwd: reply["cwd"] as? String ?? project.cwd, expectId: reply["sessionId"] as? String)
+            if tuned {
+                model.planLaunch(LaunchPlan(sourceId: project.sourceId, cwd: reply["cwd"] as? String ?? project.cwd, known: known,
+                                            until: Date().addingTimeInterval(180), expectId: reply["sessionId"] as? String ?? "",
+                                            launched: reply["launched"] as? Bool == true, mode: launchMode, model: launchModel,
+                                            effort: launchEffort, ultracode: launchUltracode,
+                                            followUp: goal != nil ? prompt : nil, images: goal != nil ? images : []))
+            }
             let status: String
             var phase = Sent.Phase.waiting
             if let branch = reply["branch"] as? String { status = L("已在独立分支 %@ 开始，等待新会话出现…", branch) }
@@ -812,3 +887,166 @@ extension NewTaskSeed {
     }
 }
 #endif
+
+/// 新会话页的「权限模式」面板（同对话页 ModeSheet）：还没有会话，选的先记着，开会话时带上
+private struct DraftModeSheet: KLView {
+    @PanelDismiss private var dismiss
+    @Binding var mode: PermissionMode?
+
+    var klBody: some View {
+        FitSheet(title: L("权限模式")) {
+            SheetSection(footer: L("新会话开始时即使用所选模式。")) {
+                row(nil, symbol: "shield", title: L("默认模式"), detail: L("照电脑上 Claude Code 的默认设置"))
+                ForEach(PermissionMode.cycle, id: \.self) { item in
+                    SheetDivider(inset: 52)
+                    row(item, symbol: item.symbol, title: item.title, detail: item.detail)
+                }
+            }
+        }
+    }
+
+    private func row(_ item: PermissionMode?, symbol: String, title: String, detail: String) -> some View {
+        Button { mode = item; dismiss() } label: {
+            HStack(alignment: .top, spacing: 12) {
+                TarsIcon(symbol: symbol, size: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.ui(.body).weight(.medium))
+                    Text(detail).font(.ui(.caption)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                if item == mode { Image(systemName: "checkmark").font(.ui(.body).weight(.semibold)).foregroundStyle(Theme.wechatGreen) }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+        }
+        .buttonStyle(RowButtonStyle())
+    }
+}
+
+/// 新会话页的「模型和思考等级」面板（同对话页 ModelSheet）
+private struct DraftModelSheet: KLView {
+    @PanelDismiss private var dismiss
+    @Binding var model: String?
+    @Binding var effort: String?
+    @Binding var ultracode: Bool
+    let choices: [(id: String, name: String)]
+
+    var klBody: some View {
+        FitSheet(title: L("模型和思考等级")) {
+            Group {
+                SheetSection(title: L("模型")) {
+                    modelRow(nil, L("默认模型"))
+                    ForEach(choices, id: \.id) { choice in
+                        SheetDivider()
+                        modelRow(choice.id, choice.name)
+                    }
+                }
+                SheetSection(title: L("思考等级"), footer: L("新会话开始时即使用所选模型和思考等级，仅作用于此会话。")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("思考等级", systemImage: "gauge.with.dots.needle.50percent")
+                            Spacer()
+                            Text(EffortLevel.name(effort)).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 0) {
+                            ForEach(EffortLevel.all, id: \.id) { level in
+                                let on = (effort ?? "auto") == level.id
+                                Button {
+                                    withAnimation(.klSnappy(duration: 0.2)) { effort = level.id == "auto" ? nil : level.id }
+                                } label: {
+                                    VStack(spacing: 5) {
+                                        Circle().fill(on ? Theme.wechatGreen : Color.primary.opacity(0.15)).frame(width: on ? 16 : 9, height: on ? 16 : 9)
+                                            .frame(height: 16)
+                                        Text(level.name).font(.ui(.caption2)).foregroundStyle(on ? .primary : .secondary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.steady(.plain))
+                                .accessibilityLabel(L("思考等级：%@", level.name))
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    SheetDivider()
+                    SwitchRow(isOn: $ultracode) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Ultracode", systemImage: "bolt.horizontal")
+                            Text("大型任务多代理并行").font(.ui(.caption)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
+    private func modelRow(_ id: String?, _ name: String) -> some View {
+        Button { model = id; dismiss() } label: {
+            HStack {
+                Text(name).font(.ui(.body).weight(.medium))
+                Spacer(minLength: 4)
+                if id == model { Image(systemName: "checkmark").font(.ui(.body).weight(.semibold)).foregroundStyle(Theme.wechatGreen) }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14).padding(.vertical, 12)
+        }
+        .buttonStyle(RowButtonStyle())
+    }
+}
+
+/// 新会话页的「目标」面板：还没有会话，写好的目标先记着，开会话时第一句发 /goal（同对话页 GoalSheet 的写目标部分）
+private struct DraftGoalSheet: KLView {
+    @PanelDismiss private var dismiss
+    @Binding var goal: String?
+    let draft: String
+    /// 目标是从输入框带过来的：设好后把输入框清掉
+    let clearDraft: () -> Void
+    @State private var text = ""
+    @State private var fromDraft = false
+    @FocusState private var focused: Bool
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var klBody: some View {
+        FitSheet(title: L("目标"), cancel: true) {
+            VStack(alignment: .leading, spacing: 8) {
+                KLTextField(L("例如：把登录模块的单元测试全部跑通，并修复发现的问题"), text: $text, axis: .vertical)
+                    .klLineLimit(4...12)
+                    .textFieldStyle(.plain).font(.ui(.body))
+                    .focused($focused)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Text(L("会话开始后第一句发送 /goal，Claude 围绕目标持续工作，确认达成才停；输入框中的内容随后发送。"))
+                    .font(.ui(.footnote)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if goal != nil {
+                    Button(L("清除目标"), role: .destructive) { goal = nil; dismiss() }
+                        .font(.ui(.body))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                }
+            }
+        } bottom: {
+            Button {
+                goal = String(trimmed.prefix(GoalSheet.limit))
+                if fromDraft, trimmed == draft.trimmingCharacters(in: .whitespacesAndNewlines) { clearDraft() }
+                dismiss()
+            } label: {
+                Text(L("设为目标"))
+                    .font(.ui(.body).weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 46)
+                    .background(Theme.wechatGreen.opacity(trimmed.isEmpty ? 0.4 : 1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(trimmed.isEmpty)
+        }
+        .onAppear {
+            text = goal ?? ""
+            let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if goal == nil, !typed.isEmpty { text = typed; fromDraft = true }
+            focused = true
+        }
+    }
+}

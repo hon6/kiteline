@@ -149,7 +149,7 @@ public sealed class HistoryPage : Panel
         Build();
     }
 
-    static readonly (string Id, string Title, string? Dot)[] StatusOptions = [("all", "全部", null), ("live", "进行中", "Accent"), ("ended", "已结束", "Text2")];
+    static readonly (string Id, string Title, string? Dot)[] StatusOptions = [("all", "全部", null), ("live", "未关闭", "Accent"), ("ended", "已结束", "Text2")];
     static readonly (string Id, string Title)[] GroupOptions = [("none", "按日期"), ("source", "按来源"), ("project", "按项目")];
 
     static bool Matches(PastItem item, string filter) => filter switch { "live" => item.Live, "ended" => !item.Live, _ => true };
@@ -359,8 +359,12 @@ public sealed class HistoryPage : Panel
         Control? live = null;
         if (item.Live)
         {
-            live = new Border { Padding = new Thickness(6, 2), CornerRadius = new CornerRadius(9), Child = Ui.Text(L("进行中"), 10.5, FontWeight.Medium, "Accent") };
-            live.Res(Border.BackgroundProperty, "IconTile");
+            // 开着不等于在跑（11-29 反馈：周五做完的还挂着「运行中」）：按这时的状态写，没在干活的灰色「空闲」
+            var s = AppModel.Shared.Session(item.Key);
+            var (text, color, fill) = s?.IsWaiting == true ? (L("待确认"), "Orange", "OrangeFill13")
+                : s?.IsBusy == true ? (L("进行中"), "Accent", "IconTile") : (L("空闲"), "Text2", "Fill06");
+            live = new Border { Padding = new Thickness(6, 2), CornerRadius = new CornerRadius(9), Child = Ui.Text(text, 10.5, FontWeight.Medium, color) };
+            live.Res(Border.BackgroundProperty, fill);
         }
         var row = Ui.H(10, new SessionAvatar(item.DisplayTitle, item.Live ? "busy" : "unknown", 30),
             Ui.VFill(1, Ui.Text(item.DisplayTitle, 13, FontWeight.SemiBold).Trim(), Ui.Text(sub, 11, color: "Text2").Trim()).Grow(),

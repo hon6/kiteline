@@ -1198,7 +1198,10 @@ def _remove(path):
 
 def r_voices(s, request, *_):
     key = request.query.get("key", "")
-    s.app.idle_close.touch([key])   # 各端只在打开对话页时取这个：旧版手机不报 /api/viewed，靠它算「打开过」
+    # 各端只在打开对话页时取这个：旧版手机不报 /api/viewed，靠它算「打开过」；
+    # passive=1 = 自己出现的对话页（恢复出来的标签页），新版各端不算打开过（11-29）
+    if request.query.get("passive") != "1":
+        s.app.idle_close.touch([key])
     return Response.json({"ok": True, "voices": [{"id": e["id"], "text": e["text"], "duration": e["duration"], "ts": e["ts"] * 1000}
                                                  for e in s.app.voices.list(key)]})
 
