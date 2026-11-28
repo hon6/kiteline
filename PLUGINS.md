@@ -39,7 +39,7 @@ Why are some agents view-only? See the [plugin development guide](guide/plugin-d
 |  | CLI | Full ✓ <sup>32</sup> | Full ✓ <sup>32</sup> | Full ✓ <sup>32</sup> |
 
 1. CLI sessions need to run in tmux
-2. 新版只能查看和发消息（等批准时会提醒），批准、回答、中断请在电脑上的 Codex 中操作
+2. The new version only supports viewing and sending messages (you're notified when approval is needed); approve, answer and interrupt in Codex on the computer
 3. Codex has no desktop app for Linux
 4. DeepSeek Harness has no desktop app for Linux
 5. Proma offers no interface for remote control, so it's view-only; reply and approve in Proma on the computer
